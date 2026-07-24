@@ -181,3 +181,75 @@ async def test_execute_raises_for_unknown_agent_before_calling_foundry(
         await gateway.execute(_request(agent_id="does-not-exist"))
 
     assert fake_client.calls == []
+
+
+class _FakeSessionAgentResolver:
+    """A fake SessionAgentResolver recording every lookup it received."""
+
+    def __init__(self, *, dedicated_id: str | None) -> None:
+        self._dedicated_id = dedicated_id
+        self.calls: list[dict[str, str]] = []
+
+    def resolve(self, *, session_id: str, agent_id: str) -> str | None:
+        self.calls.append({"session_id": session_id, "agent_id": agent_id})
+        return self._dedicated_id
+
+
+async def test_execute_routes_to_a_dedicated_agent_when_resolver_returns_one(
+    agent_registry: AgentRegistry, prompt_registry: PromptRegistry
+):
+    fake_client = _FakeFoundryClient(
+        result=FoundryRunResult(output_text="Dedicated reply.", raw_status="completed", latency_ms=1.0)
+    )
+    resolver = _FakeSessionAgentResolver(dedicated_id="dedicated-agent-42")
+    gateway = AzureAgentGateway(
+        agent_registry=agent_registry,
+        prompt_registry=prompt_registry,
+        foundry_client=fake_client,
+        session_agent_resolver=resolver,
+    )
+
+    await gateway.execute(_request(session_id="cx-session-1"))
+
+    assert resolver.calls == [{"session_id": "cx-session-1", "agent_id": "requirements-analyst"}]
+    assert fake_client.calls[0]["foundry_agent_id"] == "dedicated-agent-42"
+
+
+async def test_execute_falls_back_to_shared_agent_when_resolver_returns_none(
+    agent_registry: AgentRegistry, prompt_registry: PromptRegistry
+):
+    fake_client = _FakeFoundryClient(
+        result=FoundryRunResult(output_text="Shared reply.", raw_status="completed", latency_ms=1.0)
+    )
+    resolver = _FakeSessionAgentResolver(dedicated_id=None)
+    gateway = AzureAgentGateway(
+        agent_registry=agent_registry,
+        prompt_registry=prompt_registry,
+        foundry_client=fake_client,
+        session_agent_resolver=resolver,
+    )
+
+    await gateway.execute(_request(session_id="cx-session-1"))
+
+    assert resolver.calls == [{"session_id": "cx-session-1", "agent_id": "requirements-analyst"}]
+    assert fake_client.calls[0]["foundry_agent_id"] == "requirements-analyst-agent"
+
+
+async def test_execute_never_consults_resolver_when_session_id_is_absent(
+    agent_registry: AgentRegistry, prompt_registry: PromptRegistry
+):
+    fake_client = _FakeFoundryClient(
+        result=FoundryRunResult(output_text="Shared reply.", raw_status="completed", latency_ms=1.0)
+    )
+    resolver = _FakeSessionAgentResolver(dedicated_id="dedicated-agent-42")
+    gateway = AzureAgentGateway(
+        agent_registry=agent_registry,
+        prompt_registry=prompt_registry,
+        foundry_client=fake_client,
+        session_agent_resolver=resolver,
+    )
+
+    await gateway.execute(_request())
+
+    assert resolver.calls == []
+    assert fake_client.calls[0]["foundry_agent_id"] == "requirements-analyst-agent"

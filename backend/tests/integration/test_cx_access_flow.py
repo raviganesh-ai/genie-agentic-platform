@@ -35,6 +35,53 @@ workflows:
     enabled: true
 """
 
+# A dedicated, chat-enabled workflow (not part of _orchestration_helpers, per
+# the note in that module about not risking its exact-length assertions):
+# two independent steps, each on a different agent, whose prompts declare
+# {user_message} explicitly so a customer chat message visibly changes the
+# resolved prompt (and, therefore, the local-agent-gateway's deterministic
+# output), proving the message actually reached the targeted agent(s).
+_CHAT_PROMPTS_YAML = """
+prompts:
+  - id: chat-prompt-a
+    name: Chat Prompt A
+    description: Chat-enabled prompt for chat-step-a.
+    template: "Process input {x}. Customer message: {user_message}"
+    variables:
+      - x
+      - user_message
+  - id: chat-prompt-b
+    name: Chat Prompt B
+    description: Chat-enabled prompt for chat-step-b.
+    template: "Process input {y}. Customer message: {user_message}"
+    variables:
+      - y
+      - user_message
+"""
+
+_CHAT_WORKFLOW_YAML = """
+workflows:
+  - id: chat-workflow
+    name: Chat Workflow
+    description: Two independent, chat-enabled steps on different agents.
+    steps:
+      - id: chat-step-a
+        agent_id: agent-a
+        description: Chat-enabled step for agent-a.
+        depends_on: []
+        prompt_id: chat-prompt-a
+        variable_sources:
+          x: transcript
+      - id: chat-step-b
+        agent_id: agent-b
+        description: Chat-enabled step for agent-b.
+        depends_on: []
+        prompt_id: chat-prompt-b
+        variable_sources:
+          y: transcript
+    enabled: true
+"""
+
 
 def _bearer_token(user_id: str) -> str:
     return jwt.encode({"sub": user_id}, "unit-test-secret", algorithm="HS256")
@@ -79,6 +126,28 @@ def cx_settings_rate_limited(tmp_path: Path) -> Settings:
     )
 
 
+@pytest.fixture
+def chat_cx_settings(tmp_path: Path) -> Settings:
+    config_root = tmp_path / "config"
+    write_orchestration_config(config_root)
+    (config_root / "prompts" / "chat-prompts.yaml").write_text(
+        _CHAT_PROMPTS_YAML, encoding="utf-8"
+    )
+    (config_root / "workflows" / "chat-workflow.yaml").write_text(
+        _CHAT_WORKFLOW_YAML, encoding="utf-8"
+    )
+    return Settings(
+        environment="development",
+        provider_mode="local",
+        governance_provider="local",
+        allow_mock_agents=True,
+        allow_local_agents=True,
+        use_synthetic_data=True,
+        config_root=config_root,
+        cx_token_ttl_seconds=60,
+    )
+
+
 def _create_session_and_run(client: TestClient, headers: dict[str, str]) -> tuple[str, str]:
     session_resp = client.post("/sessions", json={"title": "Prototype demo"}, headers=headers)
     assert session_resp.status_code == 201
@@ -100,6 +169,32 @@ def _create_session_and_run(client: TestClient, headers: dict[str, str]) -> tupl
     run_body = run_resp.json()
     assert run_body["status"] == "completed"
     return session_id, run_body["workflow_run_id"]
+
+
+def _create_chat_session_and_run(client: TestClient, headers: dict[str, str]) -> tuple[str, str]:
+    session_resp = client.post("/sessions", json={"title": "Chat demo"}, headers=headers)
+    assert session_resp.status_code == 201
+    session_id = session_resp.json()["id"]
+
+    run_resp = client.post(
+        f"/sessions/{session_id}/workflows/chat-workflow/run", json={}, headers=headers
+    )
+    assert run_resp.status_code == 200
+    run_body = run_resp.json()
+    assert run_body["status"] == "completed"
+    return session_id, run_body["workflow_run_id"]
+
+
+def _mint_cx_token(
+    client: TestClient, *, session_id: str, workflow_run_id: str, headers: dict[str, str]
+) -> str:
+    mint_resp = client.post(
+        f"/sessions/{session_id}/cx-access",
+        json={"workflow_run_id": workflow_run_id},
+        headers=headers,
+    )
+    assert mint_resp.status_code == 201
+    return mint_resp.json()["path"].split("t=")[1]
 
 
 def test_minted_link_serves_the_prototype_and_sets_a_session_scoped_cookie(cx_settings) -> None:
@@ -327,3 +422,176 @@ def test_reanalysis_requests_are_rate_limited_per_session(cx_settings_rate_limit
             json={"request_type": "challenge_recommendation"},
         )
         assert second.status_code == 429
+
+
+def test_cx_access_mint_reports_zero_dedicated_agents_when_foundry_is_not_configured(
+    cx_settings,
+) -> None:
+    """Local/dev test settings never configure Foundry, so provisioning is a no-op."""
+
+    app = create_app(settings=cx_settings)
+    headers = {"Authorization": f"Bearer {_bearer_token('user-1')}"}
+
+    with TestClient(app) as client:
+        session_id, workflow_run_id = _create_session_and_run(client, headers)
+
+        mint_resp = client.post(
+            f"/sessions/{session_id}/cx-access",
+            json={"workflow_run_id": workflow_run_id},
+            headers=headers,
+        )
+        assert mint_resp.status_code == 201
+        assert mint_resp.json()["dedicated_agents_provisioned"] == 0
+
+
+def test_cx_access_close_deprovisions_and_is_reported_idempotently(cx_settings) -> None:
+    app = create_app(settings=cx_settings)
+    headers = {"Authorization": f"Bearer {_bearer_token('user-1')}"}
+
+    with TestClient(app) as client:
+        session_id, workflow_run_id = _create_session_and_run(client, headers)
+        client.post(
+            f"/sessions/{session_id}/cx-access",
+            json={"workflow_run_id": workflow_run_id},
+            headers=headers,
+        )
+
+        close_resp = client.post(f"/sessions/{session_id}/cx-access/close", headers=headers)
+        assert close_resp.status_code == 200
+        body = close_resp.json()
+        assert body["session_id"] == session_id
+        # No Foundry configured locally -> nothing was ever provisioned to tear down.
+        assert body["dedicated_agents_deprovisioned"] is False
+
+
+def test_customer_can_chat_with_a_specific_agent_through_the_minted_link(chat_cx_settings) -> None:
+    app = create_app(settings=chat_cx_settings)
+    headers = {"Authorization": f"Bearer {_bearer_token('user-1')}"}
+
+    with TestClient(app) as client:
+        session_id, workflow_run_id = _create_chat_session_and_run(client, headers)
+        token = _mint_cx_token(
+            client, session_id=session_id, workflow_run_id=workflow_run_id, headers=headers
+        )
+
+        chat_resp = client.post(
+            f"/cx/{session_id}/chat",
+            params={"t": token},
+            json={"message": "Can you make this cheaper?", "agent_id": "agent-a"},
+        )
+        assert chat_resp.status_code == 200
+        body = chat_resp.json()
+        assert body["status"] == "completed"
+
+        step_a = next(r for r in body["step_results"] if r["step_id"] == "chat-step-a")
+        step_b = next(r for r in body["step_results"] if r["step_id"] == "chat-step-b")
+        # step-a's resolved prompt now includes the (longer) chat message
+        # text, while step-b (not targeted) keeps its original, shorter
+        # resolved prompt from the initial run - proving the message
+        # reached exactly the one named agent.
+        assert "resolved_prompt_length=" in step_a["output_text"]
+        original_run_resp = client.get(
+            f"/sessions/{session_id}/workflows/runs/{workflow_run_id}", headers=headers
+        )
+        original_step_b = next(
+            r for r in original_run_resp.json()["step_results"] if r["step_id"] == "chat-step-b"
+        )
+        assert step_b["output_text"] == original_step_b["output_text"]
+
+
+def test_customer_can_broadcast_a_chat_message_to_every_agent(chat_cx_settings) -> None:
+    app = create_app(settings=chat_cx_settings)
+    headers = {"Authorization": f"Bearer {_bearer_token('user-1')}"}
+
+    with TestClient(app) as client:
+        session_id, workflow_run_id = _create_chat_session_and_run(client, headers)
+        token = _mint_cx_token(
+            client, session_id=session_id, workflow_run_id=workflow_run_id, headers=headers
+        )
+        original_run_resp = client.get(
+            f"/sessions/{session_id}/workflows/runs/{workflow_run_id}", headers=headers
+        )
+        original_results = {
+            r["step_id"]: r["output_text"] for r in original_run_resp.json()["step_results"]
+        }
+
+        chat_resp = client.post(
+            f"/cx/{session_id}/chat",
+            params={"t": token},
+            json={"message": "How does this scale to 10x traffic?"},
+        )
+        assert chat_resp.status_code == 200
+        body = chat_resp.json()
+        assert {r["step_id"] for r in body["step_results"]} == {"chat-step-a", "chat-step-b"}
+        for result in body["step_results"]:
+            assert result["output_text"] != original_results[result["step_id"]]
+
+
+def test_chat_with_an_unknown_agent_id_returns_404(chat_cx_settings) -> None:
+    app = create_app(settings=chat_cx_settings)
+    headers = {"Authorization": f"Bearer {_bearer_token('user-1')}"}
+
+    with TestClient(app) as client:
+        session_id, workflow_run_id = _create_chat_session_and_run(client, headers)
+        token = _mint_cx_token(
+            client, session_id=session_id, workflow_run_id=workflow_run_id, headers=headers
+        )
+
+        resp = client.post(
+            f"/cx/{session_id}/chat",
+            params={"t": token},
+            json={"message": "Hello?", "agent_id": "no-such-agent"},
+        )
+        assert resp.status_code == 404
+
+
+def test_chat_is_rejected_without_a_valid_token(chat_cx_settings) -> None:
+    app = create_app(settings=chat_cx_settings)
+    headers = {"Authorization": f"Bearer {_bearer_token('user-1')}"}
+
+    with TestClient(app) as client:
+        session_id, _workflow_run_id = _create_chat_session_and_run(client, headers)
+
+        resp = client.post(f"/cx/{session_id}/chat", json={"message": "Hello?"})
+        assert resp.status_code == 401
+
+
+def test_progress_reports_every_step_with_agent_names_and_no_output_content(
+    chat_cx_settings,
+) -> None:
+    app = create_app(settings=chat_cx_settings)
+    headers = {"Authorization": f"Bearer {_bearer_token('user-1')}"}
+
+    with TestClient(app) as client:
+        session_id, workflow_run_id = _create_chat_session_and_run(client, headers)
+        token = _mint_cx_token(
+            client, session_id=session_id, workflow_run_id=workflow_run_id, headers=headers
+        )
+
+        progress_resp = client.get(f"/cx/{session_id}/progress", params={"t": token})
+        assert progress_resp.status_code == 200
+        body = progress_resp.json()
+        assert body["workflow_run_id"] == workflow_run_id
+        assert body["status"] == "completed"
+
+        by_step = {step["step_id"]: step for step in body["steps"]}
+        assert by_step["chat-step-a"]["agent_id"] == "agent-a"
+        assert by_step["chat-step-a"]["agent_name"] == "Agent A"
+        assert by_step["chat-step-a"]["status"] == "completed"
+        for step in body["steps"]:
+            assert "output_text" not in step
+
+
+def test_progress_is_rejected_for_a_token_minted_for_another_session(chat_cx_settings) -> None:
+    app = create_app(settings=chat_cx_settings)
+    headers = {"Authorization": f"Bearer {_bearer_token('user-1')}"}
+
+    with TestClient(app) as client:
+        session_id_a, run_id_a = _create_chat_session_and_run(client, headers)
+        session_id_b, _run_id_b = _create_chat_session_and_run(client, headers)
+        token_for_a = _mint_cx_token(
+            client, session_id=session_id_a, workflow_run_id=run_id_a, headers=headers
+        )
+
+        resp = client.get(f"/cx/{session_id_b}/progress", params={"t": token_for_a})
+        assert resp.status_code == 403

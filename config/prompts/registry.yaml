@@ -18,8 +18,11 @@ prompts:
 
       Transcript excerpt:
       {transcript_excerpt}
+
+      Customer message (if any): {user_message}
     variables:
       - transcript_excerpt
+      - user_message
     version: "1.0.0"
 
   - id: architecture-recommendation-v1
@@ -36,8 +39,11 @@ prompts:
 
       Approved requirements:
       {approved_requirements}
+
+      Customer message (if any): {user_message}
     variables:
       - approved_requirements
+      - user_message
     version: "1.0.0"
 
   - id: governance-review-v1
@@ -55,9 +61,12 @@ prompts:
 
       Policies:
       {policies}
+
+      Customer message (if any): {user_message}
     variables:
       - artifact
       - policies
+      - user_message
     version: "1.0.0"
 
   - id: risk-assessment-v1
@@ -72,8 +81,11 @@ prompts:
 
       Requirements:
       {requirements}
+
+      Customer message (if any): {user_message}
     variables:
       - requirements
+      - user_message
     version: "1.0.0"
 
   - id: failure-diagnosis-v1
@@ -88,8 +100,11 @@ prompts:
 
       Failure details:
       {failure_details}
+
+      Customer message (if any): {user_message}
     variables:
       - failure_details
+      - user_message
     version: "1.0.0"
 
   - id: memory-curation-review-v1
@@ -105,8 +120,11 @@ prompts:
 
       Approved finding:
       {approved_finding}
+
+      Customer message (if any): {user_message}
     variables:
       - approved_finding
+      - user_message
     version: "1.0.0"
 
   - id: business-agent-workshop-v1
@@ -122,8 +140,11 @@ prompts:
 
       Context:
       {context}
+
+      Customer message (if any): {user_message}
     variables:
       - context
+      - user_message
     version: "1.0.0"
 
   - id: prototype-generation-v1

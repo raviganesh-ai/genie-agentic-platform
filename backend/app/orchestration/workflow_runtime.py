@@ -106,7 +106,17 @@ class WorkflowRuntime:
         state_machine.transition("running")
 
         for wave_index, wave in enumerate(waves):
-            pending_steps = [step for step in wave if step.id not in completed_ids]
+            # A step already completed in resume_from is normally skipped -
+            # resume_workflow only advances a paused run. The one exception:
+            # a step explicitly named in step_inputs is re-executed even if
+            # already completed, so a customer/user chat message ("interact
+            # with the agents" against an already-completed run) actually
+            # reaches that agent instead of being silently ignored.
+            pending_steps = [
+                step
+                for step in wave
+                if step.id not in completed_ids or step.id in inputs_by_id
+            ]
             if not pending_steps:
                 continue
 
@@ -145,6 +155,9 @@ class WorkflowRuntime:
                 state_machine.transition("failed", detail=str(exc))
                 raise
 
+            rerun_ids = {step.id for step in pending_steps if step.id in completed_ids}
+            if rerun_ids:
+                step_results = [result for result in step_results if result.step_id not in rerun_ids]
             step_results.extend(wave_results)
             completed_ids.update(result.step_id for result in wave_results)
 

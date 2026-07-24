@@ -9,19 +9,36 @@ No route here can read any other customer's session - by design, so a
 leaked/shared link can never do more than interact with the one workflow
 run it was minted for.
 
-Two routes are read-only (``GET /app``, ``GET /status``). One route,
-``POST /reanalyze``, is the sole customer-triggerable write action: it
-lets the customer (via the generated prototype's own UI) challenge a
-recommendation, request an alternative architecture, or ask for a
-lower-cost/higher-security/MVP/Fabric-first redesign - the exact
-"customer interacts with the agentic workflow" capability described in
-``app.models.reanalysis_models``. It routes through the unmodified Phase 6
-``AgentOrchestrator.request_reanalysis`` (identical code path to the
-internal ``/sessions/{id}/workshop/reanalysis`` route), is rate-limited per
-session (``app.security.cx_rate_limiter``) since a leaked link must never
-be able to flood agent-routing work, and never lets the customer choose an
+Routes ``GET /app``, ``GET /status``, and ``GET /progress`` are read-only.
+Two routes are customer-triggerable write actions:
+
+- ``POST /reanalyze`` lets the customer (via the generated prototype's own
+  UI) challenge a recommendation, request an alternative architecture, or
+  ask for a lower-cost/higher-security/MVP/Fabric-first redesign - the
+  exact "customer interacts with the agentic workflow" capability
+  described in ``app.models.reanalysis_models``. It routes through the
+  unmodified Phase 6 ``AgentOrchestrator.request_reanalysis`` (identical
+  code path to the internal ``/sessions/{id}/workshop/reanalysis`` route).
+- ``POST /chat`` lets the customer send a free-form message to one named
+  agent, or to every agent in the workflow, mirroring the internal
+  ``WorkshopService.chat_with_agent``/``chat_with_all_agents`` pattern:
+  the message is supplied as a ``user_message`` step input variable and
+  the session's workflow run is resumed - the agent's own reply is
+  whatever the Azure-hosted agent produces during that resumed run, never
+  synthesized here.
+
+Both write routes are rate-limited per session
+(``app.security.cx_rate_limiter``) since a leaked link must never be able
+to flood agent-routing work, and never let the customer choose an
 arbitrary workflow_run_id or session_id - both are pinned to the minted
 token's claims, never taken from the request body.
+
+If ``POST /sessions/{id}/cx-access`` provisioned a dedicated Foundry agent
+fleet for this session (see ``CustomerAgentProvisioningService``), every
+``/chat`` and ``/reanalyze`` interaction here automatically executes
+against those dedicated agents rather than the shared catalog pool - no
+route in this module needs to know or care which pool is in effect, since
+that resolution happens inside ``AzureAgentGateway``.
 
 The generated prototype HTML is exactly the ``output_text`` an Azure-hosted
 agent (the already-provisioned ``ui-designer-agent``) produced during the
@@ -43,7 +60,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.api.dependencies import get_agent_orchestrator, get_cx_rate_limiter
 from app.config.settings import Settings
 from app.models.reanalysis_models import ReanalysisRequestType, ReanalysisResult
-from app.models.workflow_models import WorkflowRunResult
+from app.models.workflow_models import WorkflowRunResult, WorkflowStepInput
 from app.orchestration.agent_orchestrator import AgentOrchestrator
 from app.security.cx_dependencies import CX_SESSION_COOKIE_NAME, get_current_customer_session
 from app.security.cx_rate_limiter import CxRateLimiter
@@ -62,6 +79,18 @@ class CxReanalysisRequest(BaseModel):
     rationale: str = Field(default="", max_length=4000)
 
 
+class CxChatRequest(BaseModel):
+    """A customer-submitted chat message for one agent, or every agent in the run."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    message: str = Field(min_length=1, max_length=4000)
+    agent_id: str | None = Field(
+        default=None,
+        description="Target a single agent by id, or omit to message every agent in the run.",
+    )
+
+
 class CxWorkflowStatus(BaseModel):
     """A minimal, least-privilege status view - no step content is exposed here."""
 
@@ -71,6 +100,29 @@ class CxWorkflowStatus(BaseModel):
     status: str
     steps_completed: int
     steps_total: int
+
+
+class CxStepProgress(BaseModel):
+    """One workflow step's live, customer-safe progress - no output content exposed."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    step_id: str
+    agent_id: str
+    agent_name: str
+    status: str
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+
+
+class CxWorkflowProgress(BaseModel):
+    """An Agent-Arena-style live view of every step in the customer's own run."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    workflow_run_id: str
+    status: str
+    steps: list[CxStepProgress]
 
 
 def _get_settings(request: Request) -> Settings:
@@ -187,6 +239,41 @@ async def get_prototype_status(
     )
 
 
+@router.get("/progress")
+async def get_prototype_progress(
+    session_id: str,
+    claims: CustomerSessionClaims = Depends(get_current_customer_session),
+    orchestrator: AgentOrchestrator = Depends(get_agent_orchestrator),
+) -> CxWorkflowProgress:
+    """A live, Agent-Arena-style view of the customer's own workflow run.
+
+    Reports which agents have run/are running/have completed for this
+    session, without exposing any step's ``output_text`` - a leaked link
+    can watch agents work end to end but never read raw agent output
+    through this route (``GET /app`` and ``POST /chat`` remain the only
+    routes that return generated content, both scoped to this session).
+    """
+
+    run = _resolve_run(orchestrator=orchestrator, claims=claims)
+    steps: list[CxStepProgress] = []
+    for result in run.step_results:
+        try:
+            agent_name = orchestrator.agent_registry.get(result.agent_id).name
+        except KeyError:
+            agent_name = result.agent_id
+        steps.append(
+            CxStepProgress(
+                step_id=result.step_id,
+                agent_id=result.agent_id,
+                agent_name=agent_name,
+                status=result.status,
+                started_at=result.started_at,
+                completed_at=result.completed_at,
+            )
+        )
+    return CxWorkflowProgress(workflow_run_id=run.workflow_run_id, status=run.status, steps=steps)
+
+
 @router.post("/reanalyze", status_code=status.HTTP_201_CREATED)
 async def submit_reanalysis_request(
     session_id: str,
@@ -209,4 +296,51 @@ async def submit_reanalysis_request(
         request_type=body.request_type,
         target_recommendation_id=body.target_recommendation_id,
         rationale=body.rationale,
+    )
+
+
+@router.post("/chat", status_code=status.HTTP_200_OK)
+async def submit_chat_message(
+    session_id: str,
+    body: CxChatRequest,
+    claims: CustomerSessionClaims = Depends(get_current_customer_session),
+    orchestrator: AgentOrchestrator = Depends(get_agent_orchestrator),
+    rate_limiter: CxRateLimiter = Depends(get_cx_rate_limiter),
+) -> WorkflowRunResult:
+    """Let the customer chat directly with one agent, or every agent in the run.
+
+    Mirrors ``WorkshopService.chat_with_agent``/``chat_with_all_agents``:
+    the message is supplied as a ``user_message`` step input variable and
+    the session's own workflow run is resumed - the reply is exactly
+    whatever the Azure-hosted agent (the session's dedicated agent, if
+    ``POST /sessions/{id}/cx-access`` provisioned one) produces, never
+    synthesized here. Shares the same per-session rate limit budget as
+    ``POST /reanalyze``, since both trigger real agent-routing work.
+    """
+
+    run = _resolve_run(orchestrator=orchestrator, claims=claims)
+    rate_limiter.check(claims.session_id)
+    workflow = orchestrator.workflow_registry.get(run.workflow_id)
+
+    if body.agent_id is not None:
+        step = next((s for s in workflow.steps if s.agent_id == body.agent_id), None)
+        if step is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"No step in this workflow is assigned to agent '{body.agent_id}'.",
+            )
+        step_inputs = {
+            step.id: WorkflowStepInput(step_id=step.id, variables={"user_message": body.message})
+        }
+    else:
+        step_inputs = {
+            step.id: WorkflowStepInput(step_id=step.id, variables={"user_message": body.message})
+            for step in workflow.steps
+        }
+
+    return await orchestrator.resume_workflow(
+        workflow_run_id=claims.workflow_run_id,
+        session_id=claims.session_id,
+        trace_id=str(uuid4()),
+        step_inputs=step_inputs,
     )

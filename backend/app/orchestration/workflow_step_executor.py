@@ -126,9 +126,17 @@ class WorkflowStepExecutor:
         omitted, so an under-specified step still fails closed via
         ``resolve_prompt_text``'s missing-variable check rather than
         silently sending a blank value.
+
+        ``user_message`` always defaults to an empty string so that any
+        prompt template which declares it (customer/user chat interactions
+        - see ``app.api.cx``'s ``/chat`` route) can rely on it always being
+        present, without requiring every non-chat workflow run to supply it
+        explicitly. Prompts that do not reference ``{user_message}`` in
+        their text are entirely unaffected: an unused ``str.format`` kwarg
+        never changes the resolved output.
         """
 
-        resolved: dict[str, str] = {}
+        resolved: dict[str, str] = {"user_message": ""}
         for variable_name, source in step.variable_sources.items():
             if source == "transcript":
                 resolved[variable_name] = transcript_text

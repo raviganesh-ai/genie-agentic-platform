@@ -18,6 +18,7 @@ from app.agents.foundry.errors import FoundryUnavailableError
 from app.agents.gateway import (
     GovernanceTraceRecorder,
     NullGovernanceTraceRecorder,
+    SessionAgentResolver,
     get_enabled_agent,
     resolve_prompt_text,
 )
@@ -38,16 +39,26 @@ class AzureAgentGateway:
         prompt_registry: PromptRegistry,
         foundry_client: FoundryAgentClient,
         governance_recorder: GovernanceTraceRecorder | None = None,
+        session_agent_resolver: SessionAgentResolver | None = None,
     ) -> None:
         self._agent_registry = agent_registry
         self._prompt_registry = prompt_registry
         self._foundry_client = foundry_client
         self._governance_recorder = governance_recorder or NullGovernanceTraceRecorder()
+        self._session_agent_resolver = session_agent_resolver
 
     async def execute(self, request: AgentExecutionRequest) -> AgentExecutionResult:
         agent = get_enabled_agent(self._agent_registry, request.agent_id)
 
-        if not agent.foundry_agent_id:
+        foundry_agent_id = agent.foundry_agent_id
+        if request.session_id and self._session_agent_resolver is not None:
+            dedicated_agent_id = self._session_agent_resolver.resolve(
+                session_id=request.session_id, agent_id=agent.id
+            )
+            if dedicated_agent_id:
+                foundry_agent_id = dedicated_agent_id
+
+        if not foundry_agent_id:
             reason = (
                 f"Agent '{agent.id}' has no foundry_agent_id configured; it is "
                 f"not deployed as an Azure AI Foundry agent resource and cannot "
@@ -60,7 +71,7 @@ class AzureAgentGateway:
 
         try:
             run_result = await self._foundry_client.run(
-                foundry_agent_id=agent.foundry_agent_id,
+                foundry_agent_id=foundry_agent_id,
                 input_text=resolved_text,
             )
         except FoundryUnavailableError as exc:

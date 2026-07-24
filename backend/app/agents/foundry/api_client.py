@@ -6,12 +6,26 @@ layer (``FoundryAgentProvider``, ``AzureAgentGateway``, and every future
 orchestrator/API route) depends only on the ``AgentApiClient`` protocol
 below, never on the SDK types directly.
 
-ASSUMPTION (verify against the installed azure-ai-projects version before
-relying on this in production): the Azure AI Foundry Agent Service exposes
+VERIFIED against the installed SDK (azure-ai-projects==1.1.0b4, which pulls
+in azure-ai-agents as a direct dependency - confirmed via
+``pip show azure-ai-projects``): the Azure AI Foundry Agent Service exposes
 thread/message/run operations under ``AIProjectClient(endpoint=...,
-credential=...).agents``, addressing an *existing* agent resource by id
-(agents are provisioned independently - e.g. via Foundry portal/CLI/IaC -
-never created ad hoc by this backend):
+credential=...).agents`` (a lazily-constructed ``azure.ai.agents.
+AgentsClient``), addressing an *existing* agent resource by id. Every
+method name and keyword-argument signature below was checked with
+``inspect.signature`` against the real ``AgentsClient``/``ThreadsOperations``/
+``MessagesOperations``/``RunsOperations`` classes and matches exactly,
+including ``create_agent``/``delete_agent``/``get_agent`` being top-level
+methods on ``AgentsClient`` itself (not nested under a sub-resource) and
+the returned ``Agent`` model having a required ``id`` field. Every shared,
+catalog-defined business agent (``AgentDefinition.foundry_agent_id``) is
+provisioned independently - e.g. via Foundry portal/CLI/IaC - never created
+ad hoc by this backend. The one exception is ``create_agent``/
+``delete_agent`` below, used exclusively by
+``CustomerAgentProvisioningService`` to clone a dedicated, per-customer
+copy of an already-approved catalog agent - never to invent new agent
+reasoning of any kind (the cloned agent's instructions are always exactly
+the catalog agent's own configured description):
 
     client.agents.threads.create() -> object with `.id`
     client.agents.messages.create(thread_id, role="user", content=...) -> None
@@ -22,10 +36,16 @@ never created ad hoc by this backend):
         not-found style exception, normalized to False by
         ``AzureAIProjectsApiClient.agent_exists``, if no such resource
         exists)
+    client.agents.create_agent(model=..., name=..., instructions=...) ->
+        object with `.id`
+    client.agents.delete_agent(agent_id) -> None
 
-This preview SDK's exact method names have changed across versions. Every
-SDK call is isolated to ``AzureAIProjectsApiClient`` below so any drift only
-needs to be reconciled in this one class.
+This preview SDK's exact method names have changed across versions and may
+change again in a future release; re-run the verification above (import
+each operations class and diff ``inspect.signature(...)``) whenever
+``azure-ai-projects``/``azure-ai-agents`` is upgraded. Every SDK call is
+isolated to ``AzureAIProjectsApiClient`` below so any drift only needs to
+be reconciled in this one class.
 """
 from __future__ import annotations
 
@@ -68,6 +88,22 @@ class AgentApiClient(Protocol):
         """
         ...
 
+    def create_agent(self, *, name: str, model: str, instructions: str) -> str:
+        """Create a new Foundry agent resource and return its id.
+
+        Used exclusively by ``CustomerAgentProvisioningService`` to clone a
+        dedicated, per-customer copy of an already-approved catalog agent.
+        """
+        ...
+
+    def delete_agent(self, agent_id: str) -> None:
+        """Delete a Foundry agent resource previously created by ``create_agent``.
+
+        Used exclusively by ``CustomerAgentProvisioningService`` to tear down
+        a customer's dedicated agents on explicit session close.
+        """
+        ...
+
 
 class AzureAIProjectsApiClient:
     """Concrete ``AgentApiClient`` backed by ``azure.ai.projects.AIProjectClient``."""
@@ -101,3 +137,12 @@ class AzureAIProjectsApiClient:
             # deciding whether that should fail startup closed.
             return False
         return True
+
+    def create_agent(self, *, name: str, model: str, instructions: str) -> str:
+        agent = self._sdk_client.agents.create_agent(
+            model=model, name=name, instructions=instructions
+        )
+        return agent.id
+
+    def delete_agent(self, agent_id: str) -> None:
+        self._sdk_client.agents.delete_agent(agent_id)

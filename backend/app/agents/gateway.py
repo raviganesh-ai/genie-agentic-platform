@@ -53,6 +53,21 @@ class GovernanceTraceRecorder(Protocol):
     def record_unavailable(self, *, request: AgentExecutionRequest, reason: str) -> None: ...
 
 
+class SessionAgentResolver(Protocol):
+    """Seam for resolving a customer session's own dedicated Foundry agent.
+
+    Implemented by ``CustomerAgentProvisioningService``
+    (``app.services.customer_agent_provisioning_service``). When a session
+    has had dedicated per-customer Foundry agents provisioned,
+    ``AzureAgentGateway`` executes against that dedicated agent id instead
+    of the shared, statically configured ``AgentDefinition.foundry_agent_id``
+    - so customer chat/reanalysis interactions never reach the same Foundry
+    agent resource another customer's session uses.
+    """
+
+    def resolve(self, *, session_id: str, agent_id: str) -> str | None: ...
+
+
 class NullGovernanceTraceRecorder:
     """No-op ``GovernanceTraceRecorder`` used until Phase 5 governance services exist."""
 
@@ -136,6 +151,7 @@ def create_agent_gateway(
     agent_registry: AgentRegistry,
     prompt_registry: PromptRegistry,
     governance_recorder: GovernanceTraceRecorder | None = None,
+    session_agent_resolver: SessionAgentResolver | None = None,
 ) -> AgentGateway:
     """Select the single execution gateway for the current provider mode.
 
@@ -146,6 +162,11 @@ def create_agent_gateway(
     Local/dev: ``LocalAgentGateway`` when ``allow_local_agents`` is True,
     otherwise ``AzureAgentGateway`` if Foundry is configured, otherwise
     raises.
+
+    ``session_agent_resolver``, when supplied, lets ``AzureAgentGateway``
+    route a given session's executions to that session's own dedicated
+    Foundry agents (see ``CustomerAgentProvisioningService``) instead of the
+    shared catalog pool - ignored by ``LocalAgentGateway``.
     """
 
     # Local import: keeps the (lazily-imported) azure-ai-projects SDK import
@@ -172,6 +193,7 @@ def create_agent_gateway(
             prompt_registry=prompt_registry,
             foundry_client=FoundryAgentProvider(project_service),
             governance_recorder=recorder,
+            session_agent_resolver=session_agent_resolver,
         )
 
     if settings.provider_mode == "production":

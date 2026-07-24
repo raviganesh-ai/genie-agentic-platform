@@ -44,6 +44,12 @@ from app.prompts.registry import PromptRegistry
 from app.repositories.recommendation_lineage_repository import (
     InMemoryRecommendationLineageRepository,
 )
+from app.services.customer_agent_provisioning_service import (
+    CustomerAgentProvisioningService,
+    NullCustomerAgentProvisioningService,
+    ProvisionedAgentRecord,
+    create_customer_agent_provisioning_service,
+)
 from app.workflows.registry import WorkflowRegistry, WorkflowRegistryError
 
 __all__ = ["AgentOrchestrator", "create_agent_orchestrator"]
@@ -73,8 +79,14 @@ class AgentOrchestrator:
         agent_registry: AgentRegistry,
         workflow_registry: WorkflowRegistry,
         recommendation_lineage_service: RecommendationLineageService,
+        customer_agent_provisioning_service: (
+            CustomerAgentProvisioningService | NullCustomerAgentProvisioningService | None
+        ) = None,
     ) -> None:
         self._execution_service = execution_service
+        self._customer_agent_provisioning_service = (
+            customer_agent_provisioning_service or NullCustomerAgentProvisioningService()
+        )
         self.approval_service = approval_service
         self._reanalysis_service = reanalysis_service
         self._debugging_workflow_service = debugging_workflow_service
@@ -98,6 +110,30 @@ class AgentOrchestrator:
 
     def list_workflow_runs(self, session_id: str) -> list[WorkflowRunResult]:
         return self._execution_service.list_runs_for_session(session_id)
+
+    async def provision_customer_agents(
+        self, *, session_id: str, trace_id: str | None = None
+    ) -> list[ProvisionedAgentRecord]:
+        """Provision a dedicated Foundry agent fleet for one customer session.
+
+        Idempotent - see ``CustomerAgentProvisioningService.provision_for_session``.
+        """
+
+        return await self._customer_agent_provisioning_service.provision_for_session(
+            session_id=session_id, trace_id=trace_id
+        )
+
+    async def deprovision_customer_agents(
+        self, *, session_id: str, trace_id: str | None = None
+    ) -> None:
+        """Tear down a customer session's dedicated Foundry agent fleet, if any."""
+
+        await self._customer_agent_provisioning_service.deprovision_for_session(
+            session_id=session_id, trace_id=trace_id
+        )
+
+    def customer_agents_provisioned(self, session_id: str) -> bool:
+        return self._customer_agent_provisioning_service.is_provisioned(session_id)
 
     async def run_workflow(
         self,
@@ -223,8 +259,16 @@ def create_agent_orchestrator(
     resolved_approval_service = approval_service or create_approval_service(
         settings=settings, governance_service=resolved_governance_service
     )
+    customer_agent_provisioning_service = create_customer_agent_provisioning_service(
+        settings=settings,
+        agent_registry=agent_registry,
+        governance_service=resolved_governance_service,
+    )
     resolved_agent_gateway = agent_gateway or create_agent_gateway(
-        settings=settings, agent_registry=agent_registry, prompt_registry=prompt_registry
+        settings=settings,
+        agent_registry=agent_registry,
+        prompt_registry=prompt_registry,
+        session_agent_resolver=customer_agent_provisioning_service,
     )
     recommendation_lineage_service = RecommendationLineageService(
         InMemoryRecommendationLineageRepository(), governance_service=resolved_governance_service
@@ -270,4 +314,5 @@ def create_agent_orchestrator(
         agent_registry=agent_registry,
         workflow_registry=workflow_registry,
         recommendation_lineage_service=recommendation_lineage_service,
+        customer_agent_provisioning_service=customer_agent_provisioning_service,
     )
