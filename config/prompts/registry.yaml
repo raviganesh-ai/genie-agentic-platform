@@ -146,6 +146,20 @@ prompts:
       session-scoped value - never invent or embed a session id, customer
       name, or other identifier as a literal.
 
+      Interactivity: include a simple feedback control (for example a
+      small form or button set) that lets the customer challenge a
+      recommendation, ask for an alternative architecture, or request a
+      lower-cost, higher-security, MVP, or Fabric-first redesign. Submit
+      that request with a relative, same-origin POST to the path built as
+      "/cx/" plus window.GENIE_SESSION_ID plus "/reanalyze", credentials
+      set to 'include', a JSON content type, and a JSON body containing a
+      request_type field (one of challenge_recommendation,
+      modify_priorities, request_alternative_architecture,
+      lower_cost_redesign, higher_security_redesign, mvp_redesign, or
+      fabric_first_redesign) plus an optional rationale field describing
+      the customer's feedback in their own words. Show the customer a
+      simple confirmation once the request has been submitted.
+
       Solution architecture:
       {solution_architecture}
     variables:

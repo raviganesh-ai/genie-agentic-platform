@@ -18,6 +18,7 @@ agents:
     description: Executes step-a.
     capabilities:
       - cap-a
+      - requirement_extraction
     memory_access:
       - personal
       - shared

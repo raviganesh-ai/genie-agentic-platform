@@ -115,6 +115,13 @@ class Settings(BaseSettings):
     # Mirrors debugging_workflow_id's pattern of naming a config entity from
     # settings rather than hardcoding it in application code.
     cx_prototype_step_id: str = "generate-prototype"
+    # Least-privilege abuse safeguard for the one customer-triggerable write
+    # action (POST /cx/{session_id}/reanalyze - routes a challenge/redesign
+    # request through the unmodified Phase 6 ReanalysisService, exactly like
+    # the internal /sessions/{id}/workshop/reanalysis route). Enforced by
+    # app.security.cx_rate_limiter.CxRateLimiter, keyed per session_id, since
+    # a leaked/shared cx link must never be able to flood agent execution.
+    cx_reanalysis_rate_limit_per_hour: int = 10
 
     # --- CORS -------------------------------------------------------------------
     # Comma-separated list of browser origins allowed to call this API (e.g. the

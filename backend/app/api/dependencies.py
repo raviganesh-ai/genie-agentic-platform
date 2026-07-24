@@ -15,6 +15,7 @@ from app.governance.replay_service import ReplayService
 from app.governance.traceability_service import TraceabilityService
 from app.memory.memory_service import MemoryService
 from app.orchestration.agent_orchestrator import AgentOrchestrator
+from app.security.cx_rate_limiter import CxRateLimiter
 from app.security.cx_tokens import CxTokenService
 from app.services.architecture_service import ArchitectureService
 from app.services.foundry_agent_inventory_service import FoundryAgentInventoryService
@@ -30,6 +31,7 @@ __all__ = [
     "get_agent_orchestrator",
     "get_approval_service",
     "get_architecture_service",
+    "get_cx_rate_limiter",
     "get_cx_token_service",
     "get_foundry_inventory_service",
     "get_foundry_lifecycle_service",
@@ -60,6 +62,10 @@ def get_speech_to_text_service(request: Request) -> SpeechToTextService:
 
 def get_cx_token_service(request: Request) -> CxTokenService:
     return request.app.state.cx_token_service
+
+
+def get_cx_rate_limiter(request: Request) -> CxRateLimiter:
+    return request.app.state.cx_rate_limiter
 
 
 def get_mission_control_service(request: Request) -> MissionControlService:

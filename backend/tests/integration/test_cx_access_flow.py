@@ -59,6 +59,26 @@ def cx_settings(tmp_path: Path) -> Settings:
     )
 
 
+@pytest.fixture
+def cx_settings_rate_limited(tmp_path: Path) -> Settings:
+    config_root = tmp_path / "config"
+    write_orchestration_config(config_root)
+    (config_root / "workflows" / "prototype-workflow.yaml").write_text(
+        _PROTOTYPE_WORKFLOW_YAML, encoding="utf-8"
+    )
+    return Settings(
+        environment="development",
+        provider_mode="local",
+        governance_provider="local",
+        allow_mock_agents=True,
+        allow_local_agents=True,
+        use_synthetic_data=True,
+        config_root=config_root,
+        cx_token_ttl_seconds=60,
+        cx_reanalysis_rate_limit_per_hour=1,
+    )
+
+
 def _create_session_and_run(client: TestClient, headers: dict[str, str]) -> tuple[str, str]:
     session_resp = client.post("/sessions", json={"title": "Prototype demo"}, headers=headers)
     assert session_resp.status_code == 201
@@ -216,3 +236,94 @@ def test_cx_access_link_cannot_be_minted_for_a_workflow_run_from_another_session
             headers=headers,
         )
         assert mint_resp.status_code == 404
+
+
+def test_customer_can_submit_a_reanalysis_request_through_the_minted_link(cx_settings) -> None:
+    app = create_app(settings=cx_settings)
+    headers = {"Authorization": f"Bearer {_bearer_token('user-1')}"}
+
+    with TestClient(app) as client:
+        session_id, workflow_run_id = _create_session_and_run(client, headers)
+        mint_resp = client.post(
+            f"/sessions/{session_id}/cx-access",
+            json={"workflow_run_id": workflow_run_id},
+            headers=headers,
+        )
+        token = mint_resp.json()["path"].split("t=")[1]
+
+        reanalyze_resp = client.post(
+            f"/cx/{session_id}/reanalyze",
+            params={"t": token},
+            json={"request_type": "challenge_recommendation", "rationale": "Too expensive."},
+        )
+        assert reanalyze_resp.status_code == 201
+        body = reanalyze_resp.json()
+        assert body["status"] == "routed"
+        assert body["routed_to_agent_id"] == "agent-a"
+
+
+def test_reanalysis_request_is_rejected_without_a_valid_token(cx_settings) -> None:
+    app = create_app(settings=cx_settings)
+    headers = {"Authorization": f"Bearer {_bearer_token('user-1')}"}
+
+    with TestClient(app) as client:
+        session_id, _workflow_run_id = _create_session_and_run(client, headers)
+
+        resp = client.post(
+            f"/cx/{session_id}/reanalyze",
+            json={"request_type": "challenge_recommendation"},
+        )
+        assert resp.status_code == 401
+
+
+def test_reanalysis_request_is_rejected_for_a_token_minted_for_another_session(
+    cx_settings,
+) -> None:
+    app = create_app(settings=cx_settings)
+    headers = {"Authorization": f"Bearer {_bearer_token('user-1')}"}
+
+    with TestClient(app) as client:
+        session_id_a, run_id_a = _create_session_and_run(client, headers)
+        session_id_b, _run_id_b = _create_session_and_run(client, headers)
+
+        mint_resp = client.post(
+            f"/sessions/{session_id_a}/cx-access",
+            json={"workflow_run_id": run_id_a},
+            headers=headers,
+        )
+        token_for_a = mint_resp.json()["path"].split("t=")[1]
+
+        resp = client.post(
+            f"/cx/{session_id_b}/reanalyze",
+            params={"t": token_for_a},
+            json={"request_type": "challenge_recommendation"},
+        )
+        assert resp.status_code == 403
+
+
+def test_reanalysis_requests_are_rate_limited_per_session(cx_settings_rate_limited) -> None:
+    app = create_app(settings=cx_settings_rate_limited)
+    headers = {"Authorization": f"Bearer {_bearer_token('user-1')}"}
+
+    with TestClient(app) as client:
+        session_id, workflow_run_id = _create_session_and_run(client, headers)
+        mint_resp = client.post(
+            f"/sessions/{session_id}/cx-access",
+            json={"workflow_run_id": workflow_run_id},
+            headers=headers,
+        )
+        token = mint_resp.json()["path"].split("t=")[1]
+
+        first = client.post(
+            f"/cx/{session_id}/reanalyze",
+            params={"t": token},
+            json={"request_type": "challenge_recommendation"},
+        )
+        assert first.status_code == 201
+
+        second = client.post(
+            f"/cx/{session_id}/reanalyze",
+            params={"t": token},
+            json={"request_type": "challenge_recommendation"},
+        )
+        assert second.status_code == 429

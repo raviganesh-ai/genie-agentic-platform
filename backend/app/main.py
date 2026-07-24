@@ -44,6 +44,7 @@ from app.governance.replay_service import ReplayService
 from app.governance.traceability_service import TraceabilityService
 from app.orchestration.agent_orchestrator import create_agent_orchestrator
 from app.prompts.registry import PromptRegistry
+from app.security.cx_rate_limiter import create_cx_rate_limiter
 from app.security.cx_tokens import create_cx_token_service
 from app.security.token_validator import create_token_validator
 from app.services.architecture_service import create_architecture_service
@@ -213,6 +214,7 @@ def create_app(
         app.state.session_service = session_service
         app.state.speech_to_text_service = create_speech_to_text_service(resolved_settings)
         app.state.cx_token_service = create_cx_token_service(resolved_settings)
+        app.state.cx_rate_limiter = create_cx_rate_limiter(resolved_settings)
         app.state.mission_control_service = create_mission_control_service(
             orchestrator=orchestrator, session_service=session_service
         )
