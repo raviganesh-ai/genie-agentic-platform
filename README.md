@@ -122,13 +122,13 @@ Agents are **never** implemented as Python/TypeScript classes containing reasoni
 | `memory-curator` | Memory Curator | memory_management | memory_promotion_review | shared, enterprise | `memory-curation-review-v1` |
 | `debugging-agent` | Debugging Agent | debugging | failure_diagnosis | shared | `failure-diagnosis-v1` |
 
-### Supported agents catalog (provisioned in Foundry, `enabled: false` until wired into a workflow)
+### Supported agents catalog (provisioned in Foundry, now wired into real workflow steps)
 
-Defined in `config/agents/foundry_agents_catalog.yaml` — demonstrates that Genie's provisioning/inventory/lifecycle/drift tooling is fully agent-name-agnostic. Enabling one for real use requires setting `enabled: true` and (if it should participate in a workflow) adding a workflow step referencing it.
+Defined in `config/agents/foundry_agents_catalog.yaml` — all 22 are `enabled: true` and each has a real Foundry agent resource. They are wired into the workflows above so they actually execute during a real session (not just inert inventory entries).
 
-**Business agents (14):** Discovery Agent, Requirements Agent, Industry Expert Agent, Data Architect Agent, Solution Architect Agent, Risk & Compliance Agent, Innovation Agent, UI Designer Agent, Roadmap Agent, Governance Agent, Executive Summary Agent, Cost Optimization Agent, Responsible AI Agent, Workshop Facilitator Agent.
+**Business agents (14, wired into `solution-discovery-workflow`):** Discovery Agent, Requirements Agent, Industry Expert Agent, Data Architect Agent, Solution Architect Agent, Risk & Compliance Agent, Innovation Agent, UI Designer Agent, Roadmap Agent, Governance Agent, Executive Summary Agent, Cost Optimization Agent, Responsible AI Agent, Workshop Facilitator Agent.
 
-**Debugging agents (8):** Test Failure Analyst Agent, Backend Debugging Agent, Frontend Debugging Agent, Agent Orchestration Debugging Agent, Security Debugging Agent, Azure Deployment Debugging Agent, Governance Trace Debugging Agent, Memory Debugging Agent.
+**Debugging agents (8, wired into `debugging-workflow`):** Test Failure Analyst Agent, Backend Debugging Agent, Frontend Debugging Agent, Agent Orchestration Debugging Agent, Security Debugging Agent, Azure Deployment Debugging Agent, Governance Trace Debugging Agent, Memory Debugging Agent.
 
 ### Agent metadata fields
 
@@ -144,8 +144,8 @@ Every agent entry carries: `id`, `name`, `role`, `description`, `capabilities`, 
 
 Workflows (`config/workflows/registry.yaml`) define ordered, dependency-graphed steps across agents; `WorkflowRuntime` computes execution "waves" from the `depends_on` graph and runs same-wave steps in parallel via `asyncio.gather`.
 
-- **`solution-discovery-workflow`** — `analyze-requirements` (requirements-analyst) → `assess-risk` (risk-assessor) + `design-architecture` (architecture-designer), running in parallel → `governance-review` (governance-reviewer, gated by an `architecture-approval` approval checkpoint).
-- **`debugging-workflow`** — single step `diagnose-failure` (debugging-agent), invoked automatically whenever a `FailureDetected` event occurs, executed through the exact same `AzureAgentGateway` path as every other workflow (never a bespoke/local diagnostic path).
+- **`solution-discovery-workflow`** — 18 steps spanning 18 agents (4 of the original 6 registry agents + all 14 business catalog agents) across 9 dependency waves: initial discovery (`discovery-agent`, `workshop-facilitator-agent`) → requirements capture (`requirements-analyst`, `requirements-agent`) → industry context + risk (`industry-expert-agent`, `risk-assessor`, `risk-compliance-agent`) → architecture design (`architecture-designer`, `data-architect-agent`) → end-to-end solution architecture (`solution-architect-agent`) → parallel enrichment (`innovation-agent`, `ui-designer-agent`, `cost-optimization-agent`, `responsible-ai-agent`, `roadmap-agent`) → governance review (`governance-reviewer`, gated by an `architecture-approval` checkpoint) → cross-cutting governance coordination (`governance-agent`) → executive summary (`executive-summary-agent`, gated by a `final-output-approval` checkpoint).
+- **`debugging-workflow`** — `debugging-agent` plus all 8 specialist debugging catalog agents (test-failure, backend, frontend, orchestration, security, Azure deployment, governance-trace, memory) run in parallel on `FailureDetected`, each diagnosing from its own domain angle, executed through the exact same `AzureAgentGateway` path as every other workflow (never a bespoke/local diagnostic path).
 
 ---
 
@@ -504,6 +504,6 @@ All three require `GENIE_AZURE_FOUNDRY_ENDPOINT` / `GENIE_AZURE_FOUNDRY_PROJECT_
 ## Known gaps / next phases
 
 - No CI pipeline (`.github/workflows/`) exists yet.
-- The 22 Foundry Supported Agents catalog entries are provisioned but remain `enabled: false` (not yet wired into any workflow step).
+- `memory-curator` is provisioned and enabled but intentionally not a workflow step (it's invoked separately as part of the shared→enterprise memory promotion flow, not the discovery/debugging pipelines).
 - End-to-end Playwright coverage (`e2e/`) is scaffolded but not yet fully built out.
 - Admin consent for the Entra API permission may require a tenant administrator in some tenants — see [Authentication](#authentication).

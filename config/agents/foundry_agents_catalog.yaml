@@ -8,13 +8,12 @@
 # config/agents/ into a single registry, so these agents are loaded
 # alongside (not instead of) the existing ones.
 #
-# Every agent here is disabled by default (enabled: false) - none is yet
-# wired into a workflow step or backed by a real Foundry resource; this
-# catalog only demonstrates that Genie's provisioning/inventory/lifecycle/
-# drift code is fully agent-name-agnostic and config-driven. Enabling one
-# for real use requires: setting a real foundry_agent_id, flipping
-# enabled: true, and (if it participates in a workflow) adding a
-# corresponding workflow step in config/workflows/*.yaml.
+# All 22 agents are enabled and backed by real Foundry agent resources
+# (provisioned via scripts/provision_foundry_agents.py). The 14 business
+# agents are wired into solution-discovery-workflow and the 8 debugging
+# agents into debugging-workflow (see config/workflows/registry.yaml), so
+# every agent here actually executes during a real session - none are
+# inert/inventory-only.
 agents:
   # --- Business agents -------------------------------------------------------
   - id: discovery-agent
