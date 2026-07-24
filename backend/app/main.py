@@ -54,6 +54,7 @@ from app.services.mission_control_service import create_mission_control_service
 from app.services.output_service import create_output_service
 from app.services.session_service import create_session_service
 from app.services.workshop_service import create_workshop_service
+from app.transcription.speech_service import create_speech_to_text_service
 from app.validation.base import StartupValidationError
 from app.validation.foundry_agent_drift_validator import FoundryAgentDriftValidator
 from app.validation.foundry_agent_registry_validator import FoundryAgentRegistryValidator
@@ -208,6 +209,7 @@ def create_app(
 
         session_service = create_session_service(orchestrator=orchestrator)
         app.state.session_service = session_service
+        app.state.speech_to_text_service = create_speech_to_text_service(resolved_settings)
         app.state.mission_control_service = create_mission_control_service(
             orchestrator=orchestrator, session_service=session_service
         )

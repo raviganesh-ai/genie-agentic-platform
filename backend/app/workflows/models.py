@@ -44,6 +44,19 @@ class WorkflowStep(BaseModel):
             "before this step may execute."
         ),
     )
+    variable_sources: dict[str, str] = Field(
+        default_factory=dict,
+        description=(
+            "Declares where each of this step's prompt variables comes from when "
+            "the caller does not explicitly supply it in a run's step_inputs: "
+            "the literal value 'transcript' resolves to the session's combined "
+            "uploaded call transcript/recording text; the value 'step:<step_id>' "
+            "resolves to that already-completed step's output_text. Any variable "
+            "not listed here (e.g. 'policies', 'failure_details') must still be "
+            "supplied explicitly - this never auto-invents governance/policy "
+            "content from a transcript."
+        ),
+    )
 
 
 class WorkflowDefinition(BaseModel):

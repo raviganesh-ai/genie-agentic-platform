@@ -33,12 +33,14 @@ class WorkflowExecutionService:
         session_id: str,
         trace_id: str,
         step_inputs: dict[str, WorkflowStepInput] | None = None,
+        transcript_text: str = "",
     ) -> WorkflowRunResult:
         result = await self._runtime.run_workflow(
             workflow_id=workflow_id,
             session_id=session_id,
             trace_id=trace_id,
             step_inputs=step_inputs,
+            transcript_text=transcript_text,
         )
         self._store(result, session_id)
         return result
@@ -50,6 +52,7 @@ class WorkflowExecutionService:
         session_id: str,
         trace_id: str,
         step_inputs: dict[str, WorkflowStepInput] | None = None,
+        transcript_text: str = "",
     ) -> WorkflowRunResult:
         previous = self._runs.get(workflow_run_id)
         if previous is None:
@@ -60,6 +63,7 @@ class WorkflowExecutionService:
             session_id=session_id,
             trace_id=trace_id,
             step_inputs=step_inputs,
+            transcript_text=transcript_text,
             resume_from=previous,
         )
         self._store(result, session_id)

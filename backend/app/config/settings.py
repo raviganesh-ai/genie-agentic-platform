@@ -60,6 +60,12 @@ class Settings(BaseSettings):
     azure_foundry_endpoint: str | None = None
     azure_foundry_project_name: str | None = None
 
+    # --- Azure AI Speech (call transcript/recording transcription) --------------
+    # Full resource endpoint host, e.g. "https://<resource>.cognitiveservices.azure.com"
+    # - either a dedicated Speech resource or a unified AIServices account that
+    # also hosts Foundry. Never a hardcoded real endpoint (Configuration Rules).
+    azure_speech_endpoint: str | None = None
+
     # --- Memory store backend ----------------------------------------------------
     # "in_memory" is the only backend implemented in Phase 4 and is safe only
     # for local development and tests; production must configure a durable,
@@ -130,6 +136,7 @@ class Settings(BaseSettings):
 
     @field_validator(
         "azure_foundry_endpoint",
+        "azure_speech_endpoint",
         "key_vault_uri",
         "memory_store_endpoint",
         "lineage_store_endpoint",

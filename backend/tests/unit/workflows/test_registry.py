@@ -56,6 +56,56 @@ def test_fails_closed_when_directory_missing(tmp_path: Path):
         WorkflowRegistry.load(tmp_path / "missing")
 
 
+def test_loads_variable_sources_for_transcript_and_step_chaining(tmp_path: Path):
+    _write(
+        tmp_path / "registry.yaml",
+        """
+workflows:
+  - id: wf-1
+    name: Workflow One
+    description: A workflow.
+    steps:
+      - id: step-1
+        agent_id: agent-a
+        description: First step.
+        variable_sources:
+          context: transcript
+      - id: step-2
+        agent_id: agent-b
+        description: Second step.
+        depends_on:
+          - step-1
+        variable_sources:
+          input: "step:step-1"
+""",
+    )
+
+    registry = WorkflowRegistry.load(tmp_path)
+    steps = {step.id: step for step in registry.get("wf-1").steps}
+
+    assert steps["step-1"].variable_sources == {"context": "transcript"}
+    assert steps["step-2"].variable_sources == {"input": "step:step-1"}
+
+
+def test_variable_sources_defaults_to_empty(tmp_path: Path):
+    _write(
+        tmp_path / "registry.yaml",
+        """
+workflows:
+  - id: wf-1
+    name: Workflow One
+    description: A workflow.
+    steps:
+      - id: step-1
+        agent_id: agent-a
+        description: First step.
+""",
+    )
+
+    registry = WorkflowRegistry.load(tmp_path)
+    assert registry.get("wf-1").steps[0].variable_sources == {}
+
+
 def test_fails_closed_on_unknown_step_dependency(tmp_path: Path):
     _write(
         tmp_path / "registry.yaml",

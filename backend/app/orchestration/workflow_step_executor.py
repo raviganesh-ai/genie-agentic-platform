@@ -57,6 +57,8 @@ class WorkflowStepExecutor:
         trace_id: str,
         correlation_id: str,
         step_input: WorkflowStepInput | None = None,
+        transcript_text: str = "",
+        step_outputs: dict[str, str] | None = None,
     ) -> WorkflowStepResult:
         started_at = datetime.now(UTC)
         agent = get_enabled_agent(self._agent_registry, step.agent_id)
@@ -72,7 +74,12 @@ class WorkflowStepExecutor:
                 f"supplied for this run."
             )
 
-        variables = step_input.variables if step_input else {}
+        variables = self._resolve_variables(
+            step=step,
+            transcript_text=transcript_text,
+            step_outputs=step_outputs or {},
+            step_input=step_input,
+        )
         request = AgentExecutionRequest(
             agent_id=agent.id,
             prompt_id=prompt_id,
@@ -102,6 +109,37 @@ class WorkflowStepExecutor:
             started_at=started_at,
             completed_at=datetime.now(UTC),
         )
+
+    def _resolve_variables(
+        self,
+        *,
+        step: WorkflowStep,
+        transcript_text: str,
+        step_outputs: dict[str, str],
+        step_input: WorkflowStepInput | None,
+    ) -> dict[str, str]:
+        """Merges ``step.variable_sources``-derived values with explicit overrides.
+
+        Explicit ``step_input.variables`` always win over anything derived
+        from ``variable_sources`` - callers can still fully control a run.
+        Variables with no source and no explicit override are simply
+        omitted, so an under-specified step still fails closed via
+        ``resolve_prompt_text``'s missing-variable check rather than
+        silently sending a blank value.
+        """
+
+        resolved: dict[str, str] = {}
+        for variable_name, source in step.variable_sources.items():
+            if source == "transcript":
+                resolved[variable_name] = transcript_text
+            elif source.startswith("step:"):
+                source_step_id = source.removeprefix("step:")
+                if source_step_id in step_outputs:
+                    resolved[variable_name] = step_outputs[source_step_id]
+
+        if step_input:
+            resolved.update(step_input.variables)
+        return resolved
 
     async def _check_required_memory_references(
         self, *, step: WorkflowStep, agent_id: str, session_id: str, trace_id: str

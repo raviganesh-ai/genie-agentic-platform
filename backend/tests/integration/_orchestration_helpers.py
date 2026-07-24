@@ -139,6 +139,30 @@ workflows:
         depends_on: []
         prompt_id: failure-diagnosis-v1
     enabled: true
+
+  - id: transcript-workflow
+    name: Transcript Workflow
+    description: >-
+      One step derives its variable directly from the session's uploaded
+      call transcript; a second, dependent step derives its variable from
+      the first step's output - exercises variable_sources end to end.
+    steps:
+      - id: step-transcript
+        agent_id: agent-a
+        description: Derives variable 'x' from the transcript.
+        depends_on: []
+        prompt_id: prompt-a
+        variable_sources:
+          x: transcript
+      - id: step-chained
+        agent_id: agent-b
+        description: Derives variable 'y' from step-transcript's output.
+        depends_on:
+          - step-transcript
+        prompt_id: prompt-b
+        variable_sources:
+          y: "step:step-transcript"
+    enabled: true
 """
 
 _MEMORY_POLICY_YAML = """

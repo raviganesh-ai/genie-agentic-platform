@@ -34,5 +34,13 @@ class UploadRecord(BaseModel):
     uploaded_by: str = Field(min_length=1)
     status: IngestionStatus = "received"
     detail: str = ""
+    transcript_text: str | None = Field(
+        default=None,
+        description=(
+            "Text content of this upload once available - decoded directly for "
+            "'transcript' uploads, produced by Azure AI Speech for 'audio'/'video' "
+            "uploads. None until ingestion completes."
+        ),
+    )
     uploaded_at: datetime
     updated_at: datetime

@@ -23,6 +23,7 @@ from app.services.mission_control_service import MissionControlService
 from app.services.output_service import OutputService
 from app.services.session_service import SessionService
 from app.services.workshop_service import WorkshopService
+from app.transcription.speech_service import SpeechToTextService
 
 __all__ = [
     "get_agent_orchestrator",
@@ -37,6 +38,7 @@ __all__ = [
     "get_output_service",
     "get_replay_service",
     "get_session_service",
+    "get_speech_to_text_service",
     "get_traceability_service",
     "get_workshop_service",
 ]
@@ -48,6 +50,10 @@ def get_agent_orchestrator(request: Request) -> AgentOrchestrator:
 
 def get_session_service(request: Request) -> SessionService:
     return request.app.state.session_service
+
+
+def get_speech_to_text_service(request: Request) -> SpeechToTextService:
+    return request.app.state.speech_to_text_service
 
 
 def get_mission_control_service(request: Request) -> MissionControlService:

@@ -84,6 +84,7 @@ class WorkflowRuntime:
         session_id: str,
         trace_id: str,
         step_inputs: dict[str, WorkflowStepInput] | None = None,
+        transcript_text: str = "",
         resume_from: WorkflowRunResult | None = None,
     ) -> WorkflowRunResult:
         try:
@@ -123,6 +124,9 @@ class WorkflowRuntime:
                 return gate_result
 
             try:
+                step_outputs = {
+                    result.step_id: result.output_text or "" for result in step_results
+                }
                 wave_results = await asyncio.gather(
                     *(
                         self._step_executor.execute_step(
@@ -131,6 +135,8 @@ class WorkflowRuntime:
                             trace_id=trace_id,
                             correlation_id=f"{workflow_run_id}:{step.id}",
                             step_input=inputs_by_id.get(step.id),
+                            transcript_text=transcript_text,
+                            step_outputs=step_outputs,
                         )
                         for step in pending_steps
                     )

@@ -106,12 +106,14 @@ class AgentOrchestrator:
         session_id: str,
         trace_id: str | None = None,
         step_inputs: dict[str, WorkflowStepInput] | None = None,
+        transcript_text: str = "",
     ) -> WorkflowRunResult:
         return await self._execution_service.start_workflow(
             workflow_id=workflow_id,
             session_id=session_id,
             trace_id=trace_id or str(uuid4()),
             step_inputs=step_inputs,
+            transcript_text=transcript_text,
         )
 
     async def resume_workflow(
@@ -121,12 +123,14 @@ class AgentOrchestrator:
         session_id: str,
         trace_id: str | None = None,
         step_inputs: dict[str, WorkflowStepInput] | None = None,
+        transcript_text: str = "",
     ) -> WorkflowRunResult:
         return await self._execution_service.resume_workflow(
             workflow_run_id=workflow_run_id,
             session_id=session_id,
             trace_id=trace_id or str(uuid4()),
             step_inputs=step_inputs,
+            transcript_text=transcript_text,
         )
 
     def request_reanalysis(

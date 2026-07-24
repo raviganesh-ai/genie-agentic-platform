@@ -113,6 +113,9 @@ class SessionService:
         file_name: str,
         content_type: str,
         size_bytes: int,
+        status: IngestionStatus = "received",
+        detail: str = "",
+        transcript_text: str | None = None,
     ) -> UploadRecord:
         await self._get_owned_session(
             session_id=session_id, requesting_user_id=requesting_user_id
@@ -126,7 +129,9 @@ class SessionService:
             content_type=content_type,
             size_bytes=size_bytes,
             uploaded_by=requesting_user_id,
-            status="received",
+            status=status,
+            detail=detail,
+            transcript_text=transcript_text,
             uploaded_at=now,
             updated_at=now,
         )
@@ -151,6 +156,27 @@ class SessionService:
             session_id=session_id, requesting_user_id=requesting_user_id
         )
         return await self._upload_repository.list_for_session(session_id=session_id)
+
+    async def get_combined_transcript_text(
+        self, *, session_id: str, requesting_user_id: str
+    ) -> str:
+        """Concatenates every completed upload's transcript text for a session.
+
+        Used to auto-populate workflow step variables from whatever call
+        transcripts/recordings have been uploaded and transcribed so far -
+        callers never need to paste transcript text into a workflow run
+        request by hand.
+        """
+
+        uploads = await self.list_uploads(
+            session_id=session_id, requesting_user_id=requesting_user_id
+        )
+        texts = [
+            upload.transcript_text
+            for upload in sorted(uploads, key=lambda u: u.uploaded_at)
+            if upload.transcript_text
+        ]
+        return "\n\n".join(texts)
 
     async def update_ingestion_status(
         self,

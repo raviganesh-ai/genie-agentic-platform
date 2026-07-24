@@ -11,6 +11,16 @@
 # so all previously-provisioned-but-unreferenced catalog agents now actually
 # execute (in real, observable collaboration waves) during a real session -
 # not just appear as inert inventory entries.
+#
+# Phase 1 (call transcript intake) additionally gives every step below a
+# `variable_sources` mapping so the whole graph can run automatically from
+# nothing but an uploaded call transcript/recording: 'transcript' resolves
+# to the session's combined transcribed text, 'step:<id>' resolves to that
+# already-completed step's output. Variables that should never be
+# auto-derived from a transcript (governance-review's `policies`,
+# failure-diagnosis-v1's `failure_details`) are deliberately left unmapped -
+# they still require an explicit step_inputs override, per
+# app.workflows.models.WorkflowStep.variable_sources's fail-closed contract.
 workflows:
   - id: solution-discovery-workflow
     name: Solution Discovery Workflow
@@ -26,11 +36,15 @@ workflows:
         description: Lead initial customer discovery across ingested inputs.
         depends_on: []
         prompt_id: business-agent-workshop-v1
+        variable_sources:
+          context: transcript
       - id: facilitate-workshop
         agent_id: workshop-facilitator-agent
         description: Facilitate the interactive customer workshop experience.
         depends_on: []
         prompt_id: business-agent-workshop-v1
+        variable_sources:
+          context: transcript
 
       # --- Wave 1: requirements capture ---------------------------------
       - id: analyze-requirements
@@ -39,12 +53,16 @@ workflows:
         depends_on:
           - discover-inputs
         prompt_id: requirements-extraction-v1
+        variable_sources:
+          transcript_excerpt: transcript
       - id: capture-requirements-detail
         agent_id: requirements-agent
         description: Capture and structure functional and non-functional requirements.
         depends_on:
           - discover-inputs
         prompt_id: business-agent-workshop-v1
+        variable_sources:
+          context: transcript
 
       # --- Wave 2: industry context + risk -------------------------------
       - id: apply-industry-patterns
@@ -54,6 +72,8 @@ workflows:
           - analyze-requirements
           - capture-requirements-detail
         prompt_id: business-agent-workshop-v1
+        variable_sources:
+          context: step:analyze-requirements
       - id: assess-risk
         agent_id: risk-assessor
         description: Score business, technical, and compliance risk.
@@ -61,6 +81,8 @@ workflows:
           - analyze-requirements
           - capture-requirements-detail
         prompt_id: risk-assessment-v1
+        variable_sources:
+          requirements: step:analyze-requirements
       - id: assess-risk-compliance
         agent_id: risk-compliance-agent
         description: Assess regulatory, compliance, and business risk.
@@ -68,6 +90,8 @@ workflows:
           - analyze-requirements
           - capture-requirements-detail
         prompt_id: business-agent-workshop-v1
+        variable_sources:
+          context: step:analyze-requirements
 
       # --- Wave 3: architecture design -----------------------------------
       - id: design-architecture
@@ -76,12 +100,16 @@ workflows:
         depends_on:
           - apply-industry-patterns
         prompt_id: architecture-recommendation-v1
+        variable_sources:
+          approved_requirements: step:analyze-requirements
       - id: design-data-architecture
         agent_id: data-architect-agent
         description: Design data architecture and integration patterns.
         depends_on:
           - apply-industry-patterns
         prompt_id: business-agent-workshop-v1
+        variable_sources:
+          context: step:apply-industry-patterns
 
       # --- Wave 4: end-to-end solution architecture -----------------------
       - id: design-solution-architecture
@@ -91,6 +119,8 @@ workflows:
           - design-architecture
           - design-data-architecture
         prompt_id: business-agent-workshop-v1
+        variable_sources:
+          context: step:design-architecture
 
       # --- Wave 5: parallel enrichment of the solution --------------------
       - id: propose-innovation
@@ -99,30 +129,40 @@ workflows:
         depends_on:
           - design-solution-architecture
         prompt_id: business-agent-workshop-v1
+        variable_sources:
+          context: step:design-solution-architecture
       - id: design-ui
         agent_id: ui-designer-agent
         description: Design interactive UI/UX concepts for the proposed solution.
         depends_on:
           - design-solution-architecture
         prompt_id: business-agent-workshop-v1
+        variable_sources:
+          context: step:design-solution-architecture
       - id: optimize-cost
         agent_id: cost-optimization-agent
         description: Evaluate and recommend Azure cost optimizations.
         depends_on:
           - design-solution-architecture
         prompt_id: business-agent-workshop-v1
+        variable_sources:
+          context: step:design-solution-architecture
       - id: review-responsible-ai
         agent_id: responsible-ai-agent
         description: Review the proposed solution for responsible AI considerations.
         depends_on:
           - design-solution-architecture
         prompt_id: business-agent-workshop-v1
+        variable_sources:
+          context: step:design-solution-architecture
       - id: build-roadmap
         agent_id: roadmap-agent
         description: Build a phased delivery roadmap from the proposed architecture.
         depends_on:
           - design-solution-architecture
         prompt_id: business-agent-workshop-v1
+        variable_sources:
+          context: step:design-solution-architecture
 
       # --- Wave 6: governance approval gate --------------------------------
       - id: governance-review
@@ -134,6 +174,8 @@ workflows:
           - design-solution-architecture
         prompt_id: governance-review-v1
         requires_approval_checkpoint: architecture-approval
+        variable_sources:
+          artifact: step:design-solution-architecture
 
       # --- Wave 7: cross-cutting governance coordination --------------------
       - id: coordinate-governance
@@ -147,6 +189,8 @@ workflows:
           - review-responsible-ai
           - build-roadmap
         prompt_id: business-agent-workshop-v1
+        variable_sources:
+          context: step:governance-review
 
       # --- Wave 8: executive summary / final output gate ---------------------
       - id: summarize-executive
@@ -156,6 +200,8 @@ workflows:
           - coordinate-governance
         prompt_id: business-agent-workshop-v1
         requires_approval_checkpoint: final-output-approval
+        variable_sources:
+          context: step:coordinate-governance
     enabled: true
 
   - id: debugging-workflow

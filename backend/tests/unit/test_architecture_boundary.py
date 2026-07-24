@@ -12,6 +12,9 @@ directly, each isolating that SDK behind its own interface:
   ResourceManagementClient / DefaultAzureCredential lifecycle for
   pre-provisioning Azure subscription readiness checks
   (``ResourceProviderStatusSource`` protocol).
+- ``app/transcription/speech_service.py`` owns the ``DefaultAzureCredential``
+  lifecycle for Azure AI Speech call-transcript transcription
+  (``SpeechToTextService`` protocol).
 
 Every other module must depend only on those protocols, never on the SDK
 directly. This test fails closed if that boundary is ever violated.
@@ -29,6 +32,7 @@ _SDK_IMPORT_PATTERN = re.compile(r"^\s*(?:import|from)\s+azure\.(ai\.projects|id
 _ALLOWED_RELATIVE_PATHS = {
     Path("agents/foundry/project_service.py"),
     Path("deployment/provider_status_source.py"),
+    Path("transcription/speech_service.py"),
 }
 
 
@@ -68,4 +72,12 @@ def test_deployment_access_layer_actually_imports_the_sdk():
     # dead weight if provider_status_source.py stops importing the SDK.
     provider_status_source = _app_root() / "deployment" / "provider_status_source.py"
     text = provider_status_source.read_text(encoding="utf-8")
+    assert _SDK_IMPORT_PATTERN.search(text)
+
+
+def test_transcription_access_layer_actually_imports_the_sdk():
+    # Sanity check: guards against the allow-list above silently becoming
+    # dead weight if speech_service.py stops importing the SDK.
+    speech_service = _app_root() / "transcription" / "speech_service.py"
+    text = speech_service.read_text(encoding="utf-8")
     assert _SDK_IMPORT_PATTERN.search(text)
