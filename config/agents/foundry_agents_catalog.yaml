@@ -1,0 +1,305 @@
+# Foundry Supported Agents catalog (Phase 10A, additive).
+#
+# The 22 named agents (14 business + 8 debugging) Foundry agent
+# provisioning/inventory/lifecycle/drift management must support, per the
+# Genie Phase 10A specification. Distinct file from registry.yaml so the
+# original 6 workflow-referenced agents are never touched by this
+# addition - AgentRegistry.load() merges every YAML file under
+# config/agents/ into a single registry, so these agents are loaded
+# alongside (not instead of) the existing ones.
+#
+# Every agent here is disabled by default (enabled: false) - none is yet
+# wired into a workflow step or backed by a real Foundry resource; this
+# catalog only demonstrates that Genie's provisioning/inventory/lifecycle/
+# drift code is fully agent-name-agnostic and config-driven. Enabling one
+# for real use requires: setting a real foundry_agent_id, flipping
+# enabled: true, and (if it participates in a workflow) adding a
+# corresponding workflow step in config/workflows/*.yaml.
+agents:
+  # --- Business agents -------------------------------------------------------
+  - id: discovery-agent
+    name: Discovery Agent
+    role: discovery
+    description: Leads initial customer discovery across ingested inputs.
+    capabilities: [transcript_analysis]
+    allowed_tools: [azure_ai_search]
+    memory_access: [personal, shared]
+    foundry_agent_id: asst_3mtWPqHXnZ9udxNAocBNr8cr
+    owner: requirements-team
+    governance_policy_id: standard-governance-policy-v1
+    prompt_template_ref: business-agent-workshop-v1
+    enabled: true
+
+  - id: requirements-agent
+    name: Requirements Agent
+    role: requirement_discovery
+    description: Captures and structures functional and non-functional requirements.
+    capabilities: [requirement_extraction]
+    allowed_tools: [azure_ai_search]
+    memory_access: [personal, shared]
+    foundry_agent_id: asst_shiQWkQzERRLdbeQLZKiUiKP
+    owner: requirements-team
+    governance_policy_id: standard-governance-policy-v1
+    prompt_template_ref: business-agent-workshop-v1
+    enabled: true
+
+  - id: industry-expert-agent
+    name: Industry Expert Agent
+    role: industry_expertise
+    description: Supplies industry-specific patterns and best practices.
+    capabilities: [industry_pattern_matching]
+    allowed_tools: [azure_ai_search]
+    memory_access: [shared, enterprise]
+    foundry_agent_id: asst_8jufAMRrWIvh1jQHvKmpZPNg
+    owner: architecture-team
+    governance_policy_id: standard-governance-policy-v1
+    prompt_template_ref: business-agent-workshop-v1
+    enabled: true
+
+  - id: data-architect-agent
+    name: Data Architect Agent
+    role: data_architecture
+    description: Designs data architecture and integration patterns.
+    capabilities: [data_architecture_design]
+    allowed_tools: [azure_ai_search]
+    memory_access: [shared, enterprise]
+    foundry_agent_id: asst_Q6RbNRRFA3houcdk6sOYQCfo
+    owner: architecture-team
+    governance_policy_id: standard-governance-policy-v1
+    prompt_template_ref: business-agent-workshop-v1
+    enabled: true
+
+  - id: solution-architect-agent
+    name: Solution Architect Agent
+    role: solution_architecture
+    description: Produces end-to-end Azure solution architectures.
+    capabilities: [architecture_generation]
+    allowed_tools: [azure_ai_search]
+    memory_access: [shared, enterprise]
+    foundry_agent_id: asst_DaSOs11rAfN0Rfel0HIQuyET
+    owner: architecture-team
+    governance_policy_id: standard-governance-policy-v1
+    prompt_template_ref: business-agent-workshop-v1
+    enabled: true
+
+  - id: risk-compliance-agent
+    name: Risk & Compliance Agent
+    role: risk_compliance
+    description: Assesses regulatory, compliance, and business risk.
+    capabilities: [risk_scoring, compliance_review]
+    allowed_tools: []
+    memory_access: [shared]
+    foundry_agent_id: asst_36WW8tqSPIJmmRSqZk61wnyL
+    owner: risk-team
+    governance_policy_id: standard-governance-policy-v1
+    prompt_template_ref: business-agent-workshop-v1
+    enabled: true
+
+  - id: innovation-agent
+    name: Innovation Agent
+    role: innovation
+    description: Proposes innovative or emerging-technology alternatives.
+    capabilities: [alternative_design_generation]
+    allowed_tools: [azure_ai_search]
+    memory_access: [shared, enterprise]
+    foundry_agent_id: asst_bCm6dt1sl2RhizEBD9fwTokH
+    owner: architecture-team
+    governance_policy_id: standard-governance-policy-v1
+    prompt_template_ref: business-agent-workshop-v1
+    enabled: true
+
+  - id: ui-designer-agent
+    name: UI Designer Agent
+    role: ui_design
+    description: Designs interactive UI/UX concepts for proposed solutions.
+    capabilities: [ui_design]
+    allowed_tools: []
+    memory_access: [shared]
+    foundry_agent_id: asst_38m3IGJdQNqpAzMCWCqYabil
+    owner: architecture-team
+    governance_policy_id: standard-governance-policy-v1
+    prompt_template_ref: business-agent-workshop-v1
+    enabled: true
+
+  - id: roadmap-agent
+    name: Roadmap Agent
+    role: roadmap_planning
+    description: Builds phased delivery roadmaps from approved architecture.
+    capabilities: [roadmap_generation]
+    allowed_tools: []
+    memory_access: [shared]
+    foundry_agent_id: asst_0PqvQQ0ixsBRZNMD1s4LlukQ
+    owner: architecture-team
+    governance_policy_id: standard-governance-policy-v1
+    prompt_template_ref: business-agent-workshop-v1
+    enabled: true
+
+  - id: governance-agent
+    name: Governance Agent
+    role: governance
+    description: Coordinates cross-cutting governance policy checks.
+    capabilities: [policy_review]
+    allowed_tools: []
+    memory_access: [shared]
+    foundry_agent_id: asst_ShSafZrxoCGocEDaROtbBEq7
+    owner: governance-team
+    governance_policy_id: standard-governance-policy-v1
+    prompt_template_ref: business-agent-workshop-v1
+    enabled: true
+
+  - id: executive-summary-agent
+    name: Executive Summary Agent
+    role: executive_reporting
+    description: Produces executive-ready summaries of session outcomes.
+    capabilities: [summary_generation]
+    allowed_tools: []
+    memory_access: [shared]
+    foundry_agent_id: asst_s246qqnG2OSnzlW3PY3x8X6n
+    owner: governance-team
+    governance_policy_id: standard-governance-policy-v1
+    prompt_template_ref: business-agent-workshop-v1
+    enabled: true
+
+  - id: cost-optimization-agent
+    name: Cost Optimization Agent
+    role: cost_optimization
+    description: Evaluates and recommends Azure cost optimizations.
+    capabilities: [cost_analysis]
+    allowed_tools: [azure_ai_search]
+    memory_access: [shared]
+    foundry_agent_id: asst_0Gx7UiI0uWz6Swcw4z6ggDNy
+    owner: architecture-team
+    governance_policy_id: standard-governance-policy-v1
+    prompt_template_ref: business-agent-workshop-v1
+    enabled: true
+
+  - id: responsible-ai-agent
+    name: Responsible AI Agent
+    role: responsible_ai
+    description: Reviews proposed solutions for responsible AI considerations.
+    capabilities: [responsible_ai_review]
+    allowed_tools: []
+    memory_access: [shared]
+    foundry_agent_id: asst_kfZAU0N7kVaCA9oV5k4cxtPZ
+    owner: governance-team
+    governance_policy_id: standard-governance-policy-v1
+    prompt_template_ref: business-agent-workshop-v1
+    enabled: true
+
+  - id: workshop-facilitator-agent
+    name: Workshop Facilitator Agent
+    role: workshop_facilitation
+    description: Facilitates the interactive customer workshop experience.
+    capabilities: [workshop_facilitation]
+    allowed_tools: []
+    memory_access: [personal, shared]
+    foundry_agent_id: asst_MoFVLKmQNUyABKgUopkiIdn3
+    owner: requirements-team
+    governance_policy_id: standard-governance-policy-v1
+    prompt_template_ref: business-agent-workshop-v1
+    enabled: true
+
+  # --- Debugging agents --------------------------------------------------------
+  - id: test-failure-analyst-agent
+    name: Test Failure Analyst Agent
+    role: debugging
+    description: Diagnoses automated test failures across the platform.
+    capabilities: [failure_diagnosis]
+    allowed_tools: []
+    memory_access: [shared]
+    foundry_agent_id: asst_EbwvqwmHuNlfbtNJf8d22YpO
+    owner: platform-engineering-team
+    governance_policy_id: debugging-governance-policy-v1
+    prompt_template_ref: failure-diagnosis-v1
+    enabled: true
+
+  - id: backend-debugging-agent
+    name: Backend Debugging Agent
+    role: debugging
+    description: Diagnoses backend service and API execution failures.
+    capabilities: [failure_diagnosis]
+    allowed_tools: []
+    memory_access: [shared]
+    foundry_agent_id: asst_nMatf12sRE3kYftO8EhNELj3
+    owner: platform-engineering-team
+    governance_policy_id: debugging-governance-policy-v1
+    prompt_template_ref: failure-diagnosis-v1
+    enabled: true
+
+  - id: frontend-debugging-agent
+    name: Frontend Debugging Agent
+    role: debugging
+    description: Diagnoses frontend rendering and interaction failures.
+    capabilities: [failure_diagnosis]
+    allowed_tools: []
+    memory_access: [shared]
+    foundry_agent_id: asst_ywo4LPJISzSlvnXuY8HmbUxb
+    owner: platform-engineering-team
+    governance_policy_id: debugging-governance-policy-v1
+    prompt_template_ref: failure-diagnosis-v1
+    enabled: true
+
+  - id: agent-orchestration-debugging-agent
+    name: Agent Orchestration Debugging Agent
+    role: debugging
+    description: Diagnoses workflow orchestration and handoff failures.
+    capabilities: [failure_diagnosis]
+    allowed_tools: []
+    memory_access: [shared]
+    foundry_agent_id: asst_2Qfs8TB07FJ2V869poP1FBLp
+    owner: platform-engineering-team
+    governance_policy_id: debugging-governance-policy-v1
+    prompt_template_ref: failure-diagnosis-v1
+    enabled: true
+
+  - id: security-debugging-agent
+    name: Security Debugging Agent
+    role: debugging
+    description: Diagnoses authentication, authorization, and security failures.
+    capabilities: [failure_diagnosis]
+    allowed_tools: []
+    memory_access: [shared]
+    foundry_agent_id: asst_hVKKQWBTp6sW7hs8Ug28LV5N
+    owner: platform-engineering-team
+    governance_policy_id: debugging-governance-policy-v1
+    prompt_template_ref: failure-diagnosis-v1
+    enabled: true
+
+  - id: azure-deployment-debugging-agent
+    name: Azure Deployment Debugging Agent
+    role: debugging
+    description: Diagnoses Azure infrastructure and deployment failures.
+    capabilities: [failure_diagnosis]
+    allowed_tools: []
+    memory_access: [shared]
+    foundry_agent_id: asst_LUpRZlnr4gxuzUUxoHo5Uhj2
+    owner: platform-engineering-team
+    governance_policy_id: debugging-governance-policy-v1
+    prompt_template_ref: failure-diagnosis-v1
+    enabled: true
+
+  - id: governance-trace-debugging-agent
+    name: Governance Trace Debugging Agent
+    role: debugging
+    description: Diagnoses governance/decision lineage recording failures.
+    capabilities: [failure_diagnosis]
+    allowed_tools: []
+    memory_access: [shared]
+    foundry_agent_id: asst_JgPAwtPEvaQTNBlHVmaT08AQ
+    owner: platform-engineering-team
+    governance_policy_id: debugging-governance-policy-v1
+    prompt_template_ref: failure-diagnosis-v1
+    enabled: true
+
+  - id: memory-debugging-agent
+    name: Memory Debugging Agent
+    role: debugging
+    description: Diagnoses memory read/write/promotion failures.
+    capabilities: [failure_diagnosis]
+    allowed_tools: []
+    memory_access: [shared]
+    foundry_agent_id: asst_BIzib40o8gVY0VDZRwkmsAQy
+    owner: platform-engineering-team
+    governance_policy_id: debugging-governance-policy-v1
+    prompt_template_ref: failure-diagnosis-v1
+    enabled: true

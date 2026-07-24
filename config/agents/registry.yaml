@@ -1,0 +1,152 @@
+# Agent registry manifest.
+#
+# Each entry defines an agent's externally configured identity and
+# capabilities for the Agent Arena experience described in
+# docs/GENIE_BUILD_SPEC.md. Every agent here is an independently deployed
+# Azure AI Foundry agent resource: its reasoning, instructions, and tools
+# are owned and versioned in Azure AI Foundry (portal/CLI/IaC), never in
+# Genie source code. This registry only describes *what* agents exist and
+# *which* Foundry resource (foundry_agent_id) each one maps to.
+#
+# foundry_agent_id is the id of that pre-provisioned Foundry agent
+# resource. It is required for AzureAgentGateway to execute the agent in
+# production; it may be left unset for agents only ever exercised through
+# LocalAgentGateway during local development. The values below are
+# placeholders - replace with the real Foundry agent ids for each
+# environment via deployment configuration, never hardcode real ids here.
+#
+# model_deployment_ref is optional and informational/telemetry only (the
+# model actually used is whatever the referenced foundry_agent_id resource
+# is configured with). When omitted, it defaults to the platform-wide
+# default LLM (Settings.default_llm / GENIE_DEFAULT_LLM, "gpt-5.1"
+# unless overridden). Anthropic Claude models were evaluated but are not
+# deployed: they require an Azure Marketplace subscription, and this
+# subscription currently has a default quota of 0 for every Claude SKU.
+#
+# owner / governance_policy_id / prompt_template_ref (Phase 10A, additive):
+# owner names the team accountable for this agent's Foundry deployment
+# (never a person's name). governance_policy_id is a descriptive policy
+# identifier used purely for Foundry inventory/drift tracking - it is not
+# cross-validated against config/policies/approval_policy.yaml checkpoints
+# (those govern workflow-step approval gates, a distinct concept).
+# prompt_template_ref names this agent's primary registered prompt
+# template (config/prompts/*.yaml) and must resolve via PromptRegistry.
+agents:
+  - id: requirements-analyst
+    name: Requirements Analyst
+    role: requirement_discovery
+    description: >-
+      Extracts goals, functional and non-functional requirements, risks,
+      assumptions, and constraints from ingested transcripts and documents.
+    capabilities:
+      - transcript_analysis
+      - requirement_extraction
+      - risk_identification
+    allowed_tools:
+      - azure_ai_search
+    memory_access:
+      - personal
+      - shared
+    foundry_agent_id: asst_mTpdPnlPquK6GZs1Dw3QO3vL
+    owner: requirements-team
+    governance_policy_id: standard-governance-policy-v1
+    prompt_template_ref: requirements-extraction-v1
+    enabled: true
+
+  - id: architecture-designer
+    name: Architecture Designer
+    role: architecture_design
+    description: >-
+      Produces interactive Azure reference architectures with rationale,
+      security considerations, dependencies, and cost notes.
+    capabilities:
+      - architecture_generation
+      - alternative_design_generation
+    allowed_tools:
+      - azure_ai_search
+    memory_access:
+      - shared
+      - enterprise
+    # Explicit override, demonstrating per-agent LLM configurability. Set
+    # to the same model as the platform default today (gpt-5.1) because
+    # gpt-4o is deprecating on this account; change this to any other
+    # deployed model name to diverge from the default again.
+    model_deployment_ref: gpt-5.1
+    foundry_agent_id: asst_g9iKyn1tUi66oxWXPkxefljO
+    owner: architecture-team
+    governance_policy_id: standard-governance-policy-v1
+    prompt_template_ref: architecture-recommendation-v1
+    enabled: true
+
+  - id: risk-assessor
+    name: Risk Assessor
+    role: risk_analysis
+    description: >-
+      Evaluates business, technical, and compliance risk across discovered
+      requirements and proposed architectures.
+    capabilities:
+      - risk_scoring
+      - readiness_scoring
+    allowed_tools: []
+    memory_access:
+      - shared
+    foundry_agent_id: asst_IH2GCqawEs4yUd90EL1Htpuh
+    owner: risk-team
+    governance_policy_id: standard-governance-policy-v1
+    prompt_template_ref: risk-assessment-v1
+    enabled: true
+
+  - id: governance-reviewer
+    name: Governance Reviewer
+    role: governance
+    description: >-
+      Reviews agent and workflow outputs for policy compliance and records
+      approval decisions and decision lineage.
+    capabilities:
+      - policy_review
+      - approval_recording
+    allowed_tools: []
+    memory_access:
+      - shared
+    foundry_agent_id: asst_odSCN7XZ8rzzVz4Gm5c1HU3P
+    owner: governance-team
+    governance_policy_id: standard-governance-policy-v1
+    prompt_template_ref: governance-review-v1
+    enabled: true
+
+  - id: memory-curator
+    name: Memory Curator
+    role: memory_management
+    description: >-
+      Curates promotion of approved findings from shared collaboration
+      memory into enterprise knowledge memory.
+    capabilities:
+      - memory_promotion_review
+    allowed_tools:
+      - azure_ai_search
+    memory_access:
+      - shared
+      - enterprise
+    foundry_agent_id: asst_qda2RruIwkUnl0yvqB9Lrqvv
+    owner: memory-team
+    governance_policy_id: standard-governance-policy-v1
+    prompt_template_ref: memory-curation-review-v1
+    enabled: true
+
+  - id: debugging-agent
+    name: Debugging Agent
+    role: debugging
+    description: >-
+      Diagnoses workflow and agent execution failures (FailureDetected) and
+      recommends remediation, running through the same AzureAgentGateway
+      execution path as every other agent - never locally in production.
+    capabilities:
+      - failure_diagnosis
+    allowed_tools: []
+    memory_access:
+      - shared
+    foundry_agent_id: asst_WobmsPWJJSuxbtDHSb1dIO7z
+    owner: platform-engineering-team
+    governance_policy_id: debugging-governance-policy-v1
+    prompt_template_ref: failure-diagnosis-v1
+    enabled: true

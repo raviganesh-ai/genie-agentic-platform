@@ -1,0 +1,127 @@
+# Prompt template registry manifest.
+#
+# Prompt templates are externalized here per the Configuration Rules in
+# .github/copilot-instructions.md; agents resolve these by id rather than
+# embedding prompt text in source code. Prompt execution is implemented
+# alongside AzureAgentGateway in Phase 3.
+prompts:
+  - id: requirements-extraction-v1
+    name: Requirements Extraction
+    description: >-
+      Extracts goals, functional and non-functional requirements, risks,
+      assumptions, and constraints from a transcript excerpt.
+    template: >-
+      You are the Requirements Analyst agent for the Genie Agentic
+      Experience Center. Given the following transcript excerpt, extract
+      goals, functional requirements, non-functional requirements, risks,
+      assumptions, and constraints.
+
+      Transcript excerpt:
+      {transcript_excerpt}
+    variables:
+      - transcript_excerpt
+    version: "1.0.0"
+
+  - id: architecture-recommendation-v1
+    name: Architecture Recommendation
+    description: >-
+      Produces an Azure reference architecture recommendation with
+      rationale for a given set of approved requirements.
+    template: >-
+      You are the Architecture Designer agent for the Genie Agentic
+      Experience Center. Given the following approved requirements,
+      propose an Azure reference architecture. For each component,
+      include rationale, security considerations, dependencies, and cost
+      notes.
+
+      Approved requirements:
+      {approved_requirements}
+    variables:
+      - approved_requirements
+    version: "1.0.0"
+
+  - id: governance-review-v1
+    name: Governance Review
+    description: >-
+      Reviews a proposed artifact for policy compliance and records an
+      approval decision.
+    template: >-
+      You are the Governance Reviewer agent for the Genie Agentic
+      Experience Center. Review the following artifact against the
+      provided policies and record an approval decision with rationale.
+
+      Artifact:
+      {artifact}
+
+      Policies:
+      {policies}
+    variables:
+      - artifact
+      - policies
+    version: "1.0.0"
+
+  - id: risk-assessment-v1
+    name: Risk Assessment
+    description: >-
+      Evaluates business, technical, and compliance risk across a set of
+      discovered requirements.
+    template: >-
+      You are the Risk Assessor agent for the Genie Agentic Experience
+      Center. Given the following requirements, identify and score the
+      business, technical, and compliance risks.
+
+      Requirements:
+      {requirements}
+    variables:
+      - requirements
+    version: "1.0.0"
+
+  - id: failure-diagnosis-v1
+    name: Failure Diagnosis
+    description: >-
+      Diagnoses a detected workflow or agent execution failure and
+      recommends remediation.
+    template: >-
+      You are the Debugging Agent for the Genie Agentic Experience Center.
+      Given the following failure details, diagnose the root cause and
+      recommend remediation steps.
+
+      Failure details:
+      {failure_details}
+    variables:
+      - failure_details
+    version: "1.0.0"
+
+  - id: memory-curation-review-v1
+    name: Memory Curation Review
+    description: >-
+      Reviews an approved finding from shared collaboration memory and
+      recommends whether it should be promoted into enterprise knowledge
+      memory.
+    template: >-
+      You are the Memory Curator agent for the Genie Agentic Experience
+      Center. Given the following approved finding, recommend whether it
+      should be promoted into enterprise knowledge memory and why.
+
+      Approved finding:
+      {approved_finding}
+    variables:
+      - approved_finding
+    version: "1.0.0"
+
+  - id: business-agent-workshop-v1
+    name: Business Agent Workshop
+    description: >-
+      Generic primary prompt template for Phase 10A catalog business
+      agents not yet wired into a specific workflow step; each agent
+      resolves this with its own current workshop context.
+    template: >-
+      You are a Genie Agentic Experience Center business agent. Given the
+      following workshop context, respond within your configured role and
+      capabilities.
+
+      Context:
+      {context}
+    variables:
+      - context
+    version: "1.0.0"

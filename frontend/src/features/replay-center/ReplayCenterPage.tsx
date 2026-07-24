@@ -1,0 +1,55 @@
+import { Badge, Text } from "@fluentui/react-components";
+import { useSessionContext } from "@/state/SessionContext";
+import { useReplay } from "@/hooks/useReplay";
+import { PageHeader } from "@/layouts/AppShell";
+import { LoadingState } from "@/components/LoadingState";
+import { ErrorState } from "@/components/ErrorState";
+import { SectionCard } from "@/components/SectionCard";
+import type { ReplayTimelineEntry } from "@/types/replay";
+
+const KIND_LABELS: Record<ReplayTimelineEntry["kind"], string> = {
+  governance: "Governance",
+  approval: "Approval",
+  lineage: "Recommendation",
+};
+
+export function ReplayCenterPage(): JSX.Element {
+  const { sessionId } = useSessionContext();
+  const { data, loading, error, refresh } = useReplay(sessionId);
+
+  return (
+    <div>
+      <PageHeader
+        title="Replay Center"
+        subtitle="Step-by-step reconstruction of every governed decision in this session."
+      />
+      {loading && !data ? <LoadingState label="Loading replay..." /> : null}
+      {error ? <ErrorState error={error} onRetry={refresh} /> : null}
+
+      {data ? (
+        <SectionCard
+          title="Replay-Ready Timeline"
+          action={<Badge appearance="tint">{data.timeline.length} events</Badge>}
+        >
+          <div style={{ display: "flex", flexDirection: "column", gap: 10, maxHeight: 520, overflowY: "auto" }}>
+            {data.timeline.length === 0 ? (
+              <Text size={300} style={{ opacity: 0.7 }}>
+                No replay events recorded yet for this session.
+              </Text>
+            ) : (
+              data.timeline.map((entry) => (
+                <div key={entry.id} style={{ borderLeft: "2px solid #4e93e5", paddingLeft: 10 }}>
+                  <Text size={200} style={{ opacity: 0.6, display: "block" }}>
+                    {new Date(entry.timestamp).toLocaleString()} · {KIND_LABELS[entry.kind]}
+                    {entry.agentId ? ` · ${entry.agentId}` : ""}
+                  </Text>
+                  <Text size={300}>{entry.label}</Text>
+                </div>
+              ))
+            )}
+          </div>
+        </SectionCard>
+      ) : null}
+    </div>
+  );
+}

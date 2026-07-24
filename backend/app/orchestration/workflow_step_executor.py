@@ -1,0 +1,133 @@
+"""Workflow step executor.
+
+Executes exactly one ``WorkflowStep`` by resolving its registered agent and
+prompt template, then delegating to the caller-supplied ``AgentGateway``
+(``app.agents.gateway``, unmodified - "All agent execution must flow
+through AzureAgentGateway"). Contains no business/reasoning logic of its
+own: it only resolves configuration, checks fail-closed preconditions, and
+records the resulting governance event.
+"""
+from __future__ import annotations
+
+from datetime import UTC, datetime
+
+from app.agents.gateway import AgentGateway, get_enabled_agent, resolve_prompt_text
+from app.agents.models import AgentExecutionRequest
+from app.agents.registry import AgentRegistry
+from app.governance.governance_service import GovernanceService
+from app.memory.memory_service import MemoryService
+from app.models.workflow_models import WorkflowStepInput, WorkflowStepResult
+from app.prompts.registry import PromptRegistry
+from app.workflows.models import WorkflowStep
+
+__all__ = ["MissingMemoryReferenceError", "MissingPromptError", "WorkflowStepExecutor"]
+
+
+class MissingPromptError(RuntimeError):
+    """Raised when a step has no resolvable prompt id (fail closed)."""
+
+
+class MissingMemoryReferenceError(RuntimeError):
+    """Raised when a step's required shared memory reference is missing (fail closed)."""
+
+
+class WorkflowStepExecutor:
+    """Resolves and executes a single workflow step via the injected ``AgentGateway``."""
+
+    def __init__(
+        self,
+        *,
+        agent_registry: AgentRegistry,
+        prompt_registry: PromptRegistry,
+        agent_gateway: AgentGateway,
+        governance_service: GovernanceService,
+        memory_service: MemoryService | None = None,
+    ) -> None:
+        self._agent_registry = agent_registry
+        self._prompt_registry = prompt_registry
+        self._agent_gateway = agent_gateway
+        self._governance_service = governance_service
+        self._memory_service = memory_service
+
+    async def execute_step(
+        self,
+        *,
+        step: WorkflowStep,
+        session_id: str,
+        trace_id: str,
+        correlation_id: str,
+        step_input: WorkflowStepInput | None = None,
+    ) -> WorkflowStepResult:
+        started_at = datetime.now(UTC)
+        agent = get_enabled_agent(self._agent_registry, step.agent_id)
+
+        await self._check_required_memory_references(
+            step=step, agent_id=agent.id, session_id=session_id, trace_id=trace_id
+        )
+
+        prompt_id = (step_input.prompt_id if step_input else None) or step.prompt_id
+        if not prompt_id:
+            raise MissingPromptError(
+                f"Workflow step '{step.id}' has no prompt_id configured and none was "
+                f"supplied for this run."
+            )
+
+        variables = step_input.variables if step_input else {}
+        request = AgentExecutionRequest(
+            agent_id=agent.id,
+            prompt_id=prompt_id,
+            variables=variables,
+            correlation_id=correlation_id,
+            session_id=session_id,
+        )
+        # resolve_prompt_text is used only to fail fast (MissingPromptError's
+        # sibling PromptResolutionError/UnknownPromptError) before handing
+        # off to the gateway, which performs the same resolution internally.
+        resolve_prompt_text(self._prompt_registry, request)
+
+        result = await self._agent_gateway.execute(request)
+
+        await self._governance_service.record_execution(
+            session_id=session_id,
+            trace_id=trace_id,
+            agent_id=agent.id,
+            detail={"step_id": step.id, "workflow_step": True},
+        )
+
+        return WorkflowStepResult(
+            step_id=step.id,
+            agent_id=agent.id,
+            status="completed",
+            output_text=result.output_text,
+            started_at=started_at,
+            completed_at=datetime.now(UTC),
+        )
+
+    async def _check_required_memory_references(
+        self, *, step: WorkflowStep, agent_id: str, session_id: str, trace_id: str
+    ) -> None:
+        if not step.required_memory_references:
+            return
+        if self._memory_service is None:
+            raise MissingMemoryReferenceError(
+                f"Workflow step '{step.id}' requires memory references "
+                f"{step.required_memory_references} but no MemoryService is configured."
+            )
+
+        agent = get_enabled_agent(self._agent_registry, step.agent_id)
+        for key in step.required_memory_references:
+            records = await self._memory_service.shared.read(
+                requesting_agent=agent, session_id=session_id, trace_id=trace_id, key=key
+            )
+            if not records:
+                raise MissingMemoryReferenceError(
+                    f"Workflow step '{step.id}' requires shared memory reference "
+                    f"'{key}' which does not exist for session '{session_id}'."
+                )
+
+        await self._governance_service.record_memory_read(
+            session_id=session_id,
+            trace_id=trace_id,
+            agent_id=agent_id,
+            detail={"step_id": step.id, "keys": step.required_memory_references},
+        )
