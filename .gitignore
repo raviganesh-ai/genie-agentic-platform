@@ -21,6 +21,7 @@ infra/.build/
 node_modules/
 dist/
 build/
+*.tsbuildinfo
 
 # OS / editor
 .DS_Store

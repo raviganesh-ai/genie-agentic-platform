@@ -94,6 +94,17 @@ class Settings(BaseSettings):
     entra_tenant_id: str | None = None
     entra_client_id: str | None = None
 
+    # --- CORS -------------------------------------------------------------------
+    # Comma-separated list of browser origins allowed to call this API (e.g. the
+    # Genie frontend's Static Web App hostname). Empty by default - no
+    # cross-origin browser access - so this must be explicitly configured per
+    # deployment; never hardcoded to a real environment hostname in source.
+    cors_allowed_origins: str = ""
+
+    @property
+    def cors_allowed_origins_list(self) -> list[str]:
+        return [origin.strip() for origin in self.cors_allowed_origins.split(",") if origin.strip()]
+
     # --- Externalized configuration roots (never hold secrets or business data) -
     config_root: Path = Path("config")
     agents_config_dir: str = "agents"

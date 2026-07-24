@@ -1,6 +1,8 @@
 import type { ReactNode } from "react";
+import { useEffect, useState } from "react";
 import { NavLink, Outlet } from "react-router-dom";
-import { Text } from "@fluentui/react-components";
+import { Button, Text } from "@fluentui/react-components";
+import { getActiveAccountName, isAuthenticated, onAccessTokenChange, signOut } from "@/services/authProvider";
 
 const NAV_ITEMS: Array<{ to: string; label: string }> = [
   { to: "/", label: "Landing" },
@@ -30,6 +32,10 @@ function navLinkStyle(isActive: boolean): React.CSSProperties {
 }
 
 export function AppShell(): JSX.Element {
+  const [signedIn, setSignedIn] = useState(isAuthenticated());
+
+  useEffect(() => onAccessTokenChange((token) => setSignedIn(token !== null)), []);
+
   return (
     <div style={{ display: "flex", minHeight: "100vh" }}>
       <nav
@@ -39,6 +45,8 @@ export function AppShell(): JSX.Element {
           backgroundColor: "#11161d",
           borderRight: "1px solid #232a33",
           padding: 16,
+          display: "flex",
+          flexDirection: "column",
         }}
       >
         <Text weight="bold" size={500} style={{ display: "block", marginBottom: 4 }}>
@@ -57,6 +65,22 @@ export function AppShell(): JSX.Element {
             {item.label}
           </NavLink>
         ))}
+        <div style={{ marginTop: "auto", paddingTop: 16, borderTop: "1px solid #232a33" }}>
+          {signedIn ? (
+            <>
+              <Text size={200} style={{ display: "block", marginBottom: 8, opacity: 0.7 }}>
+                {getActiveAccountName() ?? "Signed in"}
+              </Text>
+              <Button size="small" appearance="secondary" onClick={signOut}>
+                Sign out
+              </Button>
+            </>
+          ) : (
+            <Text size={200} style={{ opacity: 0.7 }}>
+              Not signed in
+            </Text>
+          )}
+        </div>
       </nav>
       <main style={{ flex: 1, padding: 24, overflowY: "auto" }}>
         <Outlet />

@@ -14,6 +14,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.agents.foundry.agent_synchronization_service import FoundryAgentSynchronizationService
 from app.agents.foundry.errors import FoundryAgentSynchronizationError, FoundryUnavailableError
@@ -245,6 +246,15 @@ def create_app(
         version="1.0.0",
         lifespan=lifespan,
     )
+
+    if resolved_settings.cors_allowed_origins_list:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=resolved_settings.cors_allowed_origins_list,
+            allow_credentials=True,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
 
     app.add_exception_handler(RuntimeError, domain_error_handler)
 
