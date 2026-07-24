@@ -135,6 +135,9 @@ class AgentOrchestrator:
     def customer_agents_provisioned(self, session_id: str) -> bool:
         return self._customer_agent_provisioning_service.is_provisioned(session_id)
 
+    def provisioned_customer_agent_count(self, session_id: str) -> int:
+        return len(self._customer_agent_provisioning_service.provisioned_agents(session_id))
+
     async def run_workflow(
         self,
         *,

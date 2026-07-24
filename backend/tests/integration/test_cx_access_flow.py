@@ -595,3 +595,65 @@ def test_progress_is_rejected_for_a_token_minted_for_another_session(chat_cx_set
 
         resp = client.get(f"/cx/{session_id_b}/progress", params={"t": token_for_a})
         assert resp.status_code == 403
+
+
+def test_customer_can_download_a_starter_kit_zip_of_the_prototype(cx_settings) -> None:
+    import io
+    import zipfile
+
+    app = create_app(settings=cx_settings)
+    headers = {"Authorization": f"Bearer {_bearer_token('user-1')}"}
+
+    with TestClient(app) as client:
+        session_id, workflow_run_id = _create_session_and_run(client, headers)
+        token = _mint_cx_token(
+            client, session_id=session_id, workflow_run_id=workflow_run_id, headers=headers
+        )
+
+        resp = client.get(f"/cx/{session_id}/starter-kit", params={"t": token})
+        assert resp.status_code == 200
+        assert resp.headers["content-type"] == "application/zip"
+        assert f"genie-starter-kit-{session_id[:8]}.zip" in resp.headers["content-disposition"]
+        assert resp.headers["cache-control"] == "no-store"
+
+        archive = zipfile.ZipFile(io.BytesIO(resp.content))
+        names = set(archive.namelist())
+        assert names == {"prototype/index.html", "README.md", "ACCESS_POLICY.md"}
+
+        prototype_text = archive.read("prototype/index.html").decode("utf-8")
+        assert prototype_text  # the generated prototype output_text, non-empty
+
+        policy_text = archive.read("ACCESS_POLICY.md").decode("utf-8")
+        assert str(cx_settings.cx_token_ttl_seconds) in policy_text
+        assert str(cx_settings.cx_reanalysis_rate_limit_per_hour) in policy_text
+        assert "Dedicated Azure AI Foundry agents provisioned for this session: 0" in policy_text
+
+
+def test_starter_kit_returns_404_when_the_prototype_has_not_been_generated(
+    chat_cx_settings,
+) -> None:
+    # chat-workflow's steps are not the configured cx_prototype_step_id, so
+    # no prototype content has ever been produced for this run.
+    app = create_app(settings=chat_cx_settings)
+    headers = {"Authorization": f"Bearer {_bearer_token('user-1')}"}
+
+    with TestClient(app) as client:
+        session_id, workflow_run_id = _create_chat_session_and_run(client, headers)
+        token = _mint_cx_token(
+            client, session_id=session_id, workflow_run_id=workflow_run_id, headers=headers
+        )
+
+        resp = client.get(f"/cx/{session_id}/starter-kit", params={"t": token})
+        assert resp.status_code == 404
+
+
+def test_starter_kit_is_rejected_without_a_valid_token(cx_settings) -> None:
+    app = create_app(settings=cx_settings)
+    headers = {"Authorization": f"Bearer {_bearer_token('user-1')}"}
+
+    with TestClient(app) as client:
+        session_id, _workflow_run_id = _create_session_and_run(client, headers)
+
+        resp = client.get(f"/cx/{session_id}/starter-kit")
+        assert resp.status_code == 401
+

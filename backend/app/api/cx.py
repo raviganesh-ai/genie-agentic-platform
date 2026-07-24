@@ -27,6 +27,11 @@ Two routes are customer-triggerable write actions:
   whatever the Azure-hosted agent produces during that resumed run, never
   synthesized here.
 
+``GET /starter-kit`` is a third read-only route: it lets the customer
+download a zip of their generated prototype plus a README and access
+policy doc (Phase 3 of the call-transcript-to-live-prototype feature) -
+see ``app.services.starter_kit_service``.
+
 Both write routes are rate-limited per session
 (``app.security.cx_rate_limiter``) since a leaked link must never be able
 to flood agent-routing work, and never let the customer choose an
@@ -57,7 +62,11 @@ from uuid import uuid4
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.api.dependencies import get_agent_orchestrator, get_cx_rate_limiter
+from app.api.dependencies import (
+    get_agent_orchestrator,
+    get_cx_rate_limiter,
+    get_starter_kit_service,
+)
 from app.config.settings import Settings
 from app.models.reanalysis_models import ReanalysisRequestType, ReanalysisResult
 from app.models.workflow_models import WorkflowRunResult, WorkflowStepInput
@@ -65,6 +74,7 @@ from app.orchestration.agent_orchestrator import AgentOrchestrator
 from app.security.cx_dependencies import CX_SESSION_COOKIE_NAME, get_current_customer_session
 from app.security.cx_rate_limiter import CxRateLimiter
 from app.security.cx_tokens import CustomerSessionClaims
+from app.services.starter_kit_service import StarterKitError, StarterKitService
 
 router = APIRouter(prefix="/cx/{session_id}", tags=["customer-experience"])
 
@@ -140,6 +150,13 @@ def _resolve_run(
     return run
 
 
+def _get_prototype_text(run: WorkflowRunResult, *, settings: Settings) -> str:
+    for result in run.step_results:
+        if result.step_id == settings.cx_prototype_step_id and result.status == "completed":
+            return result.output_text or ""
+    return ""
+
+
 def _set_session_cookie(response: Response, *, session_id: str, token: str, claims: CustomerSessionClaims) -> None:
     max_age = max(int((claims.expires_at - datetime.now(UTC)).total_seconds()), 0)
     response.set_cookie(
@@ -175,11 +192,7 @@ async def get_prototype_app(
     settings: Settings = Depends(_get_settings),
 ) -> Response:
     run = _resolve_run(orchestrator=orchestrator, claims=claims)
-    prototype_text = ""
-    for result in run.step_results:
-        if result.step_id == settings.cx_prototype_step_id and result.status == "completed":
-            prototype_text = result.output_text or ""
-            break
+    prototype_text = _get_prototype_text(run, settings=settings)
 
     if not prototype_text:
         raise HTTPException(
@@ -344,3 +357,41 @@ async def submit_chat_message(
         trace_id=str(uuid4()),
         step_inputs=step_inputs,
     )
+
+
+@router.get("/starter-kit")
+async def download_starter_kit(
+    session_id: str,
+    claims: CustomerSessionClaims = Depends(get_current_customer_session),
+    orchestrator: AgentOrchestrator = Depends(get_agent_orchestrator),
+    starter_kit_service: StarterKitService = Depends(get_starter_kit_service),
+    settings: Settings = Depends(_get_settings),
+) -> Response:
+    """Let the customer download a zip of their generated prototype + deploy docs.
+
+    Phase 3 of the call-transcript-to-live-prototype feature: packages the
+    exact same prototype ``output_text`` served by ``GET /app`` alongside a
+    ``README.md`` (generic hosting instructions) and an ``ACCESS_POLICY.md``
+    (token TTL, rate limit, and dedicated-agent-count figures read straight
+    from ``Settings``/the provisioning service - never hardcoded). Contains
+    no Genie platform source code or other customer's data.
+    """
+
+    run = _resolve_run(orchestrator=orchestrator, claims=claims)
+    prototype_text = _get_prototype_text(run, settings=settings)
+
+    try:
+        archive_bytes = starter_kit_service.build_zip(
+            prototype_html=prototype_text,
+            settings=settings,
+            dedicated_agent_count=orchestrator.provisioned_customer_agent_count(claims.session_id),
+        )
+    except StarterKitError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+    response = Response(content=archive_bytes, media_type="application/zip")
+    response.headers["Content-Disposition"] = (
+        f'attachment; filename="genie-starter-kit-{session_id[:8]}.zip"'
+    )
+    response.headers["Cache-Control"] = "no-store"
+    return response

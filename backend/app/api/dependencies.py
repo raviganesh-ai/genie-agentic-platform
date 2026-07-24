@@ -24,6 +24,7 @@ from app.services.foundry_agent_synchronization_service import FoundryAgentSynch
 from app.services.mission_control_service import MissionControlService
 from app.services.output_service import OutputService
 from app.services.session_service import SessionService
+from app.services.starter_kit_service import StarterKitService
 from app.services.workshop_service import WorkshopService
 from app.transcription.speech_service import SpeechToTextService
 
@@ -43,6 +44,7 @@ __all__ = [
     "get_replay_service",
     "get_session_service",
     "get_speech_to_text_service",
+    "get_starter_kit_service",
     "get_traceability_service",
     "get_workshop_service",
 ]
@@ -82,6 +84,10 @@ def get_architecture_service(request: Request) -> ArchitectureService:
 
 def get_output_service(request: Request) -> OutputService:
     return request.app.state.output_service
+
+
+def get_starter_kit_service(request: Request) -> StarterKitService:
+    return request.app.state.starter_kit_service
 
 
 def get_governance_service(request: Request) -> GovernanceService:

@@ -56,6 +56,7 @@ from app.services.foundry_agent_synchronization_service import (
 from app.services.mission_control_service import create_mission_control_service
 from app.services.output_service import create_output_service
 from app.services.session_service import create_session_service
+from app.services.starter_kit_service import StarterKitService
 from app.services.workshop_service import create_workshop_service
 from app.transcription.speech_service import create_speech_to_text_service
 from app.validation.base import StartupValidationError
@@ -227,6 +228,7 @@ def create_app(
         app.state.output_service = create_output_service(
             orchestrator=orchestrator, session_service=session_service
         )
+        app.state.starter_kit_service = StarterKitService()
         app.state.replay_service = ReplayService(
             governance_service=orchestrator.governance_service,
             approval_service=orchestrator.approval_service,
