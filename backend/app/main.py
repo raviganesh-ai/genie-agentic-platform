@@ -23,6 +23,7 @@ from app.api import (
     agents,
     approvals,
     architecture,
+    cx,
     debugging,
     foundry_admin,
     governance,
@@ -43,6 +44,7 @@ from app.governance.replay_service import ReplayService
 from app.governance.traceability_service import TraceabilityService
 from app.orchestration.agent_orchestrator import create_agent_orchestrator
 from app.prompts.registry import PromptRegistry
+from app.security.cx_tokens import create_cx_token_service
 from app.security.token_validator import create_token_validator
 from app.services.architecture_service import create_architecture_service
 from app.services.foundry_agent_inventory_service import FoundryAgentInventoryService
@@ -210,6 +212,7 @@ def create_app(
         session_service = create_session_service(orchestrator=orchestrator)
         app.state.session_service = session_service
         app.state.speech_to_text_service = create_speech_to_text_service(resolved_settings)
+        app.state.cx_token_service = create_cx_token_service(resolved_settings)
         app.state.mission_control_service = create_mission_control_service(
             orchestrator=orchestrator, session_service=session_service
         )
@@ -276,6 +279,7 @@ def create_app(
     app.include_router(debugging.router)
     app.include_router(replay.router)
     app.include_router(foundry_admin.router)
+    app.include_router(cx.router)
 
     return app
 

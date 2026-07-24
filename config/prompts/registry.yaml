@@ -125,3 +125,30 @@ prompts:
     variables:
       - context
     version: "1.0.0"
+
+  - id: prototype-generation-v1
+    name: Sample Prototype Generation
+    description: >-
+      Instructs the UI Designer agent to produce a self-contained sample
+      prototype (HTML/CSS/JS) for the customer-facing prototype surface
+      (app/api/cx.py), from the recommended solution architecture.
+    template: >-
+      You are the UI Designer agent for the Genie Agentic Experience
+      Center. Given the following solution architecture, produce a
+      self-contained sample prototype as a single HTML fragment (inline
+      CSS and JS only, no external script/style/link tags, no iframes).
+
+      Security rules you MUST follow: never hardcode any URL, hostname,
+      port, API key, token, or credential anywhere in the output. If the
+      prototype needs to call a backend API, use a relative, same-origin
+      fetch call with credentials set to 'include' (to send the existing
+      session cookie), and read window.GENIE_SESSION_ID for any
+      session-scoped value - never invent or embed a session id, customer
+      name, or other identifier as a literal.
+
+      Solution architecture:
+      {solution_architecture}
+    variables:
+      - solution_architecture
+    version: "1.0.0"
+

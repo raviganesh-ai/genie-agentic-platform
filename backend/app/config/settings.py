@@ -100,6 +100,22 @@ class Settings(BaseSettings):
     entra_tenant_id: str | None = None
     entra_client_id: str | None = None
 
+    # --- Customer-experience (cx) session tokens ---------------------------------
+    # Signs the short-lived, session-scoped access tokens used by the
+    # customer-facing generated-prototype surface (app/api/cx.py) - a
+    # distinct, least-privilege identity from internal Mission Control users
+    # (see app.security.token_validator). Sourced from Key Vault in
+    # production (via a Container App Key Vault secret reference), never
+    # hardcoded. See app.security.cx_tokens.create_cx_token_service for the
+    # fail-closed resolution contract.
+    cx_token_signing_key: str | None = None
+    cx_token_ttl_seconds: int = 3600
+    # Id of the workflow step (config/workflows/*.yaml) whose output_text is
+    # the generated customer prototype HTML, served by app/api/cx.py.
+    # Mirrors debugging_workflow_id's pattern of naming a config entity from
+    # settings rather than hardcoding it in application code.
+    cx_prototype_step_id: str = "generate-prototype"
+
     # --- CORS -------------------------------------------------------------------
     # Comma-separated list of browser origins allowed to call this API (e.g. the
     # Genie frontend's Static Web App hostname). Empty by default - no
@@ -140,6 +156,7 @@ class Settings(BaseSettings):
         "key_vault_uri",
         "memory_store_endpoint",
         "lineage_store_endpoint",
+        "cx_token_signing_key",
         mode="after",
     )
     @classmethod

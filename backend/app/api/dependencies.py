@@ -15,6 +15,7 @@ from app.governance.replay_service import ReplayService
 from app.governance.traceability_service import TraceabilityService
 from app.memory.memory_service import MemoryService
 from app.orchestration.agent_orchestrator import AgentOrchestrator
+from app.security.cx_tokens import CxTokenService
 from app.services.architecture_service import ArchitectureService
 from app.services.foundry_agent_inventory_service import FoundryAgentInventoryService
 from app.services.foundry_agent_lifecycle_service import FoundryAgentLifecycleService
@@ -29,6 +30,7 @@ __all__ = [
     "get_agent_orchestrator",
     "get_approval_service",
     "get_architecture_service",
+    "get_cx_token_service",
     "get_foundry_inventory_service",
     "get_foundry_lifecycle_service",
     "get_foundry_synchronization_service",
@@ -54,6 +56,10 @@ def get_session_service(request: Request) -> SessionService:
 
 def get_speech_to_text_service(request: Request) -> SpeechToTextService:
     return request.app.state.speech_to_text_service
+
+
+def get_cx_token_service(request: Request) -> CxTokenService:
+    return request.app.state.cx_token_service
 
 
 def get_mission_control_service(request: Request) -> MissionControlService:

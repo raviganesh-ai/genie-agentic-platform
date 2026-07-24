@@ -136,9 +136,9 @@ workflows:
         description: Design interactive UI/UX concepts for the proposed solution.
         depends_on:
           - design-solution-architecture
-        prompt_id: business-agent-workshop-v1
+        prompt_id: prototype-generation-v1
         variable_sources:
-          context: step:design-solution-architecture
+          solution_architecture: step:design-solution-architecture
       - id: optimize-cost
         agent_id: cost-optimization-agent
         description: Evaluate and recommend Azure cost optimizations.
@@ -163,6 +163,18 @@ workflows:
         prompt_id: business-agent-workshop-v1
         variable_sources:
           context: step:design-solution-architecture
+      - id: generate-prototype
+        agent_id: ui-designer-agent
+        description: >-
+          Generate a self-contained sample prototype for the customer-facing
+          preview surface (app/api/cx.py), reusing the ui-designer-agent
+          already provisioned for design-ui above and its same canonical
+          prompt_template_ref.
+        depends_on:
+          - design-solution-architecture
+        prompt_id: prototype-generation-v1
+        variable_sources:
+          solution_architecture: step:design-solution-architecture
 
       # --- Wave 6: governance approval gate --------------------------------
       - id: governance-review
@@ -188,6 +200,7 @@ workflows:
           - optimize-cost
           - review-responsible-ai
           - build-roadmap
+          - generate-prototype
         prompt_id: business-agent-workshop-v1
         variable_sources:
           context: step:governance-review

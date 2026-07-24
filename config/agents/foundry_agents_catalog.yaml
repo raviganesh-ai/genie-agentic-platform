@@ -117,7 +117,7 @@ agents:
     foundry_agent_id: asst_38m3IGJdQNqpAzMCWCqYabil
     owner: architecture-team
     governance_policy_id: standard-governance-policy-v1
-    prompt_template_ref: business-agent-workshop-v1
+    prompt_template_ref: prototype-generation-v1
     enabled: true
 
   - id: roadmap-agent
