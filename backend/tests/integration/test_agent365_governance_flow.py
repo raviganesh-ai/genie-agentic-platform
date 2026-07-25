@@ -83,6 +83,13 @@ async def test_all_tracked_categories_are_recorded(local_settings):
         session_id="s1", trace_id="t1", agent_id="agent-a", policy_name="memory_access", allowed=True
     )
     await service.record_access_denied(session_id="s1", trace_id="t1", agent_id="agent-a", reason="no access")
+    await service.record_human_checkpoint_confirmation(
+        session_id="s1",
+        trace_id="t1",
+        stage_key="requirements",
+        stage_label="Requirement Discovery",
+        confirmed_by="user-1",
+    )
 
     events = await service.events_for_session("s1")
     categories = {event.category for event in events}
@@ -97,4 +104,29 @@ async def test_all_tracked_categories_are_recorded(local_settings):
         "tool_request",
         "policy_evaluation",
         "access_denied",
+        "human_checkpoint_confirmation",
     }
+
+
+@pytest.mark.asyncio
+async def test_human_checkpoint_confirmation_records_stage_and_confirming_user(local_settings):
+    service = create_governance_service(settings=local_settings)
+
+    event = await service.record_human_checkpoint_confirmation(
+        session_id="s1",
+        trace_id="t1",
+        stage_key="architecture-studio",
+        stage_label="Architecture Studio",
+        confirmed_by="user-42",
+    )
+
+    assert event.category == "human_checkpoint_confirmation"
+    assert event.agent_id is None
+    assert event.detail == {
+        "stage_key": "architecture-studio",
+        "stage_label": "Architecture Studio",
+        "confirmed_by": "user-42",
+    }
+
+    events = await service.events_for_session("s1")
+    assert events == [event]

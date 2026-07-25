@@ -282,6 +282,31 @@ class GovernanceService:
             "access_denied", session_id=session_id, trace_id=trace_id, agent_id=agent_id, detail=merged_detail
         )
 
+    async def record_human_checkpoint_confirmation(
+        self,
+        *,
+        session_id: str,
+        trace_id: str,
+        stage_key: str,
+        stage_label: str,
+        confirmed_by: str,
+    ) -> GovernanceEvent:
+        """Record that a person explicitly proceeded the Discovery Wizard past a stage.
+
+        Responsible AI Accountability checkpoint: the Discovery Wizard never
+        auto-advances - ``confirmed_by`` is always the authenticated caller's
+        user id (never a client-supplied value), so every advancement is
+        attributable to a specific person.
+        """
+
+        return await self._record(
+            "human_checkpoint_confirmation",
+            session_id=session_id,
+            trace_id=trace_id,
+            agent_id=None,
+            detail={"stage_key": stage_key, "stage_label": stage_label, "confirmed_by": confirmed_by},
+        )
+
 
 def create_governance_service(
     *,

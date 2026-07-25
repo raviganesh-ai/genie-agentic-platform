@@ -10,7 +10,8 @@ export type GovernanceEventCategory =
   | "memory_write"
   | "tool_request"
   | "policy_evaluation"
-  | "access_denied";
+  | "access_denied"
+  | "human_checkpoint_confirmation";
 
 export interface GovernanceEvent {
   id: string;

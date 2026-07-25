@@ -7,6 +7,7 @@ import { getActiveAccountName, isAuthenticated, onAccessTokenChange, signOut } f
 const NAV_ITEMS: Array<{ to: string; label: string }> = [
   { to: "/", label: "Landing" },
   { to: "/upload", label: "Upload" },
+  { to: "/discovery", label: "Discovery Wizard" },
   { to: "/mission-control", label: "Mission Control" },
   { to: "/agent-arena", label: "Agent Arena" },
   { to: "/collaboration-graph", label: "Collaboration Graph" },

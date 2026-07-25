@@ -4,9 +4,12 @@ A single, canonical ``GovernanceEvent`` shape is used for every category of
 governed activity tracked by Phase 5 (see "Agent Execution Governance" and
 "Governance Requirements" in ``.github/copilot-instructions.md``): agent
 registration, agent versions, agent lifecycle, agent executions, agent
-communication, memory reads/writes, tool requests, policy evaluations, and
-denied access events. A single shape (rather than one class per category)
-keeps storage, querying, and replay reconstruction uniform.
+communication, memory reads/writes, tool requests, policy evaluations,
+denied access events, and (added post-Phase-8, for Responsible AI
+Accountability) human checkpoint confirmations - a person explicitly
+proceeding the Discovery Wizard past a workflow stage. A single shape
+(rather than one class per category) keeps storage, querying, and replay
+reconstruction uniform.
 """
 from __future__ import annotations
 
@@ -26,6 +29,7 @@ GovernanceEventCategory = Literal[
     "tool_request",
     "policy_evaluation",
     "access_denied",
+    "human_checkpoint_confirmation",
 ]
 
 __all__ = ["GovernanceEvent", "GovernanceEventCategory"]

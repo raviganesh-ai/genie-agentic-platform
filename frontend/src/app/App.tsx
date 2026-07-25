@@ -11,6 +11,7 @@ import { WorkshopPage } from "@/features/workshop-center/WorkshopPage";
 import { GovernancePage } from "@/features/governance-center/GovernancePage";
 import { ReplayCenterPage } from "@/features/replay-center/ReplayCenterPage";
 import { FinalOutputPage } from "@/features/final-output-center/FinalOutputPage";
+import { DiscoveryWizardPage } from "@/features/discovery-wizard/DiscoveryWizardPage";
 
 const router = createBrowserRouter([
   {
@@ -19,6 +20,7 @@ const router = createBrowserRouter([
     children: [
       { index: true, element: <LandingPage /> },
       { path: "upload", element: <UploadPage /> },
+      { path: "discovery", element: <DiscoveryWizardPage /> },
       { path: "mission-control", element: <MissionControlPage /> },
       { path: "agent-arena", element: <AgentArenaPage /> },
       { path: "collaboration-graph", element: <CollaborationGraphPage /> },

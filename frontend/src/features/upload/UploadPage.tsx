@@ -6,18 +6,21 @@ import { LoadingState } from "@/components/LoadingState";
 import { ErrorState } from "@/components/ErrorState";
 import { useSessionContext } from "@/state/SessionContext";
 import { useUploadAction, useUploads } from "@/hooks/useUploads";
+import { useWorkflowRun } from "@/hooks/useWorkflowRun";
+import { DISCOVERY_WORKFLOW_ID } from "@/config/discoveryWorkflow";
 import type { UploadType } from "@/types/upload";
 
 const UPLOAD_TYPES: UploadType[] = ["transcript", "audio", "video", "supporting_document"];
 
 export function UploadPage(): JSX.Element {
   const navigate = useNavigate();
-  const { sessionId } = useSessionContext();
+  const { sessionId, setWorkflowRunId } = useSessionContext();
   const [uploadType, setUploadType] = useState<UploadType>("transcript");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const { upload, uploading, error: uploadError } = useUploadAction(sessionId);
   const { data: uploads, loading, error, refresh } = useUploads(sessionId);
+  const { run, running, error: runError } = useWorkflowRun(sessionId);
 
   const handleFileChosen = useCallback(
     async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -29,6 +32,12 @@ export function UploadPage(): JSX.Element {
     },
     [upload, uploadType, refresh],
   );
+
+  const handleGeneratePrototype = useCallback(async () => {
+    const result = await run(DISCOVERY_WORKFLOW_ID);
+    setWorkflowRunId(result.workflow_run_id);
+    navigate("/discovery");
+  }, [run, setWorkflowRunId, navigate]);
 
   if (!sessionId) {
     return (
@@ -76,6 +85,7 @@ export function UploadPage(): JSX.Element {
       </div>
 
       {uploadError ? <ErrorState error={uploadError} /> : null}
+      {runError ? <ErrorState error={runError} /> : null}
 
       {loading ? <LoadingState label="Loading uploads..." /> : null}
       {error ? <ErrorState error={error} onRetry={refresh} /> : null}
@@ -103,8 +113,15 @@ export function UploadPage(): JSX.Element {
         </Table>
       ) : null}
 
-      <div style={{ marginTop: 24 }}>
-        <Button appearance="primary" onClick={() => navigate("/mission-control")}>
+      <div style={{ marginTop: 24, display: "flex", gap: 12 }}>
+        <Button
+          appearance="primary"
+          disabled={running || !uploads || uploads.length === 0}
+          onClick={() => void handleGeneratePrototype()}
+        >
+          {running ? "Starting Discovery..." : "Generate Prototype"}
+        </Button>
+        <Button appearance="secondary" onClick={() => navigate("/mission-control")}>
           Go to Mission Control
         </Button>
       </div>

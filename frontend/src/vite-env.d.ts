@@ -16,6 +16,8 @@ interface ImportMetaEnv {
   readonly VITE_GOVERNANCE_POLL_MS?: string;
   readonly VITE_REPLAY_POLL_MS?: string;
   readonly VITE_FINAL_OUTPUT_POLL_MS?: string;
+  /** Id of the workflow "Generate Prototype" starts (config/workflows/registry.yaml). */
+  readonly VITE_DISCOVERY_WORKFLOW_ID?: string;
 }
 
 interface ImportMeta {
