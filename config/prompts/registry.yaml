@@ -9,7 +9,9 @@ prompts:
     name: Requirements Extraction
     description: >-
       Extracts goals, functional and non-functional requirements, risks,
-      assumptions, and constraints from a transcript excerpt.
+      assumptions, and constraints from a transcript excerpt, and assesses
+      whether those requirements actually warrant a multi-agent agentic AI
+      workflow.
     template: >-
       You are the Requirements Analyst agent for the Genie Agentic
       Experience Center. Given the following transcript excerpt, extract
@@ -20,10 +22,30 @@ prompts:
       {transcript_excerpt}
 
       Customer message (if any): {user_message}
+
+      After extracting the requirements above, assess whether they
+      genuinely warrant a multi-agent agentic AI workflow (multiple
+      collaborating agents performing planning, reasoning, tool use, and
+      handoffs) rather than a simpler, non-agentic solution (a single
+      deterministic script, a rule engine, a static report, or one
+      one-shot API/LLM call). Consider factors such as: whether the work
+      requires multi-step planning or ambiguous judgment calls, whether
+      multiple distinct specialist roles genuinely need to collaborate,
+      whether the requirements are open-ended/exploratory rather than a
+      single fixed calculation or lookup, and whether ongoing tool use or
+      iterative refinement is needed. Do not qualify simple, fully
+      deterministic, single-step tasks as agentic just because an agent
+      could technically perform them.
+
+      Conclude your response with EXACTLY these two lines, with no
+      additional text after them:
+      AGENTIC_WORKFLOW_QUALIFICATION: <QUALIFIED or NOT_QUALIFIED>
+      QUALIFICATION_REASON: <one or two plain-language sentences explaining
+      your judgment, written for a non-technical business stakeholder>
     variables:
       - transcript_excerpt
       - user_message
-    version: "1.0.0"
+    version: "1.1.0"
 
   - id: architecture-recommendation-v1
     name: Architecture Recommendation

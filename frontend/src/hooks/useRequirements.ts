@@ -1,9 +1,11 @@
 import { useCallback } from "react";
 import { memoryApi } from "@/services/memoryApi";
+import { requirementsApi } from "@/services/requirementsApi";
 import { workshopApi } from "@/services/workshopApi";
 import { getTraceId } from "@/state/traceRegistry";
 import { useAsyncResource, type AsyncResourceState } from "./useAsyncResource";
 import type { SharedMemoryRecord } from "@/types/memory";
+import type { RequirementsQualification } from "@/types/requirementsQualification";
 
 export interface RequirementItem {
   record: SharedMemoryRecord;
@@ -95,4 +97,29 @@ export function useRequirementActions(): RequirementActions {
   );
 
   return { challenge };
+}
+
+/**
+ * Fetches whether the requirements discovered for a workflow run genuinely
+ * warrant an agentic AI workflow, per the Requirements Analyst agent's own
+ * judgment (see backend/app/services/requirements_service.py). Used to
+ * render a graceful "not qualified" banner on the Requirement Discovery Map
+ * rather than silently proceeding.
+ */
+export function useRequirementsQualification(
+  sessionId: string | null,
+  workflowRunId: string | null,
+  pollIntervalMs: number = DEFAULT_POLL_MS,
+): AsyncResourceState<RequirementsQualification> {
+  const fetcher = useCallback(async (): Promise<RequirementsQualification> => {
+    if (!sessionId || !workflowRunId) {
+      throw new Error("No active session or workflow run.");
+    }
+    return requirementsApi.getQualification(sessionId, workflowRunId);
+  }, [sessionId, workflowRunId]);
+
+  return useAsyncResource(fetcher, [sessionId, workflowRunId], {
+    enabled: Boolean(sessionId && workflowRunId),
+    pollIntervalMs,
+  });
 }

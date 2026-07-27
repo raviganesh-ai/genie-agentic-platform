@@ -23,6 +23,7 @@ from app.services.foundry_agent_lifecycle_service import FoundryAgentLifecycleSe
 from app.services.foundry_agent_synchronization_service import FoundryAgentSynchronizationService
 from app.services.mission_control_service import MissionControlService
 from app.services.output_service import OutputService
+from app.services.requirements_service import RequirementsService
 from app.services.session_service import SessionService
 from app.services.starter_kit_service import StarterKitService
 from app.services.workshop_service import WorkshopService
@@ -42,6 +43,7 @@ __all__ = [
     "get_mission_control_service",
     "get_output_service",
     "get_replay_service",
+    "get_requirements_service",
     "get_session_service",
     "get_speech_to_text_service",
     "get_starter_kit_service",
@@ -84,6 +86,10 @@ def get_architecture_service(request: Request) -> ArchitectureService:
 
 def get_output_service(request: Request) -> OutputService:
     return request.app.state.output_service
+
+
+def get_requirements_service(request: Request) -> RequirementsService:
+    return request.app.state.requirements_service
 
 
 def get_starter_kit_service(request: Request) -> StarterKitService:

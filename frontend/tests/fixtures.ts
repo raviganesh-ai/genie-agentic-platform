@@ -5,6 +5,7 @@ import type { ApprovalRequest, GovernanceEvent } from "@/types/governance";
 import type { DecisionGraph } from "@/types/collaboration";
 import type { SessionReplayResponse } from "@/types/replay";
 import type { ArchitectureSnapshot } from "@/types/architecture";
+import type { RequirementsQualification } from "@/types/requirementsQualification";
 
 /** Shared, non-customer fixture data for frontend tests only. */
 
@@ -150,5 +151,16 @@ export function buildArchitectureSnapshot(): ArchitectureSnapshot {
       { step_id: "design-architecture", recommended_by: "architecture-designer", content: "Use Azure Container Apps." },
     ],
     decision_graph: buildDecisionGraph(),
+  };
+}
+
+export function buildRequirementsQualification(
+  overrides: Partial<RequirementsQualification> = {},
+): RequirementsQualification {
+  return {
+    status: "qualified",
+    reason: "Multiple specialist agents must collaborate on open-ended architecture decisions.",
+    assessed_by_agent_id: "requirements-analyst",
+    ...overrides,
   };
 }

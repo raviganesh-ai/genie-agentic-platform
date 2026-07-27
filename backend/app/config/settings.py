@@ -115,6 +115,12 @@ class Settings(BaseSettings):
     # Mirrors debugging_workflow_id's pattern of naming a config entity from
     # settings rather than hardcoding it in application code.
     cx_prototype_step_id: str = "generate-prototype"
+    # Id of the workflow step (config/workflows/*.yaml) whose output_text
+    # carries the Requirements Analyst agent's structured agentic-workflow
+    # qualification verdict (see app.services.requirements_service). Mirrors
+    # cx_prototype_step_id's pattern of naming a config entity from settings
+    # rather than hardcoding it in application code.
+    requirements_qualification_step_id: str = "analyze-requirements"
     # Least-privilege abuse safeguard for the one customer-triggerable write
     # action (POST /cx/{session_id}/reanalyze - routes a challenge/redesign
     # request through the unmodified Phase 6 ReanalysisService, exactly like

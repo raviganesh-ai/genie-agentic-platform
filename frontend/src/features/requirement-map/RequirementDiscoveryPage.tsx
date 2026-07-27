@@ -1,7 +1,19 @@
 import { useCallback, useState } from "react";
-import { Badge, Button, Text, Textarea } from "@fluentui/react-components";
+import {
+  Badge,
+  Button,
+  MessageBar,
+  MessageBarBody,
+  MessageBarTitle,
+  Text,
+  Textarea,
+} from "@fluentui/react-components";
 import { useSessionContext } from "@/state/SessionContext";
-import { useRequirementActions, useRequirements } from "@/hooks/useRequirements";
+import {
+  useRequirementActions,
+  useRequirements,
+  useRequirementsQualification,
+} from "@/hooks/useRequirements";
 import { useAsyncResource } from "@/hooks/useAsyncResource";
 import { approvalApi } from "@/services/approvalApi";
 import { getTraceId } from "@/state/traceRegistry";
@@ -15,6 +27,7 @@ const POLL_MS = Number(import.meta.env.VITE_REQUIREMENTS_POLL_MS ?? 0);
 export function RequirementDiscoveryPage(): JSX.Element {
   const { sessionId, workflowRunId } = useSessionContext();
   const { data, loading, error, refresh } = useRequirements(sessionId, workflowRunId, POLL_MS);
+  const { data: qualification } = useRequirementsQualification(sessionId, workflowRunId, POLL_MS);
   const { challenge } = useRequirementActions();
   const [rationaleByKey, setRationaleByKey] = useState<Record<string, string>>({});
 
@@ -53,6 +66,16 @@ export function RequirementDiscoveryPage(): JSX.Element {
       />
       {loading && !data ? <LoadingState label="Loading requirements..." /> : null}
       {error ? <ErrorState error={error} onRetry={refresh} /> : null}
+
+      {qualification?.status === "not_qualified" ? (
+        <MessageBar intent="warning" layout="multiline" style={{ marginBottom: 16 }}>
+          <MessageBarBody>
+            <MessageBarTitle>This requirement doesn&apos;t currently qualify for an agentic AI workflow</MessageBarTitle>
+            {qualification.reason ??
+              "The Requirements Analyst agent determined a simpler, non-agentic solution is more appropriate here."}
+          </MessageBarBody>
+        </MessageBar>
+      ) : null}
 
       {data ? (
         <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 24 }}>
