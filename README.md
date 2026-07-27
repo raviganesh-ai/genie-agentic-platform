@@ -147,6 +147,17 @@ Workflows (`config/workflows/registry.yaml`) define ordered, dependency-graphed 
 - **`solution-discovery-workflow`** — 18 steps spanning 18 agents (4 of the original 6 registry agents + all 14 business catalog agents) across 9 dependency waves: initial discovery (`discovery-agent`, `workshop-facilitator-agent`) → requirements capture (`requirements-analyst`, `requirements-agent`) → industry context + risk (`industry-expert-agent`, `risk-assessor`, `risk-compliance-agent`) → architecture design (`architecture-designer`, `data-architect-agent`) → end-to-end solution architecture (`solution-architect-agent`) → parallel enrichment (`innovation-agent`, `ui-designer-agent`, `cost-optimization-agent`, `responsible-ai-agent`, `roadmap-agent`) → governance review (`governance-reviewer`, gated by an `architecture-approval` checkpoint) → cross-cutting governance coordination (`governance-agent`) → executive summary (`executive-summary-agent`, gated by a `final-output-approval` checkpoint).
 - **`debugging-workflow`** — `debugging-agent` plus all 8 specialist debugging catalog agents (test-failure, backend, frontend, orchestration, security, Azure deployment, governance-trace, memory) run in parallel on `FailureDetected`, each diagnosing from its own domain angle, executed through the exact same `AzureAgentGateway` path as every other workflow (never a bespoke/local diagnostic path).
 
+### Agentic-workflow qualification check
+
+The Requirement Discovery Map doesn't just list extracted requirements — it also surfaces whether they actually **qualify for a multi-agent agentic workflow** in the first place, versus being better served by a simpler, deterministic solution. This is deliberately **not** a Python business rule: the judgment is made by the existing `requirements-analyst` agent as part of its normal `analyze-requirements` step. Its prompt (`requirements-extraction-v1`) instructs it to end its output with two machine-parseable lines:
+
+```
+AGENTIC_WORKFLOW_QUALIFICATION: QUALIFIED | NOT_QUALIFIED
+QUALIFICATION_REASON: <one or two plain-language sentences>
+```
+
+The backend (`RequirementsService.get_qualification`, `GET /sessions/{id}/requirements/{workflow_run_id}/qualification`) only *extracts* this verdict via a regex parser — it never invents or overrides the agent's own reasoning. If the requirements don't qualify, `RequirementDiscoveryPage` shows a graceful Fluent `MessageBar` banner explaining why, using the agent's own stated reason. The step id this check watches is configurable via `GENIE_REQUIREMENTS_QUALIFICATION_STEP_ID` (defaults to `analyze-requirements`), never hardcoded.
+
 ---
 
 ## Repository layout
@@ -272,6 +283,7 @@ All backend configuration is via environment variables prefixed `GENIE_` (pydant
 | `GENIE_LINEAGE_STORE_ENDPOINT` | *(none)* | Required in production |
 | `GENIE_DEFAULT_LLM` | `gpt-5.1` | Default model deployment name for agents that omit `model_deployment_ref` |
 | `GENIE_DEBUGGING_WORKFLOW_ID` | `debugging-workflow` | Workflow id run on `FailureDetected` |
+| `GENIE_REQUIREMENTS_QUALIFICATION_STEP_ID` | `analyze-requirements` | Workflow step id whose output is checked for an agentic-workflow qualification verdict |
 | `GENIE_KEY_VAULT_URI` | *(none)* | Required in production |
 | `GENIE_ENTRA_TENANT_ID` | *(none)* | Microsoft Entra ID tenant for token validation + login |
 | `GENIE_ENTRA_CLIENT_ID` | *(none)* | App registration (API) client id |
@@ -507,3 +519,4 @@ All three require `GENIE_AZURE_FOUNDRY_ENDPOINT` / `GENIE_AZURE_FOUNDRY_PROJECT_
 - `memory-curator` is provisioned and enabled but intentionally not a workflow step (it's invoked separately as part of the shared→enterprise memory promotion flow, not the discovery/debugging pipelines).
 - End-to-end Playwright coverage (`e2e/`) is scaffolded but not yet fully built out.
 - Admin consent for the Entra API permission may require a tenant administrator in some tenants — see [Authentication](#authentication).
+- Shared Collaboration Memory currently has no write call sites anywhere in the backend — nothing ever calls `memory_service.shared.write`. The Requirement Discovery Map's main requirements list (which reads from Shared Memory) is therefore likely empty in real usage today; the agentic-workflow qualification check above was deliberately built to read `WorkflowRunResult.step_results` directly instead, so it works independently of this gap.
