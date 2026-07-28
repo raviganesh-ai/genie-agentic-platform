@@ -8,6 +8,7 @@ import { PageHeader } from "@/layouts/AppShell";
 import { ErrorState } from "@/components/ErrorState";
 import { SectionCard } from "@/components/SectionCard";
 import { LiveWorkflowPulse } from "@/components/LiveWorkflowPulse";
+import { AgentActivityAnimation } from "@/components/AgentActivityAnimation";
 import { useWorkflowEventStream } from "@/hooks/useWorkflowEventStream";
 import { GeneratedArtifacts } from "./GeneratedArtifacts";
 import type { WorkflowStepResult } from "@/types/workflow";
@@ -72,10 +73,10 @@ export function WorkshopPage(): JSX.Element {
         {buildOutputText ? (
           <GeneratedArtifacts outputText={buildOutputText} />
         ) : (
-          <div style={{ display: "flex", alignItems: "center", gap: 8, opacity: 0.7 }}>
-            <span className="genie-live-dot" aria-label="Waiting" />
-            <Text size={300}>Waiting for the Build Agent to generate your UI and agent workflow...</Text>
-          </div>
+          <AgentActivityAnimation
+            label="Genie is working with the Build Agent to generate your UI and multi-agent workflow..."
+            events={liveEvents}
+          />
         )}
       </SectionCard>
 

@@ -9,6 +9,7 @@ import { LoadingState } from "@/components/LoadingState";
 import { ErrorState } from "@/components/ErrorState";
 import { SectionCard } from "@/components/SectionCard";
 import { LiveWorkflowPulse } from "@/components/LiveWorkflowPulse";
+import { AgentActivityAnimation } from "@/components/AgentActivityAnimation";
 import { useWorkflowEventStream } from "@/hooks/useWorkflowEventStream";
 import { splitIntoNamedSections } from "@/utils/textArtifacts";
 import type { DeliverablePackage, DeliverableType } from "@/types/workflow";
@@ -100,6 +101,13 @@ export function FinalOutputPage(): JSX.Element {
       {generateError ? <ErrorState error={generateError} /> : null}
 
       <LiveWorkflowPulse connected={liveConnected} events={liveEvents} />
+
+      {!canLaunch ? (
+        <AgentActivityAnimation
+          label="Genie is working with the Governance Reviewer and Deployment Agent to finish and deploy your solution..."
+          events={liveEvents}
+        />
+      ) : null}
 
       {canLaunch ? (
         <SectionCard

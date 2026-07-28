@@ -21,6 +21,7 @@ import { LoadingState } from "@/components/LoadingState";
 import { ErrorState } from "@/components/ErrorState";
 import { SectionCard } from "@/components/SectionCard";
 import { LiveWorkflowPulse } from "@/components/LiveWorkflowPulse";
+import { AgentActivityAnimation } from "@/components/AgentActivityAnimation";
 import { useWorkflowEventStream } from "@/hooks/useWorkflowEventStream";
 
 const POLL_MS = Number(import.meta.env.VITE_REQUIREMENTS_POLL_MS ?? 0);
@@ -525,6 +526,13 @@ export function RequirementDiscoveryPage(): JSX.Element {
               "The Requirements Analyst agent determined a simpler, non-agentic solution is more appropriate here."}
           </MessageBarBody>
         </MessageBar>
+      ) : null}
+
+      {!analyzedRequirementsText ? (
+        <AgentActivityAnimation
+          label="Genie is working with the Requirements Analyst agent to extract your requirements..."
+          events={liveEvents}
+        />
       ) : null}
 
       {analyzedRequirementsText ? (

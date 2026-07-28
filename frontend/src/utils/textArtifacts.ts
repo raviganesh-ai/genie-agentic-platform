@@ -54,6 +54,61 @@ export function splitIntoNamedSections(text: string): ParsedSection[] {
   return sections;
 }
 
+export interface TopLevelSection {
+  title: string;
+  /** Free text directly under the header, before its first bullet item. */
+  summary: string;
+  /** Everything under the header (summary + bullets) - feed this into
+   * `splitIntoNamedSections` to get one card per bullet item. */
+  body: string;
+}
+
+/**
+ * Splits text into its top-level `## <Title>` sections - used for prompts
+ * (e.g. architecture-recommendation-v1) that contract to return a small,
+ * fixed set of named top-level sections (each optionally containing its
+ * own bulleted sub-items). Unlike `splitIntoNamedSections`, this only
+ * recognizes `##`-style markdown headers, so nested bullet items stay
+ * part of their parent section's `body` instead of becoming their own
+ * top-level entries.
+ */
+export function splitTopLevelSections(text: string): TopLevelSection[] {
+  const lines = text.split(/\r?\n/);
+  const sections: TopLevelSection[] = [];
+  let currentTitle: string | null = null;
+  let currentLines: string[] = [];
+
+  const flush = () => {
+    if (currentTitle && currentTitle.trim().length > 0) {
+      const firstBulletIndex = currentLines.findIndex((line) =>
+        /^\s*(?:[-*]|\d+[.)])\s+/.test(line),
+      );
+      const summaryLines = firstBulletIndex === -1 ? currentLines : currentLines.slice(0, firstBulletIndex);
+      sections.push({
+        title: currentTitle.trim(),
+        summary: summaryLines.join("\n").trim(),
+        body: currentLines.join("\n").trim(),
+      });
+    }
+  };
+
+  for (const rawLine of lines) {
+    const headerMatch = rawLine.match(/^##\s+(.+)$/);
+    if (headerMatch) {
+      flush();
+      currentTitle = headerMatch[1];
+      currentLines = [];
+      continue;
+    }
+    if (currentTitle !== null) {
+      currentLines.push(rawLine);
+    }
+  }
+  flush();
+
+  return sections;
+}
+
 export interface ParsedCodeBlock {
   language: string;
   code: string;

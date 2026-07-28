@@ -14,7 +14,6 @@ import {
   useArchitectureStudio,
   type RedesignGoal,
 } from "@/hooks/useArchitectureStudio";
-import { useAgentRegistry } from "@/hooks/useAgentRegistry";
 import { useAsyncResource } from "@/hooks/useAsyncResource";
 import { approvalApi } from "@/services/approvalApi";
 import { workflowApi } from "@/services/workflowApi";
@@ -24,9 +23,10 @@ import { LoadingState } from "@/components/LoadingState";
 import { ErrorState } from "@/components/ErrorState";
 import { SectionCard } from "@/components/SectionCard";
 import { LiveWorkflowPulse } from "@/components/LiveWorkflowPulse";
+import { AgentActivityAnimation } from "@/components/AgentActivityAnimation";
 import { useWorkflowEventStream } from "@/hooks/useWorkflowEventStream";
-import { InteractiveFlowDiagram, type FlowDiagramNode } from "./InteractiveFlowDiagram";
 import { ArchitectureComponentDiagram } from "./ArchitectureComponentDiagram";
+import { splitTopLevelSections } from "@/utils/textArtifacts";
 import type { ApiError } from "@/services/httpClient";
 
 const REDESIGN_GOALS: Array<{ id: RedesignGoal; label: string; icon: string }> = [
@@ -37,41 +37,21 @@ const REDESIGN_GOALS: Array<{ id: RedesignGoal; label: string; icon: string }> =
   { id: "fabric_first", label: "Fabric-First", icon: "🧵" },
 ];
 
-/** Static description of the two-box "Architecture" flow (UI <-> Agentic
- * Workflow) - a conceptual overview, not agent/customer configuration, so
- * (like REDESIGN_GOALS/GOVERNANCE_POLICY_OPTIONS above) it's fine as UI
- * copy here rather than externalized config. */
-const ARCHITECTURE_OVERVIEW_NODES: FlowDiagramNode[] = [
-  {
-    id: "ui",
-    title: "UI",
-    icon: "🖥️",
-    description:
-      "The customer-facing experience for this mission: React + Fluent UI screens that render forms, live agent activity, approvals, and generated results. A dedicated UI is generated per approved requirement in the Build phase.",
-  },
-  {
-    id: "agentic-workflow",
-    title: "Agentic Workflow",
-    icon: "🤖",
-    description:
-      "The orchestrated set of Azure AI Foundry agents behind the UI: they discover requirements, design the architecture, generate build artifacts, and govern every decision made for this mission.",
-  },
+/** Icon per top-level section of the architecture-designer's response
+ * (config/prompts/registry.yaml's architecture-recommendation-v1 contract:
+ * "## UI Design", "## Multi-Agent Workflow", "## Azure Reference
+ * Architecture") - purely a display affordance. */
+const TOP_SECTION_ICONS: Array<[RegExp, string]> = [
+  [/ui design/i, "🖥️"],
+  [/multi-agent workflow/i, "🤖"],
+  [/azure reference architecture/i, "🏛️"],
 ];
 
-/** Icon per registered agent `role` (config/agents/registry.yaml) for the
- * Agentic Workflow diagram - purely a display affordance. */
-const AGENT_ROLE_ICONS: Record<string, string> = {
-  mission_orchestration: "🧭",
-  requirement_discovery: "🔎",
-  architecture_design: "🏗️",
-  solution_build: "🛠️",
-  solution_deployment: "🚀",
-  governance: "🛡️",
-  debugging: "🩺",
-};
-
-function iconForAgentRole(role: string): string {
-  return AGENT_ROLE_ICONS[role] ?? "🧩";
+function iconForTopSection(title: string): string {
+  for (const [regex, icon] of TOP_SECTION_ICONS) {
+    if (regex.test(title)) return icon;
+  }
+  return "🧩";
 }
 
 const GOVERNANCE_POLICY_OPTIONS: string[] = [
@@ -99,44 +79,22 @@ export function ArchitectureStudioPage(): JSX.Element {
     sessionId,
     workflowRunId,
   );
-  const { data: agents } = useAgentRegistry();
 
-  /** The Agentic Workflow diagram shows the flow the Architecture Designer
-   * set in motion for THIS mission's requirement scope - not Genie (the
-   * internal mission orchestrator) - so its hub is whichever agent
-   * actually produced this session's architecture recommendation (falling
-   * back to the registered architecture_design agent before that
-   * recommendation exists yet), and its spokes are that agent's own
-   * `connected_agent_ids` (config/agents/registry.yaml): the Build,
-   * Governance, and Deployment agents its design leads into. */
-  const agenticWorkflow = useMemo(() => {
-    if (!agents) return null;
-    const architectureAgentId = snapshot?.components.find(
-      (component) => component.step_id === "design-architecture",
-    )?.recommended_by;
-    const architectureAgent =
-      (architectureAgentId ? agents.find((agent) => agent.id === architectureAgentId) : null) ??
-      agents.find((agent) => agent.role === "architecture_design");
-    if (!architectureAgent) return null;
-    const spokes: FlowDiagramNode[] = (architectureAgent.connected_agent_ids ?? [])
-      .map((agentId) => agents.find((agent) => agent.id === agentId))
-      .filter((agent): agent is NonNullable<typeof agent> => Boolean(agent))
-      .map((agent) => ({
-        id: agent.id,
-        title: agent.name,
-        icon: iconForAgentRole(agent.role),
-        description: agent.description,
-      }));
-    return {
-      hub: {
-        id: architectureAgent.id,
-        title: architectureAgent.name,
-        icon: iconForAgentRole(architectureAgent.role),
-        description: architectureAgent.description,
-      },
-      spokes,
-    };
-  }, [agents, snapshot?.components]);
+  /** The Architecture Designer is given the approved requirements as its
+   * design payload and asked to work out - using its own reasoning, not a
+   * fixed lineup - how this specific scope of work translates into a
+   * multi-agent solution (config/prompts/registry.yaml's
+   * architecture-recommendation-v1). Its response is split into the three
+   * top-level sections that contract requires, so this page shows THIS
+   * mission's actual UI design and agent workflow instead of Genie's own
+   * (fixed, content-independent) internal build pipeline. */
+  const architectureComponent = snapshot?.components.find(
+    (component) => component.step_id === "design-architecture",
+  );
+  const topSections = useMemo(
+    () => (architectureComponent ? splitTopLevelSections(architectureComponent.content) : []),
+    [architectureComponent],
+  );
 
   const approvalsFetcher = useCallback(
     () => (sessionId ? approvalApi.list(sessionId) : Promise.reject(new Error("No session"))),
@@ -247,43 +205,38 @@ export function ArchitectureStudioPage(): JSX.Element {
 
       {snapshot ? (
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          <SectionCard title="🏛️ Architecture">
-            <Text size={200} style={{ display: "block", marginBottom: 12, opacity: 0.7 }}>
-              Hover a component to see what it's about.
-            </Text>
-            <InteractiveFlowDiagram nodes={ARCHITECTURE_OVERVIEW_NODES} />
-          </SectionCard>
-          <SectionCard title="🧭 Agentic Workflow">
-            <Text size={200} style={{ display: "block", marginBottom: 12, opacity: 0.7 }}>
-              Hover the Architecture Designer or any agent to see what it's about.
-            </Text>
-            <InteractiveFlowDiagram
-              hub={agenticWorkflow?.hub}
-              nodes={agenticWorkflow?.spokes ?? []}
-              emptyLabel="Waiting on the Architecture Designer's recommendation..."
+          {!architectureComponent ? (
+            <AgentActivityAnimation
+              label="Genie is working with the Architecture Designer agent on this mission's UI design and multi-agent workflow..."
+              events={liveEvents}
             />
-          </SectionCard>
-          {/* design-architecture's own recommendation is already shown in the
-           * "Architecture" / "Agentic Workflow" diagrams above, so it's
-           * excluded here to avoid a redundant duplicate card. */}
-          {snapshot.components.filter((component) => component.step_id !== "design-architecture")
-            .length === 0 ? (
-            <Text size={300} style={{ opacity: 0.7 }}>
-              No architecture components recommended yet.
-            </Text>
+          ) : topSections.length > 0 ? (
+            topSections.map((section) => (
+              <SectionCard key={section.title} title={`${iconForTopSection(section.title)} ${section.title}`}>
+                {section.summary ? (
+                  <Text size={200} style={{ display: "block", marginBottom: 12, opacity: 0.7 }}>
+                    {section.summary}
+                  </Text>
+                ) : null}
+                <ArchitectureComponentDiagram content={section.body} />
+              </SectionCard>
+            ))
           ) : (
-            snapshot.components
-              .filter((component) => component.step_id !== "design-architecture")
-              .map((component) => (
-                <SectionCard
-                  key={component.step_id}
-                  title={`🏗️ ${component.step_id.replace(/-/g, " ")}`}
-                  action={<Text size={200}>{component.recommended_by}</Text>}
-                >
-                  <ArchitectureComponentDiagram content={component.content} />
-                </SectionCard>
-              ))
+            <SectionCard title="🏗️ Recommended Solution Architecture">
+              <ArchitectureComponentDiagram content={architectureComponent.content} />
+            </SectionCard>
           )}
+          {snapshot.components
+            .filter((component) => component.step_id !== "design-architecture")
+            .map((component) => (
+              <SectionCard
+                key={component.step_id}
+                title={`🏗️ ${component.step_id.replace(/-/g, " ")}`}
+                action={<Text size={200}>{component.recommended_by}</Text>}
+              >
+                <ArchitectureComponentDiagram content={component.content} />
+              </SectionCard>
+            ))}
         </div>
       ) : null}
 

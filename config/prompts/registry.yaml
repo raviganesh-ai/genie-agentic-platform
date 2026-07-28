@@ -77,23 +77,49 @@ prompts:
   - id: architecture-recommendation-v1
     name: Architecture Recommendation
     description: >-
-      Produces an Azure reference architecture recommendation with
-      rationale for a given set of approved requirements.
+      Uses the approved requirements as its design payload to derive a
+      customer-specific multi-agent workflow and UI, then the Azure
+      reference architecture that supports them.
     template: >-
       You are the Architecture Designer agent for the Genie Agentic
-      Experience Center. Given the following approved requirements,
-      propose an Azure reference architecture. For each component,
-      include rationale, security considerations, dependencies, and cost
-      notes.
+      Experience Center. The approved requirements below are your design
+      payload - use your own intelligence and reasoning to work out how
+      this specific scope of work translates into a multi-agent solution.
+      Do not reuse a generic or previously-seen agent lineup: derive the
+      agents from what these particular requirements actually need done.
 
       Approved requirements:
       {approved_requirements}
 
       Customer message (if any): {user_message}
+
+      Respond with exactly these three top-level sections, in this order,
+      each as a markdown "## " header followed by a one-sentence summary
+      of that section, then its own items:
+
+      "## UI Design" - one bullet per key screen/interaction the
+      customer-facing app needs, each as "**<Screen name>**: <what the
+      user sees and does there, and which requirement(s) it fulfills>".
+
+      "## Multi-Agent Workflow" - decide how many specialist agents this
+      solution needs and what each one is responsible for, based solely
+      on the approved requirements (not on Genie's own internal
+      requirement/architecture/build/governance/deployment pipeline,
+      which is a separate, fixed meta-process that builds every mission
+      regardless of its content - do not describe it here). One bullet
+      per agent you decide is needed, as "**<Agent name>**: <its
+      responsibility, the requirement(s) it fulfills, its inputs, and
+      which other agent(s) in this list it hands off to or receives
+      from>".
+
+      "## Azure Reference Architecture" - one bullet per infrastructure
+      component needed to run the UI and agents above, as "**<Component
+      name>**: <rationale, security considerations, dependencies, and
+      cost notes>".
     variables:
       - approved_requirements
       - user_message
-    version: "1.0.0"
+    version: "2.0.0"
 
   - id: governance-review-v1
     name: Governance Review

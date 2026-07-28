@@ -1,21 +1,6 @@
 import { Text } from "@fluentui/react-components";
+import { describeEvent } from "@/utils/workflowEventText";
 import type { WorkflowStreamEvent } from "@/types/workflowEvents";
-
-const EVENT_LABELS: Record<WorkflowStreamEvent["event_type"], string> = {
-  step_started: "started",
-  step_delta: "working",
-  step_completed: "completed",
-  step_failed: "failed",
-};
-
-function describeEvent(event: WorkflowStreamEvent): string {
-  const label = EVENT_LABELS[event.event_type];
-  const preview = event.delta ?? event.output_preview ?? event.error ?? "";
-  const stepLabel = event.step_id.replace(/-/g, " ");
-  return preview
-    ? `${event.agent_id} (${stepLabel}) ${label}: ${preview}`
-    : `${event.agent_id} (${stepLabel}) ${label}`;
-}
 
 /**
  * A compact "live" banner shown on each Mission Control page while its

@@ -14,6 +14,7 @@ import { ErrorState } from "@/components/ErrorState";
 import { SectionCard } from "@/components/SectionCard";
 import { GovernanceStatusBadge } from "@/components/StatusBadge";
 import { LiveWorkflowPulse } from "@/components/LiveWorkflowPulse";
+import { AgentActivityAnimation } from "@/components/AgentActivityAnimation";
 import { useWorkflowEventStream } from "@/hooks/useWorkflowEventStream";
 import type { GovernanceEventCategory } from "@/types/governance";
 
@@ -143,7 +144,12 @@ export function GovernancePage(): JSX.Element {
                 {governanceReviewText}
               </Text>
             </SectionCard>
-          ) : null}
+          ) : (
+            <AgentActivityAnimation
+              label="Genie is working with the Governance Reviewer agent to evaluate your selected policies..."
+              events={liveEvents}
+            />
+          )}
 
           {pendingDeployApproval ? (
             <SectionCard title="Approve & Deploy">

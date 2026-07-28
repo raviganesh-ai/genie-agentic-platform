@@ -106,13 +106,29 @@ export function buildSessionReplayResponse(): SessionReplayResponse {
   };
 }
 
+export const FIXTURE_ARCHITECTURE_CONTENT = `## UI Design
+The customer-facing app needs the following screens.
+- **Upload Screen**: Lets the customer upload source documents; fulfills the document intake requirement.
+
+## Multi-Agent Workflow
+This solution needs the following specialist agents.
+- **Document Intake Agent**: Normalizes incoming documents and hands off to the Classification Agent.
+- **Classification Agent**: Classifies each document into a predefined type.
+
+## Azure Reference Architecture
+The following Azure services support the app and agents above.
+- **Azure Container Apps**: Use Azure Container Apps to host the agents; managed identity for auth.`;
+
 export function buildArchitectureSnapshot(): ArchitectureSnapshot {
   return {
     session_id: FIXTURE_SESSION_ID,
     workflow_run_id: FIXTURE_WORKFLOW_RUN_ID,
     components: [
-      { step_id: "design-architecture", recommended_by: "architecture-designer", content: "Use Azure Container Apps." },
-      { step_id: "build-solution", recommended_by: "architecture-designer", content: "Generated the customer-facing UI code." },
+      {
+        step_id: "design-architecture",
+        recommended_by: "architecture-designer",
+        content: FIXTURE_ARCHITECTURE_CONTENT,
+      },
     ],
     decision_graph: buildDecisionGraph(),
   };

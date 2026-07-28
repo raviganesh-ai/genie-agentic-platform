@@ -3,7 +3,6 @@ import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithProviders, mockFetchSequence } from "./testUtils";
 import {
-  buildAgentSummaries,
   buildApprovalRequests,
   buildArchitectureSnapshot,
   FIXTURE_SESSION_ID,
@@ -12,11 +11,10 @@ import {
 import { ArchitectureStudioPage } from "@/features/architecture-studio/ArchitectureStudioPage";
 
 describe("ArchitectureStudioPage", () => {
-  it("renders recommended architecture components and reanalysis actions", async () => {
+  it("renders the requirement-derived UI design and multi-agent workflow", async () => {
     mockFetchSequence([
       { match: `/architecture/${FIXTURE_WORKFLOW_RUN_ID}`, response: buildArchitectureSnapshot() },
       { match: "/approvals", response: [] },
-      { match: "/agents", response: buildAgentSummaries() },
     ]);
 
     renderWithProviders(<ArchitectureStudioPage />, {
@@ -24,8 +22,11 @@ describe("ArchitectureStudioPage", () => {
       workflowRunId: FIXTURE_WORKFLOW_RUN_ID,
     });
 
-    await waitFor(() => expect(screen.getByText(/Generated the customer-facing UI code/i)).toBeInTheDocument());
-    expect(screen.queryByText(/Use Azure Container Apps/i)).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getAllByText(/UI Design/i).length).toBeGreaterThan(0));
+    expect(screen.getAllByText(/Multi-Agent Workflow/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Azure Reference Architecture/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Document Intake Agent/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Classification Agent/i).length).toBeGreaterThan(0);
     expect(screen.getByRole("button", { name: /Lower Cost/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Fabric-First/i })).toBeInTheDocument();
   });
@@ -34,7 +35,6 @@ describe("ArchitectureStudioPage", () => {
     const fetchMock = mockFetchSequence([
       { match: `/architecture/${FIXTURE_WORKFLOW_RUN_ID}`, response: buildArchitectureSnapshot() },
       { match: "/approvals", response: buildApprovalRequests({ subject_id: "build-solution" }) },
-      { match: "/agents", response: buildAgentSummaries() },
       { match: "/decide", response: { id: "decision-1" } },
       { match: "/resume", response: { status: "running" } },
     ]);
@@ -69,7 +69,6 @@ describe("ArchitectureStudioPage", () => {
     const fetchMock = mockFetchSequence([
       { match: `/architecture/${FIXTURE_WORKFLOW_RUN_ID}`, response: buildArchitectureSnapshot() },
       { match: "/approvals", response: buildApprovalRequests({ subject_id: "build-solution" }) },
-      { match: "/agents", response: buildAgentSummaries() },
       { match: "/decide", response: { id: "decision-1" } },
       { match: "/resume", response: { status: "running" } },
     ]);
