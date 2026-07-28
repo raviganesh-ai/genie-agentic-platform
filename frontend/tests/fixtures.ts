@@ -113,11 +113,7 @@ The customer-facing app needs the following screens.
 ## Multi-Agent Workflow
 This solution needs the following specialist agents.
 - **Document Intake Agent**: Normalizes incoming documents and hands off to the Classification Agent.
-- **Classification Agent**: Classifies each document into a predefined type.
-
-## Azure Reference Architecture
-The following Azure services support the app and agents above.
-- **Azure Container Apps**: Use Azure Container Apps to host the agents; managed identity for auth.`;
+- **Classification Agent**: Classifies each document into a predefined type.`;
 
 export function buildArchitectureSnapshot(): ArchitectureSnapshot {
   return {
@@ -156,7 +152,7 @@ export function buildAgentSummaries(): AgentSummary[] {
       id: "architecture-designer",
       name: "Architecture Designer",
       role: "architecture_design",
-      description: "Produces interactive Azure reference architectures with rationale.",
+      description: "Derives a customer-specific multi-agent workflow and UI design from approved requirements.",
       connected_agent_ids: ["build-agent", "governance-reviewer", "deployment-agent"],
       enabled: true,
     },

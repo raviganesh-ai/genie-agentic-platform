@@ -378,3 +378,41 @@ a,
     transform 200ms ease;
 }
 
+/* Architecture Studio's requirement-derived "UI Design" / "Multi-Agent
+   Workflow" sections - the two most important, mission-specific outputs
+   on that page - get an animated brand-gradient glow border so they
+   visually pop rather than looking like every other static card. */
+@keyframes genie-section-highlight-glow {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 1px rgba(47, 131, 224, 0.4),
+      0 0 20px 1px rgba(47, 131, 224, 0.2);
+  }
+  50% {
+    box-shadow:
+      0 0 0 1px rgba(138, 99, 210, 0.5),
+      0 0 32px 6px rgba(138, 99, 210, 0.3);
+  }
+}
+
+.genie-section-card-highlight {
+  animation: genie-section-highlight-glow 3.6s ease-in-out infinite;
+  background-image: linear-gradient(160deg, rgba(47, 131, 224, 0.06), transparent 60%);
+}
+
+.genie-section-card-highlight:hover {
+  animation-play-state: paused;
+  box-shadow:
+    0 10px 26px rgba(0, 0, 0, 0.3),
+    0 0 0 1px rgba(138, 99, 210, 0.55) !important;
+}
+
+/* Staggered entrance for each item inside an animated architecture
+   diagram (see ArchitectureComponentDiagram's `animated` prop) - each
+   node/connector fades/slides in slightly after the previous one instead
+   of all popping in at once. */
+.genie-stagger-in {
+  animation: genie-fade-in 420ms ease both;
+}
+

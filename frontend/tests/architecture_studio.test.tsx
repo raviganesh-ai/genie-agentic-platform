@@ -24,7 +24,7 @@ describe("ArchitectureStudioPage", () => {
 
     await waitFor(() => expect(screen.getAllByText(/UI Design/i).length).toBeGreaterThan(0));
     expect(screen.getAllByText(/Multi-Agent Workflow/i).length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/Azure Reference Architecture/i).length).toBeGreaterThan(0);
+    expect(screen.queryAllByText(/Azure Reference Architecture/i).length).toBe(0);
     expect(screen.getAllByText(/Document Intake Agent/i).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/Classification Agent/i).length).toBeGreaterThan(0);
     expect(screen.getByRole("button", { name: /Lower Cost/i })).toBeInTheDocument();

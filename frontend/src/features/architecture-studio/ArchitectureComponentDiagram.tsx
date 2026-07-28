@@ -29,8 +29,20 @@ function iconForComponent(title: string): string {
  * by arrows, click-to-expand rationale - instead of a single prose block.
  * Falls back to the raw text (still shown, just not diagrammed) when the
  * agent's response doesn't contain recognizable named sections.
+ *
+ * `animated`, when set, upgrades the plain static arrows/cards to the same
+ * "alive" flow-diagram treatment as InteractiveFlowDiagram (glowing hover
+ * nodes, a traveling data particle on every connector, staggered entrance)
+ * - reserved for the sections that most deserve to visually pop (see
+ * ArchitectureStudioPage's UI Design / Multi-Agent Workflow sections).
  */
-export function ArchitectureComponentDiagram({ content }: { content: string }): JSX.Element {
+export function ArchitectureComponentDiagram({
+  content,
+  animated,
+}: {
+  content: string;
+  animated?: boolean;
+}): JSX.Element {
   const [expanded, setExpanded] = useState<number | null>(0);
   const sections = splitIntoNamedSections(content);
 
@@ -50,6 +62,7 @@ export function ArchitectureComponentDiagram({ content }: { content: string }): 
             <button
               type="button"
               onClick={() => setExpanded((prev) => (prev === index ? null : index))}
+              className={animated ? `genie-flow-node genie-stagger-in${expanded === index ? " genie-flow-node-active" : ""}` : undefined}
               style={{
                 display: "flex",
                 flexDirection: "column",
@@ -64,6 +77,7 @@ export function ArchitectureComponentDiagram({ content }: { content: string }): 
                 cursor: "pointer",
                 textAlign: "center",
                 fontFamily: "inherit",
+                animationDelay: animated ? `${index * 90}ms` : undefined,
               }}
             >
               <span style={{ fontSize: 22 }} aria-hidden="true">
@@ -74,9 +88,16 @@ export function ArchitectureComponentDiagram({ content }: { content: string }): 
               </Text>
             </button>
             {index < sections.length - 1 ? (
-              <Text size={400} style={{ opacity: 0.35 }} aria-hidden="true">
-                →
-              </Text>
+              animated ? (
+                <div style={{ position: "relative", width: 36, height: 20, flexShrink: 0 }}>
+                  <div className="genie-flow-connector genie-flow-connector-active" />
+                  <div className="genie-flow-particle" style={{ animationDelay: `${index * 220}ms` }} />
+                </div>
+              ) : (
+                <Text size={400} style={{ opacity: 0.35 }} aria-hidden="true">
+                  →
+                </Text>
+              )
             ) : null}
           </div>
         ))}

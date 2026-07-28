@@ -39,13 +39,22 @@ const REDESIGN_GOALS: Array<{ id: RedesignGoal; label: string; icon: string }> =
 
 /** Icon per top-level section of the architecture-designer's response
  * (config/prompts/registry.yaml's architecture-recommendation-v1 contract:
- * "## UI Design", "## Multi-Agent Workflow", "## Azure Reference
- * Architecture") - purely a display affordance. */
+ * "## UI Design", "## Multi-Agent Workflow") - purely a display
+ * affordance. */
 const TOP_SECTION_ICONS: Array<[RegExp, string]> = [
   [/ui design/i, "🖥️"],
   [/multi-agent workflow/i, "🤖"],
-  [/azure reference architecture/i, "🏛️"],
 ];
+
+/** These two sections are this mission's actual, requirement-derived
+ * design output - the most important thing on this page - so they get the
+ * animated glow-card + flow-diagram treatment the rest of the page
+ * doesn't. */
+const HIGHLIGHTED_SECTIONS = [/ui design/i, /multi-agent workflow/i];
+
+function isHighlightedSection(title: string): boolean {
+  return HIGHLIGHTED_SECTIONS.some((regex) => regex.test(title));
+}
 
 function iconForTopSection(title: string): string {
   for (const [regex, icon] of TOP_SECTION_ICONS) {
@@ -84,15 +93,22 @@ export function ArchitectureStudioPage(): JSX.Element {
    * design payload and asked to work out - using its own reasoning, not a
    * fixed lineup - how this specific scope of work translates into a
    * multi-agent solution (config/prompts/registry.yaml's
-   * architecture-recommendation-v1). Its response is split into the three
+   * architecture-recommendation-v1). Its response is split into the two
    * top-level sections that contract requires, so this page shows THIS
    * mission's actual UI design and agent workflow instead of Genie's own
-   * (fixed, content-independent) internal build pipeline. */
+   * (fixed, content-independent) internal build pipeline. The UI/agent
+   * hosting platform (Azure Static Web Apps / Azure AI Foundry) is fixed,
+   * so no Azure infrastructure section is requested or rendered here -
+   * filtered defensively in case an older run's cached output still has
+   * one. */
   const architectureComponent = snapshot?.components.find(
     (component) => component.step_id === "design-architecture",
   );
   const topSections = useMemo(
-    () => (architectureComponent ? splitTopLevelSections(architectureComponent.content) : []),
+    () =>
+      (architectureComponent ? splitTopLevelSections(architectureComponent.content) : []).filter(
+        (section) => !/azure reference architecture/i.test(section.title),
+      ),
     [architectureComponent],
   );
 
@@ -211,16 +227,30 @@ export function ArchitectureStudioPage(): JSX.Element {
               events={liveEvents}
             />
           ) : topSections.length > 0 ? (
-            topSections.map((section) => (
-              <SectionCard key={section.title} title={`${iconForTopSection(section.title)} ${section.title}`}>
-                {section.summary ? (
-                  <Text size={200} style={{ display: "block", marginBottom: 12, opacity: 0.7 }}>
-                    {section.summary}
-                  </Text>
-                ) : null}
-                <ArchitectureComponentDiagram content={section.body} />
-              </SectionCard>
-            ))
+            topSections.map((section) => {
+              const highlighted = isHighlightedSection(section.title);
+              return (
+                <SectionCard
+                  key={section.title}
+                  highlight={highlighted}
+                  title={
+                    <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <span className={highlighted ? "genie-sparkle" : undefined} style={{ fontSize: 18 }}>
+                        {iconForTopSection(section.title)}
+                      </span>
+                      <span>{section.title}</span>
+                    </span>
+                  }
+                >
+                  {section.summary ? (
+                    <Text size={200} style={{ display: "block", marginBottom: 12, opacity: 0.7 }}>
+                      {section.summary}
+                    </Text>
+                  ) : null}
+                  <ArchitectureComponentDiagram content={section.body} animated={highlighted} />
+                </SectionCard>
+              );
+            })
           ) : (
             <SectionCard title="🏗️ Recommended Solution Architecture">
               <ArchitectureComponentDiagram content={architectureComponent.content} />

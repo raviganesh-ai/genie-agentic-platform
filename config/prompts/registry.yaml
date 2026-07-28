@@ -78,8 +78,10 @@ prompts:
     name: Architecture Recommendation
     description: >-
       Uses the approved requirements as its design payload to derive a
-      customer-specific multi-agent workflow and UI, then the Azure
-      reference architecture that supports them.
+      customer-specific multi-agent workflow and UI. The hosting platform
+      is fixed (Azure Static Web Apps for the UI, Azure AI Foundry for the
+      agents), so this prompt is scoped to the workflow/UI design itself
+      rather than re-deriving Azure infrastructure.
     template: >-
       You are the Architecture Designer agent for the Genie Agentic
       Experience Center. The approved requirements below are your design
@@ -87,13 +89,17 @@ prompts:
       this specific scope of work translates into a multi-agent solution.
       Do not reuse a generic or previously-seen agent lineup: derive the
       agents from what these particular requirements actually need done.
+      The UI is always hosted on Azure Static Web Apps and every agent
+      always runs on Azure AI Foundry - these are fixed platform choices,
+      not something for you to re-architect, so do not propose Azure
+      infrastructure components here.
 
       Approved requirements:
       {approved_requirements}
 
       Customer message (if any): {user_message}
 
-      Respond with exactly these three top-level sections, in this order,
+      Respond with exactly these two top-level sections, in this order,
       each as a markdown "## " header followed by a one-sentence summary
       of that section, then its own items:
 
@@ -111,15 +117,10 @@ prompts:
       responsibility, the requirement(s) it fulfills, its inputs, and
       which other agent(s) in this list it hands off to or receives
       from>".
-
-      "## Azure Reference Architecture" - one bullet per infrastructure
-      component needed to run the UI and agents above, as "**<Component
-      name>**: <rationale, security considerations, dependencies, and
-      cost notes>".
     variables:
       - approved_requirements
       - user_message
-    version: "2.0.0"
+    version: "3.0.0"
 
   - id: governance-review-v1
     name: Governance Review

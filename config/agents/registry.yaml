@@ -67,8 +67,12 @@ agents:
     name: Architecture Designer
     role: architecture_design
     description: >-
-      Produces interactive Azure reference architectures with rationale,
-      security considerations, dependencies, and cost notes.
+      Derives a customer-specific multi-agent workflow and UI design from
+      the approved requirements, reasoning out which specialist agents
+      this scope of work needs and what each screen/interaction of the
+      UI must do. The hosting platform is fixed (Azure Static Web Apps
+      for the UI, Azure AI Foundry for every agent) and is not something
+      to re-architect.
     capabilities:
       - architecture_generation
       - alternative_design_generation

@@ -62,7 +62,7 @@ workflows:
 
       - id: design-architecture
         agent_id: genie-orchestrator
-        description: Propose an Azure reference architecture with rationale.
+        description: Propose a multi-agent workflow and UI design for this mission's requirements.
         depends_on:
           - analyze-requirements
         prompt_id: orchestrator-architecture-phase-v1
