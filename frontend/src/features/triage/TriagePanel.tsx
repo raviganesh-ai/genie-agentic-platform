@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Badge, Text } from "@fluentui/react-components";
 import { useSessionContext } from "@/state/SessionContext";
 import { useAsyncResource } from "@/hooks/useAsyncResource";
@@ -218,7 +218,7 @@ function ControlFlowMap({ completedStepIds, activeStepId }: { completedStepIds: 
  * delegated it - that's the actual control flow of the mission.
  */
 export function TriagePanel({ enabled }: { enabled: boolean }): JSX.Element | null {
-  const { sessionId } = useSessionContext();
+  const { sessionId, missionStartedAt } = useSessionContext();
 
   const eventsFetcher = useCallback(
     () =>
@@ -255,6 +255,19 @@ export function TriagePanel({ enabled }: { enabled: boolean }): JSX.Element | nu
     return ids;
   }, [allCalls]);
   const activeStepId = MISSION_PHASES.find((phase) => !completedStepIds.has(phase.stepId))?.stepId ?? null;
+  const missionComplete = completedStepIds.size >= MISSION_PHASES.length;
+
+  // Live "Xs elapsed" readout for the mission console below, ticking from
+  // the moment the Upload page's "Start Prototyping" button was clicked
+  // (shared via SessionContext) until every phase has completed.
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  useEffect(() => {
+    if (!missionStartedAt || missionComplete) return;
+    const tick = () => setElapsedSeconds(Math.round((Date.now() - missionStartedAt) / 1000));
+    tick();
+    const intervalId = window.setInterval(tick, 1000);
+    return () => window.clearInterval(intervalId);
+  }, [missionStartedAt, missionComplete]);
 
   const stats = useMemo(() => computeStats(agentCalls.length), [agentCalls]);
   const isLive =
@@ -303,21 +316,41 @@ export function TriagePanel({ enabled }: { enabled: boolean }): JSX.Element | nu
           backgroundImage: "radial-gradient(circle at 0% 0%, rgba(47, 131, 224, 0.10), transparent 65%)",
         }}
       >
-        <Text
-          size={100}
-          className="genie-stage-eyebrow"
-          style={{ display: "block", opacity: 0.65, marginBottom: 10 }}
-        >
-          🧭 Mission Control Flow
-        </Text>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+          <Text size={100} className="genie-stage-eyebrow" style={{ opacity: 0.65 }}>
+            🧭 Mission Control Flow
+          </Text>
+          {missionStartedAt ? (
+            <Text size={100} style={{ opacity: 0.6, whiteSpace: "nowrap" }}>
+              {elapsedSeconds}s elapsed
+            </Text>
+          ) : null}
+        </div>
+        {missionStartedAt ? (
+          <div style={{ marginBottom: 10 }}>
+            <Text size={200} style={{ display: "block", padding: "2px 0" }}>
+              🖱️ Start Prototyping clicked
+            </Text>
+            <Text size={200} style={{ display: "block", padding: "2px 0" }}>
+              🧭 genie-orchestrator engaged - coordinating the mission
+            </Text>
+          </div>
+        ) : null}
         <ControlFlowMap completedStepIds={completedStepIds} activeStepId={activeStepId} />
         <Text size={200} style={{ display: "block", marginTop: 10, opacity: 0.85 }}>
           {activeStepId
             ? `⏳ Now: ${stepLabel(activeStepId)}`
-            : completedStepIds.size >= MISSION_PHASES.length
+            : missionComplete
               ? "✅ Mission complete"
               : "Awaiting mission start"}
         </Text>
+        {missionStartedAt ? (
+          <Text size={100} style={{ opacity: 0.5, display: "block", marginTop: 4 }}>
+            {agentCalls.length > 0
+              ? `${agentCalls.length} real agent event${agentCalls.length === 1 ? "" : "s"} recorded`
+              : "Waiting for the first agent event..."}
+          </Text>
+        ) : null}
       </div>
 
       <div style={{ padding: "12px 16px", borderBottom: "1px solid #232a33" }}>

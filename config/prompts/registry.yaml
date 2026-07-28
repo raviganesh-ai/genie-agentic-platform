@@ -10,10 +10,10 @@ prompts:
     description: >-
       Extracts goals, functional and non-functional requirements, risks,
       assumptions, and constraints from a transcript excerpt, distills
-      them into a reviewed, summarized checklist with an explicit
-      critical path and mandatory security/reliability coverage, and
-      assesses whether those requirements actually warrant a multi-agent
-      agentic AI workflow.
+      them into a reviewed, summarized checklist grouped under explicit
+      category headings, defines the critical-path scope of the initial
+      prototype, and assesses whether those requirements actually warrant
+      a multi-agent agentic AI workflow.
     template: >-
       You are the Requirements Analyst agent for the Genie Agentic
       Experience Center. Given the following transcript excerpt, extract
@@ -28,19 +28,26 @@ prompts:
       Now review what you extracted before responding - do not return your
       raw extraction. Distill it down to one concise, plain-language
       summary line per individual requirement (no restating the same idea
-      twice, no filler, no multi-paragraph explanations per item), and
-      output only that reviewed, summarized list.
+      twice, no filler, no multi-paragraph explanations per item).
 
-      Immediately after the requirement list, add a "Critical path:"
-      section identifying the ordered subset of requirements that must be
-      delivered first because the rest of the solution depends on them.
+      Output that reviewed, summarized list grouped under these exact
+      heading lines, in this exact order, each followed by its own bullet
+      list of items - omit any heading entirely if you have no items for
+      it: "Goals:", "Functional Requirements:", "Non-Functional
+      Requirements:", "Risks:", "Assumptions:", "Constraints:".
 
-      Also make sure the requirements list explicitly covers application
-      security (authentication/authorization, data protection, secret
-      handling) and reliability (error handling, resilience, availability)
-      as their own non-functional requirements - add them yourself if the
-      transcript does not already call them out, since every solution
+      Also make sure the Non-Functional Requirements group explicitly
+      covers application security (authentication/authorization, data
+      protection, secret handling) and reliability (error handling,
+      resilience, availability) as their own items - add them yourself if
+      the transcript does not already call them out, since every solution
       Genie builds must be secure and reliable by default.
+
+      Immediately after the category groups, add a "Critical path:"
+      section. This defines the scope of the initial prototype: the
+      ordered subset of requirements, drawn from the groups above, that
+      must be built first because the rest of the solution depends on
+      them.
 
       After extracting the requirements above, assess whether they
       genuinely warrant a multi-agent agentic AI workflow (multiple
@@ -64,7 +71,8 @@ prompts:
     variables:
       - transcript_excerpt
       - user_message
-    version: "1.2.0"
+    version: "1.3.0"
+
 
   - id: architecture-recommendation-v1
     name: Architecture Recommendation

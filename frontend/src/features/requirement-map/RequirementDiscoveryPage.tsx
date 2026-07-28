@@ -34,23 +34,137 @@ function stripMarker(line: string): string {
     .trim();
 }
 
-/** Splits the analyst's free-text output into one editable item per line. */
-function parseRequirementItems(text: string): string[] {
-  return text
-    .split(/\r?\n/)
-    .map(stripMarker)
-    .filter((line) => line.length > 0);
-}
-
 /**
  * The analyst's reviewed output (requirements-extraction-v1 prompt) now
  * includes a "Critical path:" heading line ahead of the ordered subset of
  * requirements that must be delivered first. Detected purely by text so
- * the checklist can render that heading and the requirements under it as
- * their own highlighted section instead of an indistinguishable row.
+ * that subset can be rendered as its own highlighted "Scope of
+ * Prototyping" section instead of an indistinguishable row.
  */
 function isCriticalPathHeading(line: string): boolean {
   return /^critical path\b/i.test(line.trim());
+}
+
+/** Stop parsing once the trailing structured qualification block starts - those two lines are never part of the requirements text itself. */
+function isQualificationBoundary(line: string): boolean {
+  return /^AGENTIC_WORKFLOW_QUALIFICATION\s*:/i.test(line.trim());
+}
+
+interface RequirementGroup {
+  key: string;
+  label: string;
+  icon: string;
+  accent: string;
+  items: string[];
+}
+
+interface ParsedRequirements {
+  groups: RequirementGroup[];
+  criticalPath: string[];
+}
+
+/**
+ * Category headings the requirements-extraction-v1 prompt is instructed to
+ * emit (in this order) ahead of its "Critical path:" section. Detected
+ * purely by heading text - not hardcoded per-item logic - so parsing stays
+ * correct even as the prompt template evolves independently of this UI.
+ */
+const CATEGORY_DEFS: { key: string; heading: RegExp; icon: string; accent: string; label: string }[] = [
+  { key: "goals", heading: /^goals\s*:?$/i, icon: "🎯", accent: "#3fa66a", label: "Goals" },
+  {
+    key: "functional",
+    heading: /^functional requirements\s*:?$/i,
+    icon: "⚙️",
+    accent: "#2f83e0",
+    label: "Functional Requirements",
+  },
+  {
+    key: "non_functional",
+    heading: /^non-?functional requirements\s*:?$/i,
+    icon: "🛡️",
+    accent: "#8a63d2",
+    label: "Non-Functional Requirements",
+  },
+  { key: "risks", heading: /^risks\s*:?$/i, icon: "⚠️", accent: "#d1495b", label: "Risks" },
+  { key: "assumptions", heading: /^assumptions\s*:?$/i, icon: "🧩", accent: "#17a2b8", label: "Assumptions" },
+  { key: "constraints", heading: /^constraints\s*:?$/i, icon: "🚧", accent: "#d99a2b", label: "Constraints" },
+];
+
+/**
+ * Groups the analyst's reviewed, summarized output (requirements-extraction-v1)
+ * into one collapsible section per category heading it was instructed to
+ * emit, plus the "Critical path:" subset kept separate so it can be shown
+ * as its own "Scope of Prototyping" callout instead of buried inside a
+ * category list. Falls back to a single "Requirements" bucket for any
+ * lines that appear before the first recognized heading (e.g. older runs
+ * recorded before this grouping existed) so nothing the agent produced is
+ * ever silently dropped.
+ */
+function parseGroupedRequirements(text: string): ParsedRequirements {
+  const groupItems: Record<string, string[]> = {};
+  const criticalPath: string[] = [];
+  const fallback: string[] = [];
+  let current: string | "critical" | null = null;
+
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    if (isQualificationBoundary(line)) break;
+
+    const categoryDef = CATEGORY_DEFS.find((def) => def.heading.test(line));
+    if (categoryDef) {
+      current = categoryDef.key;
+      groupItems[categoryDef.key] ??= [];
+      continue;
+    }
+    if (isCriticalPathHeading(line)) {
+      current = "critical";
+      continue;
+    }
+
+    const item = stripMarker(line);
+    if (!item) continue;
+    if (current === "critical") {
+      criticalPath.push(item);
+    } else if (current) {
+      groupItems[current].push(item);
+    } else {
+      fallback.push(item);
+    }
+  }
+
+  const groups: RequirementGroup[] = CATEGORY_DEFS.filter((def) => groupItems[def.key]?.length).map((def) => ({
+    key: def.key,
+    label: def.label,
+    icon: def.icon,
+    accent: def.accent,
+    items: groupItems[def.key],
+  }));
+  if (fallback.length > 0) {
+    groups.push({ key: "other", label: "Requirements", icon: "📄", accent: "#5c6572", items: fallback });
+  }
+
+  return { groups, criticalPath };
+}
+
+/**
+ * Serializes the (possibly edited) grouped requirements back into the same
+ * heading-based free text the architecture step expects as its
+ * `approved_requirements` input.
+ */
+function serializeGroupedRequirements(parsed: ParsedRequirements): string {
+  const lines: string[] = [];
+  for (const group of parsed.groups) {
+    if (group.items.length === 0) continue;
+    lines.push(`${group.label}:`);
+    for (const item of group.items) lines.push(`- ${item}`);
+    lines.push("");
+  }
+  if (parsed.criticalPath.length > 0) {
+    lines.push("Critical path:");
+    for (const item of parsed.criticalPath) lines.push(`- ${item}`);
+  }
+  return lines.join("\n").trim();
 }
 
 const CLASSIFICATION_META: Record<string, { icon: string; accent: string }> = {
@@ -84,7 +198,8 @@ export function RequirementDiscoveryPage(): JSX.Element {
   const { challenge } = useRequirementActions();
   const [rationaleByKey, setRationaleByKey] = useState<Record<string, string>>({});
   const [policiesByRequest, setPoliciesByRequest] = useState<Record<string, string>>({});
-  const [requirementItems, setRequirementItems] = useState<string[] | null>(null);
+  const [requirementOverrides, setRequirementOverrides] = useState<ParsedRequirements | null>(null);
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
   const [showRawText, setShowRawText] = useState(false);
   const [resumeError, setResumeError] = useState<string | null>(null);
   const [resumingRequestId, setResumingRequestId] = useState<string | null>(null);
@@ -92,9 +207,11 @@ export function RequirementDiscoveryPage(): JSX.Element {
   // The analyst's discovered requirements are free text (the workflow run's
   // analyze-requirements step output), separate from the (currently
   // unpopulated - Shared Memory is never written to) structured records
-  // above. Parsed into one editable item per line - rather than one large
-  // textarea - so the user can scan, edit, remove, and add requirements as
-  // a checklist before approving the design-architecture gate.
+  // above. Parsed into one collapsible category group per heading the
+  // requirements-extraction-v1 prompt is instructed to emit - plus a
+  // separate "Critical path" subset shown as its own Scope of Prototyping
+  // section - so the user can scan, edit, remove, and add requirements at
+  // the group level before approving the design-architecture gate.
   const runFetcher = useCallback(
     () =>
       sessionId && workflowRunId
@@ -110,17 +227,14 @@ export function RequirementDiscoveryPage(): JSX.Element {
       run?.step_results.find((result) => result.step_id === "analyze-requirements")?.output_text ?? "",
     [run],
   );
-  const effectiveRequirementItems = useMemo(
-    () => requirementItems ?? parseRequirementItems(analyzedRequirementsText),
-    [requirementItems, analyzedRequirementsText],
+  const parsedRequirements = useMemo(
+    () => parseGroupedRequirements(analyzedRequirementsText),
+    [analyzedRequirementsText],
   );
+  const effectiveRequirements = requirementOverrides ?? parsedRequirements;
   const effectiveRequirementsDraft = useMemo(
-    () => effectiveRequirementItems.map((item) => `- ${item}`).join("\n"),
-    [effectiveRequirementItems],
-  );
-  const criticalPathHeadingIndex = useMemo(
-    () => effectiveRequirementItems.findIndex((item) => isCriticalPathHeading(item)),
-    [effectiveRequirementItems],
+    () => serializeGroupedRequirements(effectiveRequirements),
+    [effectiveRequirements],
   );
 
   // Live breakdown of discovered items by classification, driving the hero
@@ -134,32 +248,93 @@ export function RequirementDiscoveryPage(): JSX.Element {
     return counts;
   }, [data]);
 
-  const updateRequirementItem = useCallback(
+  const withOverrides = useCallback(
+    (prev: ParsedRequirements | null): ParsedRequirements =>
+      prev ?? {
+        groups: parsedRequirements.groups.map((group) => ({ ...group, items: [...group.items] })),
+        criticalPath: [...parsedRequirements.criticalPath],
+      },
+    [parsedRequirements],
+  );
+
+  const updateGroupItem = useCallback(
+    (groupKey: string, index: number, value: string) => {
+      setRequirementOverrides((prev) => {
+        const base = withOverrides(prev);
+        return {
+          ...base,
+          groups: base.groups.map((group) =>
+            group.key === groupKey
+              ? { ...group, items: group.items.map((item, i) => (i === index ? value : item)) }
+              : group,
+          ),
+        };
+      });
+    },
+    [withOverrides],
+  );
+  const removeGroupItem = useCallback(
+    (groupKey: string, index: number) => {
+      setRequirementOverrides((prev) => {
+        const base = withOverrides(prev);
+        return {
+          ...base,
+          groups: base.groups.map((group) =>
+            group.key === groupKey ? { ...group, items: group.items.filter((_, i) => i !== index) } : group,
+          ),
+        };
+      });
+    },
+    [withOverrides],
+  );
+  const addGroupItem = useCallback(
+    (groupKey: string) => {
+      setRequirementOverrides((prev) => {
+        const base = withOverrides(prev);
+        return {
+          ...base,
+          groups: base.groups.map((group) =>
+            group.key === groupKey ? { ...group, items: [...group.items, ""] } : group,
+          ),
+        };
+      });
+    },
+    [withOverrides],
+  );
+
+  const updateCriticalPathItem = useCallback(
     (index: number, value: string) => {
-      setRequirementItems((prev) => {
-        const base = prev ?? parseRequirementItems(analyzedRequirementsText);
-        const next = [...base];
-        next[index] = value;
-        return next;
+      setRequirementOverrides((prev) => {
+        const base = withOverrides(prev);
+        return { ...base, criticalPath: base.criticalPath.map((item, i) => (i === index ? value : item)) };
       });
     },
-    [analyzedRequirementsText],
+    [withOverrides],
   );
-  const removeRequirementItem = useCallback(
+  const removeCriticalPathItem = useCallback(
     (index: number) => {
-      setRequirementItems((prev) => {
-        const base = prev ?? parseRequirementItems(analyzedRequirementsText);
-        return base.filter((_, i) => i !== index);
+      setRequirementOverrides((prev) => {
+        const base = withOverrides(prev);
+        return { ...base, criticalPath: base.criticalPath.filter((_, i) => i !== index) };
       });
     },
-    [analyzedRequirementsText],
+    [withOverrides],
   );
-  const addRequirementItem = useCallback(() => {
-    setRequirementItems((prev) => {
-      const base = prev ?? parseRequirementItems(analyzedRequirementsText);
-      return [...base, ""];
+  const addCriticalPathItem = useCallback(() => {
+    setRequirementOverrides((prev) => {
+      const base = withOverrides(prev);
+      return { ...base, criticalPath: [...base.criticalPath, ""] };
     });
-  }, [analyzedRequirementsText]);
+  }, [withOverrides]);
+
+  const toggleGroupCollapsed = useCallback((groupKey: string) => {
+    setCollapsedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(groupKey)) next.delete(groupKey);
+      else next.add(groupKey);
+      return next;
+    });
+  }, []);
 
 
   // Real ApprovalRequest entries for this session (subject_type is
@@ -339,147 +514,202 @@ export function RequirementDiscoveryPage(): JSX.Element {
       ) : null}
 
       {analyzedRequirementsText ? (
-        <SectionCard
-          title="📝 Requirements Checklist (edit before approving)"
-          action={
-            <Button appearance="subtle" size="small" onClick={() => setShowRawText((prev) => !prev)}>
-              {showRawText ? "Hide raw output" : "View raw analyst output"}
-            </Button>
-          }
-        >
-          <Text size={300} style={{ display: "block", marginBottom: 12, opacity: 0.8 }}>
-            Edit, remove, or add requirements below - this is what the architecture design step will
-            use once you approve.
-          </Text>
-
-          <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 12 }}>
-            {effectiveRequirementItems.length === 0 ? (
-              <Text size={200} style={{ opacity: 0.6 }}>
-                No requirements yet - add one below.
-              </Text>
-            ) : (
-              effectiveRequirementItems.map((item, index) => {
-                const isHeading = isCriticalPathHeading(item);
-                const isCritical = criticalPathHeadingIndex !== -1 && index > criticalPathHeadingIndex;
-
-                if (isHeading) {
-                  return (
-                    <div
-                      key={index}
-                      className="genie-fade-in"
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 8,
-                        padding: "8px 12px",
-                        marginTop: index > 0 ? 6 : 0,
-                        borderRadius: 8,
-                        border: "1px solid #d99a2b66",
-                        backgroundColor: "rgba(217, 154, 43, 0.12)",
-                        animationDelay: `${Math.min(index, 12) * 30}ms`,
-                      }}
-                    >
-                      <span style={{ fontSize: 16 }}>🎯</span>
-                      <Text
-                        size={200}
-                        weight="bold"
-                        style={{ color: "#d99a2b", textTransform: "uppercase", letterSpacing: 1 }}
-                      >
-                        Critical Path
-                      </Text>
-                      <Button
-                        appearance="subtle"
-                        size="small"
-                        shape="circular"
-                        title="Remove this heading"
-                        aria-label="Remove this heading"
-                        onClick={() => removeRequirementItem(index)}
-                        style={{ marginLeft: "auto" }}
-                      >
-                        ✕
-                      </Button>
-                    </div>
-                  );
-                }
-
-                return (
-                  <div
-                    key={index}
-                    className="genie-fade-in genie-req-item"
-                    style={{
-                      display: "flex",
-                      gap: 8,
-                      alignItems: "flex-start",
-                      padding: "8px 10px",
-                      borderRadius: 8,
-                      border: isCritical ? "1px solid #d99a2b55" : "1px solid #232a33",
-                      backgroundColor: isCritical ? "rgba(217, 154, 43, 0.06)" : "#161c24",
-                      animationDelay: `${Math.min(index, 12) * 30}ms`,
-                    }}
-                  >
-                    <span
-                      style={{
-                        flexShrink: 0,
-                        width: 22,
-                        height: 22,
-                        marginTop: 4,
-                        borderRadius: "50%",
-                        backgroundImage: isCritical
-                          ? "linear-gradient(135deg, #d99a2b, #e0b354)"
-                          : "linear-gradient(135deg, #2f83e0, #8a63d2)",
-                        color: "#f4f7fb",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        fontSize: 11,
-                        fontWeight: 700,
-                      }}
-                    >
-                      {index + 1}
-                    </span>
-                    <Textarea
-                      value={item}
-                      onChange={(_, dataEv) => updateRequirementItem(index, dataEv.value)}
-                      resize="vertical"
-                      style={{ flex: 1 }}
-                    />
-                    {isCritical ? (
-                      <Badge
-                        shape="rounded"
-                        style={{ backgroundColor: "rgba(217, 154, 43, 0.18)", color: "#d99a2b", flexShrink: 0 }}
-                      >
-                        🎯 Critical
-                      </Badge>
-                    ) : null}
-                    <Button
-                      appearance="subtle"
-                      size="small"
-                      shape="circular"
-                      title="Remove this requirement"
-                      aria-label="Remove this requirement"
-                      onClick={() => removeRequirementItem(index)}
-                    >
-                      ✕
-                    </Button>
-                  </div>
-                );
-              })
-            )}
-          </div>
-          <Button appearance="secondary" size="small" onClick={addRequirementItem}>
-            + Add requirement
+        <div style={{ marginBottom: 8 }}>
+          <Button appearance="subtle" size="small" onClick={() => setShowRawText((prev) => !prev)}>
+            {showRawText ? "Hide raw analyst output" : "🔍 View raw analyst output"}
           </Button>
-
           {showRawText ? (
             <Textarea
               value={analyzedRequirementsText}
               readOnly
               rows={10}
-              style={{ width: "100%", fontFamily: "monospace", fontSize: 12, marginTop: 12, opacity: 0.8 }}
+              style={{ width: "100%", fontFamily: "monospace", fontSize: 12, marginTop: 8, opacity: 0.8 }}
             />
           ) : null}
+        </div>
+      ) : null}
+
+      {effectiveRequirements.criticalPath.length > 0 ? (
+        <SectionCard
+          title={
+            <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ fontSize: 18 }}>🎯</span>
+              <span>Scope of Prototyping</span>
+              <Text size={200} style={{ opacity: 0.6, fontWeight: 400 }}>
+                (Critical Path)
+              </Text>
+            </span>
+          }
+          action={
+            <Button appearance="secondary" size="small" onClick={addCriticalPathItem}>
+              + Add item
+            </Button>
+          }
+        >
+          <Text size={200} style={{ display: "block", marginBottom: 12, opacity: 0.8 }}>
+            These requirements are what the initial prototype will actually build first - everything
+            else depends on them being in place.
+          </Text>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {effectiveRequirements.criticalPath.map((item, index) => (
+              <div
+                key={index}
+                className="genie-fade-in genie-req-item"
+                style={{
+                  display: "flex",
+                  gap: 8,
+                  alignItems: "flex-start",
+                  padding: "8px 10px",
+                  borderRadius: 8,
+                  border: "1px solid #d99a2b55",
+                  backgroundColor: "rgba(217, 154, 43, 0.08)",
+                }}
+              >
+                <span
+                  style={{
+                    flexShrink: 0,
+                    width: 22,
+                    height: 22,
+                    marginTop: 4,
+                    borderRadius: "50%",
+                    backgroundImage: "linear-gradient(135deg, #d99a2b, #e0b354)",
+                    color: "#1a1200",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    fontSize: 11,
+                    fontWeight: 700,
+                  }}
+                >
+                  {index + 1}
+                </span>
+                <Textarea
+                  value={item}
+                  onChange={(_, dataEv) => updateCriticalPathItem(index, dataEv.value)}
+                  resize="vertical"
+                  style={{ flex: 1 }}
+                />
+                <Button
+                  appearance="subtle"
+                  size="small"
+                  shape="circular"
+                  title="Remove this requirement"
+                  aria-label="Remove this requirement"
+                  onClick={() => removeCriticalPathItem(index)}
+                >
+                  ✕
+                </Button>
+              </div>
+            ))}
+          </div>
         </SectionCard>
       ) : null}
+
+      {effectiveRequirements.groups.map((group) => {
+        const collapsed = collapsedGroups.has(group.key);
+        return (
+          <SectionCard
+            key={group.key}
+            title={
+              <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span
+                  style={{
+                    width: 26,
+                    height: 26,
+                    borderRadius: "50%",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    fontSize: 13,
+                    backgroundColor: `${group.accent}22`,
+                    border: `1px solid ${group.accent}66`,
+                  }}
+                >
+                  {group.icon}
+                </span>
+                <span>{group.label}</span>
+                <Badge shape="rounded" style={{ backgroundColor: `${group.accent}22`, color: group.accent }}>
+                  {group.items.length}
+                </Badge>
+              </span>
+            }
+            action={
+              <Button appearance="subtle" size="small" onClick={() => toggleGroupCollapsed(group.key)}>
+                {collapsed ? "▸ Expand" : "▾ Collapse"}
+              </Button>
+            }
+          >
+            {collapsed ? null : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {group.items.length === 0 ? (
+                  <Text size={200} style={{ opacity: 0.6 }}>
+                    No items yet - add one below.
+                  </Text>
+                ) : (
+                  group.items.map((item, index) => (
+                    <div
+                      key={index}
+                      className="genie-fade-in genie-req-item"
+                      style={{
+                        display: "flex",
+                        gap: 8,
+                        alignItems: "flex-start",
+                        padding: "8px 10px",
+                        borderRadius: 8,
+                        border: "1px solid #232a33",
+                        backgroundColor: "#161c24",
+                      }}
+                    >
+                      <span
+                        style={{
+                          flexShrink: 0,
+                          width: 22,
+                          height: 22,
+                          marginTop: 4,
+                          borderRadius: "50%",
+                          backgroundColor: group.accent,
+                          color: "#0b0f14",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          fontSize: 11,
+                          fontWeight: 700,
+                        }}
+                      >
+                        {index + 1}
+                      </span>
+                      <Textarea
+                        value={item}
+                        onChange={(_, dataEv) => updateGroupItem(group.key, index, dataEv.value)}
+                        resize="vertical"
+                        style={{ flex: 1 }}
+                      />
+                      <Button
+                        appearance="subtle"
+                        size="small"
+                        shape="circular"
+                        title="Remove this requirement"
+                        aria-label="Remove this requirement"
+                        onClick={() => removeGroupItem(group.key, index)}
+                      >
+                        ✕
+                      </Button>
+                    </div>
+                  ))
+                )}
+                <Button
+                  appearance="secondary"
+                  size="small"
+                  onClick={() => addGroupItem(group.key)}
+                  style={{ alignSelf: "flex-start" }}
+                >
+                  + Add item
+                </Button>
+              </div>
+            )}
+          </SectionCard>
+        );
+      })}
 
       {data ? (
         <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 24 }}>

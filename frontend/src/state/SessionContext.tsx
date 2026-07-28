@@ -5,8 +5,14 @@ import { createContext, useContext, useMemo, useState, type ReactNode } from "re
 export interface SessionContextValue {
   sessionId: string | null;
   workflowRunId: string | null;
+  /** Timestamp (ms) the user last clicked "Start Prototyping", or null if no
+   * mission is currently underway. Lets the Agent Triage panel show a live
+   * "clicked -> orchestrator engaged" mission console without the Upload
+   * page needing its own duplicate view. */
+  missionStartedAt: number | null;
   setSessionId: (sessionId: string | null) => void;
   setWorkflowRunId: (workflowRunId: string | null) => void;
+  setMissionStartedAt: (missionStartedAt: number | null) => void;
 }
 
 const SessionContext = createContext<SessionContextValue | null>(null);
@@ -29,10 +35,11 @@ export function SessionProvider({
 }): JSX.Element {
   const [sessionId, setSessionId] = useState<string | null>(initialSessionId);
   const [workflowRunId, setWorkflowRunId] = useState<string | null>(initialWorkflowRunId);
+  const [missionStartedAt, setMissionStartedAt] = useState<number | null>(null);
 
   const value = useMemo(
-    () => ({ sessionId, workflowRunId, setSessionId, setWorkflowRunId }),
-    [sessionId, workflowRunId],
+    () => ({ sessionId, workflowRunId, missionStartedAt, setSessionId, setWorkflowRunId, setMissionStartedAt }),
+    [sessionId, workflowRunId, missionStartedAt],
   );
 
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;
