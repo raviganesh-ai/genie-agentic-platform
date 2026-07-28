@@ -37,7 +37,7 @@ from app.governance.governance_service import GovernanceService
 from app.memory.memory_models import SharedMemoryClassification
 from app.memory.memory_service import MemoryService
 
-__all__ = ["register_orchestrator_delegation_tools"]
+__all__ = ["register_orchestrator_delegation_tools", "resolve_delegate_agent_id"]
 
 _ORCHESTRATOR_AGENT_ID = "genie-orchestrator"
 _PREVIEW_MAX_LENGTH = 240
@@ -126,6 +126,24 @@ _DELEGATIONS: tuple[_Delegation, ...] = (
         shared_memory_classification="roadmap_artifact",
     ),
 )
+
+
+def resolve_delegate_agent_id(tool_name: str) -> str | None:
+    """Returns the specialist agent id ``tool_name`` delegates to, if any.
+
+    Every ``solution-discovery-workflow`` step's own ``WorkflowStepResult``
+    is recorded under ``genie-orchestrator``'s agent id (the step's
+    configured ``agent_id`` - see ``WorkflowStepExecutor.execute_step``),
+    never the real specialist that produced the content. Callers that need
+    to know *which specialist actually produced* a given step's output
+    (e.g. ``ArchitectureService``) can recover it from that step's
+    ``allowed_tool_names`` via this lookup instead.
+    """
+
+    for delegation in _DELEGATIONS:
+        if delegation.tool_name == tool_name:
+            return delegation.target_agent_id
+    return None
 
 
 def register_orchestrator_delegation_tools(

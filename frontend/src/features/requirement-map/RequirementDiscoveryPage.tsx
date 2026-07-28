@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   Badge,
   Button,
@@ -351,6 +352,8 @@ export function RequirementDiscoveryPage(): JSX.Element {
   // prompt variable is deliberately never auto-derived from the transcript
   // (config/workflows/registry.yaml) - a human must supply it explicitly as
   // a step_input, so we collect it here before resuming.
+  const navigate = useNavigate();
+
   const approveAndResume = useCallback(
     async (requestId: string, subjectId: string) => {
       if (!sessionId || !workflowRunId) return;
@@ -381,13 +384,21 @@ export function RequirementDiscoveryPage(): JSX.Element {
         // approval requests (e.g. final-output-approval) - refetch so any
         // newly pending request appears without requiring a manual reload.
         await Promise.all([refresh(), refreshApprovals()]);
+        // Approving the requirement-discovery checkpoint kicks off
+        // design-architecture in the same resume call above - jump the user
+        // straight to Architecture Studio so the newly produced
+        // recommendation is visible immediately, instead of leaving them on
+        // this page wondering whether anything happened.
+        if (subjectId === "design-architecture") {
+          navigate("/architecture-studio");
+        }
       } catch (err) {
         setResumeError((err as ApiError).message ?? "Failed to resume the workflow.");
       } finally {
         setResumingRequestId(null);
       }
     },
-[sessionId, workflowRunId, policiesByRequest, effectiveRequirementsDraft, refresh, refreshApprovals],
+[sessionId, workflowRunId, policiesByRequest, effectiveRequirementsDraft, refresh, refreshApprovals, navigate],
   );
 
   if (!workflowRunId) {

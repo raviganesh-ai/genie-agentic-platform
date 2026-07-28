@@ -9,22 +9,30 @@ redesign is produced by whichever registered agent
 ``ReanalysisService`` routes to, on a subsequent workflow run/resume.
 
 Each architecture "component" corresponds to one completed workflow step
-executed by an agent whose registered capability is
-``architecture_generation``. Its full ``output_text`` (rationale, security
-considerations, dependencies, and cost notes are all part of that one
-agent-produced blob - there is no further structured schema to parse it
-into, since no prior phase defined one) is returned as-is, alongside which
-agent produced it.
+whose configured ``allowed_tool_names`` delegates to a specialist agent
+whose registered capability is ``architecture_generation`` (every
+``solution-discovery-workflow`` step actually executes as
+``genie-orchestrator``, which then calls exactly one delegation tool for
+its phase - see ``app.agents.tools.orchestration_tools`` - so the real
+specialist is recovered from the step's tool wiring, never from
+``WorkflowStepResult.agent_id`` itself). Its full ``output_text``
+(rationale, security considerations, dependencies, and cost notes are all
+part of that one agent-produced blob - there is no further structured
+schema to parse it into, since no prior phase defined one) is returned
+as-is, alongside which specialist agent produced it.
 """
 from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.agents.registry import AgentRegistry
+from app.agents.tools.orchestration_tools import resolve_delegate_agent_id
 from app.models.decision_graph import DecisionGraph
 from app.models.reanalysis_models import ReanalysisResult
 from app.orchestration.agent_orchestrator import AgentOrchestrator
 from app.services.session_service import SessionService
 from app.services.workshop_service import UnknownWorkflowRunError
+from app.workflows.models import WorkflowStep
 
 __all__ = [
     "ArchitectureComponent",
@@ -34,6 +42,30 @@ __all__ = [
 ]
 
 _ARCHITECTURE_CAPABILITY = "architecture_generation"
+
+
+def _architecture_agent_id_for_step(
+    step: WorkflowStep | None, agent_registry: AgentRegistry
+) -> str | None:
+    """Returns the specialist agent id ``step`` delegates architecture work to.
+
+    Every ``solution-discovery-workflow`` step invokes ``genie-orchestrator``
+    directly (see ``config/workflows/registry.yaml``), so its own
+    ``WorkflowStepResult.agent_id`` is always ``"genie-orchestrator"`` -
+    never the real specialist that produced the content (e.g.
+    ``architecture-designer``). The real specialist is recovered from the
+    step's ``allowed_tool_names`` instead.
+    """
+
+    if step is None:
+        return None
+    for tool_name in step.allowed_tool_names or []:
+        target_agent_id = resolve_delegate_agent_id(tool_name)
+        if target_agent_id is None:
+            continue
+        if _ARCHITECTURE_CAPABILITY in agent_registry.get(target_agent_id).capabilities:
+            return target_agent_id
+    return None
 
 
 class ArchitectureComponent(BaseModel):
@@ -76,20 +108,23 @@ class ArchitectureService:
         if run is None:
             raise UnknownWorkflowRunError(f"Unknown workflow run id '{workflow_run_id}'.")
 
-        architecture_agent_ids = {
-            agent.id
-            for agent in self._orchestrator.agent_registry.list()
-            if _ARCHITECTURE_CAPABILITY in agent.capabilities
-        }
-        components = [
-            ArchitectureComponent(
-                step_id=result.step_id,
-                recommended_by=result.agent_id,
-                content=result.output_text or "",
+        steps_by_id = {step.id: step for step in self._orchestrator.workflow_registry.get(run.workflow_id).steps}
+        components: list[ArchitectureComponent] = []
+        for result in run.step_results:
+            if result.status != "completed":
+                continue
+            recommended_by = _architecture_agent_id_for_step(
+                steps_by_id.get(result.step_id), self._orchestrator.agent_registry
             )
-            for result in run.step_results
-            if result.status == "completed" and result.agent_id in architecture_agent_ids
-        ]
+            if recommended_by is None:
+                continue
+            components.append(
+                ArchitectureComponent(
+                    step_id=result.step_id,
+                    recommended_by=recommended_by,
+                    content=result.output_text or "",
+                )
+            )
 
         return ArchitectureSnapshot(
             session_id=session_id,
