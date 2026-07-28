@@ -86,6 +86,17 @@ agents:
     owner: architecture-team
     governance_policy_id: standard-governance-policy-v1
     prompt_template_ref: architecture-recommendation-v1
+    # The Agentic Workflow this architecture leads into for the approved
+    # requirement scope: once the architecture is designed, the Build
+    # Agent generates the UI + dedicated multi-agent workflow, the
+    # Governance Reviewer evaluates it against policy, and the Deployment
+    # Agent provisions/launches it - this mirrors genie-orchestrator's own
+    # connected_agent_ids above, scoped to what this agent's own design
+    # sets in motion.
+    connected_agent_ids:
+      - build-agent
+      - governance-reviewer
+      - deployment-agent
     enabled: true
 
   - id: build-agent

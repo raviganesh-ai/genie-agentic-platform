@@ -99,24 +99,24 @@ export function ArchitectureStudioPage(): JSX.Element {
   );
   const { data: agents } = useAgentRegistry();
 
-  /** The Agentic Workflow diagram reflects the actual, dynamic workflow
-   * built for THIS mission's requirement scope - not every agent the
-   * orchestrator could ever call - so its spokes are sourced from the
-   * distinct specialists that have contributed a completed step to this
-   * session's own architecture snapshot (in the order each first
-   * contributed), a live prototype of the per-requirement workflow rather
-   * than a static full agent-registry listing. */
+  /** The Agentic Workflow diagram shows the flow the Architecture Designer
+   * set in motion for THIS mission's requirement scope - not Genie (the
+   * internal mission orchestrator) - so its hub is whichever agent
+   * actually produced this session's architecture recommendation (falling
+   * back to the registered architecture_design agent before that
+   * recommendation exists yet), and its spokes are that agent's own
+   * `connected_agent_ids` (config/agents/registry.yaml): the Build,
+   * Governance, and Deployment agents its design leads into. */
   const agenticWorkflow = useMemo(() => {
     if (!agents) return null;
-    const orchestrator = agents.find((agent) => agent.role === "mission_orchestration");
-    if (!orchestrator) return null;
-    const contributingAgentIds: string[] = [];
-    for (const component of snapshot?.components ?? []) {
-      if (!contributingAgentIds.includes(component.recommended_by)) {
-        contributingAgentIds.push(component.recommended_by);
-      }
-    }
-    const spokes: FlowDiagramNode[] = contributingAgentIds
+    const architectureAgentId = snapshot?.components.find(
+      (component) => component.step_id === "design-architecture",
+    )?.recommended_by;
+    const architectureAgent =
+      (architectureAgentId ? agents.find((agent) => agent.id === architectureAgentId) : null) ??
+      agents.find((agent) => agent.role === "architecture_design");
+    if (!architectureAgent) return null;
+    const spokes: FlowDiagramNode[] = (architectureAgent.connected_agent_ids ?? [])
       .map((agentId) => agents.find((agent) => agent.id === agentId))
       .filter((agent): agent is NonNullable<typeof agent> => Boolean(agent))
       .map((agent) => ({
@@ -127,10 +127,10 @@ export function ArchitectureStudioPage(): JSX.Element {
       }));
     return {
       hub: {
-        id: orchestrator.id,
-        title: orchestrator.name,
-        icon: iconForAgentRole(orchestrator.role),
-        description: orchestrator.description,
+        id: architectureAgent.id,
+        title: architectureAgent.name,
+        icon: iconForAgentRole(architectureAgent.role),
+        description: architectureAgent.description,
       },
       spokes,
     };
@@ -242,12 +242,12 @@ export function ArchitectureStudioPage(): JSX.Element {
           </SectionCard>
           <SectionCard title="🧭 Agentic Workflow">
             <Text size={200} style={{ display: "block", marginBottom: 12, opacity: 0.7 }}>
-              Hover the Orchestrator or any agent to see what it's about.
+              Hover the Architecture Designer or any agent to see what it's about.
             </Text>
             <InteractiveFlowDiagram
               hub={agenticWorkflow?.hub}
               nodes={agenticWorkflow?.spokes ?? []}
-              emptyLabel="No agents have contributed to this mission's workflow yet."
+              emptyLabel="Waiting on the Architecture Designer's recommendation..."
             />
           </SectionCard>
           {/* design-architecture's own recommendation is already shown in the
