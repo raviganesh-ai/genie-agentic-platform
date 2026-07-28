@@ -61,6 +61,25 @@ describe("RequirementDiscoveryPage", () => {
     ).toBeInTheDocument();
   });
 
+  it("shows the agent activity animation while a mission is in flight and no workflow_run_id has been minted yet", () => {
+    // Reproduces the Upload -> Requirements navigation: Upload navigates here
+    // immediately (setting missionStartedAt) before the background workflow
+    // run resolves a workflow_run_id, so this page must not fall back to the
+    // static "start a workflow run from Upload" empty state in that window.
+    renderWithProviders(<RequirementDiscoveryPage />, {
+      sessionId: FIXTURE_SESSION_ID,
+      workflowRunId: null,
+      missionStartedAt: Date.now(),
+    });
+
+    expect(
+      screen.getByText(/Genie is working with the Requirements Analyst agent/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(/Start a workflow run from Upload to begin discovering requirements/i),
+    ).not.toBeInTheDocument();
+  });
+
   it("seeds an editable requirements draft and submits the edited text when approving", async () => {
     const fetchMock = mockFetchSequence([
       { match: "/approvals", response: buildApprovalRequests() },

@@ -13,7 +13,11 @@ import { SessionProvider } from "@/state/SessionContext";
  */
 export function renderWithProviders(
   ui: ReactElement,
-  options: { sessionId?: string | null; workflowRunId?: string | null } = {},
+  options: {
+    sessionId?: string | null;
+    workflowRunId?: string | null;
+    missionStartedAt?: number | null;
+  } = {},
 ) {
   return render(
     <FluentProvider theme={genieDarkTheme}>
@@ -21,6 +25,7 @@ export function renderWithProviders(
         <SessionProvider
           initialSessionId={options.sessionId ?? null}
           initialWorkflowRunId={options.workflowRunId ?? null}
+          initialMissionStartedAt={options.missionStartedAt ?? null}
         >
           {ui}
         </SessionProvider>

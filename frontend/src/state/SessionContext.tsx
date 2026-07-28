@@ -34,15 +34,17 @@ export function SessionProvider({
   children,
   initialSessionId = null,
   initialWorkflowRunId = null,
+  initialMissionStartedAt = null,
 }: {
   children: ReactNode;
   /** Test-only seams for rendering pages without going through LandingPage. */
   initialSessionId?: string | null;
   initialWorkflowRunId?: string | null;
+  initialMissionStartedAt?: number | null;
 }): JSX.Element {
   const [sessionId, setSessionId] = useState<string | null>(initialSessionId);
   const [workflowRunId, setWorkflowRunId] = useState<string | null>(initialWorkflowRunId);
-  const [missionStartedAt, setMissionStartedAt] = useState<number | null>(null);
+  const [missionStartedAt, setMissionStartedAt] = useState<number | null>(initialMissionStartedAt);
   const [missionError, setMissionError] = useState<SafeError | null>(null);
 
   const value = useMemo(

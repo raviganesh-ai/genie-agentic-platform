@@ -188,7 +188,7 @@ function approvalStatusMeta(status: string): { icon: string; accent: string } {
 }
 
 export function RequirementDiscoveryPage(): JSX.Element {
-  const { sessionId, workflowRunId, missionError, setMissionError } = useSessionContext();
+  const { sessionId, workflowRunId, missionStartedAt, missionError, setMissionError } = useSessionContext();
   const navigate = useNavigate();
   const { data, loading, error, refresh } = useRequirements(sessionId, workflowRunId, POLL_MS);
   const { data: qualification } = useRequirementsQualification(sessionId, workflowRunId, POLL_MS);
@@ -415,6 +415,35 @@ export function RequirementDiscoveryPage(): JSX.Element {
   );
 
   if (!workflowRunId) {
+    // A mission was just kicked off from Upload, which navigates here
+    // immediately (ahead of the workflow run finishing) so the user sees
+    // the Requirements Analyst agent working in real time rather than a
+    // static page - the run just hasn't minted a workflow_run_id to poll
+    // yet. Show the same live agent activity animation the rest of this
+    // page shows while waiting on analyzedRequirementsText.
+    if (missionError) {
+      return (
+        <div className="genie-fade-in" style={{ maxWidth: 560, margin: "10vh auto" }}>
+          <ErrorState
+            error={missionError}
+            onRetry={() => {
+              setMissionError(null);
+              navigate("/upload");
+            }}
+          />
+        </div>
+      );
+    }
+    if (missionStartedAt) {
+      return (
+        <div className="genie-fade-in" style={{ maxWidth: 720, margin: "10vh auto" }}>
+          <AgentActivityAnimation
+            label="Genie is working with the Requirements Analyst agent to extract your requirements..."
+            events={liveEvents}
+          />
+        </div>
+      );
+    }
     return (
       <div className="genie-fade-in" style={{ maxWidth: 560, margin: "10vh auto", textAlign: "center" }}>
         <span className="genie-sparkle" style={{ fontSize: 48, display: "block", marginBottom: 12 }}>
