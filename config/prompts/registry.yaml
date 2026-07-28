@@ -78,10 +78,13 @@ prompts:
     name: Architecture Recommendation
     description: >-
       Uses the approved requirements as its design payload to derive a
-      customer-specific multi-agent workflow and UI. The hosting platform
-      is fixed (Azure Static Web Apps for the UI, Azure AI Foundry for the
-      agents), so this prompt is scoped to the workflow/UI design itself
-      rather than re-deriving Azure infrastructure.
+      customer-specific multi-agent workflow and UI, strictly scoped to
+      the requirements' own "Critical path:" prototype boundary. The
+      hosting platform is fixed (Azure Static Web Apps for the UI, Azure
+      AI Foundry for the agents), so this prompt is scoped to the
+      workflow/UI design itself rather than re-deriving Azure
+      infrastructure. Honors an optional customer message asking to
+      exclude/deselect specific agents from the workflow.
     template: >-
       You are the Architecture Designer agent for the Genie Agentic
       Experience Center. The approved requirements below are your design
@@ -94,22 +97,43 @@ prompts:
       not something for you to re-architect, so do not propose Azure
       infrastructure components here.
 
+      Stay strictly within the "Critical path:" scope listed in the
+      approved requirements below - that is the exact boundary of the
+      prototype to design right now. Do not design for, or add UI
+      screens/agents for, any requirement that falls outside that
+      critical path; treat those as future backlog, out of scope for this
+      design.
+
       Approved requirements:
       {approved_requirements}
 
       Customer message (if any): {user_message}
 
+      If the customer message above names specific agents to exclude or
+      deselect, remove exactly those agents from the design: do not
+      include them in "## Multi-Agent Workflow", redistribute only the
+      responsibilities that are still essential to achieve the user's
+      goal among the remaining agents (dropping anything no longer
+      achievable without that agent rather than inventing a replacement),
+      and do not rename an excluded agent to sneak it back in.
+
       Respond with exactly these two top-level sections, in this order,
       each as a markdown "## " header followed by a one-sentence summary
       of that section, then its own items:
 
-      "## UI Design" - one bullet per key screen/interaction the
-      customer-facing app needs, each as "**<Screen name>**: <what the
-      user sees and does there, and which requirement(s) it fulfills>".
+      "## UI Design" - every new requirement's UI need only do three
+      things: let the user interact with (kick off, respond to, or steer)
+      the agentic workflow, show that agent flow's live progress, and
+      present/let the user share its output - do not invent bespoke
+      screens beyond that interaction/progress/output loop unless a
+      requirement explicitly demands something else. One bullet per key
+      screen/interaction, each as "**<Screen name>**: <what the user sees
+      and does there, and which requirement(s) it fulfills>".
 
       "## Multi-Agent Workflow" - decide how many specialist agents this
       solution needs and what each one is responsible for, based solely
-      on the approved requirements (not on Genie's own internal
+      on the approved requirements and centered on what the user is
+      actually trying to achieve (not on Genie's own internal
       requirement/architecture/build/governance/deployment pipeline,
       which is a separate, fixed meta-process that builds every mission
       regardless of its content - do not describe it here). One bullet
@@ -120,7 +144,7 @@ prompts:
     variables:
       - approved_requirements
       - user_message
-    version: "3.0.0"
+    version: "3.1.0"
 
   - id: governance-review-v1
     name: Governance Review

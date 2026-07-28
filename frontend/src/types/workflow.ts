@@ -38,6 +38,7 @@ export interface WorkflowStepResult {
   error: string | null;
   started_at: string;
   completed_at: string;
+  resolved_variables?: Record<string, string>;
 }
 
 export interface WorkflowRunResult {

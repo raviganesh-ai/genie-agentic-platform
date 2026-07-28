@@ -27,8 +27,9 @@ import { LiveWorkflowPulse } from "@/components/LiveWorkflowPulse";
 import { AgentActivityAnimation } from "@/components/AgentActivityAnimation";
 import { useWorkflowEventStream } from "@/hooks/useWorkflowEventStream";
 import { ArchitectureComponentDiagram } from "./ArchitectureComponentDiagram";
-import { splitTopLevelSections } from "@/utils/textArtifacts";
-import type { ApiError } from "@/services/httpClient";
+import { splitTopLevelSections, splitIntoNamedSections } from "@/utils/textArtifacts";
+import { ApiError } from "@/services/httpClient";
+import type { SafeError } from "@/types/common";
 
 const REDESIGN_GOALS: Array<{ id: RedesignGoal; label: string; icon: string }> = [
   { id: "lower_cost", label: "Lower Cost", icon: "💰" },
@@ -46,6 +47,11 @@ const TOP_SECTION_ICONS: Array<[RegExp, string]> = [
   [/ui design/i, "🖥️"],
   [/multi-agent workflow/i, "🤖"],
 ];
+
+/** Matches the architecture-recommendation-v1 contract's "## Multi-Agent
+ * Workflow" section title - used to find that section's parsed agent list
+ * so the user can deselect agents to limit the design. */
+const MULTI_AGENT_WORKFLOW_TITLE = /multi-agent workflow/i;
 
 /** These two sections are this mission's actual, requirement-derived
  * design output - the most important thing on this page - so they get the
@@ -182,6 +188,61 @@ export function ArchitectureStudioPage(): JSX.Element {
     refreshApprovals,
   ]);
 
+  // Lets the user deselect specific agents from the "## Multi-Agent
+  // Workflow" section and re-run design-architecture (still the same
+  // workflow step, not a new one) with a user_message asking the
+  // Architecture Designer to exclude exactly those agents - honored by
+  // architecture-recommendation-v1's exclude/deselect instruction. The
+  // step's approval checkpoint was already granted earlier (Requirements
+  // page), so re-executing it does not re-pause the run.
+  const [excludedAgents, setExcludedAgents] = useState<Set<string>>(new Set());
+  const [regenerating, setRegenerating] = useState(false);
+  const [regenerateError, setRegenerateError] = useState<SafeError | null>(null);
+
+  const toggleAgentIncluded = useCallback((agentName: string, included: boolean) => {
+    setExcludedAgents((prev) => {
+      const next = new Set(prev);
+      if (included) {
+        next.delete(agentName);
+      } else {
+        next.add(agentName);
+      }
+      return next;
+    });
+  }, []);
+
+  const handleRegenerateWithoutExcludedAgents = useCallback(async () => {
+    if (!sessionId || !workflowRunId || excludedAgents.size === 0) return;
+    setRegenerating(true);
+    setRegenerateError(null);
+    try {
+      const run = await workflowApi.getRun(sessionId, workflowRunId);
+      const priorDesignStep = run.step_results.find((result) => result.step_id === "design-architecture");
+      const approvedRequirements =
+        priorDesignStep?.resolved_variables?.approved_requirements ??
+        run.step_results.find((result) => result.step_id === "analyze-requirements")?.output_text ??
+        "";
+      const traceId = getTraceId(workflowRunId) ?? undefined;
+      await workflowApi.resumeRun(sessionId, workflowRunId, traceId, {
+        "design-architecture": {
+          step_id: "design-architecture",
+          variables: {
+            approved_requirements: approvedRequirements,
+            user_message: `Exclude the following agents entirely from the design and adjust the multi-agent workflow so it still fully achieves the user's stated goal without them: ${Array.from(excludedAgents).join(", ")}.`,
+          },
+        },
+      });
+      await refresh();
+      setExcludedAgents(new Set());
+    } catch (err) {
+      setRegenerateError(
+        err instanceof ApiError ? err : { message: "Failed to regenerate the design." },
+      );
+    } finally {
+      setRegenerating(false);
+    }
+  }, [sessionId, workflowRunId, excludedAgents, refresh]);
+
   if (!workflowRunId) {
     return (
       <div>
@@ -241,6 +302,8 @@ export function ArchitectureStudioPage(): JSX.Element {
           ) : topSections.length > 0 ? (
             topSections.map((section) => {
               const highlighted = isHighlightedSection(section.title);
+              const isMultiAgentWorkflow = MULTI_AGENT_WORKFLOW_TITLE.test(section.title);
+              const agentItems = isMultiAgentWorkflow ? splitIntoNamedSections(section.body) : [];
               return (
                 <SectionCard
                   key={section.title}
@@ -260,6 +323,42 @@ export function ArchitectureStudioPage(): JSX.Element {
                     </Text>
                   ) : null}
                   <ArchitectureComponentDiagram content={section.body} animated={highlighted} />
+                  {isMultiAgentWorkflow && agentItems.length > 1 ? (
+                    <div style={{ marginTop: 16, paddingTop: 16, borderTop: "1px solid #232a33" }}>
+                      <Text
+                        size={200}
+                        weight="semibold"
+                        style={{ display: "block", marginBottom: 8, opacity: 0.75 }}
+                      >
+                        Limit the design - deselect any agents you don't need
+                      </Text>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: 12 }}>
+                        {agentItems.map((item) => (
+                          <Checkbox
+                            key={item.title}
+                            label={item.title}
+                            checked={!excludedAgents.has(item.title)}
+                            disabled={regenerating}
+                            onChange={(_, data) => toggleAgentIncluded(item.title, Boolean(data.checked))}
+                          />
+                        ))}
+                      </div>
+                      {regenerateError ? (
+                        <div style={{ marginBottom: 12 }}>
+                          <ErrorState error={regenerateError} />
+                        </div>
+                      ) : null}
+                      <Button
+                        size="small"
+                        disabled={regenerating || excludedAgents.size === 0}
+                        onClick={() => void handleRegenerateWithoutExcludedAgents()}
+                      >
+                        {regenerating
+                          ? "Regenerating design..."
+                          : `Regenerate without ${excludedAgents.size} agent${excludedAgents.size === 1 ? "" : "s"}`}
+                      </Button>
+                    </div>
+                  ) : null}
                 </SectionCard>
               );
             })
@@ -268,6 +367,7 @@ export function ArchitectureStudioPage(): JSX.Element {
               <ArchitectureComponentDiagram content={architectureComponent.content} />
             </SectionCard>
           )}
+
           {snapshot.components
             .filter((component) => component.step_id !== "design-architecture")
             .map((component) => (
