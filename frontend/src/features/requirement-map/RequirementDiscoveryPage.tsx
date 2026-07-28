@@ -9,11 +9,7 @@ import {
   Textarea,
 } from "@fluentui/react-components";
 import { useSessionContext } from "@/state/SessionContext";
-import {
-  useRequirementActions,
-  useRequirements,
-  useRequirementsQualification,
-} from "@/hooks/useRequirements";
+import { useRequirements, useRequirementsQualification } from "@/hooks/useRequirements";
 import { useAsyncResource } from "@/hooks/useAsyncResource";
 import { approvalApi } from "@/services/approvalApi";
 import { workflowApi } from "@/services/workflowApi";
@@ -175,10 +171,6 @@ const CLASSIFICATION_META: Record<string, { icon: string; accent: string }> = {
   assumption: { icon: "🧩", accent: "#8a63d2" },
 };
 
-function classificationMeta(classification: string): { icon: string; accent: string } {
-  return CLASSIFICATION_META[classification] ?? { icon: "📄", accent: "#5c6572" };
-}
-
 const APPROVAL_STATUS_META: Record<string, { icon: string; accent: string }> = {
   approved: { icon: "✅", accent: "#3fa66a" },
   pending: { icon: "⏳", accent: "#d99a2b" },
@@ -195,8 +187,6 @@ export function RequirementDiscoveryPage(): JSX.Element {
   const { sessionId, workflowRunId } = useSessionContext();
   const { data, loading, error, refresh } = useRequirements(sessionId, workflowRunId, POLL_MS);
   const { data: qualification } = useRequirementsQualification(sessionId, workflowRunId, POLL_MS);
-  const { challenge } = useRequirementActions();
-  const [rationaleByKey, setRationaleByKey] = useState<Record<string, string>>({});
   const [policiesByRequest, setPoliciesByRequest] = useState<Record<string, string>>({});
   const [requirementOverrides, setRequirementOverrides] = useState<ParsedRequirements | null>(null);
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
@@ -710,95 +700,6 @@ export function RequirementDiscoveryPage(): JSX.Element {
           </SectionCard>
         );
       })}
-
-      {data ? (
-        <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 24 }}>
-          {data.items.length === 0 ? (
-            <Text size={300} style={{ opacity: 0.7 }}>
-              No requirements discovered yet.
-            </Text>
-          ) : (
-            data.items.map(({ record }) => {
-              const meta = classificationMeta(record.classification);
-              const confidencePct = Math.round(record.lineage.confidence_score * 100);
-              const approvalMeta = approvalStatusMeta(record.lineage.approval_status);
-              return (
-                <SectionCard
-                  key={record.id}
-                  title={
-                    <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      <span
-                        style={{
-                          width: 26,
-                          height: 26,
-                          borderRadius: "50%",
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          fontSize: 13,
-                          backgroundColor: `${meta.accent}22`,
-                          border: `1px solid ${meta.accent}66`,
-                        }}
-                      >
-                        {meta.icon}
-                      </span>
-                      <span style={{ textTransform: "capitalize" }}>
-                        {record.classification.replace(/_/g, " ")}
-                      </span>
-                    </span>
-                  }
-                  action={<Badge appearance="tint">v{record.version}</Badge>}
-                >
-                  <div style={{ borderLeft: `3px solid ${meta.accent}`, paddingLeft: 12 }}>
-                    <pre style={{ fontSize: 12, whiteSpace: "pre-wrap", marginBottom: 8, marginTop: 0 }}>
-                      {JSON.stringify(record.content, null, 2)}
-                    </pre>
-                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
-                      <Badge
-                        shape="rounded"
-                        style={{ backgroundColor: "#232a33", color: "#9aa4b2" }}
-                        title="Confidence score"
-                      >
-                        📈 {confidencePct}% confidence
-                      </Badge>
-                      <Badge
-                        shape="rounded"
-                        style={{ backgroundColor: `${approvalMeta.accent}22`, color: approvalMeta.accent }}
-                      >
-                        {approvalMeta.icon} {record.lineage.approval_status.replace(/_/g, " ")}
-                      </Badge>
-                    </div>
-                    <Textarea
-                      placeholder="Rationale for challenging this item"
-                      value={rationaleByKey[record.id] ?? ""}
-                      onChange={(_, dataEv) =>
-                        setRationaleByKey((prev) => ({ ...prev, [record.id]: dataEv.value }))
-                      }
-                      style={{ marginBottom: 8, width: "100%" }}
-                    />
-                    <Button
-                      size="small"
-                      onClick={() => {
-                        const traceId = getTraceId(workflowRunId);
-                        if (!sessionId || !traceId) return;
-                        void challenge(
-                          sessionId,
-                          workflowRunId,
-                          traceId,
-                          record.id,
-                          rationaleByKey[record.id] ?? "",
-                        ).then(refresh);
-                      }}
-                    >
-                      Challenge
-                    </Button>
-                  </div>
-                </SectionCard>
-              );
-            })
-          )}
-        </div>
-      ) : null}
 
       <SectionCard title="🔑 Pending Approvals">
         {approvalsLoading && !approvals ? <LoadingState label="Loading approvals..." /> : null}
