@@ -1,5 +1,13 @@
-import { useCallback, useState } from "react";
-import { Button, MessageBar, MessageBarBody, MessageBarTitle, Text, Textarea } from "@fluentui/react-components";
+import { useCallback, useMemo, useState } from "react";
+import {
+  Button,
+  Checkbox,
+  MessageBar,
+  MessageBarBody,
+  MessageBarTitle,
+  Text,
+  Textarea,
+} from "@fluentui/react-components";
 import { useSessionContext } from "@/state/SessionContext";
 import {
   useArchitectureReanalysis,
@@ -35,6 +43,18 @@ const GRAPH_LEGEND: Array<{ label: string; color: string }> = [
   { label: "Evidence", color: "#5c6572" },
 ];
 
+const GOVERNANCE_POLICY_OPTIONS: string[] = [
+  "Must use managed identity (no embedded credentials)",
+  "No hardcoded secrets, keys, or connection strings",
+  "Least-privilege data access",
+  "Data encrypted at rest and in transit",
+  "Audit logging / governance trace enabled for all actions",
+  "Network isolation (private endpoints / no public data access)",
+  "Detailed error handling (no silent failures, clear error messages)",
+];
+
+const OTHER_POLICY_OPTION = "Other";
+
 const POLL_MS = Number(import.meta.env.VITE_ARCHITECTURE_STUDIO_POLL_MS ?? 0);
 
 export function ArchitectureStudioPage(): JSX.Element {
@@ -62,9 +82,23 @@ export function ArchitectureStudioPage(): JSX.Element {
   const pendingArchitectureApproval = approvals?.find(
     (request) => request.status === "pending" && request.subject_id === "build-solution",
   );
-  const [governancePolicies, setGovernancePolicies] = useState("");
+  const [selectedPolicies, setSelectedPolicies] = useState<Record<string, boolean>>({});
+  const [otherPolicyChecked, setOtherPolicyChecked] = useState(false);
+  const [otherPolicyText, setOtherPolicyText] = useState("");
   const [approving, setApproving] = useState(false);
   const [approveError, setApproveError] = useState<string | null>(null);
+
+  const togglePolicy = useCallback((option: string, checked: boolean) => {
+    setSelectedPolicies((prev) => ({ ...prev, [option]: checked }));
+  }, []);
+
+  const effectiveGovernancePolicies = useMemo(() => {
+    const parts = GOVERNANCE_POLICY_OPTIONS.filter((option) => selectedPolicies[option]);
+    if (otherPolicyChecked && otherPolicyText.trim().length > 0) {
+      parts.push(otherPolicyText.trim());
+    }
+    return parts.join("; ");
+  }, [selectedPolicies, otherPolicyChecked, otherPolicyText]);
 
   const handleApproveArchitecture = useCallback(async () => {
     if (!sessionId || !workflowRunId || !pendingArchitectureApproval) return;
@@ -77,7 +111,7 @@ export function ArchitectureStudioPage(): JSX.Element {
       await workflowApi.resumeRun(sessionId, workflowRunId, traceId, {
         "governance-review": {
           step_id: "governance-review",
-          variables: { policies: governancePolicies },
+          variables: { policies: effectiveGovernancePolicies },
         },
       });
       await Promise.all([refresh(), refreshApprovals()]);
@@ -86,7 +120,14 @@ export function ArchitectureStudioPage(): JSX.Element {
     } finally {
       setApproving(false);
     }
-  }, [sessionId, workflowRunId, pendingArchitectureApproval, governancePolicies, refresh, refreshApprovals]);
+  }, [
+    sessionId,
+    workflowRunId,
+    pendingArchitectureApproval,
+    effectiveGovernancePolicies,
+    refresh,
+    refreshApprovals,
+  ]);
 
   if (!workflowRunId) {
     return (
@@ -185,18 +226,35 @@ export function ArchitectureStudioPage(): JSX.Element {
           ) : null}
           <Text size={300} style={{ display: "block", marginBottom: 8, opacity: 0.8 }}>
             Approving generates the UI + agent workflow code and runs the governance/security
-            review. Provide the policies the generated code should be evaluated against:
+            review. Select the policies the generated code should be evaluated against:
           </Text>
-          <Textarea
-            value={governancePolicies}
-            onChange={(_, dataEv) => setGovernancePolicies(dataEv.value)}
-            rows={4}
-            placeholder="e.g. Must use managed identity, no hardcoded secrets, least-privilege data access..."
-            style={{ width: "100%", marginBottom: 12 }}
-          />
+          <div style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: 8 }}>
+            {GOVERNANCE_POLICY_OPTIONS.map((option) => (
+              <Checkbox
+                key={option}
+                label={option}
+                checked={Boolean(selectedPolicies[option])}
+                onChange={(_, data) => togglePolicy(option, Boolean(data.checked))}
+              />
+            ))}
+            <Checkbox
+              label={OTHER_POLICY_OPTION}
+              checked={otherPolicyChecked}
+              onChange={(_, data) => setOtherPolicyChecked(Boolean(data.checked))}
+            />
+          </div>
+          {otherPolicyChecked ? (
+            <Textarea
+              value={otherPolicyText}
+              onChange={(_, dataEv) => setOtherPolicyText(dataEv.value)}
+              rows={3}
+              placeholder="Describe the additional policy/policies to evaluate against..."
+              style={{ width: "100%", marginBottom: 12 }}
+            />
+          ) : null}
           <Button
             appearance="primary"
-            disabled={approving || governancePolicies.trim().length === 0}
+            disabled={approving || effectiveGovernancePolicies.trim().length === 0}
             onClick={() => void handleApproveArchitecture()}
           >
             {approving ? "Continuing..." : "Approve Architecture & Generate Code"}

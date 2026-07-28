@@ -44,8 +44,8 @@ describe("ArchitectureStudioPage", () => {
     expect(approveButton).toBeDisabled();
 
     const user = userEvent.setup();
-    const policiesBox = screen.getByPlaceholderText(/managed identity/i);
-    await user.type(policiesBox, "Must use managed identity and least privilege access.");
+    const managedIdentityOption = screen.getByRole("checkbox", { name: /managed identity/i });
+    await user.click(managedIdentityOption);
     expect(approveButton).toBeEnabled();
 
     await user.click(approveButton);
@@ -58,6 +58,40 @@ describe("ArchitectureStudioPage", () => {
       expect(body.step_inputs["governance-review"].variables.policies).toContain(
         "managed identity",
       );
+    });
+  });
+
+  it("lets the user select 'Other' and type a custom governance policy", async () => {
+    const fetchMock = mockFetchSequence([
+      { match: `/architecture/${FIXTURE_WORKFLOW_RUN_ID}`, response: buildArchitectureSnapshot() },
+      { match: "/approvals", response: buildApprovalRequests({ subject_id: "build-solution" }) },
+      { match: "/decide", response: { id: "decision-1" } },
+      { match: "/resume", response: { status: "running" } },
+    ]);
+
+    renderWithProviders(<ArchitectureStudioPage />, {
+      sessionId: FIXTURE_SESSION_ID,
+      workflowRunId: FIXTURE_WORKFLOW_RUN_ID,
+    });
+
+    const approveButton = await screen.findByRole("button", { name: /Approve Architecture & Generate Code/i });
+    expect(approveButton).toBeDisabled();
+
+    const user = userEvent.setup();
+    const otherOption = screen.getByRole("checkbox", { name: /^Other$/i });
+    await user.click(otherOption);
+    const otherBox = await screen.findByPlaceholderText(/additional policy/i);
+    await user.type(otherBox, "Must comply with HIPAA.");
+    expect(approveButton).toBeEnabled();
+
+    await user.click(approveButton);
+
+    await waitFor(() => {
+      const resumeCall = fetchMock.mock.calls.find((call) => String(call[0]).endsWith("/resume"));
+      expect(resumeCall).toBeDefined();
+      const [, resumeInit] = resumeCall as unknown as [string, RequestInit];
+      const body = JSON.parse(resumeInit.body as string);
+      expect(body.step_inputs["governance-review"].variables.policies).toContain("HIPAA");
     });
   });
 });
