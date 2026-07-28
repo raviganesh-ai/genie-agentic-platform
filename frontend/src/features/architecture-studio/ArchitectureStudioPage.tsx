@@ -14,7 +14,7 @@ import {
   useArchitectureStudio,
   type RedesignGoal,
 } from "@/hooks/useArchitectureStudio";
-import { useDecisionGraph } from "@/hooks/useDecisionGraph";
+import { useAgentRegistry } from "@/hooks/useAgentRegistry";
 import { useAsyncResource } from "@/hooks/useAsyncResource";
 import { approvalApi } from "@/services/approvalApi";
 import { workflowApi } from "@/services/workflowApi";
@@ -23,7 +23,7 @@ import { PageHeader } from "@/layouts/AppShell";
 import { LoadingState } from "@/components/LoadingState";
 import { ErrorState } from "@/components/ErrorState";
 import { SectionCard } from "@/components/SectionCard";
-import { ArchitectureFlowGraph } from "./ArchitectureFlowGraph";
+import { InteractiveFlowDiagram, type FlowDiagramNode } from "./InteractiveFlowDiagram";
 import { ArchitectureComponentDiagram } from "./ArchitectureComponentDiagram";
 import type { ApiError } from "@/services/httpClient";
 
@@ -35,13 +35,42 @@ const REDESIGN_GOALS: Array<{ id: RedesignGoal; label: string; icon: string }> =
   { id: "fabric_first", label: "Fabric-First", icon: "🧵" },
 ];
 
-const GRAPH_LEGEND: Array<{ label: string; color: string }> = [
-  { label: "Agent", color: "#2f83e0" },
-  { label: "Recommendation", color: "#5aa16c" },
-  { label: "Approval", color: "#c98a2c" },
-  { label: "Memory record", color: "#8a63d2" },
-  { label: "Evidence", color: "#5c6572" },
+/** Static description of the two-box "Architecture" flow (UI <-> Agentic
+ * Workflow) - a conceptual overview, not agent/customer configuration, so
+ * (like REDESIGN_GOALS/GOVERNANCE_POLICY_OPTIONS above) it's fine as UI
+ * copy here rather than externalized config. */
+const ARCHITECTURE_OVERVIEW_NODES: FlowDiagramNode[] = [
+  {
+    id: "ui",
+    title: "UI",
+    icon: "🖥️",
+    description:
+      "The customer-facing experience for this mission: React + Fluent UI screens that render forms, live agent activity, approvals, and generated results. A dedicated UI is generated per approved requirement in the Build phase.",
+  },
+  {
+    id: "agentic-workflow",
+    title: "Agentic Workflow",
+    icon: "🤖",
+    description:
+      "The orchestrated set of Azure AI Foundry agents behind the UI: they discover requirements, design the architecture, generate build artifacts, and govern every decision made for this mission.",
+  },
 ];
+
+/** Icon per registered agent `role` (config/agents/registry.yaml) for the
+ * Agentic Workflow diagram - purely a display affordance. */
+const AGENT_ROLE_ICONS: Record<string, string> = {
+  mission_orchestration: "🧭",
+  requirement_discovery: "🔎",
+  architecture_design: "🏗️",
+  solution_build: "🛠️",
+  solution_deployment: "🚀",
+  governance: "🛡️",
+  debugging: "🩺",
+};
+
+function iconForAgentRole(role: string): string {
+  return AGENT_ROLE_ICONS[role] ?? "🧩";
+}
 
 const GOVERNANCE_POLICY_OPTIONS: string[] = [
   "Must use managed identity (no embedded credentials)",
@@ -68,7 +97,31 @@ export function ArchitectureStudioPage(): JSX.Element {
     sessionId,
     workflowRunId,
   );
-  const inspector = useDecisionGraph(snapshot?.decision_graph ?? null);
+  const { data: agents } = useAgentRegistry();
+
+  const agenticWorkflow = useMemo(() => {
+    if (!agents) return null;
+    const orchestrator = agents.find((agent) => agent.role === "mission_orchestration");
+    if (!orchestrator) return null;
+    const spokes: FlowDiagramNode[] = (orchestrator.connected_agent_ids ?? [])
+      .map((agentId) => agents.find((agent) => agent.id === agentId))
+      .filter((agent): agent is NonNullable<typeof agent> => Boolean(agent))
+      .map((agent) => ({
+        id: agent.id,
+        title: agent.name,
+        icon: iconForAgentRole(agent.role),
+        description: agent.description,
+      }));
+    return {
+      hub: {
+        id: orchestrator.id,
+        title: orchestrator.name,
+        icon: iconForAgentRole(orchestrator.role),
+        description: orchestrator.description,
+      },
+      spokes,
+    };
+  }, [agents]);
 
   const approvalsFetcher = useCallback(
     () => (sessionId ? approvalApi.list(sessionId) : Promise.reject(new Error("No session"))),
@@ -168,33 +221,21 @@ export function ArchitectureStudioPage(): JSX.Element {
 
       {snapshot ? (
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          <SectionCard title="🗺️ Mission Control Flow (Visual)">
-            <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 10 }}>
-              {GRAPH_LEGEND.map((entry) => (
-                <div key={entry.label} style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                  <span
-                    style={{
-                      display: "inline-block",
-                      width: 10,
-                      height: 10,
-                      borderRadius: "50%",
-                      backgroundColor: entry.color,
-                    }}
-                  />
-                  <Text size={100} style={{ opacity: 0.7 }}>
-                    {entry.label}
-                  </Text>
-                </div>
-              ))}
-            </div>
-            <ArchitectureFlowGraph
-              graph={snapshot.decision_graph}
-              onNodeClick={inspector.selectNode}
-              onEdgeClick={inspector.selectEdge}
-            />
-            <Text size={100} style={{ opacity: 0.55, display: "block", marginTop: 8 }}>
-              Click any node to inspect its details below.
+          <SectionCard title="🏛️ Architecture">
+            <Text size={200} style={{ display: "block", marginBottom: 12, opacity: 0.7 }}>
+              Hover a component to see what it's about.
             </Text>
+            <InteractiveFlowDiagram nodes={ARCHITECTURE_OVERVIEW_NODES} />
+          </SectionCard>
+          <SectionCard title="🧭 Agentic Workflow">
+            <Text size={200} style={{ display: "block", marginBottom: 12, opacity: 0.7 }}>
+              Hover the Orchestrator or any agent to see what it's about.
+            </Text>
+            <InteractiveFlowDiagram
+              hub={agenticWorkflow?.hub}
+              nodes={agenticWorkflow?.spokes ?? []}
+              emptyLabel="Loading the agent registry..."
+            />
           </SectionCard>
           {snapshot.components.length === 0 ? (
             <Text size={300} style={{ opacity: 0.7 }}>
@@ -262,26 +303,6 @@ export function ArchitectureStudioPage(): JSX.Element {
         </SectionCard>
       ) : null}
 
-      {inspector.selectedNode ? (
-        <SectionCard title="🔍 Node Inspector" action={<Button size="small" onClick={inspector.clearSelection}>Close</Button>}>
-          <Text weight="semibold" style={{ display: "block" }}>
-            {inspector.selectedNode.label}
-          </Text>
-          <pre style={{ fontSize: 11, whiteSpace: "pre-wrap" }}>
-            {JSON.stringify(inspector.selectedNode.metadata, null, 2)}
-          </pre>
-        </SectionCard>
-      ) : null}
-      {inspector.selectedEdge ? (
-        <SectionCard title="🔍 Edge Inspector" action={<Button size="small" onClick={inspector.clearSelection}>Close</Button>}>
-          <Text weight="semibold" style={{ display: "block" }}>
-            {inspector.selectedEdge.edge_type.replace(/_/g, " ")}
-          </Text>
-          <pre style={{ fontSize: 11, whiteSpace: "pre-wrap" }}>
-            {JSON.stringify(inspector.selectedEdge.metadata, null, 2)}
-          </pre>
-        </SectionCard>
-      ) : null}
     </div>
   );
 }

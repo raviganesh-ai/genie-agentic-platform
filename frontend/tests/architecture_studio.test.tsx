@@ -3,6 +3,7 @@ import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithProviders, mockFetchSequence } from "./testUtils";
 import {
+  buildAgentSummaries,
   buildApprovalRequests,
   buildArchitectureSnapshot,
   FIXTURE_SESSION_ID,
@@ -15,6 +16,7 @@ describe("ArchitectureStudioPage", () => {
     mockFetchSequence([
       { match: `/architecture/${FIXTURE_WORKFLOW_RUN_ID}`, response: buildArchitectureSnapshot() },
       { match: "/approvals", response: [] },
+      { match: "/agents", response: buildAgentSummaries() },
     ]);
 
     renderWithProviders(<ArchitectureStudioPage />, {
@@ -31,6 +33,7 @@ describe("ArchitectureStudioPage", () => {
     const fetchMock = mockFetchSequence([
       { match: `/architecture/${FIXTURE_WORKFLOW_RUN_ID}`, response: buildArchitectureSnapshot() },
       { match: "/approvals", response: buildApprovalRequests({ subject_id: "build-solution" }) },
+      { match: "/agents", response: buildAgentSummaries() },
       { match: "/decide", response: { id: "decision-1" } },
       { match: "/resume", response: { status: "running" } },
     ]);
@@ -65,6 +68,7 @@ describe("ArchitectureStudioPage", () => {
     const fetchMock = mockFetchSequence([
       { match: `/architecture/${FIXTURE_WORKFLOW_RUN_ID}`, response: buildArchitectureSnapshot() },
       { match: "/approvals", response: buildApprovalRequests({ subject_id: "build-solution" }) },
+      { match: "/agents", response: buildAgentSummaries() },
       { match: "/decide", response: { id: "decision-1" } },
       { match: "/resume", response: { status: "running" } },
     ]);

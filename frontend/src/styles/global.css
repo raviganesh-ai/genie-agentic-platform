@@ -202,3 +202,118 @@ a,
   background-color: #1a2230;
 }
 
+/* Interactive flow diagrams (Architecture Studio: UI <-> Agentic Workflow,
+   Orchestrator <-> individual agents) - animated "data flowing" connectors
+   plus glowing hover/focus state on each node so scrubbing across the
+   diagram feels alive, not a static chart. */
+@keyframes genie-flow-line-travel {
+  from {
+    background-position: 0 0;
+  }
+  to {
+    background-position: -32px 0;
+  }
+}
+
+.genie-flow-connector {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 100%;
+  height: 3px;
+  margin-top: -1px;
+  border-radius: 2px;
+  background-image: repeating-linear-gradient(to right, #2f83e0 0, #2f83e0 8px, transparent 8px, transparent 16px);
+  background-size: 32px 100%;
+  animation: genie-flow-line-travel 900ms linear infinite;
+  opacity: 0.7;
+  transition: opacity 200ms ease;
+}
+
+.genie-flow-connector-active {
+  opacity: 1;
+}
+
+@keyframes genie-flow-particle {
+  0% {
+    left: -2%;
+    opacity: 0;
+    transform: translateY(-50%) scale(0.6);
+  }
+  12% {
+    opacity: 1;
+    transform: translateY(-50%) scale(1);
+  }
+  88% {
+    opacity: 1;
+    transform: translateY(-50%) scale(1);
+  }
+  100% {
+    left: 102%;
+    opacity: 0;
+    transform: translateY(-50%) scale(0.6);
+  }
+}
+
+.genie-flow-particle {
+  position: absolute;
+  top: 50%;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #6ab2ff;
+  box-shadow: 0 0 10px 3px rgba(106, 178, 255, 0.85);
+  animation: genie-flow-particle 1.7s ease-in-out infinite;
+  pointer-events: none;
+}
+
+.genie-flow-node {
+  position: relative;
+  cursor: pointer;
+  transition:
+    transform 200ms ease,
+    box-shadow 200ms ease,
+    border-color 200ms ease,
+    background-color 200ms ease;
+}
+
+.genie-flow-node:hover,
+.genie-flow-node:focus-visible,
+.genie-flow-node.genie-flow-node-active {
+  transform: translateY(-5px) scale(1.04);
+  border-color: #2f83e0 !important;
+  box-shadow:
+    0 10px 26px rgba(47, 131, 224, 0.32),
+    0 0 0 1px rgba(47, 131, 224, 0.45);
+  background-color: #182534 !important;
+}
+
+@keyframes genie-flow-hub-pulse {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 0 rgba(47, 131, 224, 0.5),
+      0 0 18px 2px rgba(47, 131, 224, 0.4);
+  }
+  50% {
+    box-shadow:
+      0 0 0 10px rgba(47, 131, 224, 0),
+      0 0 28px 8px rgba(47, 131, 224, 0.7);
+  }
+}
+
+.genie-flow-hub {
+  animation: genie-flow-hub-pulse 2.4s ease-in-out infinite;
+}
+
+.genie-flow-hub.genie-flow-node-active,
+.genie-flow-hub:hover {
+  animation-play-state: paused;
+}
+
+.genie-flow-detail-panel {
+  transition:
+    opacity 200ms ease,
+    transform 200ms ease;
+}
+

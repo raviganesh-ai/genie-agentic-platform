@@ -4,6 +4,7 @@ import type { DecisionGraph } from "@/types/collaboration";
 import type { SessionReplayResponse } from "@/types/replay";
 import type { ArchitectureSnapshot } from "@/types/architecture";
 import type { RequirementsQualification } from "@/types/requirementsQualification";
+import type { AgentSummary } from "@/types/agents";
 
 /** Shared, non-customer fixture data for frontend tests only. */
 
@@ -114,6 +115,35 @@ export function buildArchitectureSnapshot(): ArchitectureSnapshot {
     ],
     decision_graph: buildDecisionGraph(),
   };
+}
+
+export function buildAgentSummaries(): AgentSummary[] {
+  return [
+    {
+      id: "genie-orchestrator",
+      name: "Genie Orchestrator",
+      role: "mission_orchestration",
+      description: "Drives the mission phase by phase, delegating to each specialist agent.",
+      connected_agent_ids: ["requirements-analyst", "architecture-designer"],
+      enabled: true,
+    },
+    {
+      id: "requirements-analyst",
+      name: "Requirements Analyst",
+      role: "requirement_discovery",
+      description: "Extracts goals, requirements, risks, and constraints from ingested material.",
+      connected_agent_ids: null,
+      enabled: true,
+    },
+    {
+      id: "architecture-designer",
+      name: "Architecture Designer",
+      role: "architecture_design",
+      description: "Produces interactive Azure reference architectures with rationale.",
+      connected_agent_ids: null,
+      enabled: true,
+    },
+  ];
 }
 
 export function buildRequirementsQualification(
