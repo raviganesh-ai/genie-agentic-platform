@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Button, Text, Textarea } from "@fluentui/react-components";
 import { useSessionContext } from "@/state/SessionContext";
 import { useWorkshop } from "@/hooks/useWorkshop";
@@ -7,6 +7,8 @@ import { workflowApi } from "@/services/workflowApi";
 import { PageHeader } from "@/layouts/AppShell";
 import { ErrorState } from "@/components/ErrorState";
 import { SectionCard } from "@/components/SectionCard";
+import { LiveWorkflowPulse } from "@/components/LiveWorkflowPulse";
+import { useWorkflowEventStream } from "@/hooks/useWorkflowEventStream";
 import { GeneratedArtifacts } from "./GeneratedArtifacts";
 import type { WorkflowStepResult } from "@/types/workflow";
 
@@ -28,10 +30,18 @@ export function WorkshopPage(): JSX.Element {
         : Promise.reject(new Error("No active workflow run")),
     [sessionId, workflowRunId],
   );
-  const { data: run } = useAsyncResource(runFetcher, [sessionId, workflowRunId], {
+  const { data: run, refresh: refreshRun } = useAsyncResource(runFetcher, [sessionId, workflowRunId], {
     enabled: Boolean(sessionId && workflowRunId),
     pollIntervalMs: Number(import.meta.env.VITE_ARCHITECTURE_STUDIO_POLL_MS ?? 0),
   });
+  const { events: liveEvents, connected: liveConnected } = useWorkflowEventStream(sessionId);
+  const lastLiveEvent = liveEvents[liveEvents.length - 1] ?? null;
+  useEffect(() => {
+    if (lastLiveEvent?.event_type === "step_completed" || lastLiveEvent?.event_type === "step_failed") {
+      void refreshRun();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lastLiveEvent]);
   const buildOutputText = useMemo(
     () => run?.step_results.find((result) => result.step_id === "build-solution")?.output_text ?? "",
     [run],
@@ -55,6 +65,8 @@ export function WorkshopPage(): JSX.Element {
         subtitle="Watch the Build Agent's generated UI and multi-agent workflow artifacts, then chat, challenge, and adjust priorities in real time."
       />
       {workshop.error ? <ErrorState error={workshop.error} /> : null}
+
+      <LiveWorkflowPulse connected={liveConnected} events={liveEvents} />
 
       <SectionCard title="🛠️ Generated Artifacts">
         {buildOutputText ? (

@@ -222,3 +222,20 @@ class AgentExecutionResult(BaseModel):
     model_deployment_ref: str = ""
     output_text: str
     correlation_id: str = Field(min_length=1)
+
+
+class AgentExecutionStreamChunk(BaseModel):
+    """One item yielded by ``AgentGateway.execute_stream``.
+
+    Every chunk except the last carries a non-empty ``delta`` (an
+    incremental slice of the agent's response text) and ``result=None``.
+    The last chunk carries ``delta=None`` and a populated ``result`` with
+    the same ``AgentExecutionResult`` shape ``execute()`` returns, so
+    callers that only want the finished result can consume the stream and
+    keep whichever chunk has ``result`` set.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    delta: str | None = None
+    result: AgentExecutionResult | None = None

@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Badge,
@@ -20,6 +20,8 @@ import type { ApiError } from "@/services/httpClient";
 import { LoadingState } from "@/components/LoadingState";
 import { ErrorState } from "@/components/ErrorState";
 import { SectionCard } from "@/components/SectionCard";
+import { LiveWorkflowPulse } from "@/components/LiveWorkflowPulse";
+import { useWorkflowEventStream } from "@/hooks/useWorkflowEventStream";
 
 const POLL_MS = Number(import.meta.env.VITE_REQUIREMENTS_POLL_MS ?? 0);
 
@@ -210,9 +212,19 @@ export function RequirementDiscoveryPage(): JSX.Element {
         : Promise.reject(new Error("No active workflow run")),
     [sessionId, workflowRunId],
   );
-  const { data: run } = useAsyncResource(runFetcher, [sessionId, workflowRunId], {
+  const { data: run, refresh: refreshRun } = useAsyncResource(runFetcher, [sessionId, workflowRunId], {
     enabled: Boolean(sessionId && workflowRunId),
   });
+  const { events: liveEvents, connected: liveConnected } = useWorkflowEventStream(sessionId);
+  const lastLiveEvent = liveEvents[liveEvents.length - 1] ?? null;
+  useEffect(() => {
+    if (lastLiveEvent?.event_type === "step_completed" || lastLiveEvent?.event_type === "step_failed") {
+      void refresh();
+      void refreshRun();
+      void refreshApprovals();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lastLiveEvent]);
   const analyzedRequirementsText = useMemo(
     () =>
       run?.step_results.find((result) => result.step_id === "analyze-requirements")?.output_text ?? "",
@@ -501,6 +513,7 @@ export function RequirementDiscoveryPage(): JSX.Element {
           })}
         </div>
       </div>
+      <LiveWorkflowPulse connected={liveConnected} events={liveEvents} />
       {loading && !data ? <LoadingState label="Loading requirements..." /> : null}
       {error ? <ErrorState error={error} onRetry={refresh} /> : null}
 

@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button, MessageBar, MessageBarBody, MessageBarTitle, Text } from "@fluentui/react-components";
 import { useSessionContext } from "@/state/SessionContext";
@@ -13,6 +13,8 @@ import { LoadingState } from "@/components/LoadingState";
 import { ErrorState } from "@/components/ErrorState";
 import { SectionCard } from "@/components/SectionCard";
 import { GovernanceStatusBadge } from "@/components/StatusBadge";
+import { LiveWorkflowPulse } from "@/components/LiveWorkflowPulse";
+import { useWorkflowEventStream } from "@/hooks/useWorkflowEventStream";
 import type { GovernanceEventCategory } from "@/types/governance";
 
 const POLL_MS = Number(import.meta.env.VITE_GOVERNANCE_POLL_MS ?? 5000);
@@ -46,6 +48,14 @@ export function GovernancePage(): JSX.Element {
   const { data: run } = useAsyncResource(runFetcher, [sessionId, workflowRunId], {
     enabled: Boolean(sessionId && workflowRunId),
   });
+  const { events: liveEvents, connected: liveConnected } = useWorkflowEventStream(sessionId);
+  const lastLiveEvent = liveEvents[liveEvents.length - 1] ?? null;
+  useEffect(() => {
+    if (lastLiveEvent?.event_type === "step_completed" || lastLiveEvent?.event_type === "step_failed") {
+      void refresh();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lastLiveEvent]);
   const governanceReviewText = useMemo(
     () => run?.step_results.find((result) => result.step_id === "governance-review")?.output_text ?? "",
     [run],
@@ -89,6 +99,8 @@ export function GovernancePage(): JSX.Element {
       <PageHeader title="Governance Center" subtitle="Policy checks, authorization decisions, and compliance status." />
       {loading && !data ? <LoadingState label="Loading governance trace..." /> : null}
       {error ? <ErrorState error={error} onRetry={refresh} /> : null}
+
+      <LiveWorkflowPulse connected={liveConnected} events={liveEvents} />
 
       {data ? (
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>

@@ -34,6 +34,7 @@ from app.api import (
     requirements,
     sessions,
     uploads,
+    workflow_events,
     workflows,
     workshop,
 )
@@ -267,6 +268,7 @@ def create_app(
     app.include_router(uploads.router)
     app.include_router(ingestion.router)
     app.include_router(workflows.router)
+    app.include_router(workflow_events.router)
     app.include_router(agents.router)
     app.include_router(memory.router)
     app.include_router(governance.router)

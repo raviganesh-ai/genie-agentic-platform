@@ -36,6 +36,17 @@ export function mockFetchSequence(
   const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
     const url = typeof input === "string" ? input : input.toString();
     const pathname = new URL(url).pathname;
+    // Every page now opens a live workflow-events SSE connection
+    // (useWorkflowEventStream) alongside its normal polled fetches. Tests
+    // that don't care about that stream shouldn't need to register a
+    // handler for it explicitly - resolve it with an immediately-closed
+    // empty stream so the hook connects, sees no events, and stops.
+    if (pathname.endsWith("/workflow-events/stream")) {
+      return new Response(new ReadableStream({ start: (controller) => controller.close() }), {
+        status: 200,
+        headers: { "Content-Type": "text/event-stream" },
+      });
+    }
     const handler = handlers.find((h) => pathname.endsWith(h.match));
     if (!handler) {
       throw new Error(`No mock handler registered for URL: ${url}`);
@@ -48,3 +59,4 @@ export function mockFetchSequence(
   vi.stubGlobal("fetch", fetchMock);
   return fetchMock;
 }
+

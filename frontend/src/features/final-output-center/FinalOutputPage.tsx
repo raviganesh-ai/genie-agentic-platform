@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Button, Text } from "@fluentui/react-components";
 import { useSessionContext } from "@/state/SessionContext";
 import { useFinalOutput, useFinalOutputTypes, exportDeliverable } from "@/hooks/useFinalOutput";
@@ -8,6 +8,8 @@ import { PageHeader } from "@/layouts/AppShell";
 import { LoadingState } from "@/components/LoadingState";
 import { ErrorState } from "@/components/ErrorState";
 import { SectionCard } from "@/components/SectionCard";
+import { LiveWorkflowPulse } from "@/components/LiveWorkflowPulse";
+import { useWorkflowEventStream } from "@/hooks/useWorkflowEventStream";
 import { splitIntoNamedSections } from "@/utils/textArtifacts";
 import type { DeliverablePackage, DeliverableType } from "@/types/workflow";
 
@@ -53,10 +55,18 @@ export function FinalOutputPage(): JSX.Element {
         : Promise.reject(new Error("No active workflow run")),
     [sessionId, workflowRunId],
   );
-  const { data: run } = useAsyncResource(runFetcher, [sessionId, workflowRunId], {
+  const { data: run, refresh: refreshRun } = useAsyncResource(runFetcher, [sessionId, workflowRunId], {
     enabled: Boolean(sessionId && workflowRunId),
     pollIntervalMs: 5000,
   });
+  const { events: liveEvents, connected: liveConnected } = useWorkflowEventStream(sessionId);
+  const lastLiveEvent = liveEvents[liveEvents.length - 1] ?? null;
+  useEffect(() => {
+    if (lastLiveEvent?.event_type === "step_completed" || lastLiveEvent?.event_type === "step_failed") {
+      void refreshRun();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lastLiveEvent]);
   const buildOutput = useMemo(
     () => run?.step_results.find((result) => result.step_id === "build-solution")?.output_text ?? "",
     [run],
@@ -88,6 +98,8 @@ export function FinalOutputPage(): JSX.Element {
       {loading && !types ? <LoadingState label="Loading deliverable types..." /> : null}
       {error ? <ErrorState error={error} onRetry={refresh} /> : null}
       {generateError ? <ErrorState error={generateError} /> : null}
+
+      <LiveWorkflowPulse connected={liveConnected} events={liveEvents} />
 
       {canLaunch ? (
         <SectionCard

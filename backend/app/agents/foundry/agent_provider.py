@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -41,6 +42,7 @@ __all__ = [
     "FoundryAgentClient",
     "FoundryAgentProvider",
     "FoundryRunResult",
+    "FoundryStreamChunk",
     "tool_definition_to_json_schema",
 ]
 
@@ -52,6 +54,22 @@ class FoundryRunResult:
     output_text: str
     raw_status: str
     latency_ms: float
+
+
+@dataclass(frozen=True)
+class FoundryStreamChunk:
+    """One item yielded by ``FoundryAgentClient.run_stream``.
+
+    Every chunk except the last carries a non-empty ``delta`` (an
+    incremental slice of the agent's response text as the model produces
+    it) and ``final=None``. The last chunk carries ``delta=None`` and a
+    populated ``final`` with the same shape ``run()`` returns - so callers
+    that only want the finished result can simply consume the stream and
+    keep whichever chunk has ``final`` set.
+    """
+
+    delta: str | None = None
+    final: FoundryRunResult | None = None
 
 
 class FoundryAgentClient(Protocol):
@@ -72,6 +90,15 @@ class FoundryAgentClient(Protocol):
     ) -> FoundryRunResult:
         ...
 
+    def run_stream(
+        self,
+        *,
+        foundry_agent_id: str,
+        input_text: str,
+        tool_context: ToolCallContext | None = None,
+    ) -> AsyncIterator[FoundryStreamChunk]:
+        ...
+
 
 class _RunnableAgent(Protocol):
     """The minimal surface ``FoundryAgentProvider`` needs from a constructed agent.
@@ -81,7 +108,7 @@ class _RunnableAgent(Protocol):
     without any network access.
     """
 
-    async def run(self, messages: Any, *, tools: Any = None) -> Any:
+    async def run(self, messages: Any, *, tools: Any = None, stream: bool = False) -> Any:
         ...
 
 
@@ -110,20 +137,8 @@ class FoundryAgentProvider:
     ) -> FoundryRunResult:
         started = time.monotonic()
         try:
-            pinned_version = tool_context.agent.foundry_agent_version if tool_context else None
-            if pinned_version:
-                agent_version = pinned_version
-            else:
-                api_client = self._project_service.get_api_client()
-                agent_version = await asyncio.to_thread(api_client.get_latest_version, foundry_agent_id)
-
-            project_client = self._project_service.get_async_project_client()
-            tools = self._build_function_tools(tool_context)
-
-            agent: _RunnableAgent = self._agent_factory(
-                project_client=project_client,
-                agent_name=foundry_agent_id,
-                agent_version=agent_version,
+            agent, agent_version, tools = await self._build_runnable_agent(
+                foundry_agent_id=foundry_agent_id, tool_context=tool_context
             )
             response = await agent.run(input_text, tools=tools or None)
             output_text = (getattr(response, "text", None) or "").strip()
@@ -142,6 +157,77 @@ class FoundryAgentProvider:
 
         latency_ms = (time.monotonic() - started) * 1000
         return FoundryRunResult(output_text=output_text, raw_status="completed", latency_ms=latency_ms)
+
+    async def run_stream(
+        self,
+        *,
+        foundry_agent_id: str,
+        input_text: str,
+        tool_context: ToolCallContext | None = None,
+    ) -> AsyncIterator[FoundryStreamChunk]:
+        """Streams incremental response text as the model produces it.
+
+        Yields one ``FoundryStreamChunk(delta=...)`` per incremental text
+        update from ``agent_framework``'s streaming run, then a final
+        ``FoundryStreamChunk(final=...)`` carrying the same
+        ``FoundryRunResult`` shape ``run()`` returns (built from the fully
+        accumulated text) once the stream is exhausted. Raises
+        ``FoundryUnavailableError`` (never falls back to a canned response)
+        on any failure, exactly like ``run()``.
+        """
+
+        started = time.monotonic()
+        accumulated = ""
+        try:
+            agent, agent_version, tools = await self._build_runnable_agent(
+                foundry_agent_id=foundry_agent_id, tool_context=tool_context
+            )
+            stream = agent.run(input_text, tools=tools or None, stream=True)
+            async for update in stream:
+                delta = getattr(update, "text", None) or ""
+                if not delta:
+                    continue
+                accumulated += delta
+                yield FoundryStreamChunk(delta=delta)
+
+            output_text = accumulated.strip()
+            if not output_text:
+                raise FoundryUnavailableError(
+                    f"Azure AI Foundry run produced no output text for agent "
+                    f"'{foundry_agent_id}' (version '{agent_version}')."
+                )
+        except FoundryUnavailableError:
+            raise
+        except Exception as exc:
+            raise FoundryUnavailableError(
+                f"Azure AI Foundry execution failed for agent "
+                f"'{foundry_agent_id}': {exc}"
+            ) from exc
+
+        latency_ms = (time.monotonic() - started) * 1000
+        yield FoundryStreamChunk(
+            final=FoundryRunResult(output_text=output_text, raw_status="completed", latency_ms=latency_ms)
+        )
+
+    async def _build_runnable_agent(
+        self, *, foundry_agent_id: str, tool_context: ToolCallContext | None
+    ) -> tuple[_RunnableAgent, str, list[FunctionTool]]:
+        pinned_version = tool_context.agent.foundry_agent_version if tool_context else None
+        if pinned_version:
+            agent_version = pinned_version
+        else:
+            api_client = self._project_service.get_api_client()
+            agent_version = await asyncio.to_thread(api_client.get_latest_version, foundry_agent_id)
+
+        project_client = self._project_service.get_async_project_client()
+        tools = self._build_function_tools(tool_context)
+
+        agent: _RunnableAgent = self._agent_factory(
+            project_client=project_client,
+            agent_name=foundry_agent_id,
+            agent_version=agent_version,
+        )
+        return agent, agent_version, tools
 
     def _build_function_tools(self, tool_context: ToolCallContext | None) -> list[FunctionTool]:
         if tool_context is None or self._tool_registry is None:

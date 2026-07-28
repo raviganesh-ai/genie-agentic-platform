@@ -12,11 +12,13 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from app.agents.gateway import AgentGateway, get_enabled_agent, resolve_prompt_text
-from app.agents.models import AgentDefinition, AgentExecutionRequest
+from app.agents.models import AgentDefinition, AgentExecutionRequest, AgentExecutionResult
 from app.agents.registry import AgentRegistry
 from app.governance.governance_service import GovernanceService
 from app.memory.memory_service import MemoryService
 from app.models.workflow_models import WorkflowStepInput, WorkflowStepResult
+from app.models.workflow_stream_models import WorkflowStreamEvent
+from app.orchestration.workflow_event_bus import WorkflowEventBus
 from app.prompts.registry import PromptRegistry
 from app.workflows.models import WorkflowStep
 
@@ -55,12 +57,14 @@ class WorkflowStepExecutor:
         agent_gateway: AgentGateway,
         governance_service: GovernanceService,
         memory_service: MemoryService | None = None,
+        event_bus: WorkflowEventBus | None = None,
     ) -> None:
         self._agent_registry = agent_registry
         self._prompt_registry = prompt_registry
         self._agent_gateway = agent_gateway
         self._governance_service = governance_service
         self._memory_service = memory_service
+        self._event_bus = event_bus
 
     async def execute_step(
         self,
@@ -74,6 +78,7 @@ class WorkflowStepExecutor:
         step_outputs: dict[str, str] | None = None,
         previous_variables: dict[str, str] | None = None,
         agent_scope_id: str | None = None,
+        workflow_run_id: str = "",
     ) -> WorkflowStepResult:
         started_at = datetime.now(UTC)
         agent = get_enabled_agent(self._agent_registry, step.agent_id)
@@ -113,7 +118,13 @@ class WorkflowStepExecutor:
         # off to the gateway, which performs the same resolution internally.
         resolve_prompt_text(self._prompt_registry, request)
 
-        result = await self._agent_gateway.execute(request)
+        result = await self._run_agent(
+            request=request,
+            session_id=session_id,
+            workflow_run_id=workflow_run_id,
+            step=step,
+            agent=agent,
+        )
 
         # Recorded immediately once *this* agent's real call returns - not
         # batched until the whole workflow run/resume call completes. The
@@ -146,6 +157,97 @@ class WorkflowStepExecutor:
             completed_at=datetime.now(UTC),
             resolved_variables=variables,
         )
+
+    async def _run_agent(
+        self,
+        *,
+        request: AgentExecutionRequest,
+        session_id: str,
+        workflow_run_id: str,
+        step: WorkflowStep,
+        agent: AgentDefinition,
+    ) -> AgentExecutionResult:
+        """Executes ``request``, publishing live step events when an event bus is wired.
+
+        With no ``event_bus`` configured (the default - e.g. most unit
+        tests), this is exactly ``await self._agent_gateway.execute(request)``
+        with no behavior change at all. With one configured, this instead
+        drives the gateway's ``execute_stream``, publishing ``step_started``
+        before the call, one ``step_delta`` per incremental chunk the
+        gateway yields, and ``step_completed``/``step_failed`` once the
+        stream ends - so a concurrent SSE subscriber
+        (``GET /sessions/{id}/workflow-events/stream``) sees this step come
+        to life in real time, without changing what governance records or
+        what this method returns to its caller.
+        """
+
+        if self._event_bus is None or not workflow_run_id:
+            return await self._agent_gateway.execute(request)
+
+        await self._event_bus.publish(
+            WorkflowStreamEvent(
+                event_type="step_started",
+                session_id=session_id,
+                workflow_run_id=workflow_run_id,
+                step_id=step.id,
+                agent_id=agent.id,
+            )
+        )
+        try:
+            result: AgentExecutionResult | None = None
+            async for chunk in self._agent_gateway.execute_stream(request):
+                if chunk.delta:
+                    await self._event_bus.publish(
+                        WorkflowStreamEvent(
+                            event_type="step_delta",
+                            session_id=session_id,
+                            workflow_run_id=workflow_run_id,
+                            step_id=step.id,
+                            agent_id=agent.id,
+                            delta=chunk.delta,
+                        )
+                    )
+                if chunk.result is not None:
+                    result = chunk.result
+        except Exception as exc:
+            await self._event_bus.publish(
+                WorkflowStreamEvent(
+                    event_type="step_failed",
+                    session_id=session_id,
+                    workflow_run_id=workflow_run_id,
+                    step_id=step.id,
+                    agent_id=agent.id,
+                    error=str(exc),
+                )
+            )
+            raise
+
+        if result is None:
+            reason = f"Agent gateway stream for step '{step.id}' ended without a final result."
+            await self._event_bus.publish(
+                WorkflowStreamEvent(
+                    event_type="step_failed",
+                    session_id=session_id,
+                    workflow_run_id=workflow_run_id,
+                    step_id=step.id,
+                    agent_id=agent.id,
+                    error=reason,
+                )
+            )
+            raise RuntimeError(reason)
+
+        await self._event_bus.publish(
+            WorkflowStreamEvent(
+                event_type="step_completed",
+                session_id=session_id,
+                workflow_run_id=workflow_run_id,
+                step_id=step.id,
+                agent_id=agent.id,
+                output_preview=_preview(result.output_text),
+            )
+        )
+        return result
+
 
     async def _resolve_variables(
         self,

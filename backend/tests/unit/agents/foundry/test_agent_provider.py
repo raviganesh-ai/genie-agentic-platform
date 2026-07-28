@@ -54,6 +54,11 @@ class _FakeAgentResponse:
     text: str
 
 
+@dataclass
+class _FakeAgentUpdate:
+    text: str
+
+
 class _FakeFoundryAgent:
     """Stands in for ``agent_framework.foundry.FoundryAgent``."""
 
@@ -62,10 +67,20 @@ class _FakeFoundryAgent:
         self.agent_name = agent_name
         self.agent_version = agent_version
         self.run_calls: list[dict[str, Any]] = []
+        self.stream_chunks: list[str] = ["Here ", "is ", "the answer."]
 
-    async def run(self, messages: Any, *, tools: Any = None) -> _FakeAgentResponse:
-        self.run_calls.append({"messages": messages, "tools": tools})
+    def run(self, messages: Any, *, tools: Any = None, stream: bool = False) -> Any:
+        self.run_calls.append({"messages": messages, "tools": tools, "stream": stream})
+        if stream:
+            return self._run_streaming()
+        return self._run_non_streaming()
+
+    async def _run_non_streaming(self) -> _FakeAgentResponse:
         return _FakeAgentResponse(text="Here is the answer.")
+
+    async def _run_streaming(self):
+        for chunk in self.stream_chunks:
+            yield _FakeAgentUpdate(text=chunk)
 
 
 def _agent_factory_returning(agent: _FakeFoundryAgent):
@@ -240,4 +255,56 @@ async def test_run_wraps_unexpected_exceptions_as_foundry_unavailable():
 
     with pytest.raises(FoundryUnavailableError, match="credential expired"):
         await provider.run(foundry_agent_id="agent-123", input_text="hello")
+
+
+async def test_run_stream_yields_deltas_then_a_final_chunk_with_accumulated_text():
+    api_client = _FakeApiClient(latest_version="7")
+    project_service = _FakeProjectService(api_client=api_client)
+    fake_agent = _FakeFoundryAgent(project_client=None, agent_name="", agent_version="")
+    fake_agent.stream_chunks = ["Here ", "is ", "the answer."]
+    provider = FoundryAgentProvider(
+        project_service, agent_factory=_agent_factory_returning(fake_agent)
+    )
+
+    chunks = [
+        chunk
+        async for chunk in provider.run_stream(foundry_agent_id="requirements-analyst", input_text="hello")
+    ]
+
+    deltas = [chunk.delta for chunk in chunks if chunk.delta is not None]
+    finals = [chunk.final for chunk in chunks if chunk.final is not None]
+    assert deltas == ["Here ", "is ", "the answer."]
+    assert len(finals) == 1
+    assert finals[0].output_text == "Here is the answer."
+    assert finals[0].raw_status == "completed"
+    assert fake_agent.run_calls[0]["stream"] is True
+
+
+async def test_run_stream_raises_foundry_unavailable_when_no_deltas_produced():
+    api_client = _FakeApiClient()
+    project_service = _FakeProjectService(api_client=api_client)
+    fake_agent = _FakeFoundryAgent(project_client=None, agent_name="", agent_version="")
+    fake_agent.stream_chunks = []
+    provider = FoundryAgentProvider(
+        project_service, agent_factory=_agent_factory_returning(fake_agent)
+    )
+
+    with pytest.raises(FoundryUnavailableError, match="no output text"):
+        async for _ in provider.run_stream(foundry_agent_id="agent-123", input_text="hello"):
+            pass
+
+
+async def test_run_stream_wraps_unexpected_exceptions_as_foundry_unavailable():
+    class _BoomProjectService:
+        def get_api_client(self):
+            raise RuntimeError("credential expired")
+
+        def get_async_project_client(self):  # pragma: no cover - not reached
+            raise RuntimeError("credential expired")
+
+    provider = FoundryAgentProvider(_BoomProjectService())
+
+    with pytest.raises(FoundryUnavailableError, match="credential expired"):
+        async for _ in provider.run_stream(foundry_agent_id="agent-123", input_text="hello"):
+            pass
 

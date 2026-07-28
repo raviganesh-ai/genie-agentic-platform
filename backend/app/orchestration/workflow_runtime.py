@@ -159,6 +159,7 @@ class WorkflowRuntime:
                             step_outputs=step_outputs,
                             previous_variables=previous_variables_by_id.get(step.id),
                             agent_scope_id=effective_scope_id,
+                            workflow_run_id=workflow_run_id,
                         )
                         for step in pending_steps
                     )

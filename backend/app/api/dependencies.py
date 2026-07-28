@@ -15,6 +15,7 @@ from app.governance.replay_service import ReplayService
 from app.governance.traceability_service import TraceabilityService
 from app.memory.memory_service import MemoryService
 from app.orchestration.agent_orchestrator import AgentOrchestrator
+from app.orchestration.workflow_event_bus import WorkflowEventBus
 from app.services.architecture_service import ArchitectureService
 from app.services.foundry_agent_inventory_service import FoundryAgentInventoryService
 from app.services.foundry_agent_lifecycle_service import FoundryAgentLifecycleService
@@ -40,6 +41,7 @@ __all__ = [
     "get_session_service",
     "get_speech_to_text_service",
     "get_traceability_service",
+    "get_workflow_event_bus",
     "get_workshop_service",
 ]
 
@@ -78,6 +80,10 @@ def get_governance_service(request: Request) -> GovernanceService:
 
 def get_approval_service(request: Request) -> ApprovalService:
     return request.app.state.agent_orchestrator.approval_service
+
+
+def get_workflow_event_bus(request: Request) -> WorkflowEventBus:
+    return request.app.state.agent_orchestrator.workflow_event_bus
 
 
 def get_memory_service(request: Request) -> MemoryService:

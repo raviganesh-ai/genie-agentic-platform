@@ -108,6 +108,36 @@ export async function apiFetch<TResponse>(
   return parsed as TResponse;
 }
 
+/**
+ * Opens a Server-Sent Events connection to a Genie backend streaming route
+ * (currently only the live workflow-events route). Kept here - rather than
+ * in the calling hook - so the "every HTTP call goes through httpClient"
+ * rule (see tests/no_foundry_direct_access.test.tsx) still holds: this is
+ * the one place in the app that needs raw `fetch` + a `ReadableStream` body
+ * (SSE) instead of `apiFetch`'s buffered JSON response handling. Auth still
+ * goes through the same in-memory bearer token as every other call - never
+ * a query string, which would otherwise leak the token into server/proxy
+ * access logs (OWASP A02/A09).
+ */
+export async function openEventStream(path: string, signal: AbortSignal): Promise<Response> {
+  const headers: Record<string, string> = { Accept: "text/event-stream" };
+  const token = getAccessToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
+
+  let response: Response;
+  try {
+    response = await fetch(buildUrl(path), { headers, signal });
+  } catch (err) {
+    if (signal.aborted) throw err;
+    throw new ApiError("Unable to reach the Genie backend. Check your connection and try again.");
+  }
+
+  if (!response.ok || !response.body) {
+    throw new ApiError(mapStatusToMessage(response.status), response.status);
+  }
+  return response;
+}
+
 function safeJsonParse(text: string): unknown {
   try {
     return JSON.parse(text);

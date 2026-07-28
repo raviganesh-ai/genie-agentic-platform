@@ -133,6 +133,20 @@ class TestLocalAgentGateway:
         with pytest.raises(UnknownAgentError):
             await gateway.execute(_request(agent_id="does-not-exist"))
 
+    async def test_execute_stream_yields_one_delta_then_the_same_final_result_as_execute(
+        self, agent_registry: AgentRegistry, prompt_registry: PromptRegistry
+    ):
+        gateway = LocalAgentGateway(agent_registry, prompt_registry)
+
+        chunks = [chunk async for chunk in gateway.execute_stream(_request())]
+
+        deltas = [chunk.delta for chunk in chunks if chunk.delta is not None]
+        results = [chunk.result for chunk in chunks if chunk.result is not None]
+        assert len(deltas) == 1
+        assert len(results) == 1
+        assert results[0].agent_id == "requirements-analyst"
+        assert deltas[0] == results[0].output_text
+
 
 class TestCreateAgentGateway:
     def test_local_mode_with_allow_local_agents_returns_local_gateway(

@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 from app.agents.azure_agent_gateway import AzureAgentGateway
-from app.agents.foundry.agent_provider import FoundryRunResult
+from app.agents.foundry.agent_provider import FoundryRunResult, FoundryStreamChunk
 from app.agents.foundry.errors import FoundryUnavailableError
 from app.agents.gateway import UnknownAgentError
 from app.agents.models import AgentExecutionRequest
@@ -72,11 +72,19 @@ def _request(**overrides: object) -> AgentExecutionRequest:
 class _FakeFoundryClient:
     """A fake FoundryAgentClient recording every call it received."""
 
-    def __init__(self, *, result: FoundryRunResult | None = None, error: Exception | None = None):
+    def __init__(
+        self,
+        *,
+        result: FoundryRunResult | None = None,
+        error: Exception | None = None,
+        stream_deltas: list[str] | None = None,
+    ):
         self._result = result
         self._error = error
+        self._stream_deltas = stream_deltas if stream_deltas is not None else []
         self.calls: list[dict[str, str]] = []
         self.tool_contexts: list[object] = []
+        self.stream_calls: list[dict[str, str]] = []
 
     async def run(
         self, *, foundry_agent_id: str, input_text: str, tool_context=None
@@ -87,6 +95,16 @@ class _FakeFoundryClient:
             raise self._error
         assert self._result is not None
         return self._result
+
+    async def run_stream(self, *, foundry_agent_id: str, input_text: str, tool_context=None):
+        self.stream_calls.append({"foundry_agent_id": foundry_agent_id, "input_text": input_text})
+        self.tool_contexts.append(tool_context)
+        if self._error is not None:
+            raise self._error
+        for delta in self._stream_deltas:
+            yield FoundryStreamChunk(delta=delta)
+        assert self._result is not None
+        yield FoundryStreamChunk(final=self._result)
 
 
 class _RecordingGovernanceRecorder:
@@ -343,3 +361,77 @@ async def test_execute_never_consults_resolver_when_session_id_is_absent(
 
     assert resolver.calls == []
     assert fake_client.calls[0]["foundry_agent_id"] == "requirements-analyst-agent"
+
+
+async def test_execute_stream_yields_deltas_then_final_result_and_records_governance(
+    agent_registry: AgentRegistry, prompt_registry: PromptRegistry
+):
+    fake_client = _FakeFoundryClient(
+        result=FoundryRunResult(output_text="Here are the requirements.", raw_status="completed", latency_ms=12.0),
+        stream_deltas=["Here ", "are ", "the requirements."],
+    )
+    recorder = _RecordingGovernanceRecorder()
+    gateway = AzureAgentGateway(
+        agent_registry=agent_registry,
+        prompt_registry=prompt_registry,
+        foundry_client=fake_client,
+        governance_recorder=recorder,
+    )
+
+    chunks = [chunk async for chunk in gateway.execute_stream(_request())]
+
+    deltas = [chunk.delta for chunk in chunks if chunk.delta is not None]
+    results = [chunk.result for chunk in chunks if chunk.result is not None]
+    assert deltas == ["Here ", "are ", "the requirements."]
+    assert len(results) == 1
+    assert results[0].output_text == "Here are the requirements."
+    assert fake_client.stream_calls == [
+        {
+            "foundry_agent_id": "requirements-analyst-agent",
+            "input_text": "Extract requirements from: We need a chatbot.",
+        }
+    ]
+    assert len(recorder.executions) == 1
+    assert recorder.unavailable == []
+
+
+async def test_execute_stream_never_falls_back_when_foundry_unavailable(
+    agent_registry: AgentRegistry, prompt_registry: PromptRegistry
+):
+    fake_client = _FakeFoundryClient(error=FoundryUnavailableError("Foundry is down."))
+    recorder = _RecordingGovernanceRecorder()
+    gateway = AzureAgentGateway(
+        agent_registry=agent_registry,
+        prompt_registry=prompt_registry,
+        foundry_client=fake_client,
+        governance_recorder=recorder,
+    )
+
+    with pytest.raises(FoundryUnavailableError, match="Foundry is down"):
+        async for _ in gateway.execute_stream(_request()):
+            pass
+
+    assert len(recorder.unavailable) == 1
+    assert recorder.executions == []
+
+
+async def test_execute_stream_raises_for_agent_without_foundry_agent_id(
+    agent_registry: AgentRegistry, prompt_registry: PromptRegistry
+):
+    fake_client = _FakeFoundryClient(
+        result=FoundryRunResult(output_text="unused", raw_status="completed", latency_ms=1.0)
+    )
+    recorder = _RecordingGovernanceRecorder()
+    gateway = AzureAgentGateway(
+        agent_registry=agent_registry,
+        prompt_registry=prompt_registry,
+        foundry_client=fake_client,
+        governance_recorder=recorder,
+    )
+
+    with pytest.raises(FoundryUnavailableError, match="no foundry_agent_id"):
+        async for _ in gateway.execute_stream(_request(agent_id="no-foundry-agent")):
+            pass
+
+    assert fake_client.stream_calls == []
+    assert len(recorder.unavailable) == 1

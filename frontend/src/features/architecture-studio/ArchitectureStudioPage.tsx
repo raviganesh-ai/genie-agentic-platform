@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Button,
   Checkbox,
@@ -23,6 +23,8 @@ import { PageHeader } from "@/layouts/AppShell";
 import { LoadingState } from "@/components/LoadingState";
 import { ErrorState } from "@/components/ErrorState";
 import { SectionCard } from "@/components/SectionCard";
+import { LiveWorkflowPulse } from "@/components/LiveWorkflowPulse";
+import { useWorkflowEventStream } from "@/hooks/useWorkflowEventStream";
 import { InteractiveFlowDiagram, type FlowDiagramNode } from "./InteractiveFlowDiagram";
 import { ArchitectureComponentDiagram } from "./ArchitectureComponentDiagram";
 import type { ApiError } from "@/services/httpClient";
@@ -145,6 +147,15 @@ export function ArchitectureStudioPage(): JSX.Element {
     [sessionId],
     { enabled: Boolean(sessionId) },
   );
+  const { events: liveEvents, connected: liveConnected } = useWorkflowEventStream(sessionId);
+  const lastLiveEvent = liveEvents[liveEvents.length - 1] ?? null;
+  useEffect(() => {
+    if (lastLiveEvent?.event_type === "step_completed" || lastLiveEvent?.event_type === "step_failed") {
+      void refresh();
+      void refreshApprovals();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lastLiveEvent]);
   const pendingArchitectureApproval = approvals?.find(
     (request) => request.status === "pending" && request.subject_id === "build-solution",
   );
@@ -215,6 +226,8 @@ export function ArchitectureStudioPage(): JSX.Element {
       {loading && !snapshot ? <LoadingState label="Loading architecture..." /> : null}
       {error ? <ErrorState error={error} onRetry={refresh} /> : null}
       {reanalysisError ? <ErrorState error={reanalysisError} /> : null}
+
+      <LiveWorkflowPulse connected={liveConnected} events={liveEvents} />
 
       <Text size={200} weight="semibold" style={{ display: "block", marginBottom: 8, opacity: 0.75 }}>
         Request an alternative design

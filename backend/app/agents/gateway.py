@@ -13,9 +13,15 @@ prompt template a request names, then hands execution off to a gateway.
 """
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, Protocol
 
-from app.agents.models import AgentDefinition, AgentExecutionRequest, AgentExecutionResult
+from app.agents.models import (
+    AgentDefinition,
+    AgentExecutionRequest,
+    AgentExecutionResult,
+    AgentExecutionStreamChunk,
+)
 from app.agents.registry import AgentRegistry
 from app.config.settings import Settings
 from app.prompts.registry import PromptRegistry
@@ -94,6 +100,18 @@ class AgentGateway(Protocol):
 
     async def execute(self, request: AgentExecutionRequest) -> AgentExecutionResult: ...
 
+    def execute_stream(
+        self, request: AgentExecutionRequest
+    ) -> AsyncIterator[AgentExecutionStreamChunk]:
+        """Streams incremental output text, ending with a chunk carrying the final result.
+
+        Every implementation performs the exact same governance recording
+        and error handling as ``execute`` - streaming only changes *when*
+        output text becomes visible to the caller, never what gets recorded
+        or how failures are handled.
+        """
+        ...
+
 
 def get_enabled_agent(agent_registry: AgentRegistry, agent_id: str) -> AgentDefinition:
     try:
@@ -152,6 +170,20 @@ class LocalAgentGateway:
             output_text=output_text,
             correlation_id=request.correlation_id,
         )
+
+    async def execute_stream(
+        self, request: AgentExecutionRequest
+    ) -> AsyncIterator[AgentExecutionStreamChunk]:
+        """Yields the same deterministic text as ``execute``, as a single chunk.
+
+        Dev-only stand-in: there is no real model to stream tokens from, so
+        this simply mirrors ``execute``'s output in one delta followed by
+        the final chunk, keeping the two methods behaviorally consistent.
+        """
+
+        result = await self.execute(request)
+        yield AgentExecutionStreamChunk(delta=result.output_text)
+        yield AgentExecutionStreamChunk(result=result)
 
 
 def create_agent_gateway(

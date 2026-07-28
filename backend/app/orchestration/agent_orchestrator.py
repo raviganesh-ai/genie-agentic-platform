@@ -39,6 +39,7 @@ from app.orchestration.debugging_workflow_service import DebuggingWorkflowServic
 from app.orchestration.handoff_service import HandoffService
 from app.orchestration.reanalysis_service import ReanalysisService
 from app.orchestration.workflow_checkpoint_service import WorkflowCheckpointService
+from app.orchestration.workflow_event_bus import WorkflowEventBus
 from app.orchestration.workflow_execution_service import WorkflowExecutionService
 from app.orchestration.workflow_runtime import WorkflowRuntime
 from app.orchestration.workflow_step_executor import WorkflowStepExecutor
@@ -81,6 +82,7 @@ class AgentOrchestrator:
         agent_registry: AgentRegistry,
         workflow_registry: WorkflowRegistry,
         recommendation_lineage_service: RecommendationLineageService,
+        workflow_event_bus: WorkflowEventBus,
         customer_agent_provisioning_service: (
             CustomerAgentProvisioningService | NullCustomerAgentProvisioningService | None
         ) = None,
@@ -97,15 +99,17 @@ class AgentOrchestrator:
         self.checkpoint_service = checkpoint_service
         # Exposed (read-only use expected) so Phase 7 API/services can render
         # the architecture decision graph, query governance events, read
-        # shared memory, and list registered agents - all against the exact
-        # same wired instances this orchestrator uses, rather than
-        # constructing separate, inconsistent duplicates.
+        # shared memory, list registered agents, and subscribe to live
+        # workflow step events - all against the exact same wired instances
+        # this orchestrator uses, rather than constructing separate,
+        # inconsistent duplicates.
         self.decision_graph_service = decision_graph_service
         self.governance_service = governance_service
         self.memory_service = memory_service
         self.agent_registry = agent_registry
         self.workflow_registry = workflow_registry
         self.recommendation_lineage_service = recommendation_lineage_service
+        self.workflow_event_bus = workflow_event_bus
 
     def get_workflow_run(self, workflow_run_id: str) -> WorkflowRunResult | None:
         return self._execution_service.get_run(workflow_run_id)
@@ -250,6 +254,7 @@ def create_agent_orchestrator(
     governance_service: GovernanceService | None = None,
     memory_service: MemoryService | None = None,
     approval_service: ApprovalService | None = None,
+    workflow_event_bus: WorkflowEventBus | None = None,
 ) -> AgentOrchestrator:
     """Build an ``AgentOrchestrator`` wired to the externally configured registries.
 
@@ -307,12 +312,15 @@ def create_agent_orchestrator(
         InMemoryRecommendationLineageRepository(), governance_service=resolved_governance_service
     )
 
+    resolved_workflow_event_bus = workflow_event_bus or WorkflowEventBus()
+
     step_executor = WorkflowStepExecutor(
         agent_registry=agent_registry,
         prompt_registry=prompt_registry,
         agent_gateway=resolved_agent_gateway,
         governance_service=resolved_governance_service,
         memory_service=resolved_memory_service,
+        event_bus=resolved_workflow_event_bus,
     )
     handoff_service = HandoffService(governance_service=resolved_governance_service)
     decision_graph_service = DecisionGraphService()
@@ -347,5 +355,6 @@ def create_agent_orchestrator(
         agent_registry=agent_registry,
         workflow_registry=workflow_registry,
         recommendation_lineage_service=recommendation_lineage_service,
+        workflow_event_bus=resolved_workflow_event_bus,
         customer_agent_provisioning_service=customer_agent_provisioning_service,
     )
