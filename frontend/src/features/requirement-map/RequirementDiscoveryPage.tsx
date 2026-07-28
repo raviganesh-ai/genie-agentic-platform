@@ -188,7 +188,8 @@ function approvalStatusMeta(status: string): { icon: string; accent: string } {
 }
 
 export function RequirementDiscoveryPage(): JSX.Element {
-  const { sessionId, workflowRunId } = useSessionContext();
+  const { sessionId, workflowRunId, missionError, setMissionError } = useSessionContext();
+  const navigate = useNavigate();
   const { data, loading, error, refresh } = useRequirements(sessionId, workflowRunId, POLL_MS);
   const { data: qualification } = useRequirementsQualification(sessionId, workflowRunId, POLL_MS);
   const [policiesByRequest, setPoliciesByRequest] = useState<Record<string, string>>({});
@@ -365,7 +366,6 @@ export function RequirementDiscoveryPage(): JSX.Element {
   // prompt variable is deliberately never auto-derived from the transcript
   // (config/workflows/registry.yaml) - a human must supply it explicitly as
   // a step_input, so we collect it here before resuming.
-  const navigate = useNavigate();
 
   const approveAndResume = useCallback(
     async (requestId: string, subjectId: string) => {
@@ -528,7 +528,17 @@ export function RequirementDiscoveryPage(): JSX.Element {
         </MessageBar>
       ) : null}
 
-      {!analyzedRequirementsText ? (
+      {!analyzedRequirementsText && missionError ? (
+        <ErrorState
+          error={missionError}
+          onRetry={() => {
+            setMissionError(null);
+            navigate("/upload");
+          }}
+        />
+      ) : null}
+
+      {!analyzedRequirementsText && !missionError ? (
         <AgentActivityAnimation
           label="Genie is working with the Requirements Analyst agent to extract your requirements..."
           events={liveEvents}

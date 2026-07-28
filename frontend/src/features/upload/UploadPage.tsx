@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Button, Dropdown, Option, Table, TableBody, TableCell, TableHeader, TableHeaderCell, TableRow, Text } from "@fluentui/react-components";
+import { Button, Dropdown, Option, Table, TableBody, TableCell, TableHeader, TableHeaderCell, TableRow } from "@fluentui/react-components";
 import { PageHeader } from "@/layouts/AppShell";
 import { LoadingState } from "@/components/LoadingState";
 import { ErrorState } from "@/components/ErrorState";
@@ -8,19 +8,24 @@ import { useSessionContext } from "@/state/SessionContext";
 import { useUploadAction, useUploads } from "@/hooks/useUploads";
 import { useWorkflowRun } from "@/hooks/useWorkflowRun";
 import { DISCOVERY_WORKFLOW_ID } from "@/config/discoveryWorkflow";
+import { ApiError } from "@/services/httpClient";
+import type { SafeError } from "@/types/common";
 import type { UploadType } from "@/types/upload";
 
 const UPLOAD_TYPES: UploadType[] = ["transcript", "audio", "video", "supporting_document"];
 
 export function UploadPage(): JSX.Element {
   const navigate = useNavigate();
-  const { sessionId, setWorkflowRunId, setMissionStartedAt } = useSessionContext();
+  const { sessionId, setWorkflowRunId, setMissionStartedAt, setMissionError } = useSessionContext();
   const [uploadType, setUploadType] = useState<UploadType>("transcript");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const { upload, uploading, error: uploadError } = useUploadAction(sessionId);
   const { data: uploads, loading, error, refresh } = useUploads(sessionId);
-  const { run, running, error: runError } = useWorkflowRun(sessionId);
+  // Errors from this run are surfaced via SessionContext's missionError (see
+  // handleGeneratePrototype below) since this page navigates away before
+  // the run promise settles - there is no local error state to show here.
+  const { run } = useWorkflowRun(sessionId);
 
   const handleFileChosen = useCallback(
     async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -33,35 +38,35 @@ export function UploadPage(): JSX.Element {
     [upload, uploadType, refresh],
   );
 
-  // `clicked` flips true the instant the button is pressed (not just while
-  // the HTTP request is in flight) so the live console appears with zero
-  // perceived latency, and stays true through the short "finishing" beat
-  // below so the user sees a clear terminal state instead of an abrupt jump
-  // straight to the Requirements page.
+  // `clicked` flips true the instant the button is pressed so the button
+  // disables and the live console appears with zero perceived latency.
   const [clicked, setClicked] = useState(false);
-  const [finishingMessage, setFinishingMessage] = useState<string | null>(null);
 
+  // Navigates to Requirements immediately on click - the workflow run
+  // itself (which can take a while, since analyze-requirements is a real
+  // agent call) is kicked off in the background rather than awaited here,
+  // so the Requirements page's own AgentActivityAnimation is what the user
+  // watches while the agent works, instead of staring at a disabled button
+  // on this page. The fetch is not tied to this component's lifecycle, so
+  // it keeps running (and still updates the shared session context) even
+  // after Upload unmounts.
   const handleGeneratePrototype = useCallback(async () => {
     setClicked(true);
-    setFinishingMessage(null);
     // Marks the mission as started for the Agent Triage panel (global, in
     // AppShell) so it can show the live "clicked -> orchestrator engaged"
     // mission console itself - this page no longer renders its own copy.
     setMissionStartedAt(Date.now());
+    setMissionError(null);
+    navigate("/requirements");
     try {
       const result = await run(DISCOVERY_WORKFLOW_ID);
       setWorkflowRunId(result.workflow_run_id);
-      setFinishingMessage(
-        result.status === "waiting_for_approval"
-          ? "Paused for your approval - opening Requirements..."
-          : "Mission phase complete - opening Requirements...",
-      );
-      window.setTimeout(() => navigate("/requirements"), 900);
-    } catch {
-      setClicked(false);
+    } catch (err) {
       setMissionStartedAt(null);
+      const safe: SafeError = err instanceof ApiError ? err : { message: "Unable to start the workflow." };
+      setMissionError(safe);
     }
-  }, [run, setWorkflowRunId, setMissionStartedAt, navigate]);
+  }, [run, setWorkflowRunId, setMissionStartedAt, setMissionError, navigate]);
 
   if (!sessionId) {
     return (
@@ -109,7 +114,6 @@ export function UploadPage(): JSX.Element {
       </div>
 
       {uploadError ? <ErrorState error={uploadError} /> : null}
-      {runError ? <ErrorState error={runError} /> : null}
 
       {loading ? <LoadingState label="Loading uploads..." /> : null}
       {error ? <ErrorState error={error} onRetry={refresh} /> : null}
@@ -143,19 +147,9 @@ export function UploadPage(): JSX.Element {
           disabled={clicked || !uploads || uploads.length === 0}
           onClick={() => void handleGeneratePrototype()}
         >
-          {clicked ? (running ? "Starting Prototyping..." : "Finishing up...") : "Start Prototyping"}
+          {clicked ? "Opening Requirements..." : "Start Prototyping"}
         </Button>
-        {clicked ? (
-          <Text size={200} style={{ opacity: 0.75 }}>
-            🕹️ Live mission progress is in the Agent Triage panel on the right
-          </Text>
-        ) : null}
       </div>
-      {clicked && finishingMessage ? (
-        <Text size={200} className="genie-fade-in" style={{ display: "block", marginTop: 10, opacity: 0.85 }}>
-          🏁 {finishingMessage}
-        </Text>
-      ) : null}
     </div>
   );
 }

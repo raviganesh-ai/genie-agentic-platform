@@ -1,6 +1,7 @@
 /* eslint-disable react-refresh/only-export-components -- this module intentionally
    pairs the SessionProvider component with its useSessionContext hook. */
 import { createContext, useContext, useMemo, useState, type ReactNode } from "react";
+import type { SafeError } from "@/types/common";
 
 export interface SessionContextValue {
   sessionId: string | null;
@@ -10,9 +11,15 @@ export interface SessionContextValue {
    * "clicked -> orchestrator engaged" mission console without the Upload
    * page needing its own duplicate view. */
   missionStartedAt: number | null;
+  /** Set if the workflow run kicked off from Upload failed *before* a
+   * workflow_run_id was ever minted - the Requirements page (which the user
+   * is navigated to immediately on click, ahead of the run finishing) has
+   * no other way to learn the run never produced a run id to poll. */
+  missionError: SafeError | null;
   setSessionId: (sessionId: string | null) => void;
   setWorkflowRunId: (workflowRunId: string | null) => void;
   setMissionStartedAt: (missionStartedAt: number | null) => void;
+  setMissionError: (missionError: SafeError | null) => void;
 }
 
 const SessionContext = createContext<SessionContextValue | null>(null);
@@ -36,10 +43,20 @@ export function SessionProvider({
   const [sessionId, setSessionId] = useState<string | null>(initialSessionId);
   const [workflowRunId, setWorkflowRunId] = useState<string | null>(initialWorkflowRunId);
   const [missionStartedAt, setMissionStartedAt] = useState<number | null>(null);
+  const [missionError, setMissionError] = useState<SafeError | null>(null);
 
   const value = useMemo(
-    () => ({ sessionId, workflowRunId, missionStartedAt, setSessionId, setWorkflowRunId, setMissionStartedAt }),
-    [sessionId, workflowRunId, missionStartedAt],
+    () => ({
+      sessionId,
+      workflowRunId,
+      missionStartedAt,
+      missionError,
+      setSessionId,
+      setWorkflowRunId,
+      setMissionStartedAt,
+      setMissionError,
+    }),
+    [sessionId, workflowRunId, missionStartedAt, missionError],
   );
 
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;
