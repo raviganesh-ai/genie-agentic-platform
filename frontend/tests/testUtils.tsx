@@ -4,6 +4,7 @@ import { MemoryRouter } from "react-router-dom";
 import { FluentProvider } from "@fluentui/react-components";
 import { genieDarkTheme } from "@/styles/theme";
 import { SessionProvider } from "@/state/SessionContext";
+import type { SafeError } from "@/types/common";
 
 /**
  * Renders a page/component wrapped in the same providers the real app uses
@@ -17,6 +18,7 @@ export function renderWithProviders(
     sessionId?: string | null;
     workflowRunId?: string | null;
     missionStartedAt?: number | null;
+    missionError?: SafeError | null;
   } = {},
 ) {
   return render(
@@ -26,6 +28,7 @@ export function renderWithProviders(
           initialSessionId={options.sessionId ?? null}
           initialWorkflowRunId={options.workflowRunId ?? null}
           initialMissionStartedAt={options.missionStartedAt ?? null}
+          initialMissionError={options.missionError ?? null}
         >
           {ui}
         </SessionProvider>

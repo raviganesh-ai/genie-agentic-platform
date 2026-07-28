@@ -16,7 +16,8 @@ import { approvalApi } from "@/services/approvalApi";
 import { workflowApi } from "@/services/workflowApi";
 import { getTraceId } from "@/state/traceRegistry";
 import type { WorkflowStepInput } from "@/types/workflow";
-import type { ApiError } from "@/services/httpClient";
+import { ApiError } from "@/services/httpClient";
+import type { SafeError } from "@/types/common";
 import { LoadingState } from "@/components/LoadingState";
 import { ErrorState } from "@/components/ErrorState";
 import { SectionCard } from "@/components/SectionCard";
@@ -189,6 +190,7 @@ function approvalStatusMeta(status: string): { icon: string; accent: string } {
 
 export function RequirementDiscoveryPage(): JSX.Element {
   const { sessionId, workflowRunId, missionStartedAt, missionError, setMissionError } = useSessionContext();
+
   const navigate = useNavigate();
   const { data, loading, error, refresh } = useRequirements(sessionId, workflowRunId, POLL_MS);
   const { data: qualification } = useRequirementsQualification(sessionId, workflowRunId, POLL_MS);
@@ -392,26 +394,45 @@ export function RequirementDiscoveryPage(): JSX.Element {
                   },
                 }
               : undefined;
+
+        if (subjectId === "design-architecture") {
+          // Approving this checkpoint kicks off design-architecture (a real
+          // Architecture Designer agent call, which can take a while) in the
+          // resume call below - jump straight to Architecture Studio so its
+          // agent-activity animation is visible right away, instead of
+          // awaiting the whole step here first and arriving with the work
+          // already done (and the animation never getting a chance to show).
+          setMissionError(null);
+          navigate("/architecture-studio");
+          workflowApi.resumeRun(sessionId, workflowRunId, traceId, stepInputs).catch((err) => {
+            const safe: SafeError =
+              err instanceof ApiError ? err : { message: "Failed to resume the workflow." };
+            setMissionError(safe);
+          });
+          return;
+        }
+
         await workflowApi.resumeRun(sessionId, workflowRunId, traceId, stepInputs);
         // Resuming can complete further steps that raise their own new
         // approval requests (e.g. final-output-approval) - refetch so any
         // newly pending request appears without requiring a manual reload.
         await Promise.all([refresh(), refreshApprovals()]);
-        // Approving the requirement-discovery checkpoint kicks off
-        // design-architecture in the same resume call above - jump the user
-        // straight to Architecture Studio so the newly produced
-        // recommendation is visible immediately, instead of leaving them on
-        // this page wondering whether anything happened.
-        if (subjectId === "design-architecture") {
-          navigate("/architecture-studio");
-        }
       } catch (err) {
         setResumeError((err as ApiError).message ?? "Failed to resume the workflow.");
       } finally {
         setResumingRequestId(null);
       }
     },
-[sessionId, workflowRunId, policiesByRequest, effectiveRequirementsDraft, refresh, refreshApprovals, navigate],
+    [
+      sessionId,
+      workflowRunId,
+      policiesByRequest,
+      effectiveRequirementsDraft,
+      refresh,
+      refreshApprovals,
+      navigate,
+      setMissionError,
+    ],
   );
 
   if (!workflowRunId) {

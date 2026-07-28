@@ -264,35 +264,25 @@ a,
 }
 
 /* Interactive flow diagrams (Architecture Studio: UI <-> Agentic Workflow,
-   Orchestrator <-> individual agents) - animated "data flowing" connectors
-   plus glowing hover/focus state on each node so scrubbing across the
-   diagram feels alive, not a static chart. */
-@keyframes genie-flow-line-travel {
-  from {
-    background-position: 0 0;
-  }
-  to {
-    background-position: -32px 0;
-  }
-}
-
+   Orchestrator <-> individual agents) - a calm, static "connected" line
+   plus a single gentle traveling particle sweep on entrance (not a
+   perpetual strobe - repeated bright motion forever is fatiguing to look
+   at on a page meant to be read, not just glanced at) so the diagram
+   still feels alive without being distracting. */
 .genie-flow-connector {
   position: absolute;
   left: 0;
   top: 50%;
   width: 100%;
-  height: 3px;
+  height: 2px;
   margin-top: -1px;
   border-radius: 2px;
-  background-image: repeating-linear-gradient(to right, #2f83e0 0, #2f83e0 8px, transparent 8px, transparent 16px);
-  background-size: 32px 100%;
-  animation: genie-flow-line-travel 900ms linear infinite;
-  opacity: 0.7;
-  transition: opacity 200ms ease;
+  background-color: rgba(47, 131, 224, 0.32);
+  transition: opacity 200ms ease, background-color 200ms ease;
 }
 
 .genie-flow-connector-active {
-  opacity: 1;
+  background-color: rgba(47, 131, 224, 0.5);
 }
 
 @keyframes genie-flow-particle {
@@ -301,12 +291,12 @@ a,
     opacity: 0;
     transform: translateY(-50%) scale(0.6);
   }
-  12% {
-    opacity: 1;
+  20% {
+    opacity: 0.9;
     transform: translateY(-50%) scale(1);
   }
-  88% {
-    opacity: 1;
+  80% {
+    opacity: 0.9;
     transform: translateY(-50%) scale(1);
   }
   100% {
@@ -319,13 +309,21 @@ a,
 .genie-flow-particle {
   position: absolute;
   top: 50%;
-  width: 9px;
-  height: 9px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
   background: #6ab2ff;
-  box-shadow: 0 0 10px 3px rgba(106, 178, 255, 0.85);
-  animation: genie-flow-particle 1.7s ease-in-out infinite;
+  box-shadow: 0 0 6px 1px rgba(106, 178, 255, 0.5);
+  animation: genie-flow-particle 1.6s ease-in-out 1;
+  animation-fill-mode: forwards;
   pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .genie-flow-particle {
+    animation: none;
+    opacity: 0;
+  }
 }
 
 .genie-flow-node {
@@ -380,32 +378,41 @@ a,
 
 /* Architecture Studio's requirement-derived "UI Design" / "Multi-Agent
    Workflow" sections - the two most important, mission-specific outputs
-   on that page - get an animated brand-gradient glow border so they
-   visually pop rather than looking like every other static card. */
+   on that page - get a slow, subtle glow border so they visually stand
+   out from every other static card without being distracting to read
+   next to (single hue, low blur/opacity, ~8s breathing cycle rather than
+   a fast, high-contrast pulse). */
 @keyframes genie-section-highlight-glow {
   0%,
   100% {
     box-shadow:
-      0 0 0 1px rgba(47, 131, 224, 0.4),
-      0 0 20px 1px rgba(47, 131, 224, 0.2);
+      0 0 0 1px rgba(47, 131, 224, 0.28),
+      0 0 10px 0 rgba(47, 131, 224, 0.08);
   }
   50% {
     box-shadow:
-      0 0 0 1px rgba(138, 99, 210, 0.5),
-      0 0 32px 6px rgba(138, 99, 210, 0.3);
+      0 0 0 1px rgba(47, 131, 224, 0.4),
+      0 0 14px 1px rgba(47, 131, 224, 0.14);
   }
 }
 
 .genie-section-card-highlight {
-  animation: genie-section-highlight-glow 3.6s ease-in-out infinite;
-  background-image: linear-gradient(160deg, rgba(47, 131, 224, 0.06), transparent 60%);
+  animation: genie-section-highlight-glow 8s ease-in-out infinite;
+  background-image: linear-gradient(160deg, rgba(47, 131, 224, 0.04), transparent 60%);
 }
 
 .genie-section-card-highlight:hover {
   animation-play-state: paused;
   box-shadow:
     0 10px 26px rgba(0, 0, 0, 0.3),
-    0 0 0 1px rgba(138, 99, 210, 0.55) !important;
+    0 0 0 1px rgba(47, 131, 224, 0.45) !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .genie-section-card-highlight {
+    animation: none;
+    box-shadow: 0 0 0 1px rgba(47, 131, 224, 0.3);
+  }
 }
 
 /* Staggered entrance for each item inside an animated architecture

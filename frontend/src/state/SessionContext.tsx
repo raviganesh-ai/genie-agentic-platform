@@ -11,10 +11,12 @@ export interface SessionContextValue {
    * "clicked -> orchestrator engaged" mission console without the Upload
    * page needing its own duplicate view. */
   missionStartedAt: number | null;
-  /** Set if the workflow run kicked off from Upload failed *before* a
-   * workflow_run_id was ever minted - the Requirements page (which the user
-   * is navigated to immediately on click, ahead of the run finishing) has
-   * no other way to learn the run never produced a run id to poll. */
+  /** Surfaces a background workflow-run failure to whatever page the user
+   * has already been navigated to ahead of that work finishing - e.g. the
+   * Upload -> Requirements handoff (failed before a workflow_run_id was
+   * ever minted, so Requirements has no run to poll) and the Requirements
+   * approve -> Architecture Studio handoff (failed resuming an existing
+   * run). Cleared by the destination page once shown/retried. */
   missionError: SafeError | null;
   setSessionId: (sessionId: string | null) => void;
   setWorkflowRunId: (workflowRunId: string | null) => void;
@@ -35,17 +37,19 @@ export function SessionProvider({
   initialSessionId = null,
   initialWorkflowRunId = null,
   initialMissionStartedAt = null,
+  initialMissionError = null,
 }: {
   children: ReactNode;
   /** Test-only seams for rendering pages without going through LandingPage. */
   initialSessionId?: string | null;
   initialWorkflowRunId?: string | null;
   initialMissionStartedAt?: number | null;
+  initialMissionError?: SafeError | null;
 }): JSX.Element {
   const [sessionId, setSessionId] = useState<string | null>(initialSessionId);
   const [workflowRunId, setWorkflowRunId] = useState<string | null>(initialWorkflowRunId);
   const [missionStartedAt, setMissionStartedAt] = useState<number | null>(initialMissionStartedAt);
-  const [missionError, setMissionError] = useState<SafeError | null>(null);
+  const [missionError, setMissionError] = useState<SafeError | null>(initialMissionError);
 
   const value = useMemo(
     () => ({

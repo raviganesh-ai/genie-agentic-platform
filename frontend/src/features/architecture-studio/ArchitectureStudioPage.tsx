@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   Button,
   Checkbox,
@@ -78,7 +79,8 @@ const OTHER_POLICY_OPTION = "Other";
 const POLL_MS = Number(import.meta.env.VITE_ARCHITECTURE_STUDIO_POLL_MS ?? 0);
 
 export function ArchitectureStudioPage(): JSX.Element {
-  const { sessionId, workflowRunId } = useSessionContext();
+  const { sessionId, workflowRunId, missionError, setMissionError } = useSessionContext();
+  const navigate = useNavigate();
   const { data: snapshot, loading, error, refresh } = useArchitectureStudio(
     sessionId,
     workflowRunId,
@@ -222,10 +224,20 @@ export function ArchitectureStudioPage(): JSX.Element {
       {snapshot ? (
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           {!architectureComponent ? (
-            <AgentActivityAnimation
-              label="Genie is working with the Architecture Designer agent on this mission's UI design and multi-agent workflow..."
-              events={liveEvents}
-            />
+            missionError ? (
+              <ErrorState
+                error={missionError}
+                onRetry={() => {
+                  setMissionError(null);
+                  navigate("/requirements");
+                }}
+              />
+            ) : (
+              <AgentActivityAnimation
+                label="Genie is working with the Architecture Designer agent on this mission's UI design and multi-agent workflow..."
+                events={liveEvents}
+              />
+            )
           ) : topSections.length > 0 ? (
             topSections.map((section) => {
               const highlighted = isHighlightedSection(section.title);

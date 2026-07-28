@@ -31,6 +31,50 @@ describe("ArchitectureStudioPage", () => {
     expect(screen.getByRole("button", { name: /Fabric-First/i })).toBeInTheDocument();
   });
 
+  it("shows the agent activity animation while design-architecture hasn't produced a component yet", async () => {
+    // Reproduces the Requirements approve -> Architecture Studio navigation:
+    // the user is navigated here immediately (ahead of the background resume
+    // call finishing design-architecture), so this page must show the
+    // Architect agent's live activity animation rather than an empty list.
+    mockFetchSequence([
+      {
+        match: `/architecture/${FIXTURE_WORKFLOW_RUN_ID}`,
+        response: { ...buildArchitectureSnapshot(), components: [] },
+      },
+      { match: "/approvals", response: [] },
+    ]);
+
+    renderWithProviders(<ArchitectureStudioPage />, {
+      sessionId: FIXTURE_SESSION_ID,
+      workflowRunId: FIXTURE_WORKFLOW_RUN_ID,
+    });
+
+    await waitFor(() =>
+      expect(screen.getByText(/Genie is working with the Architecture Designer agent/i)).toBeInTheDocument(),
+    );
+  });
+
+  it("shows an error instead of the animation when the background resume failed before producing a component", async () => {
+    mockFetchSequence([
+      {
+        match: `/architecture/${FIXTURE_WORKFLOW_RUN_ID}`,
+        response: { ...buildArchitectureSnapshot(), components: [] },
+      },
+      { match: "/approvals", response: [] },
+    ]);
+
+    renderWithProviders(<ArchitectureStudioPage />, {
+      sessionId: FIXTURE_SESSION_ID,
+      workflowRunId: FIXTURE_WORKFLOW_RUN_ID,
+      missionError: { message: "Failed to resume the workflow." },
+    });
+
+    await waitFor(() => expect(screen.getByText(/Failed to resume the workflow/i)).toBeInTheDocument());
+    expect(
+      screen.queryByText(/Genie is working with the Architecture Designer agent/i),
+    ).not.toBeInTheDocument();
+  });
+
   it("requires governance policies before approving the architecture and generating code", async () => {
     const fetchMock = mockFetchSequence([
       { match: `/architecture/${FIXTURE_WORKFLOW_RUN_ID}`, response: buildArchitectureSnapshot() },
