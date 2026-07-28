@@ -6,7 +6,7 @@ export function SectionCard({
   action,
   children,
 }: {
-  title: string;
+  title: ReactNode;
   action?: JSX.Element;
   children: ReactNode;
 }): JSX.Element {

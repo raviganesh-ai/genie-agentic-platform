@@ -120,6 +120,85 @@ a,
   animation: genie-live-pulse 1.6s ease-in-out infinite;
 }
 
+/* Mission flow sidebar - a "skill tree" style vertical pipeline, not a
+   standard nav menu: glowing status nodes, an energy line that visibly
+   flows toward whichever stage is currently active, and a subtle hover
+   lift on reachable rows. */
+@keyframes genie-node-pulse-active {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 0 rgba(217, 154, 43, 0.5),
+      0 0 14px 2px rgba(217, 154, 43, 0.45);
+    transform: scale(1);
+  }
+  50% {
+    box-shadow:
+      0 0 0 8px rgba(217, 154, 43, 0),
+      0 0 22px 6px rgba(217, 154, 43, 0.65);
+    transform: scale(1.06);
+  }
+}
+
+.genie-stage-node-active {
+  animation: genie-node-pulse-active 1.8s ease-in-out infinite;
+}
+
+.genie-stage-node-complete {
+  box-shadow: 0 0 12px 2px rgba(63, 166, 106, 0.45);
+}
+
+.genie-stage-node-locked {
+  filter: grayscale(1);
+  opacity: 0.5;
+}
+
+@keyframes genie-flow-travel {
+  from {
+    background-position: 0 0;
+  }
+  to {
+    background-position: 0 -32px;
+  }
+}
+
+.genie-stage-line-active {
+  background-image: repeating-linear-gradient(to bottom, #d99a2b 0, #d99a2b 8px, transparent 8px, transparent 16px);
+  background-size: 100% 32px;
+  animation: genie-flow-travel 900ms linear infinite;
+}
+
+.genie-stage-row {
+  border-radius: 10px;
+  transition:
+    background-color 160ms ease,
+    transform 160ms ease;
+}
+
+.genie-stage-row.genie-stage-clickable:hover {
+  background-color: rgba(47, 131, 224, 0.08);
+  transform: translateX(3px);
+}
+
+.genie-stage-eyebrow {
+  letter-spacing: 2px;
+  text-transform: uppercase;
+}
+
 .genie-xp-bar {
   transition: width 400ms ease;
 }
+
+.genie-req-item {
+  transition:
+    transform 160ms ease,
+    border-color 160ms ease,
+    background-color 160ms ease;
+}
+
+.genie-req-item:hover {
+  transform: translateX(3px);
+  border-color: #2f83e0;
+  background-color: #1a2230;
+}
+

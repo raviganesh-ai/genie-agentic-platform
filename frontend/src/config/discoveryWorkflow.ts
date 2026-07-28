@@ -9,3 +9,19 @@
 export const DISCOVERY_WORKFLOW_ID: string =
   (import.meta.env.VITE_DISCOVERY_WORKFLOW_ID as string | undefined) ??
   "solution-discovery-workflow";
+
+/**
+ * Ordered mission phases for `solution-discovery-workflow`
+ * (config/workflows/registry.yaml `steps[].id`/`description`). Shared by
+ * every UI surface that needs to render this mission's stage sequence
+ * (Upload's progress bar, the Triage panel's control-flow map) so there is
+ * exactly one place that mirrors the backend registry, instead of each
+ * surface hardcoding its own copy that could drift out of sync.
+ */
+export const MISSION_PHASES: { stepId: string; label: string }[] = [
+  { stepId: "analyze-requirements", label: "Analyzing requirements" },
+  { stepId: "design-architecture", label: "Designing architecture" },
+  { stepId: "build-solution", label: "Building UI & agent workflow" },
+  { stepId: "governance-review", label: "Governance review" },
+  { stepId: "deploy-solution", label: "Deploying & launching" },
+];

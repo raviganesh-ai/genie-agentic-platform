@@ -191,3 +191,74 @@ workflows:
     agent_registry = _agent_registry(tmp_path, agent_id="agent-a")
 
     assert workflow_registry.validate_agent_references(agent_registry) == []
+
+
+def test_validate_agent_references_detects_unknown_allowed_tool_name(tmp_path: Path):
+    _write(
+        tmp_path / "agents" / "registry.yaml",
+        "agents:\n"
+        "  - id: agent-a\n"
+        "    name: A\n"
+        "    role: r\n"
+        "    description: d\n"
+        "    model_deployment_ref: m\n"
+        "    tool_definitions:\n"
+        "      - name: call_known\n"
+        "        description: A known tool.\n",
+    )
+    agent_registry = AgentRegistry.load(tmp_path / "agents")
+    _write(
+        tmp_path / "workflows" / "registry.yaml",
+        """
+workflows:
+  - id: wf-1
+    name: Workflow One
+    description: A workflow.
+    steps:
+      - id: step-1
+        agent_id: agent-a
+        description: First step.
+        allowed_tool_names:
+          - call_unknown
+""",
+    )
+    workflow_registry = WorkflowRegistry.load(tmp_path / "workflows")
+
+    errors = workflow_registry.validate_agent_references(agent_registry)
+
+    assert len(errors) == 1
+    assert "call_unknown" in errors[0]
+
+
+def test_validate_agent_references_passes_for_known_allowed_tool_name(tmp_path: Path):
+    _write(
+        tmp_path / "agents" / "registry.yaml",
+        "agents:\n"
+        "  - id: agent-a\n"
+        "    name: A\n"
+        "    role: r\n"
+        "    description: d\n"
+        "    model_deployment_ref: m\n"
+        "    tool_definitions:\n"
+        "      - name: call_known\n"
+        "        description: A known tool.\n",
+    )
+    agent_registry = AgentRegistry.load(tmp_path / "agents")
+    _write(
+        tmp_path / "workflows" / "registry.yaml",
+        """
+workflows:
+  - id: wf-1
+    name: Workflow One
+    description: A workflow.
+    steps:
+      - id: step-1
+        agent_id: agent-a
+        description: First step.
+        allowed_tool_names:
+          - call_known
+""",
+    )
+    workflow_registry = WorkflowRegistry.load(tmp_path / "workflows")
+
+    assert workflow_registry.validate_agent_references(agent_registry) == []

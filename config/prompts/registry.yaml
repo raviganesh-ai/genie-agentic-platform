@@ -9,9 +9,11 @@ prompts:
     name: Requirements Extraction
     description: >-
       Extracts goals, functional and non-functional requirements, risks,
-      assumptions, and constraints from a transcript excerpt, and assesses
-      whether those requirements actually warrant a multi-agent agentic AI
-      workflow.
+      assumptions, and constraints from a transcript excerpt, distills
+      them into a reviewed, summarized checklist with an explicit
+      critical path and mandatory security/reliability coverage, and
+      assesses whether those requirements actually warrant a multi-agent
+      agentic AI workflow.
     template: >-
       You are the Requirements Analyst agent for the Genie Agentic
       Experience Center. Given the following transcript excerpt, extract
@@ -22,6 +24,23 @@ prompts:
       {transcript_excerpt}
 
       Customer message (if any): {user_message}
+
+      Now review what you extracted before responding - do not return your
+      raw extraction. Distill it down to one concise, plain-language
+      summary line per individual requirement (no restating the same idea
+      twice, no filler, no multi-paragraph explanations per item), and
+      output only that reviewed, summarized list.
+
+      Immediately after the requirement list, add a "Critical path:"
+      section identifying the ordered subset of requirements that must be
+      delivered first because the rest of the solution depends on them.
+
+      Also make sure the requirements list explicitly covers application
+      security (authentication/authorization, data protection, secret
+      handling) and reliability (error handling, resilience, availability)
+      as their own non-functional requirements - add them yourself if the
+      transcript does not already call them out, since every solution
+      Genie builds must be secure and reliable by default.
 
       After extracting the requirements above, assess whether they
       genuinely warrant a multi-agent agentic AI workflow (multiple
@@ -45,7 +64,7 @@ prompts:
     variables:
       - transcript_excerpt
       - user_message
-    version: "1.1.0"
+    version: "1.2.0"
 
   - id: architecture-recommendation-v1
     name: Architecture Recommendation
@@ -221,4 +240,114 @@ prompts:
       - transcript
       - user_message
     version: "1.0.0"
+
+  - id: orchestrator-requirements-phase-v1
+    name: Orchestrator Requirements Phase
+    description: >-
+      Drives the requirements-discovery phase of the mission by
+      delegating to the Requirements Analyst agent.
+    template: >-
+      You are the Genie Orchestrator driving the requirements-discovery
+      phase of this mission. Call the call_requirements_analyst tool
+      exactly once, passing transcript_excerpt and user_message below
+      unchanged, then respond with EXACTLY that tool's returned output
+      text and nothing else - no additional commentary, no summary.
+
+      transcript_excerpt: {transcript_excerpt}
+
+      user_message: {user_message}
+    variables:
+      - transcript_excerpt
+      - user_message
+    version: "1.0.0"
+
+  - id: orchestrator-architecture-phase-v1
+    name: Orchestrator Architecture Phase
+    description: >-
+      Drives the architecture-design phase of the mission by delegating
+      to the Architecture Designer agent.
+    template: >-
+      You are the Genie Orchestrator driving the architecture-design
+      phase of this mission. Call the call_architecture_designer tool
+      exactly once, passing approved_requirements and user_message below
+      unchanged, then respond with EXACTLY that tool's returned output
+      text and nothing else - no additional commentary, no summary.
+
+      approved_requirements: {approved_requirements}
+
+      user_message: {user_message}
+    variables:
+      - approved_requirements
+      - user_message
+    version: "1.0.0"
+
+  - id: orchestrator-build-phase-v1
+    name: Orchestrator Build Phase
+    description: >-
+      Drives the build phase of the mission by delegating to the Build
+      Agent.
+    template: >-
+      You are the Genie Orchestrator driving the build phase of this
+      mission. Call the call_build_agent tool exactly once, passing
+      requirements, architecture, and user_message below unchanged, then
+      respond with EXACTLY that tool's returned output text and nothing
+      else - no additional commentary, no summary.
+
+      requirements: {requirements}
+
+      architecture: {architecture}
+
+      user_message: {user_message}
+    variables:
+      - requirements
+      - architecture
+      - user_message
+    version: "1.0.0"
+
+  - id: orchestrator-governance-phase-v1
+    name: Orchestrator Governance Phase
+    description: >-
+      Drives the governance-review phase of the mission by delegating to
+      the Governance Reviewer agent.
+    template: >-
+      You are the Genie Orchestrator driving the governance-review phase
+      of this mission. Call the call_governance_reviewer tool exactly
+      once, passing artifact, policies, and user_message below unchanged,
+      then respond with EXACTLY that tool's returned output text and
+      nothing else - no additional commentary, no summary.
+
+      artifact: {artifact}
+
+      policies: {policies}
+
+      user_message: {user_message}
+    variables:
+      - artifact
+      - policies
+      - user_message
+    version: "1.0.0"
+
+  - id: orchestrator-deployment-phase-v1
+    name: Orchestrator Deployment Phase
+    description: >-
+      Drives the deployment phase of the mission by delegating to the
+      Deployment Agent.
+    template: >-
+      You are the Genie Orchestrator driving the deployment phase of
+      this mission. Call the call_deployment_agent tool exactly once,
+      passing build_output, governance_decision, and user_message below
+      unchanged, then respond with EXACTLY that tool's returned output
+      text and nothing else - no additional commentary, no summary.
+
+      build_output: {build_output}
+
+      governance_decision: {governance_decision}
+
+      user_message: {user_message}
+    variables:
+      - build_output
+      - governance_decision
+      - user_message
+    version: "1.0.0"
+
 

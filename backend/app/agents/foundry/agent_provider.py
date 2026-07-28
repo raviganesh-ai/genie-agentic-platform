@@ -37,7 +37,12 @@ from app.agents.foundry.project_service import FoundryProjectService
 from app.agents.models import AgentToolDefinition
 from app.agents.tool_execution import AgentToolRegistry, ToolCallContext, ToolExecutionError
 
-__all__ = ["FoundryAgentClient", "FoundryAgentProvider", "FoundryRunResult"]
+__all__ = [
+    "FoundryAgentClient",
+    "FoundryAgentProvider",
+    "FoundryRunResult",
+    "tool_definition_to_json_schema",
+]
 
 
 @dataclass(frozen=True)
@@ -142,9 +147,11 @@ class FoundryAgentProvider:
         if tool_context is None or self._tool_registry is None:
             return []
 
+        allowed = tool_context.allowed_tool_names
         return [
             self._build_one_tool(tool_definition, tool_context)
             for tool_definition in tool_context.agent.tool_definitions
+            if allowed is None or tool_definition.name in allowed
         ]
 
     def _build_one_tool(
@@ -172,16 +179,21 @@ class FoundryAgentProvider:
             name=tool_name,
             description=tool_definition.description,
             func=_invoke,
-            input_model=_tool_definition_to_json_schema(tool_definition),
+            input_model=tool_definition_to_json_schema(tool_definition),
         )
 
 
-def _tool_definition_to_json_schema(tool_definition: AgentToolDefinition) -> dict[str, Any]:
+def tool_definition_to_json_schema(tool_definition: AgentToolDefinition) -> dict[str, Any]:
     """Render an ``AgentToolDefinition`` as a JSON-schema object for ``FunctionTool``.
 
     CONFIRMED via sandbox testing (see session notes): ``agent_framework.
     FunctionTool(input_model=...)`` accepts a plain JSON-schema ``dict``
-    directly - no ``pydantic.BaseModel`` is required.
+    directly - no ``pydantic.BaseModel`` is required. Also reused by
+    ``scripts/provision_foundry_agents.py`` to build the *persisted*
+    ``azure.ai.projects.models.FunctionTool`` schema on the Foundry agent
+    definition itself - required for the model to even know a tool exists
+    (see that script's module docstring for why per-request tool
+    declarations are silently dropped when an agent is referenced by name).
     """
 
     properties: dict[str, Any] = {}

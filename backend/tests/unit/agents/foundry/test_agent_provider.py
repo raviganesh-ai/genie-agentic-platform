@@ -168,6 +168,49 @@ async def test_run_builds_function_tools_from_agent_tool_definitions():
     assert invoked == {"recorded": True, "text": "a requirement"}
 
 
+async def test_run_filters_function_tools_by_allowed_tool_names_on_tool_context():
+    api_client = _FakeApiClient(latest_version="1")
+    project_service = _FakeProjectService(api_client=api_client)
+    fake_agent = _FakeFoundryAgent(project_client=None, agent_name="", agent_version="")
+    tool_registry = AgentToolRegistry()
+
+    async def _call_a(arguments: dict, context: ToolCallContext) -> dict:
+        return {"tool": "a"}
+
+    async def _call_b(arguments: dict, context: ToolCallContext) -> dict:
+        return {"tool": "b"}
+
+    tool_registry.register(agent_id="genie-orchestrator", tool_name="call_a", fn=_call_a)
+    tool_registry.register(agent_id="genie-orchestrator", tool_name="call_b", fn=_call_b)
+    agent_definition = AgentDefinition(
+        id="genie-orchestrator",
+        name="Genie Orchestrator",
+        role="mission_orchestration",
+        description="Drives the mission.",
+        foundry_agent_id="genie-orchestrator",
+        tool_definitions=[
+            AgentToolDefinition(name="call_a", description="Delegate A."),
+            AgentToolDefinition(name="call_b", description="Delegate B."),
+        ],
+    )
+    tool_context = ToolCallContext(
+        agent=agent_definition, session_id="s1", trace_id="t1", allowed_tool_names=["call_a"]
+    )
+    provider = FoundryAgentProvider(
+        project_service,
+        tool_registry=tool_registry,
+        agent_factory=_agent_factory_returning(fake_agent),
+    )
+
+    await provider.run(
+        foundry_agent_id="genie-orchestrator", input_text="hello", tool_context=tool_context
+    )
+
+    [run_call] = fake_agent.run_calls
+    [built_tool] = run_call["tools"]
+    assert built_tool.name == "call_a"
+
+
 async def test_run_raises_foundry_unavailable_when_no_output_text():
     api_client = _FakeApiClient()
     project_service = _FakeProjectService(api_client=api_client)

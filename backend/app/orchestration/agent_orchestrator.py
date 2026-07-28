@@ -15,6 +15,7 @@ from uuid import uuid4
 
 from app.agents.gateway import AgentGateway, create_agent_gateway
 from app.agents.registry import AgentRegistry
+from app.agents.tools.orchestration_tools import register_orchestrator_delegation_tools
 from app.agents.tools.registration import build_default_tool_registry
 from app.config.settings import Settings
 from app.governance.approval_service import ApprovalService, create_approval_service
@@ -289,6 +290,18 @@ def create_agent_orchestrator(
         prompt_registry=prompt_registry,
         session_agent_resolver=customer_agent_provisioning_service,
         tool_registry=tool_registry,
+    )
+    # Populates the same tool_registry instance already handed to
+    # resolved_agent_gateway above (see register_orchestrator_delegation_
+    # tools's docstring for why this ordering, rather than a circular
+    # construction dependency, is safe) so genie-orchestrator's phase runs
+    # can delegate to each connected specialist through this very gateway.
+    register_orchestrator_delegation_tools(
+        tool_registry,
+        agent_gateway=resolved_agent_gateway,
+        governance_service=resolved_governance_service,
+        agent_registry=agent_registry,
+        memory_service=resolved_memory_service,
     )
     recommendation_lineage_service = RecommendationLineageService(
         InMemoryRecommendationLineageRepository(), governance_service=resolved_governance_service

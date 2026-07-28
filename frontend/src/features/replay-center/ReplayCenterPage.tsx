@@ -14,6 +14,12 @@ const KIND_LABELS: Record<ReplayTimelineEntry["kind"], string> = {
   lineage: "Recommendation",
 };
 
+const KIND_META: Record<ReplayTimelineEntry["kind"], { icon: string; accent: string }> = {
+  governance: { icon: "📜", accent: "#2f83e0" },
+  approval: { icon: "✅", accent: "#c98a2c" },
+  lineage: { icon: "🧩", accent: "#8a63d2" },
+};
+
 export function ReplayCenterPage(): JSX.Element {
   const navigate = useNavigate();
   const { sessionId } = useSessionContext();
@@ -50,15 +56,20 @@ export function ReplayCenterPage(): JSX.Element {
                 No replay events recorded yet for this session.
               </Text>
             ) : (
-              data.timeline.map((entry) => (
-                <div key={entry.id} style={{ borderLeft: "2px solid #4e93e5", paddingLeft: 10 }}>
-                  <Text size={200} style={{ opacity: 0.6, display: "block" }}>
-                    {new Date(entry.timestamp).toLocaleString()} · {KIND_LABELS[entry.kind]}
-                    {entry.agentId ? ` · ${entry.agentId}` : ""}
-                  </Text>
-                  <Text size={300}>{entry.label}</Text>
-                </div>
-              ))
+              data.timeline.map((entry) => {
+                const meta = KIND_META[entry.kind];
+                return (
+                  <div key={entry.id} style={{ borderLeft: `2px solid ${meta.accent}`, paddingLeft: 10 }}>
+                    <Text size={200} style={{ opacity: 0.6, display: "block" }}>
+                      {new Date(entry.timestamp).toLocaleString()} · {KIND_LABELS[entry.kind]}
+                      {entry.agentId ? ` · ${entry.agentId}` : ""}
+                    </Text>
+                    <Text size={300}>
+                      {meta.icon} {entry.label}
+                    </Text>
+                  </div>
+                );
+              })
             )}
           </div>
         </SectionCard>

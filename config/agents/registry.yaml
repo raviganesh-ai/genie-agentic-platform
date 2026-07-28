@@ -128,13 +128,18 @@ agents:
     name: Genie Orchestrator
     role: mission_orchestration
     description: >-
-      The single entry point that drives the end-to-end mission: given an
-      uploaded customer transcript, gathers requirements, designs the
-      architecture, builds the UI and its multi-agent workflow, gets
-      governance approval, and deploys/launches it. Uses Azure AI
-      Foundry's Connected Agents feature to call the agents named in
-      connected_agent_ids dynamically, in whatever order the mission
-      requires, rather than a fixed declarative workflow.
+      Drives the mission phase by phase: for each solution-discovery-
+      workflow step (still approval-gated exactly as before), this same
+      agent is invoked, and it calls exactly one of its own registered
+      call_<agent> delegation tools (below) to actually execute the real
+      specialist for that phase, then returns that specialist's output.
+      Delegation is implemented as ordinary Foundry function-calling
+      tools (app.agents.tools.orchestration_tools), each of which executes
+      the target agent through the same AzureAgentGateway path as every
+      other agent - Azure AI Foundry's SDK exposes no distinct "Connected
+      Agents" mechanism for Prompt Agents in the pinned azure-ai-projects
+      version, so this registry's connected_agent_ids below is realized
+      via genuine per-phase function tools, not a Foundry-native feature.
     capabilities:
       - mission_orchestration
     allowed_tools: []
@@ -147,6 +152,71 @@ agents:
       - build-agent
       - governance-reviewer
       - deployment-agent
+    tool_definitions:
+      - name: call_requirements_analyst
+        description: >-
+          Delegate the requirements-discovery phase to the Requirements
+          Analyst agent and return its real output verbatim.
+        parameters:
+          - name: transcript_excerpt
+            type: string
+            description: The customer call transcript excerpt to analyze.
+          - name: user_message
+            type: string
+            description: Optional customer chat message for this phase, or empty.
+      - name: call_architecture_designer
+        description: >-
+          Delegate the architecture-design phase to the Architecture
+          Designer agent and return its real output verbatim.
+        parameters:
+          - name: approved_requirements
+            type: string
+            description: The human-approved requirements to design an architecture for.
+          - name: user_message
+            type: string
+            description: Optional customer chat message for this phase, or empty.
+      - name: call_build_agent
+        description: >-
+          Delegate the build phase to the Build Agent and return its real
+          output verbatim.
+        parameters:
+          - name: requirements
+            type: string
+            description: The approved requirements the build must satisfy.
+          - name: architecture
+            type: string
+            description: The approved architecture the build must follow.
+          - name: user_message
+            type: string
+            description: Optional customer chat message for this phase, or empty.
+      - name: call_governance_reviewer
+        description: >-
+          Delegate the governance-review phase to the Governance Reviewer
+          agent and return its real output verbatim.
+        parameters:
+          - name: artifact
+            type: string
+            description: The build artifact to review for policy compliance.
+          - name: policies
+            type: string
+            description: The policies to review the artifact against.
+          - name: user_message
+            type: string
+            description: Optional customer chat message for this phase, or empty.
+      - name: call_deployment_agent
+        description: >-
+          Delegate the deployment phase to the Deployment Agent and
+          return its real output verbatim.
+        parameters:
+          - name: build_output
+            type: string
+            description: The approved build output to deploy.
+          - name: governance_decision
+            type: string
+            description: The governance reviewer's recorded decision.
+          - name: user_message
+            type: string
+            description: Optional customer chat message for this phase, or empty.
     owner: platform-engineering-team
     governance_policy_id: standard-governance-policy-v1
     prompt_template_ref: orchestrator-mission-v1

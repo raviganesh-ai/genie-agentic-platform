@@ -12,7 +12,7 @@ governance, customer agent provisioning) at startup - never invented here.
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from app.agents.models import AgentDefinition
@@ -34,11 +34,23 @@ class ToolCallContext:
     for agent executions not tied to any session; tools that require a
     session (nearly all of them) must raise ``ToolExecutionError`` when it
     is missing rather than guessing one.
+
+    ``variables`` are the calling agent's own resolved prompt-template
+    variables for this run (``AgentExecutionRequest.variables``) - e.g. for
+    a ``genie-orchestrator`` step this is the exact same upstream step
+    output/transcript text that was substituted into its own prompt. A
+    delegation tool (``app.agents.tools.orchestration_tools``) should treat
+    this as the authoritative value for any tool-call argument name that
+    matches one of these keys, rather than trusting the model to have
+    copied a (possibly large) text block verbatim into its function-call
+    arguments.
     """
 
     agent: AgentDefinition
     session_id: str | None
     trace_id: str
+    allowed_tool_names: list[str] | None = None
+    variables: dict[str, str] = field(default_factory=dict)
 
 
 ToolFunction = Callable[[dict[str, Any], ToolCallContext], Awaitable[dict[str, Any]]]

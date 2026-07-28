@@ -35,10 +35,12 @@ def build_default_tool_registry(
 ) -> AgentToolRegistry:
     """Build the ``AgentToolRegistry`` covering every agent's real tools.
 
-    ``genie-orchestrator`` is deliberately not represented here: it already
-    calls other agents via Azure AI Foundry's built-in Connected Agents
-    tool feature, a distinct mechanism from the function-calling tools
-    registered here.
+    ``genie-orchestrator``'s own delegation tools (``call_<agent>``) are
+    deliberately not registered here, since they need a fully constructed
+    ``AgentGateway`` (not yet available at this point in
+    ``create_agent_orchestrator``) - see
+    ``app.agents.tools.orchestration_tools.register_orchestrator_delegation_
+    tools``, called separately once the gateway exists.
     """
 
     registry = AgentToolRegistry()

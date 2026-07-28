@@ -198,6 +198,19 @@ class AgentExecutionRequest(BaseModel):
             "scope_id parameter."
         ),
     )
+    allowed_tool_names: list[str] | None = Field(
+        default=None,
+        description=(
+            "Optional request-scoped restriction of which of the agent's own "
+            "AgentDefinition.tool_definitions may be exposed to this specific "
+            "run. None means every configured tool is exposed (today's "
+            "behavior for every non-orchestrator agent). Used by phase-scoped "
+            "genie-orchestrator workflow steps so a given phase call only "
+            "exposes the one or two delegation tools relevant to that phase, "
+            "rather than every connected agent at once - never used to grant "
+            "a tool the agent does not already have configured."
+        ),
+    )
 
 
 class AgentExecutionResult(BaseModel):

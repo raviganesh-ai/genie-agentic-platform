@@ -3,6 +3,7 @@ import { Badge, Text } from "@fluentui/react-components";
 import { useSessionContext } from "@/state/SessionContext";
 import { useAsyncResource } from "@/hooks/useAsyncResource";
 import { governanceApi } from "@/services/governanceApi";
+import { MISSION_PHASES } from "@/config/discoveryWorkflow";
 import type { GovernanceEvent } from "@/types/governance";
 
 /**
@@ -37,8 +38,17 @@ function summarize(detail: Record<string, unknown>): string {
     : "(agent call completed - no output preview recorded)";
 }
 
-function stepLabel(detail: Record<string, unknown>): string | null {
+function stepId(detail: Record<string, unknown>): string | null {
   return typeof detail.step_id === "string" ? detail.step_id : null;
+}
+
+function stepLabel(id: string | null): string | null {
+  if (!id) return null;
+  return MISSION_PHASES.find((phase) => phase.stepId === id)?.label ?? id;
+}
+
+function delegatedBy(detail: Record<string, unknown>): string | null {
+  return typeof detail.delegated_by === "string" ? detail.delegated_by : null;
 }
 
 const MAX_FEED_ITEMS = 30;
@@ -59,6 +69,126 @@ function computeStats(callCount: number): TriageStats {
   return { xp, level, levelProgressPct, callCount };
 }
 
+const PHASE_ICONS: Record<string, string> = {
+  "analyze-requirements": "📋",
+  "design-architecture": "🏗️",
+  "build-solution": "🤖",
+  "governance-review": "🔐",
+  "deploy-solution": "🚀",
+};
+
+type FlowNodeStatus = "complete" | "active" | "pending";
+
+/**
+ * One glowing status node in the mission control flow - reuses the exact
+ * same node/connector visual language (`genie-stage-node-*`,
+ * `genie-stage-line-active`) as the AppShell sidebar's mission-flow, so the
+ * control flow reads identically everywhere it appears instead of being its
+ * own disconnected mini-widget.
+ */
+function FlowNode({ icon, status, label }: { icon: string; status: FlowNodeStatus; label: string }): JSX.Element {
+  const nodeClass =
+    status === "complete"
+      ? "genie-stage-node-complete"
+      : status === "active"
+        ? "genie-stage-node-active"
+        : "genie-stage-node-locked";
+  const borderColor = status === "complete" ? "#3fa66a" : status === "active" ? "#d99a2b" : "#2a323d";
+  const backgroundColor =
+    status === "complete" ? "rgba(63, 166, 106, 0.15)" : status === "active" ? "rgba(217, 154, 43, 0.15)" : "#161c24";
+  return (
+    <div
+      className={nodeClass}
+      title={label}
+      style={{
+        position: "relative",
+        flexShrink: 0,
+        width: 32,
+        height: 32,
+        borderRadius: "50%",
+        border: `2px solid ${borderColor}`,
+        backgroundColor,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        fontSize: 14,
+      }}
+    >
+      {icon}
+      {status === "complete" ? (
+        <span
+          style={{
+            position: "absolute",
+            bottom: -3,
+            right: -3,
+            width: 14,
+            height: 14,
+            borderRadius: "50%",
+            backgroundColor: "#3fa66a",
+            color: "#0b0f14",
+            fontSize: 9,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          ✓
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+/** Connector segment between two flow nodes; animates a traveling stripe while the mission is actively flowing into the next node. */
+function FlowConnector({ state }: { state: FlowNodeStatus }): JSX.Element {
+  return (
+    <div
+      className={state === "active" ? "genie-stage-line-active" : undefined}
+      style={{
+        flex: 1,
+        height: 3,
+        minWidth: 12,
+        margin: "0 2px",
+        borderRadius: 2,
+        backgroundColor: state === "complete" ? "#3fa66a" : state === "pending" ? "#232a33" : undefined,
+        opacity: state === "pending" ? 0.6 : 1,
+      }}
+    />
+  );
+}
+
+/**
+ * Horizontal map of the mission's control flow - which stage has finished,
+ * which is running right now, and which is still ahead - so the live feed
+ * below reads as "here's what's happening within this stage" instead of
+ * being the only place showing stage sequence at all.
+ */
+function ControlFlowMap({ completedStepIds, activeStepId }: { completedStepIds: Set<string>; activeStepId: string | null }): JSX.Element {
+  return (
+    <div style={{ display: "flex", alignItems: "center", width: "100%" }}>
+      {MISSION_PHASES.map((phase, index) => {
+        const status: FlowNodeStatus = completedStepIds.has(phase.stepId)
+          ? "complete"
+          : phase.stepId === activeStepId
+            ? "active"
+            : "pending";
+        const isLast = index === MISSION_PHASES.length - 1;
+        const connectorState: FlowNodeStatus = completedStepIds.has(phase.stepId)
+          ? MISSION_PHASES[index + 1]?.stepId === activeStepId
+            ? "active"
+            : "complete"
+          : "pending";
+        return (
+          <div key={phase.stepId} style={{ display: "flex", alignItems: "center", flex: isLast ? "0 0 auto" : 1 }}>
+            <FlowNode icon={PHASE_ICONS[phase.stepId] ?? "🔹"} status={status} label={phase.label} />
+            {!isLast ? <FlowConnector state={connectorState} /> : null}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 /**
  * Floating "triage mode" overlay: a concise, gamified live feed of real
  * agent calls made by the orchestrator, driven by the session's governance
@@ -76,6 +206,16 @@ function computeStats(callCount: number): TriageStats {
  * while a later step in the same batch is still executing. `output_preview`
  * on each event is a truncated slice of that same agent's real output text
  * - never synthetic content.
+ *
+ * Every mission step is actually executed as: `genie-orchestrator` (the
+ * step's own agent) calls exactly one `call_<agent>` delegation tool, which
+ * runs the real specialist agent for that phase
+ * (`app.agents.tools.orchestration_tools`). Both calls are recorded as
+ * their own governance events with the same `step_id`, so this panel skips
+ * the orchestrator's own top-level event (its output is always identical
+ * to the specialist's - it just relays it verbatim) and shows only the
+ * specialist call, labeled with which stage it belongs to and which agent
+ * delegated it - that's the actual control flow of the mission.
  */
 export function TriagePanel({ enabled }: { enabled: boolean }): JSX.Element | null {
   const { sessionId } = useSessionContext();
@@ -90,13 +230,32 @@ export function TriagePanel({ enabled }: { enabled: boolean }): JSX.Element | nu
     pollIntervalMs: 2000,
   });
 
-  const agentCalls = useMemo(
+  const allCalls = useMemo(
     () =>
       [...(events ?? [])]
         .filter((event): event is GovernanceEvent => event.category === "agent_execution")
         .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp)),
     [events],
   );
+
+  // The orchestrator's own top-level call for a step is dropped from the
+  // visible feed (see doc comment above) - it never carries information the
+  // delegated specialist's own event doesn't already have.
+  const agentCalls = useMemo(
+    () => allCalls.filter((event) => event.detail.workflow_step !== true),
+    [allCalls],
+  );
+
+  const completedStepIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const event of allCalls) {
+      const id = stepId(event.detail);
+      if (id) ids.add(id);
+    }
+    return ids;
+  }, [allCalls]);
+  const activeStepId = MISSION_PHASES.find((phase) => !completedStepIds.has(phase.stepId))?.stepId ?? null;
+
   const stats = useMemo(() => computeStats(agentCalls.length), [agentCalls]);
   const isLive =
     agentCalls.length > 0 && Date.now() - Date.parse(agentCalls[0].timestamp) < 10_000;
@@ -133,6 +292,31 @@ export function TriagePanel({ enabled }: { enabled: boolean }): JSX.Element | nu
         </div>
         <Text size={200} style={{ opacity: 0.7, display: "block" }}>
           Live feed of every real agent call, in orchestrator call order
+        </Text>
+      </div>
+
+      <div
+        className="genie-fade-in"
+        style={{
+          padding: "14px 16px",
+          borderBottom: "1px solid #232a33",
+          backgroundImage: "radial-gradient(circle at 0% 0%, rgba(47, 131, 224, 0.10), transparent 65%)",
+        }}
+      >
+        <Text
+          size={100}
+          className="genie-stage-eyebrow"
+          style={{ display: "block", opacity: 0.65, marginBottom: 10 }}
+        >
+          🧭 Mission Control Flow
+        </Text>
+        <ControlFlowMap completedStepIds={completedStepIds} activeStepId={activeStepId} />
+        <Text size={200} style={{ display: "block", marginTop: 10, opacity: 0.85 }}>
+          {activeStepId
+            ? `⏳ Now: ${stepLabel(activeStepId)}`
+            : completedStepIds.size >= MISSION_PHASES.length
+              ? "✅ Mission complete"
+              : "Awaiting mission start"}
         </Text>
       </div>
 
@@ -186,9 +370,14 @@ export function TriagePanel({ enabled }: { enabled: boolean }): JSX.Element | nu
                     +{XP_PER_CALL} XP
                   </Text>
                 </div>
-                {stepLabel(event.detail) ? (
+                {delegatedBy(event.detail) ? (
                   <Text size={100} style={{ opacity: 0.6, display: "block" }}>
-                    step: {stepLabel(event.detail)}
+                    🧭 {delegatedBy(event.detail)} → {event.agent_id ?? "unknown-agent"}
+                    {stepLabel(stepId(event.detail)) ? ` · ${stepLabel(stepId(event.detail))}` : ""}
+                  </Text>
+                ) : stepLabel(stepId(event.detail)) ? (
+                  <Text size={100} style={{ opacity: 0.6, display: "block" }}>
+                    step: {stepLabel(stepId(event.detail))}
                   </Text>
                 ) : null}
                 <Text size={200} style={{ opacity: 0.8, display: "block" }}>

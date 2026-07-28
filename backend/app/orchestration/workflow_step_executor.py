@@ -12,7 +12,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from app.agents.gateway import AgentGateway, get_enabled_agent, resolve_prompt_text
-from app.agents.models import AgentExecutionRequest
+from app.agents.models import AgentDefinition, AgentExecutionRequest
 from app.agents.registry import AgentRegistry
 from app.governance.governance_service import GovernanceService
 from app.memory.memory_service import MemoryService
@@ -89,12 +89,15 @@ class WorkflowStepExecutor:
                 f"supplied for this run."
             )
 
-        variables = self._resolve_variables(
+        variables = await self._resolve_variables(
             step=step,
             transcript_text=transcript_text,
             step_outputs=step_outputs or {},
             step_input=step_input,
             previous_variables=previous_variables,
+            agent=agent,
+            session_id=session_id,
+            trace_id=trace_id,
         )
         request = AgentExecutionRequest(
             agent_id=agent.id,
@@ -103,6 +106,7 @@ class WorkflowStepExecutor:
             correlation_id=correlation_id,
             session_id=session_id,
             agent_scope_id=agent_scope_id,
+            allowed_tool_names=step.allowed_tool_names,
         )
         # resolve_prompt_text is used only to fail fast (MissingPromptError's
         # sibling PromptResolutionError/UnknownPromptError) before handing
@@ -143,7 +147,7 @@ class WorkflowStepExecutor:
             resolved_variables=variables,
         )
 
-    def _resolve_variables(
+    async def _resolve_variables(
         self,
         *,
         step: WorkflowStep,
@@ -151,6 +155,9 @@ class WorkflowStepExecutor:
         step_outputs: dict[str, str],
         step_input: WorkflowStepInput | None,
         previous_variables: dict[str, str] | None = None,
+        agent: AgentDefinition,
+        session_id: str,
+        trace_id: str,
     ) -> dict[str, str]:
         """Merges ``step.variable_sources``-derived values with explicit overrides.
 
@@ -178,6 +185,18 @@ class WorkflowStepExecutor:
         explicitly. Prompts that do not reference ``{user_message}`` in
         their text are entirely unaffected: an unused ``str.format`` kwarg
         never changes the resolved output.
+
+        For a ``step:<id>`` source, the *real* upstream specialist output is
+        read back from Shared Collaboration Memory first (written by that
+        specialist's own delegation tool call - see
+        ``app.agents.tools.orchestration_tools``) rather than trusting only
+        the in-process ``step_outputs`` dict, which holds genie-orchestrator's
+        own relayed final message for that step and could in principle
+        diverge from the delegated specialist's actual output (e.g. if the
+        model paraphrases instead of relaying verbatim). ``step_outputs`` is
+        kept as a fallback for setups with no ``MemoryService`` (e.g. some
+        unit tests) or steps whose output was never written to shared
+        memory.
         """
 
         resolved: dict[str, str] = {"user_message": "", **(previous_variables or {})}
@@ -186,12 +205,38 @@ class WorkflowStepExecutor:
                 resolved[variable_name] = transcript_text
             elif source.startswith("step:"):
                 source_step_id = source.removeprefix("step:")
-                if source_step_id in step_outputs:
-                    resolved[variable_name] = step_outputs[source_step_id]
+                value = await self._read_step_output(
+                    source_step_id=source_step_id,
+                    step_outputs=step_outputs,
+                    agent=agent,
+                    session_id=session_id,
+                    trace_id=trace_id,
+                )
+                if value is not None:
+                    resolved[variable_name] = value
 
         if step_input:
             resolved.update(step_input.variables)
         return resolved
+
+    async def _read_step_output(
+        self,
+        *,
+        source_step_id: str,
+        step_outputs: dict[str, str],
+        agent: AgentDefinition,
+        session_id: str,
+        trace_id: str,
+    ) -> str | None:
+        if self._memory_service is not None and "shared" in agent.memory_access:
+            records = await self._memory_service.shared.read(
+                requesting_agent=agent, session_id=session_id, trace_id=trace_id, key=source_step_id
+            )
+            if records:
+                output_text = records[0].content.get("output_text")
+                if isinstance(output_text, str) and output_text:
+                    return output_text
+        return step_outputs.get(source_step_id)
 
     async def _check_required_memory_references(
         self, *, step: WorkflowStep, agent_id: str, session_id: str, trace_id: str

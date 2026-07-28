@@ -73,7 +73,11 @@ class AzureAgentGateway:
         resolved_text = resolve_prompt_text(self._prompt_registry, request)
 
         tool_context = ToolCallContext(
-            agent=agent, session_id=request.session_id, trace_id=request.correlation_id
+            agent=agent,
+            session_id=request.session_id,
+            trace_id=request.correlation_id,
+            allowed_tool_names=request.allowed_tool_names,
+            variables=request.variables,
         )
         try:
             run_result = await self._foundry_client.run(

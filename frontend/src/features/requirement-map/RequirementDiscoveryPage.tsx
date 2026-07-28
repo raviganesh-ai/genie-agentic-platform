@@ -20,12 +20,62 @@ import { workflowApi } from "@/services/workflowApi";
 import { getTraceId } from "@/state/traceRegistry";
 import type { WorkflowStepInput } from "@/types/workflow";
 import type { ApiError } from "@/services/httpClient";
-import { PageHeader } from "@/layouts/AppShell";
 import { LoadingState } from "@/components/LoadingState";
 import { ErrorState } from "@/components/ErrorState";
 import { SectionCard } from "@/components/SectionCard";
 
 const POLL_MS = Number(import.meta.env.VITE_REQUIREMENTS_POLL_MS ?? 0);
+
+/** Strip a leading bullet/number marker ("- ", "* ", "1. ", "2) ") off one line. */
+function stripMarker(line: string): string {
+  return line
+    .replace(/^\s*[-*•]\s*/, "")
+    .replace(/^\s*\d+[.)]\s*/, "")
+    .trim();
+}
+
+/** Splits the analyst's free-text output into one editable item per line. */
+function parseRequirementItems(text: string): string[] {
+  return text
+    .split(/\r?\n/)
+    .map(stripMarker)
+    .filter((line) => line.length > 0);
+}
+
+/**
+ * The analyst's reviewed output (requirements-extraction-v1 prompt) now
+ * includes a "Critical path:" heading line ahead of the ordered subset of
+ * requirements that must be delivered first. Detected purely by text so
+ * the checklist can render that heading and the requirements under it as
+ * their own highlighted section instead of an indistinguishable row.
+ */
+function isCriticalPathHeading(line: string): boolean {
+  return /^critical path\b/i.test(line.trim());
+}
+
+const CLASSIFICATION_META: Record<string, { icon: string; accent: string }> = {
+  requirement: { icon: "📋", accent: "#2f83e0" },
+  goal: { icon: "🎯", accent: "#3fa66a" },
+  constraint: { icon: "🚧", accent: "#d99a2b" },
+  risk: { icon: "⚠️", accent: "#d1495b" },
+  assumption: { icon: "🧩", accent: "#8a63d2" },
+};
+
+function classificationMeta(classification: string): { icon: string; accent: string } {
+  return CLASSIFICATION_META[classification] ?? { icon: "📄", accent: "#5c6572" };
+}
+
+const APPROVAL_STATUS_META: Record<string, { icon: string; accent: string }> = {
+  approved: { icon: "✅", accent: "#3fa66a" },
+  pending: { icon: "⏳", accent: "#d99a2b" },
+  rejected: { icon: "⛔", accent: "#d1495b" },
+  challenged: { icon: "⚠️", accent: "#d99a2b" },
+};
+const DEFAULT_APPROVAL_META = { icon: "•", accent: "#5c6572" };
+
+function approvalStatusMeta(status: string): { icon: string; accent: string } {
+  return APPROVAL_STATUS_META[status] ?? DEFAULT_APPROVAL_META;
+}
 
 export function RequirementDiscoveryPage(): JSX.Element {
   const { sessionId, workflowRunId } = useSessionContext();
@@ -34,15 +84,17 @@ export function RequirementDiscoveryPage(): JSX.Element {
   const { challenge } = useRequirementActions();
   const [rationaleByKey, setRationaleByKey] = useState<Record<string, string>>({});
   const [policiesByRequest, setPoliciesByRequest] = useState<Record<string, string>>({});
-  const [requirementsDraft, setRequirementsDraft] = useState<string | null>(null);
+  const [requirementItems, setRequirementItems] = useState<string[] | null>(null);
+  const [showRawText, setShowRawText] = useState(false);
   const [resumeError, setResumeError] = useState<string | null>(null);
   const [resumingRequestId, setResumingRequestId] = useState<string | null>(null);
 
   // The analyst's discovered requirements are free text (the workflow run's
   // analyze-requirements step output), separate from the (currently
   // unpopulated - Shared Memory is never written to) structured records
-  // above. Editable here so the user can add/remove requirements before
-  // approving the design-architecture gate.
+  // above. Parsed into one editable item per line - rather than one large
+  // textarea - so the user can scan, edit, remove, and add requirements as
+  // a checklist before approving the design-architecture gate.
   const runFetcher = useCallback(
     () =>
       sessionId && workflowRunId
@@ -58,7 +110,57 @@ export function RequirementDiscoveryPage(): JSX.Element {
       run?.step_results.find((result) => result.step_id === "analyze-requirements")?.output_text ?? "",
     [run],
   );
-  const effectiveRequirementsDraft = requirementsDraft ?? analyzedRequirementsText;
+  const effectiveRequirementItems = useMemo(
+    () => requirementItems ?? parseRequirementItems(analyzedRequirementsText),
+    [requirementItems, analyzedRequirementsText],
+  );
+  const effectiveRequirementsDraft = useMemo(
+    () => effectiveRequirementItems.map((item) => `- ${item}`).join("\n"),
+    [effectiveRequirementItems],
+  );
+  const criticalPathHeadingIndex = useMemo(
+    () => effectiveRequirementItems.findIndex((item) => isCriticalPathHeading(item)),
+    [effectiveRequirementItems],
+  );
+
+  // Live breakdown of discovered items by classification, driving the hero
+  // banner's stat pills below - purely derived from real Shared Memory
+  // records, never a hardcoded/synthetic count.
+  const classificationCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const { record } of data?.items ?? []) {
+      counts[record.classification] = (counts[record.classification] ?? 0) + 1;
+    }
+    return counts;
+  }, [data]);
+
+  const updateRequirementItem = useCallback(
+    (index: number, value: string) => {
+      setRequirementItems((prev) => {
+        const base = prev ?? parseRequirementItems(analyzedRequirementsText);
+        const next = [...base];
+        next[index] = value;
+        return next;
+      });
+    },
+    [analyzedRequirementsText],
+  );
+  const removeRequirementItem = useCallback(
+    (index: number) => {
+      setRequirementItems((prev) => {
+        const base = prev ?? parseRequirementItems(analyzedRequirementsText);
+        return base.filter((_, i) => i !== index);
+      });
+    },
+    [analyzedRequirementsText],
+  );
+  const addRequirementItem = useCallback(() => {
+    setRequirementItems((prev) => {
+      const base = prev ?? parseRequirementItems(analyzedRequirementsText);
+      return [...base, ""];
+    });
+  }, [analyzedRequirementsText]);
+
 
   // Real ApprovalRequest entries for this session (subject_type is
   // currently always "workflow_step" per backend/app/orchestration/
@@ -125,9 +227,24 @@ export function RequirementDiscoveryPage(): JSX.Element {
 
   if (!workflowRunId) {
     return (
-      <div>
-        <PageHeader title="Requirement Discovery Map" />
-        <Text size={300} style={{ opacity: 0.7 }}>
+      <div className="genie-fade-in" style={{ maxWidth: 560, margin: "10vh auto", textAlign: "center" }}>
+        <span className="genie-sparkle" style={{ fontSize: 48, display: "block", marginBottom: 12 }}>
+          🧭
+        </span>
+        <Text weight="bold" size={600} style={{ display: "block", marginBottom: 8 }}>
+          Requirement Discovery Map
+        </Text>
+        <Text
+          size={300}
+          style={{
+            opacity: 0.75,
+            display: "block",
+            padding: 20,
+            borderRadius: 12,
+            border: "1px solid #232a33",
+            backgroundColor: "rgba(19, 25, 33, 0.55)",
+          }}
+        >
           Start a workflow run from Upload to begin discovering requirements.
         </Text>
       </div>
@@ -136,10 +253,78 @@ export function RequirementDiscoveryPage(): JSX.Element {
 
   return (
     <div>
-      <PageHeader
-        title="Requirement Discovery Map"
-        subtitle="Goals, requirements, constraints, risks, and assumptions surfaced from Shared Collaboration Memory."
-      />
+      <div
+        className="genie-fade-in"
+        style={{
+          display: "flex",
+          flexWrap: "wrap",
+          justifyContent: "space-between",
+          alignItems: "center",
+          gap: 16,
+          marginBottom: 24,
+          padding: "20px 24px",
+          borderRadius: 16,
+          border: "1px solid #232a33",
+          backgroundImage:
+            "linear-gradient(135deg, rgba(47, 131, 224, 0.16) 0%, rgba(138, 99, 210, 0.10) 100%)",
+          backgroundColor: "rgba(19, 25, 33, 0.6)",
+          boxShadow: "0 8px 30px rgba(0, 0, 0, 0.25)",
+        }}
+      >
+        <div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <span className="genie-sparkle" style={{ fontSize: 28 }}>
+              🧭
+            </span>
+            <Text
+              weight="bold"
+              size={700}
+              style={{
+                backgroundImage: "linear-gradient(135deg, #6ba3ea 0%, #a3c4f3 100%)",
+                backgroundClip: "text",
+                WebkitBackgroundClip: "text",
+                color: "transparent",
+              }}
+            >
+              Requirement Discovery Map
+            </Text>
+          </div>
+          <Text size={300} style={{ opacity: 0.75, display: "block", marginTop: 6, maxWidth: 520 }}>
+            Goals, requirements, constraints, risks, and assumptions surfaced from Shared
+            Collaboration Memory - reviewed and refined here before the architecture gate opens.
+          </Text>
+        </div>
+
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {Object.entries(CLASSIFICATION_META).map(([key, meta]) => {
+            const count = classificationCounts[key] ?? 0;
+            return (
+              <div
+                key={key}
+                title={key.replace(/_/g, " ")}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                  padding: "6px 12px",
+                  borderRadius: 999,
+                  border: `1px solid ${meta.accent}55`,
+                  backgroundColor: `${meta.accent}1a`,
+                  opacity: count > 0 ? 1 : 0.45,
+                }}
+              >
+                <span style={{ fontSize: 15 }}>{meta.icon}</span>
+                <Text size={200} weight="semibold" style={{ color: meta.accent }}>
+                  {count}
+                </Text>
+                <Text size={100} style={{ opacity: 0.7, textTransform: "capitalize" }}>
+                  {key.replace(/_/g, " ")}
+                </Text>
+              </div>
+            );
+          })}
+        </div>
+      </div>
       {loading && !data ? <LoadingState label="Loading requirements..." /> : null}
       {error ? <ErrorState error={error} onRetry={refresh} /> : null}
 
@@ -154,17 +339,145 @@ export function RequirementDiscoveryPage(): JSX.Element {
       ) : null}
 
       {analyzedRequirementsText ? (
-        <SectionCard title="Discovered Requirements (edit before approving)">
-          <Text size={300} style={{ display: "block", marginBottom: 8, opacity: 0.8 }}>
-            Add or remove requirements below - this text is what the architecture design step will
+        <SectionCard
+          title="📝 Requirements Checklist (edit before approving)"
+          action={
+            <Button appearance="subtle" size="small" onClick={() => setShowRawText((prev) => !prev)}>
+              {showRawText ? "Hide raw output" : "View raw analyst output"}
+            </Button>
+          }
+        >
+          <Text size={300} style={{ display: "block", marginBottom: 12, opacity: 0.8 }}>
+            Edit, remove, or add requirements below - this is what the architecture design step will
             use once you approve.
           </Text>
-          <Textarea
-            value={effectiveRequirementsDraft}
-            onChange={(_, dataEv) => setRequirementsDraft(dataEv.value)}
-            rows={12}
-            style={{ width: "100%", fontFamily: "monospace", fontSize: 12 }}
-          />
+
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 12 }}>
+            {effectiveRequirementItems.length === 0 ? (
+              <Text size={200} style={{ opacity: 0.6 }}>
+                No requirements yet - add one below.
+              </Text>
+            ) : (
+              effectiveRequirementItems.map((item, index) => {
+                const isHeading = isCriticalPathHeading(item);
+                const isCritical = criticalPathHeadingIndex !== -1 && index > criticalPathHeadingIndex;
+
+                if (isHeading) {
+                  return (
+                    <div
+                      key={index}
+                      className="genie-fade-in"
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8,
+                        padding: "8px 12px",
+                        marginTop: index > 0 ? 6 : 0,
+                        borderRadius: 8,
+                        border: "1px solid #d99a2b66",
+                        backgroundColor: "rgba(217, 154, 43, 0.12)",
+                        animationDelay: `${Math.min(index, 12) * 30}ms`,
+                      }}
+                    >
+                      <span style={{ fontSize: 16 }}>🎯</span>
+                      <Text
+                        size={200}
+                        weight="bold"
+                        style={{ color: "#d99a2b", textTransform: "uppercase", letterSpacing: 1 }}
+                      >
+                        Critical Path
+                      </Text>
+                      <Button
+                        appearance="subtle"
+                        size="small"
+                        shape="circular"
+                        title="Remove this heading"
+                        aria-label="Remove this heading"
+                        onClick={() => removeRequirementItem(index)}
+                        style={{ marginLeft: "auto" }}
+                      >
+                        ✕
+                      </Button>
+                    </div>
+                  );
+                }
+
+                return (
+                  <div
+                    key={index}
+                    className="genie-fade-in genie-req-item"
+                    style={{
+                      display: "flex",
+                      gap: 8,
+                      alignItems: "flex-start",
+                      padding: "8px 10px",
+                      borderRadius: 8,
+                      border: isCritical ? "1px solid #d99a2b55" : "1px solid #232a33",
+                      backgroundColor: isCritical ? "rgba(217, 154, 43, 0.06)" : "#161c24",
+                      animationDelay: `${Math.min(index, 12) * 30}ms`,
+                    }}
+                  >
+                    <span
+                      style={{
+                        flexShrink: 0,
+                        width: 22,
+                        height: 22,
+                        marginTop: 4,
+                        borderRadius: "50%",
+                        backgroundImage: isCritical
+                          ? "linear-gradient(135deg, #d99a2b, #e0b354)"
+                          : "linear-gradient(135deg, #2f83e0, #8a63d2)",
+                        color: "#f4f7fb",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        fontSize: 11,
+                        fontWeight: 700,
+                      }}
+                    >
+                      {index + 1}
+                    </span>
+                    <Textarea
+                      value={item}
+                      onChange={(_, dataEv) => updateRequirementItem(index, dataEv.value)}
+                      resize="vertical"
+                      style={{ flex: 1 }}
+                    />
+                    {isCritical ? (
+                      <Badge
+                        shape="rounded"
+                        style={{ backgroundColor: "rgba(217, 154, 43, 0.18)", color: "#d99a2b", flexShrink: 0 }}
+                      >
+                        🎯 Critical
+                      </Badge>
+                    ) : null}
+                    <Button
+                      appearance="subtle"
+                      size="small"
+                      shape="circular"
+                      title="Remove this requirement"
+                      aria-label="Remove this requirement"
+                      onClick={() => removeRequirementItem(index)}
+                    >
+                      ✕
+                    </Button>
+                  </div>
+                );
+              })
+            )}
+          </div>
+          <Button appearance="secondary" size="small" onClick={addRequirementItem}>
+            + Add requirement
+          </Button>
+
+          {showRawText ? (
+            <Textarea
+              value={analyzedRequirementsText}
+              readOnly
+              rows={10}
+              style={{ width: "100%", fontFamily: "monospace", fontSize: 12, marginTop: 12, opacity: 0.8 }}
+            />
+          ) : null}
         </SectionCard>
       ) : null}
 
@@ -175,50 +488,89 @@ export function RequirementDiscoveryPage(): JSX.Element {
               No requirements discovered yet.
             </Text>
           ) : (
-            data.items.map(({ record }) => (
-              <SectionCard
-                key={record.id}
-                title={record.classification.replace(/_/g, " ")}
-                action={<Badge appearance="tint">v{record.version}</Badge>}
-              >
-                <pre style={{ fontSize: 12, whiteSpace: "pre-wrap", marginBottom: 8 }}>
-                  {JSON.stringify(record.content, null, 2)}
-                </pre>
-                <Text size={200} style={{ opacity: 0.7, display: "block", marginBottom: 8 }}>
-                  Confidence: {Math.round(record.lineage.confidence_score * 100)}% · Approval:{" "}
-                  {record.lineage.approval_status}
-                </Text>
-                <Textarea
-                  placeholder="Rationale for challenging this item"
-                  value={rationaleByKey[record.id] ?? ""}
-                  onChange={(_, dataEv) =>
-                    setRationaleByKey((prev) => ({ ...prev, [record.id]: dataEv.value }))
+            data.items.map(({ record }) => {
+              const meta = classificationMeta(record.classification);
+              const confidencePct = Math.round(record.lineage.confidence_score * 100);
+              const approvalMeta = approvalStatusMeta(record.lineage.approval_status);
+              return (
+                <SectionCard
+                  key={record.id}
+                  title={
+                    <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <span
+                        style={{
+                          width: 26,
+                          height: 26,
+                          borderRadius: "50%",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          fontSize: 13,
+                          backgroundColor: `${meta.accent}22`,
+                          border: `1px solid ${meta.accent}66`,
+                        }}
+                      >
+                        {meta.icon}
+                      </span>
+                      <span style={{ textTransform: "capitalize" }}>
+                        {record.classification.replace(/_/g, " ")}
+                      </span>
+                    </span>
                   }
-                  style={{ marginBottom: 8, width: "100%" }}
-                />
-                <Button
-                  size="small"
-                  onClick={() => {
-                    const traceId = getTraceId(workflowRunId);
-                    if (!sessionId || !traceId) return;
-                    void challenge(
-                      sessionId,
-                      workflowRunId,
-                      traceId,
-                      record.id,
-                      rationaleByKey[record.id] ?? "",
-                    ).then(refresh);
-                  }}
+                  action={<Badge appearance="tint">v{record.version}</Badge>}
                 >
-                  Challenge
-                </Button>
-              </SectionCard>
-            ))
+                  <div style={{ borderLeft: `3px solid ${meta.accent}`, paddingLeft: 12 }}>
+                    <pre style={{ fontSize: 12, whiteSpace: "pre-wrap", marginBottom: 8, marginTop: 0 }}>
+                      {JSON.stringify(record.content, null, 2)}
+                    </pre>
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+                      <Badge
+                        shape="rounded"
+                        style={{ backgroundColor: "#232a33", color: "#9aa4b2" }}
+                        title="Confidence score"
+                      >
+                        📈 {confidencePct}% confidence
+                      </Badge>
+                      <Badge
+                        shape="rounded"
+                        style={{ backgroundColor: `${approvalMeta.accent}22`, color: approvalMeta.accent }}
+                      >
+                        {approvalMeta.icon} {record.lineage.approval_status.replace(/_/g, " ")}
+                      </Badge>
+                    </div>
+                    <Textarea
+                      placeholder="Rationale for challenging this item"
+                      value={rationaleByKey[record.id] ?? ""}
+                      onChange={(_, dataEv) =>
+                        setRationaleByKey((prev) => ({ ...prev, [record.id]: dataEv.value }))
+                      }
+                      style={{ marginBottom: 8, width: "100%" }}
+                    />
+                    <Button
+                      size="small"
+                      onClick={() => {
+                        const traceId = getTraceId(workflowRunId);
+                        if (!sessionId || !traceId) return;
+                        void challenge(
+                          sessionId,
+                          workflowRunId,
+                          traceId,
+                          record.id,
+                          rationaleByKey[record.id] ?? "",
+                        ).then(refresh);
+                      }}
+                    >
+                      Challenge
+                    </Button>
+                  </div>
+                </SectionCard>
+              );
+            })
           )}
         </div>
       ) : null}
 
-      <SectionCard title="Pending Approvals">
+      <SectionCard title="🔑 Pending Approvals">
         {approvalsLoading && !approvals ? <LoadingState label="Loading approvals..." /> : null}
         {approvalsError ? <ErrorState error={approvalsError} onRetry={refreshApprovals} /> : null}
         {resumeError ? (
@@ -234,24 +586,40 @@ export function RequirementDiscoveryPage(): JSX.Element {
             No pending approvals.
           </Text>
         ) : null}
-        {approvals?.map((request) => (
+        {approvals?.map((request) => {
+          const statusMeta = approvalStatusMeta(request.status);
+          return (
           <div
             key={request.id}
+            className="genie-fade-in"
             style={{
               display: "flex",
               justifyContent: "space-between",
               alignItems: "center",
-              borderBottom: "1px solid #232a33",
-              padding: "8px 0",
+              gap: 12,
+              borderRadius: 8,
+              border: "1px solid #232a33",
+              borderLeft: `3px solid ${statusMeta.accent}`,
+              backgroundColor: "#161c24",
+              padding: "10px 12px",
+              marginBottom: 8,
             }}
           >
             <div>
-              <Text size={300} style={{ display: "block" }}>
-                {request.subject_type.replace(/_/g, " ")} · {request.subject_id}
+              <Text size={300} weight="semibold" style={{ display: "block" }}>
+                🗂️ {request.subject_type.replace(/_/g, " ")} · {request.subject_id}
               </Text>
-              <Text size={200} style={{ opacity: 0.7 }}>
-                Requested by {request.requested_by_agent_id} · {request.status}
-              </Text>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4 }}>
+                <Text size={200} style={{ opacity: 0.7 }}>
+                  Requested by {request.requested_by_agent_id}
+                </Text>
+                <Badge
+                  shape="rounded"
+                  style={{ backgroundColor: `${statusMeta.accent}22`, color: statusMeta.accent }}
+                >
+                  {statusMeta.icon} {request.status}
+                </Badge>
+              </div>
             </div>
             {request.status === "pending" && sessionId ? (
               <div style={{ display: "flex", flexDirection: "column", gap: 8, alignItems: "flex-end" }}>
@@ -292,7 +660,8 @@ export function RequirementDiscoveryPage(): JSX.Element {
               </div>
             ) : null}
           </div>
-        ))}
+          );
+        })}
       </SectionCard>
     </div>
   );

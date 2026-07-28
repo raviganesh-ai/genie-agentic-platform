@@ -15,7 +15,8 @@ function buildAgentExecutionEvent(overrides: Partial<GovernanceEvent> = {}): Gov
     timestamp: new Date().toISOString(),
     detail: {
       step_id: "analyze-requirements",
-      workflow_step: true,
+      workflow_step: false,
+      delegated_by: "genie-orchestrator",
       output_preview: "Identified 3 goals and 2 constraints from the transcript.",
     },
     ...overrides,
@@ -43,7 +44,8 @@ describe("TriagePanel", () => {
             agent_id: "architecture-designer",
             detail: {
               step_id: "design-architecture",
-              workflow_step: true,
+              workflow_step: false,
+              delegated_by: "genie-orchestrator",
               output_preview: "Recommended an Azure Container Apps based architecture.",
             },
           }),
@@ -66,8 +68,8 @@ describe("TriagePanel", () => {
     expect(
       screen.getByText(/Recommended an Azure Container Apps based architecture\./i),
     ).toBeInTheDocument();
-    expect(screen.getByText(/step: analyze-requirements/i)).toBeInTheDocument();
-    expect(screen.getByText(/step: design-architecture/i)).toBeInTheDocument();
+    expect(screen.getByText(/genie-orchestrator → requirements-analyst/i)).toBeInTheDocument();
+    expect(screen.getByText(/genie-orchestrator → architecture-designer/i)).toBeInTheDocument();
     expect(screen.getAllByText("+10 XP")).toHaveLength(2);
     expect(screen.getByText(/Level \d+/)).toBeInTheDocument();
     expect(screen.getByText(/2 agent calls/i)).toBeInTheDocument();

@@ -76,11 +76,13 @@ class _FakeFoundryClient:
         self._result = result
         self._error = error
         self.calls: list[dict[str, str]] = []
+        self.tool_contexts: list[object] = []
 
     async def run(
         self, *, foundry_agent_id: str, input_text: str, tool_context=None
     ) -> FoundryRunResult:
         self.calls.append({"foundry_agent_id": foundry_agent_id, "input_text": input_text})
+        self.tool_contexts.append(tool_context)
         if self._error is not None:
             raise self._error
         assert self._result is not None
@@ -183,6 +185,64 @@ async def test_execute_raises_for_unknown_agent_before_calling_foundry(
         await gateway.execute(_request(agent_id="does-not-exist"))
 
     assert fake_client.calls == []
+
+
+async def test_execute_forwards_allowed_tool_names_onto_tool_context(
+    agent_registry: AgentRegistry, prompt_registry: PromptRegistry
+):
+    fake_client = _FakeFoundryClient(
+        result=FoundryRunResult(output_text="unused", raw_status="completed", latency_ms=1.0)
+    )
+    gateway = AzureAgentGateway(
+        agent_registry=agent_registry,
+        prompt_registry=prompt_registry,
+        foundry_client=fake_client,
+    )
+
+    await gateway.execute(_request(allowed_tool_names=["call_requirements_analyst"]))
+
+    [tool_context] = fake_client.tool_contexts
+    assert tool_context.allowed_tool_names == ["call_requirements_analyst"]
+
+
+async def test_execute_forwards_resolved_variables_onto_tool_context(
+    agent_registry: AgentRegistry, prompt_registry: PromptRegistry
+):
+    """Delegation tools rely on ``tool_context.variables`` as the authoritative
+    source for forwarding an upstream step's real output to a delegated
+    specialist - see ``app.agents.tools.orchestration_tools``."""
+
+    fake_client = _FakeFoundryClient(
+        result=FoundryRunResult(output_text="unused", raw_status="completed", latency_ms=1.0)
+    )
+    gateway = AzureAgentGateway(
+        agent_registry=agent_registry,
+        prompt_registry=prompt_registry,
+        foundry_client=fake_client,
+    )
+
+    await gateway.execute(_request(variables={"transcript_excerpt": "We need a chatbot."}))
+
+    [tool_context] = fake_client.tool_contexts
+    assert tool_context.variables == {"transcript_excerpt": "We need a chatbot."}
+
+
+async def test_execute_defaults_allowed_tool_names_to_none(
+    agent_registry: AgentRegistry, prompt_registry: PromptRegistry
+):
+    fake_client = _FakeFoundryClient(
+        result=FoundryRunResult(output_text="unused", raw_status="completed", latency_ms=1.0)
+    )
+    gateway = AzureAgentGateway(
+        agent_registry=agent_registry,
+        prompt_registry=prompt_registry,
+        foundry_client=fake_client,
+    )
+
+    await gateway.execute(_request())
+
+    [tool_context] = fake_client.tool_contexts
+    assert tool_context.allowed_tool_names is None
 
 
 class _FakeSessionAgentResolver:

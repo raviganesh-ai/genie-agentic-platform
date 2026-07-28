@@ -8,14 +8,18 @@
 # solution-discovery-workflow was trimmed down (post Phase-10A) to the
 # single, dynamic Requirement -> Architecture -> Build -> Deploy mission:
 # every business/debugging agent that was previously wired in from the now
-# -deleted config/agents/foundry_agents_catalog.yaml has been removed, and
-# a real, independently provisioned Foundry "genie-orchestrator" agent
-# (config/agents/registry.yaml) now exists as the dynamic Connected-Agents
-# entry point for this same mission. This workflow entry remains the
-# generic wave-execution path every existing session/requirements/
-# architecture API route already resolves runs through - it is not a
-# duplicate of genie-orchestrator, it is today's concrete execution of the
-# same five-agent mission via the proven wave engine.
+# -deleted config/agents/foundry_agents_catalog.yaml has been removed. Each
+# step below now invokes the real, independently provisioned Foundry
+# "genie-orchestrator" agent (config/agents/registry.yaml) instead of the
+# step's underlying specialist directly: genie-orchestrator itself calls
+# exactly one of its own call_<agent> delegation tools (restricted per step
+# via allowed_tool_names, see app.agents.tools.orchestration_tools) to
+# execute that phase's real specialist, then returns that specialist's
+# output verbatim as the step's own output_text. The wave engine below
+# still owns dependency ordering, parallelism, and the three approval
+# checkpoints exactly as before - only *which agent is invoked per step*
+# changed, from the specialist directly to genie-orchestrator delegating
+# to that same specialist.
 #
 # Every step below has a `variable_sources` mapping so the whole graph can
 # run automatically from nothing but an uploaded call transcript/recording:
@@ -47,56 +51,83 @@ workflows:
       governance approval, and deployment/launch.
     steps:
       - id: analyze-requirements
-        agent_id: requirements-analyst
+        agent_id: genie-orchestrator
         description: Extract requirements, risks, assumptions, and constraints.
         depends_on: []
-        prompt_id: requirements-extraction-v1
+        prompt_id: orchestrator-requirements-phase-v1
+        allowed_tool_names:
+          - call_requirements_analyst
         variable_sources:
           transcript_excerpt: transcript
 
       - id: design-architecture
-        agent_id: architecture-designer
+        agent_id: genie-orchestrator
         description: Propose an Azure reference architecture with rationale.
         depends_on:
           - analyze-requirements
-        prompt_id: architecture-recommendation-v1
+        prompt_id: orchestrator-architecture-phase-v1
+        allowed_tool_names:
+          - call_architecture_designer
         requires_approval_checkpoint: requirement-discovery-approval
+        required_memory_references:
+          - analyze-requirements
         variable_sources:
           approved_requirements: step:analyze-requirements
 
       - id: build-solution
-        agent_id: build-agent
+        agent_id: genie-orchestrator
         description: >-
           Generate the customer-facing UI code and the dedicated
           multi-agent workflow design for the approved requirement and
           architecture.
         depends_on:
           - design-architecture
-        prompt_id: build-generation-v1
+        prompt_id: orchestrator-build-phase-v1
+        allowed_tool_names:
+          - call_build_agent
         requires_approval_checkpoint: architecture-approval
+        required_memory_references:
+          - analyze-requirements
+          - design-architecture
         variable_sources:
           requirements: step:analyze-requirements
           architecture: step:design-architecture
 
       - id: governance-review
-        agent_id: governance-reviewer
+        agent_id: genie-orchestrator
         description: >-
           Review the build for policy compliance, assess its security
           posture, and provision/record the access control needed for it
           to run safely.
         depends_on:
           - build-solution
-        prompt_id: governance-review-v1
+        prompt_id: orchestrator-governance-phase-v1
+        allowed_tool_names:
+          - call_governance_reviewer
+        # Governance reviews everything produced so far, not just the build
+        # artifact: this fails closed unless the requirements and
+        # architecture findings are also already present in Shared
+        # Collaboration Memory, even though only `artifact` is substituted
+        # into the governance-reviewer's own prompt text below.
+        required_memory_references:
+          - analyze-requirements
+          - design-architecture
+          - build-solution
         variable_sources:
           artifact: step:build-solution
 
       - id: deploy-solution
-        agent_id: deployment-agent
+        agent_id: genie-orchestrator
         description: Provision the designed agents/UI and produce the customer launch summary.
         depends_on:
           - governance-review
-        prompt_id: deployment-v1
+        prompt_id: orchestrator-deployment-phase-v1
+        allowed_tool_names:
+          - call_deployment_agent
         requires_approval_checkpoint: final-output-approval
+        required_memory_references:
+          - build-solution
+          - governance-review
         variable_sources:
           build_output: step:build-solution
           governance_decision: step:governance-review

@@ -1,32 +1,140 @@
 import type { ReactNode } from "react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { Button, Switch, Text } from "@fluentui/react-components";
 import { getActiveAccountName, isAuthenticated, onAccessTokenChange, signOut } from "@/services/authProvider";
 import { useSessionContext } from "@/state/SessionContext";
+import { useAsyncResource } from "@/hooks/useAsyncResource";
+import { workflowApi } from "@/services/workflowApi";
 import { TriagePanel } from "@/features/triage/TriagePanel";
+import type { WorkflowRunResult } from "@/types/workflow";
 
-/** What must exist before a step becomes reachable/clickable. */
-type StepPrerequisite = "none" | "session" | "run";
+/** Where a stage sits on the guided mission flow at any given moment. */
+type StageStatus = "locked" | "active" | "complete";
 
-const NAV_ITEMS: Array<{ to: string; label: string; requires: StepPrerequisite }> = [
-  { to: "/", label: "Landing", requires: "none" },
-  { to: "/upload", label: "Upload", requires: "session" },
-  { to: "/requirements", label: "Requirements", requires: "session" },
-  { to: "/architecture-studio", label: "Architecture", requires: "run" },
-  { to: "/workshop", label: "UI & Agent Design", requires: "run" },
-  { to: "/governance", label: "Governance", requires: "session" },
-  { to: "/outputs", label: "Deploy & Launch", requires: "session" },
+interface NavItemConfig {
+  to: string;
+  label: string;
+  icon: string;
+  end?: boolean;
+  /**
+   * Presence of this step id (any status - completed or failed, run just
+   * has to have reached it) in the active workflow run's `step_results`
+   * marks this stage complete. Landing/Upload/Deploy & Launch use bespoke
+   * checks below instead, since they aren't gated by a single workflow
+   * step id.
+   */
+  completionStepId?: string;
+}
+
+// Each stage's completion is defined by the *next* step having started,
+// not by its "own" step id - this is what naturally captures the human
+// approval checkpoint that sits between steps (e.g. Requirements isn't
+// really "done" from the user's point of view until design-architecture
+// has been kicked off, which only happens after the requirements approval
+// is granted).
+const NAV_ITEMS: NavItemConfig[] = [
+  { to: "/", label: "Landing", icon: "🏠", end: true },
+  { to: "/upload", label: "Upload", icon: "📤" },
+  { to: "/requirements", label: "Requirements", icon: "📋", completionStepId: "design-architecture" },
+  { to: "/architecture-studio", label: "Architecture", icon: "🏗️", completionStepId: "build-solution" },
+  { to: "/workshop", label: "UI & Agent Design", icon: "🤖", completionStepId: "governance-review" },
+  { to: "/governance", label: "Governance", icon: "🔐", completionStepId: "deploy-solution" },
+  { to: "/outputs", label: "Deploy & Launch", icon: "🚀" },
 ];
 
-function isStepReachable(
-  requires: StepPrerequisite,
+/**
+ * Derives each stage's traffic-light status from real mission state only
+ * (session id, workflow run id, and the run's own step results) - never
+ * from a fixed/hardcoded "which page is next" list. Each stage becomes
+ * reachable ("active") only once the previous stage is actually complete,
+ * so the sidebar can never show two stages unlocked at once out of order.
+ */
+function computeStageStatuses(
   sessionId: string | null,
   workflowRunId: string | null,
-): boolean {
-  if (requires === "none") return true;
-  if (requires === "session") return sessionId !== null;
-  return workflowRunId !== null;
+  run: WorkflowRunResult | null,
+): StageStatus[] {
+  const reachedStepIds = new Set(run?.step_results.map((result) => result.step_id) ?? []);
+  const statuses: StageStatus[] = [];
+  let previousComplete = true; // Landing is always reachable.
+
+  NAV_ITEMS.forEach((item, index) => {
+    const reachable = index === 0 ? true : previousComplete;
+    let complete: boolean;
+    if (item.to === "/") {
+      complete = sessionId !== null;
+    } else if (item.to === "/upload") {
+      complete = workflowRunId !== null;
+    } else if (item.completionStepId) {
+      complete = reachedStepIds.has(item.completionStepId);
+    } else {
+      // Deploy & Launch: only truly done once the whole run completes.
+      complete = run?.status === "completed";
+    }
+    statuses.push(!reachable ? "locked" : complete ? "complete" : "active");
+    previousComplete = reachable && complete;
+  });
+
+  return statuses;
+}
+
+function StageNode({ status, icon }: { status: StageStatus; icon: string }): JSX.Element {
+  const ringColor = status === "complete" ? "#3fa66a" : status === "active" ? "#d99a2b" : "#3a4250";
+  const glowClass =
+    status === "complete" ? "genie-stage-node-complete" : status === "active" ? "genie-stage-node-active" : "genie-stage-node-locked";
+
+  return (
+    <span
+      className={glowClass}
+      style={{
+        position: "relative",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        width: 38,
+        height: 38,
+        borderRadius: "50%",
+        flexShrink: 0,
+        backgroundColor: "#161c24",
+        border: `2px solid ${ringColor}`,
+        fontSize: 17,
+      }}
+    >
+      <span aria-hidden="true">{icon}</span>
+      {status === "complete" ? (
+        <span
+          aria-label="Complete"
+          style={{
+            position: "absolute",
+            bottom: -3,
+            right: -3,
+            width: 16,
+            height: 16,
+            borderRadius: "50%",
+            backgroundColor: "#3fa66a",
+            color: "#0b0f14",
+            fontSize: 10,
+            fontWeight: 700,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            border: "2px solid #11161d",
+          }}
+        >
+          ✓
+        </span>
+      ) : null}
+      {status === "locked" ? (
+        <span
+          aria-label="Not reached yet"
+          style={{ position: "absolute", bottom: -4, right: -4, fontSize: 11 }}
+        >
+          🔒
+        </span>
+      ) : null}
+    </span>
+  );
 }
 
 function navLinkStyle(isActive: boolean): React.CSSProperties {
@@ -34,7 +142,7 @@ function navLinkStyle(isActive: boolean): React.CSSProperties {
     display: "flex",
     alignItems: "center",
     gap: 8,
-    padding: "9px 12px",
+    padding: "8px 10px",
     borderRadius: 6,
     textDecoration: "none",
     color: isActive ? "#0b0f14" : "#c7cdd6",
@@ -42,46 +150,51 @@ function navLinkStyle(isActive: boolean): React.CSSProperties {
     boxShadow: isActive ? "0 2px 10px rgba(47, 131, 224, 0.35)" : "none",
     fontSize: 14,
     fontWeight: isActive ? 600 : 400,
-    marginBottom: 2,
+    width: "100%",
   };
 }
 
-const stepBadgeStyle = (locked: boolean, isActive: boolean): React.CSSProperties => ({
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  width: 20,
-  height: 20,
-  flexShrink: 0,
-  borderRadius: "50%",
-  fontSize: 11,
-  fontWeight: 600,
-  backgroundColor: isActive ? "rgba(11, 15, 20, 0.2)" : "rgba(199, 205, 214, 0.12)",
-  color: locked ? "#5c6572" : isActive ? "#0b0f14" : "#c7cdd6",
-});
+const MISSION_FLOW_POLL_MS = Number(import.meta.env.VITE_MISSION_FLOW_POLL_MS ?? 4000);
 
 export function AppShell(): JSX.Element {
   const [signedIn, setSignedIn] = useState(isAuthenticated());
-  const [triageOn, setTriageOn] = useState(false);
+  // Default to on: without this, starting a workflow run gives no visual
+  // feedback at all until the user discovers and manually flips the
+  // sidebar switch, leaving them wondering if anything is happening.
+  const [triageOn, setTriageOn] = useState(true);
   const location = useLocation();
   const { sessionId, workflowRunId } = useSessionContext();
 
   useEffect(() => onAccessTokenChange((token) => setSignedIn(token !== null)), []);
 
+  const runFetcher = useCallback(
+    () =>
+      sessionId && workflowRunId
+        ? workflowApi.getRun(sessionId, workflowRunId)
+        : Promise.reject(new Error("No active workflow run")),
+    [sessionId, workflowRunId],
+  );
+  const { data: run } = useAsyncResource(runFetcher, [sessionId, workflowRunId], {
+    enabled: Boolean(sessionId && workflowRunId),
+    pollIntervalMs: MISSION_FLOW_POLL_MS,
+  });
+  const stageStatuses = computeStageStatuses(sessionId, workflowRunId, run);
+
   return (
     <div style={{ display: "flex", minHeight: "100vh" }}>
       <nav
         style={{
-          width: 240,
+          width: 264,
           flexShrink: 0,
           backgroundColor: "#11161d",
+          backgroundImage: "radial-gradient(circle at 0% 0%, rgba(47, 131, 224, 0.10), transparent 55%)",
           borderRight: "1px solid #232a33",
           padding: 16,
           display: "flex",
           flexDirection: "column",
         }}
       >
-        <div style={{ marginBottom: 20 }}>
+        <div style={{ marginBottom: 22 }}>
           <Text weight="bold" size={500} style={{ display: "flex", alignItems: "center", gap: 6 }}>
             <span className="genie-sparkle" aria-hidden="true">
               ✨
@@ -92,36 +205,84 @@ export function AppShell(): JSX.Element {
             Agentic Experience Center
           </Text>
         </div>
-        {NAV_ITEMS.map((item, index) => {
-          const stepNumber = index + 1;
-          const reachable = isStepReachable(item.requires, sessionId, workflowRunId);
 
-          if (!reachable) {
-            return (
-              <div
-                key={item.to}
-                aria-disabled="true"
-                title="Complete the earlier steps to unlock this"
-                style={{ ...navLinkStyle(false), color: "#5c6572", cursor: "not-allowed" }}
-              >
-                <span style={stepBadgeStyle(true, false)}>{stepNumber}</span>
-                {item.label}
-                <span style={{ marginLeft: "auto", opacity: 0.6 }} aria-hidden="true">
-                  🔒
-                </span>
-              </div>
-            );
-          }
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+          <Text size={100} className="genie-stage-eyebrow" style={{ opacity: 0.55, fontWeight: 700 }}>
+            Mission Flow
+          </Text>
+          {workflowRunId ? (
+            <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
+              <span className="genie-live-dot" aria-hidden="true" />
+              <Text size={100} style={{ opacity: 0.65, fontWeight: 600, letterSpacing: 1 }}>
+                LIVE
+              </Text>
+            </span>
+          ) : null}
+        </div>
+
+        {/* The mission flow: a glowing vertical pipeline (deliberately not a
+            standard nav menu) - each stage is an icon in a status ring (dim
+            gray = not reached, pulsing amber glow = active, green check
+            badge = complete) joined by a connector line that itself animates
+            a flowing current toward whichever stage is currently active, so
+            progress through Upload -> ... -> Deploy & Launch reads as a
+            literal flow rather than a flat list of links. */}
+        {NAV_ITEMS.map((item, index) => {
+          const status = stageStatuses[index];
+          const locked = status === "locked";
+          const isLast = index === NAV_ITEMS.length - 1;
+          const caption = status === "complete" ? "Completed" : status === "active" ? "In progress…" : "Not started";
+          const captionColor = status === "complete" ? "#3fa66a" : status === "active" ? "#d99a2b" : "#5c6572";
+          const lineIsFlowing = status === "active";
 
           return (
-            <NavLink key={item.to} to={item.to} style={({ isActive }) => navLinkStyle(isActive)} end={item.to === "/"}>
-              {({ isActive }) => (
-                <>
-                  <span style={stepBadgeStyle(false, isActive)}>{stepNumber}</span>
-                  {item.label}
-                </>
-              )}
-            </NavLink>
+            <div
+              key={item.to}
+              className={`genie-stage-row${locked ? "" : " genie-stage-clickable"}`}
+              style={{ display: "flex", alignItems: "stretch" }}
+            >
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", width: 46, flexShrink: 0 }}>
+                <StageNode status={status} icon={item.icon} />
+                {!isLast ? (
+                  <div
+                    className={lineIsFlowing ? "genie-stage-line-active" : undefined}
+                    style={{
+                      flex: 1,
+                      width: 3,
+                      minHeight: 22,
+                      margin: "4px 0",
+                      borderRadius: 2,
+                      backgroundColor: lineIsFlowing ? undefined : status === "complete" ? "#3fa66a" : "#232a33",
+                    }}
+                  />
+                ) : null}
+              </div>
+              <div style={{ flex: 1, paddingBottom: isLast ? 4 : 12, minWidth: 0, paddingTop: 4 }}>
+                {locked ? (
+                  <div
+                    aria-disabled="true"
+                    title="Complete the earlier stages to unlock this"
+                    style={{ ...navLinkStyle(false), color: "#5c6572", cursor: "not-allowed" }}
+                  >
+                    <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
+                      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {item.label}
+                      </span>
+                      <span style={{ fontSize: 10, color: captionColor, letterSpacing: 0.3 }}>{caption}</span>
+                    </div>
+                  </div>
+                ) : (
+                  <NavLink key={item.to} to={item.to} style={({ isActive }) => navLinkStyle(isActive)} end={item.end}>
+                    <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
+                      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {item.label}
+                      </span>
+                      <span style={{ fontSize: 10, color: captionColor, letterSpacing: 0.3 }}>{caption}</span>
+                    </div>
+                  </NavLink>
+                )}
+              </div>
+            </div>
           );
         })}
         <div style={{ marginTop: "auto", paddingTop: 16, borderTop: "1px solid #232a33" }}>

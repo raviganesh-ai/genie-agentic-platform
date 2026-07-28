@@ -13,8 +13,23 @@ import { LoadingState } from "@/components/LoadingState";
 import { ErrorState } from "@/components/ErrorState";
 import { SectionCard } from "@/components/SectionCard";
 import { GovernanceStatusBadge } from "@/components/StatusBadge";
+import type { GovernanceEventCategory } from "@/types/governance";
 
 const POLL_MS = Number(import.meta.env.VITE_GOVERNANCE_POLL_MS ?? 5000);
+
+const CATEGORY_META: Record<GovernanceEventCategory, { icon: string; accent: string }> = {
+  agent_registration: { icon: "🆕", accent: "#2f83e0" },
+  agent_version: { icon: "🔢", accent: "#2f83e0" },
+  agent_lifecycle: { icon: "♻️", accent: "#2f83e0" },
+  agent_execution: { icon: "✅", accent: "#3fa66a" },
+  agent_communication: { icon: "💬", accent: "#3fa66a" },
+  memory_read: { icon: "📖", accent: "#8a63d2" },
+  memory_write: { icon: "💾", accent: "#8a63d2" },
+  tool_request: { icon: "🛠️", accent: "#d99a2b" },
+  policy_evaluation: { icon: "📋", accent: "#2f83e0" },
+  access_denied: { icon: "⛔", accent: "#d1495b" },
+  human_checkpoint_confirmation: { icon: "🗐️", accent: "#c98a2c" },
+};
 
 export function GovernancePage(): JSX.Element {
   const navigate = useNavigate();
@@ -84,19 +99,24 @@ export function GovernancePage(): JSX.Element {
             <GovernanceStatusBadge state={data.complianceState} />
           </div>
 
-          <SectionCard title="Governance Events Timeline">
+          <SectionCard title="📜 Governance Events Timeline">
             <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 360, overflowY: "auto" }}>
               {[...data.events]
                 .sort((a, b) => b.timestamp.localeCompare(a.timestamp))
-                .map((event) => (
-                  <div key={event.id} style={{ borderLeft: "2px solid #2f83e0", paddingLeft: 10 }}>
-                    <Text size={200} style={{ opacity: 0.6, display: "block" }}>
-                      {new Date(event.timestamp).toLocaleString()}
-                      {event.agent_id ? ` · ${event.agent_id}` : ""}
-                    </Text>
-                    <Text size={300}>{event.category.replace(/_/g, " ")}</Text>
-                  </div>
-                ))}
+                .map((event) => {
+                  const meta = CATEGORY_META[event.category];
+                  return (
+                    <div key={event.id} style={{ borderLeft: `2px solid ${meta.accent}`, paddingLeft: 10 }}>
+                      <Text size={200} style={{ opacity: 0.6, display: "block" }}>
+                        {new Date(event.timestamp).toLocaleString()}
+                        {event.agent_id ? ` · ${event.agent_id}` : ""}
+                      </Text>
+                      <Text size={300}>
+                        {meta.icon} {event.category.replace(/_/g, " ")}
+                      </Text>
+                    </div>
+                  );
+                })}
               {data.events.length === 0 ? (
                 <Text size={300} style={{ opacity: 0.7 }}>
                   No governance events recorded yet.

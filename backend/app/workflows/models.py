@@ -44,6 +44,16 @@ class WorkflowStep(BaseModel):
             "before this step may execute."
         ),
     )
+    allowed_tool_names: list[str] | None = Field(
+        default=None,
+        description=(
+            "Optional restriction of which of this step's agent's own "
+            "AgentDefinition.tool_definitions may be exposed for this step's "
+            "execution (see AgentExecutionRequest.allowed_tool_names). Used "
+            "by genie-orchestrator-driven phase steps so each phase only "
+            "exposes the delegation tool(s) relevant to that phase."
+        ),
+    )
     variable_sources: dict[str, str] = Field(
         default_factory=dict,
         description=(

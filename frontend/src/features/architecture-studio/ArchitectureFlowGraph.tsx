@@ -27,7 +27,15 @@ const NODE_COLOR: Record<DecisionNodeType, string> = {
  * grouped into rows by type since the backend does not compute layout
  * positions itself.
  */
-export function ArchitectureFlowGraph({ graph }: { graph: DecisionGraph | null }): JSX.Element {
+export function ArchitectureFlowGraph({
+  graph,
+  onNodeClick,
+  onEdgeClick,
+}: {
+  graph: DecisionGraph | null;
+  onNodeClick?: (nodeId: string) => void;
+  onEdgeClick?: (edgeId: string) => void;
+}): JSX.Element {
   const { nodes, edges } = useMemo(() => {
     if (!graph || graph.nodes.length === 0) {
       return { nodes: [] as Node[], edges: [] as Edge[] };
@@ -73,7 +81,14 @@ export function ArchitectureFlowGraph({ graph }: { graph: DecisionGraph | null }
 
   return (
     <div style={{ height: 380, border: "1px solid #232a33", borderRadius: 8 }}>
-      <ReactFlow nodes={nodes} edges={edges} fitView proOptions={{ hideAttribution: true }}>
+      <ReactFlow
+        nodes={nodes}
+        edges={edges}
+        fitView
+        proOptions={{ hideAttribution: true }}
+        onNodeClick={onNodeClick ? (_, node) => onNodeClick(node.id) : undefined}
+        onEdgeClick={onEdgeClick ? (_, edge) => onEdgeClick(edge.id) : undefined}
+      >
         <Background color="#232a33" gap={16} />
         <Controls showInteractive={false} />
       </ReactFlow>

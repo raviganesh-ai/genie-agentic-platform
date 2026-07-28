@@ -64,7 +64,14 @@ class FoundryAgentDriftValidator:
                     step.prompt_id
                     and agent.prompt_template_ref
                     and step.prompt_id != agent.prompt_template_ref
+                    and step.allowed_tool_names is None
                 ):
+                    # A step that declares allowed_tool_names is an
+                    # intentional phase-scoped delegation call (see
+                    # config/workflows/registry.yaml's genie-orchestrator
+                    # steps) - it is expected, by design, to use a
+                    # phase-specific prompt distinct from the agent's own
+                    # "primary" prompt_template_ref, so this is not drift.
                     errors.append(
                         f"Prompt drift: workflow '{workflow.id}' step '{step.id}' uses "
                         f"prompt '{step.prompt_id}' but agent '{agent.id}' is configured "

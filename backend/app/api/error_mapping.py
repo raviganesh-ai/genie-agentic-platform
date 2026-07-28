@@ -12,9 +12,12 @@ secrets").
 """
 from __future__ import annotations
 
+import logging
+
 from fastapi import Request, status
 from fastapi.responses import JSONResponse
 
+from app.agents.foundry.errors import FoundryAgentSynchronizationError, FoundryUnavailableError
 from app.governance.approval_service import (
     ApprovalAlreadyDecidedError,
     ApprovalExpiredError,
@@ -33,6 +36,14 @@ from app.services.session_service import (
 from app.services.workshop_service import UnknownWorkflowRunError as WorkshopUnknownRunError
 
 __all__ = ["domain_error_handler"]
+
+logger = logging.getLogger(__name__)
+
+_SERVICE_UNAVAILABLE_ERRORS = (
+    CustomerAgentProvisioningError,
+    FoundryUnavailableError,
+    FoundryAgentSynchronizationError,
+)
 
 _NOT_FOUND_ERRORS = (
     SessionNotFoundError,
@@ -59,7 +70,7 @@ def _status_code_for(exc: Exception) -> int:
         return status.HTTP_404_NOT_FOUND
     if isinstance(exc, _CONFLICT_ERRORS):
         return status.HTTP_409_CONFLICT
-    if isinstance(exc, CustomerAgentProvisioningError):
+    if isinstance(exc, _SERVICE_UNAVAILABLE_ERRORS):
         return status.HTTP_503_SERVICE_UNAVAILABLE
     if isinstance(exc, ReanalysisRoutingError):
         return status.HTTP_422_UNPROCESSABLE_ENTITY
@@ -67,4 +78,17 @@ def _status_code_for(exc: Exception) -> int:
 
 
 async def domain_error_handler(request: Request, exc: Exception) -> JSONResponse:
-    return JSONResponse(status_code=_status_code_for(exc), content={"detail": str(exc)})
+    status_code = _status_code_for(exc)
+    correlation_id = request.headers.get("x-correlation-id") or request.query_params.get(
+        "correlation_id"
+    )
+    logger.error(
+        "Domain error handled for %s %s (status=%s, correlation_id=%s): %s: %s",
+        request.method,
+        request.url.path,
+        status_code,
+        correlation_id,
+        type(exc).__name__,
+        exc,
+    )
+    return JSONResponse(status_code=status_code, content={"detail": str(exc)})

@@ -1,13 +1,14 @@
 """Upload API routes: transcript/audio/video/supporting-document uploads.
 
 Thin wrapper over ``SessionService.register_upload`` / ``list_uploads`` /
-``get_upload``. Text ``transcript`` uploads are decoded directly; ``audio``/
-``video`` uploads are transcribed synchronously via the configured
-``SpeechToTextService`` (Azure AI Speech in production, per
-``app.transcription.speech_service``) before the upload record is created.
-File bytes themselves are still never persisted to disk/blob storage -
-only the resulting transcript text, which is what every downstream agent
-actually needs.
+``get_upload``. ``transcript``/``supporting_document`` uploads have their
+text extracted synchronously via ``app.utils.document_text.extract_text``
+(PDF-aware - plain text otherwise); ``audio``/``video`` uploads are
+transcribed synchronously via the configured ``SpeechToTextService`` (Azure
+AI Speech in production, per ``app.transcription.speech_service``) before
+the upload record is created. File bytes themselves are still never
+persisted to disk/blob storage - only the resulting transcript text, which
+is what every downstream agent actually needs.
 """
 from __future__ import annotations
 
@@ -19,6 +20,7 @@ from app.security.auth_models import AuthenticatedUser
 from app.security.dependencies import get_current_user
 from app.services.session_service import SessionService
 from app.transcription.speech_service import SpeechToTextError, SpeechToTextService
+from app.utils.document_text import DocumentTextExtractionError, extract_text
 
 router = APIRouter(prefix="/sessions/{session_id}/uploads", tags=["uploads"])
 
@@ -40,9 +42,15 @@ async def create_upload(
     status: str = "received"
     detail = ""
 
-    if upload_type == "transcript":
-        transcript_text = contents.decode("utf-8", errors="replace")
-        status = "completed"
+    if upload_type in ("transcript", "supporting_document"):
+        try:
+            transcript_text = extract_text(
+                content=contents, content_type=content_type, file_name=file_name
+            )
+            status = "completed"
+        except DocumentTextExtractionError as exc:
+            status = "failed"
+            detail = str(exc)
     elif upload_type in ("audio", "video"):
         try:
             result = await speech_service.transcribe(

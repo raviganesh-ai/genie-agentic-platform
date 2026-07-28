@@ -16,14 +16,23 @@ import { LoadingState } from "@/components/LoadingState";
 import { ErrorState } from "@/components/ErrorState";
 import { SectionCard } from "@/components/SectionCard";
 import { ArchitectureFlowGraph } from "./ArchitectureFlowGraph";
+import { ArchitectureComponentDiagram } from "./ArchitectureComponentDiagram";
 import type { ApiError } from "@/services/httpClient";
 
-const REDESIGN_GOALS: Array<{ id: RedesignGoal; label: string }> = [
-  { id: "lower_cost", label: "Lower Cost" },
-  { id: "higher_security", label: "Higher Security" },
-  { id: "faster_mvp", label: "Faster MVP" },
-  { id: "regulated_industry", label: "Regulated Industry" },
-  { id: "fabric_first", label: "Fabric-First" },
+const REDESIGN_GOALS: Array<{ id: RedesignGoal; label: string; icon: string }> = [
+  { id: "lower_cost", label: "Lower Cost", icon: "💰" },
+  { id: "higher_security", label: "Higher Security", icon: "🔒" },
+  { id: "faster_mvp", label: "Faster MVP", icon: "⚡" },
+  { id: "regulated_industry", label: "Regulated Industry", icon: "⚖️" },
+  { id: "fabric_first", label: "Fabric-First", icon: "🧵" },
+];
+
+const GRAPH_LEGEND: Array<{ label: string; color: string }> = [
+  { label: "Agent", color: "#2f83e0" },
+  { label: "Recommendation", color: "#5aa16c" },
+  { label: "Approval", color: "#c98a2c" },
+  { label: "Memory record", color: "#8a63d2" },
+  { label: "Evidence", color: "#5c6572" },
 ];
 
 const POLL_MS = Number(import.meta.env.VITE_ARCHITECTURE_STUDIO_POLL_MS ?? 0);
@@ -100,6 +109,9 @@ export function ArchitectureStudioPage(): JSX.Element {
       {error ? <ErrorState error={error} onRetry={refresh} /> : null}
       {reanalysisError ? <ErrorState error={reanalysisError} /> : null}
 
+      <Text size={200} weight="semibold" style={{ display: "block", marginBottom: 8, opacity: 0.75 }}>
+        Request an alternative design
+      </Text>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 20 }}>
         {REDESIGN_GOALS.map((goal) => (
           <Button
@@ -108,15 +120,40 @@ export function ArchitectureStudioPage(): JSX.Element {
             disabled={requesting}
             onClick={() => void requestAlternative(goal.id).then(refresh)}
           >
-            {goal.label}
+            {goal.icon} {goal.label}
           </Button>
         ))}
       </div>
 
       {snapshot ? (
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          <SectionCard title="UI & Agent Flow (Visual)">
-            <ArchitectureFlowGraph graph={snapshot.decision_graph} />
+          <SectionCard title="🗺️ Mission Control Flow (Visual)">
+            <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 10 }}>
+              {GRAPH_LEGEND.map((entry) => (
+                <div key={entry.label} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <span
+                    style={{
+                      display: "inline-block",
+                      width: 10,
+                      height: 10,
+                      borderRadius: "50%",
+                      backgroundColor: entry.color,
+                    }}
+                  />
+                  <Text size={100} style={{ opacity: 0.7 }}>
+                    {entry.label}
+                  </Text>
+                </div>
+              ))}
+            </div>
+            <ArchitectureFlowGraph
+              graph={snapshot.decision_graph}
+              onNodeClick={inspector.selectNode}
+              onEdgeClick={inspector.selectEdge}
+            />
+            <Text size={100} style={{ opacity: 0.55, display: "block", marginTop: 8 }}>
+              Click any node to inspect its details below.
+            </Text>
           </SectionCard>
           {snapshot.components.length === 0 ? (
             <Text size={300} style={{ opacity: 0.7 }}>
@@ -126,19 +163,10 @@ export function ArchitectureStudioPage(): JSX.Element {
             snapshot.components.map((component) => (
               <SectionCard
                 key={component.step_id}
-                title={component.step_id}
+                title={`🏗️ ${component.step_id.replace(/-/g, " ")}`}
                 action={<Text size={200}>{component.recommended_by}</Text>}
               >
-                <Text
-                  size={300}
-                  style={{
-                    whiteSpace: "pre-wrap",
-                    cursor: "pointer",
-                  }}
-                  onClick={() => inspector.selectNode(component.step_id)}
-                >
-                  {component.content}
-                </Text>
+                <ArchitectureComponentDiagram content={component.content} />
               </SectionCard>
             ))
           )}
@@ -177,12 +205,22 @@ export function ArchitectureStudioPage(): JSX.Element {
       ) : null}
 
       {inspector.selectedNode ? (
-        <SectionCard title="Component Inspector">
+        <SectionCard title="🔍 Node Inspector" action={<Button size="small" onClick={inspector.clearSelection}>Close</Button>}>
           <Text weight="semibold" style={{ display: "block" }}>
             {inspector.selectedNode.label}
           </Text>
           <pre style={{ fontSize: 11, whiteSpace: "pre-wrap" }}>
             {JSON.stringify(inspector.selectedNode.metadata, null, 2)}
+          </pre>
+        </SectionCard>
+      ) : null}
+      {inspector.selectedEdge ? (
+        <SectionCard title="🔍 Edge Inspector" action={<Button size="small" onClick={inspector.clearSelection}>Close</Button>}>
+          <Text weight="semibold" style={{ display: "block" }}>
+            {inspector.selectedEdge.edge_type.replace(/_/g, " ")}
+          </Text>
+          <pre style={{ fontSize: 11, whiteSpace: "pre-wrap" }}>
+            {JSON.stringify(inspector.selectedEdge.metadata, null, 2)}
           </pre>
         </SectionCard>
       ) : null}

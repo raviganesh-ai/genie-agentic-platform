@@ -95,7 +95,13 @@ class WorkflowRegistry:
         return list(self._definitions.values())
 
     def validate_agent_references(self, agent_registry: AgentRegistry) -> list[str]:
-        """Return an error message for every step referencing an unknown agent."""
+        """Return an error message for every step referencing an unknown agent.
+
+        Also flags any ``step.allowed_tool_names`` entry that is not one of
+        that step's own agent's registered ``tool_definitions`` - a
+        misconfigured name here would otherwise silently expose zero (or
+        the wrong) delegation tools at runtime rather than failing closed.
+        """
 
         errors: list[str] = []
         for workflow in self._definitions.values():
@@ -105,6 +111,18 @@ class WorkflowRegistry:
                         f"Workflow '{workflow.id}' step '{step.id}' references "
                         f"unknown agent '{step.agent_id}'."
                     )
+                    continue
+                if step.allowed_tool_names is None:
+                    continue
+                agent = agent_registry.get(step.agent_id)
+                known_tool_names = {tool.name for tool in agent.tool_definitions}
+                for tool_name in step.allowed_tool_names:
+                    if tool_name not in known_tool_names:
+                        errors.append(
+                            f"Workflow '{workflow.id}' step '{step.id}' allows tool "
+                            f"'{tool_name}' which agent '{step.agent_id}' does not "
+                            f"define in its tool_definitions."
+                        )
         return errors
 
     def __contains__(self, workflow_id: str) -> bool:
