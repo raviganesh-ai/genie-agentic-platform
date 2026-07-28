@@ -24,7 +24,8 @@ describe("ArchitectureStudioPage", () => {
       workflowRunId: FIXTURE_WORKFLOW_RUN_ID,
     });
 
-    await waitFor(() => expect(screen.getByText(/Use Azure Container Apps/i)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/Generated the customer-facing UI code/i)).toBeInTheDocument());
+    expect(screen.queryByText(/Use Azure Container Apps/i)).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Lower Cost/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Fabric-First/i })).toBeInTheDocument();
   });

@@ -99,11 +99,24 @@ export function ArchitectureStudioPage(): JSX.Element {
   );
   const { data: agents } = useAgentRegistry();
 
+  /** The Agentic Workflow diagram reflects the actual, dynamic workflow
+   * built for THIS mission's requirement scope - not every agent the
+   * orchestrator could ever call - so its spokes are sourced from the
+   * distinct specialists that have contributed a completed step to this
+   * session's own architecture snapshot (in the order each first
+   * contributed), a live prototype of the per-requirement workflow rather
+   * than a static full agent-registry listing. */
   const agenticWorkflow = useMemo(() => {
     if (!agents) return null;
     const orchestrator = agents.find((agent) => agent.role === "mission_orchestration");
     if (!orchestrator) return null;
-    const spokes: FlowDiagramNode[] = (orchestrator.connected_agent_ids ?? [])
+    const contributingAgentIds: string[] = [];
+    for (const component of snapshot?.components ?? []) {
+      if (!contributingAgentIds.includes(component.recommended_by)) {
+        contributingAgentIds.push(component.recommended_by);
+      }
+    }
+    const spokes: FlowDiagramNode[] = contributingAgentIds
       .map((agentId) => agents.find((agent) => agent.id === agentId))
       .filter((agent): agent is NonNullable<typeof agent> => Boolean(agent))
       .map((agent) => ({
@@ -121,7 +134,7 @@ export function ArchitectureStudioPage(): JSX.Element {
       },
       spokes,
     };
-  }, [agents]);
+  }, [agents, snapshot?.components]);
 
   const approvalsFetcher = useCallback(
     () => (sessionId ? approvalApi.list(sessionId) : Promise.reject(new Error("No session"))),
@@ -234,23 +247,29 @@ export function ArchitectureStudioPage(): JSX.Element {
             <InteractiveFlowDiagram
               hub={agenticWorkflow?.hub}
               nodes={agenticWorkflow?.spokes ?? []}
-              emptyLabel="Loading the agent registry..."
+              emptyLabel="No agents have contributed to this mission's workflow yet."
             />
           </SectionCard>
-          {snapshot.components.length === 0 ? (
+          {/* design-architecture's own recommendation is already shown in the
+           * "Architecture" / "Agentic Workflow" diagrams above, so it's
+           * excluded here to avoid a redundant duplicate card. */}
+          {snapshot.components.filter((component) => component.step_id !== "design-architecture")
+            .length === 0 ? (
             <Text size={300} style={{ opacity: 0.7 }}>
               No architecture components recommended yet.
             </Text>
           ) : (
-            snapshot.components.map((component) => (
-              <SectionCard
-                key={component.step_id}
-                title={`🏗️ ${component.step_id.replace(/-/g, " ")}`}
-                action={<Text size={200}>{component.recommended_by}</Text>}
-              >
-                <ArchitectureComponentDiagram content={component.content} />
-              </SectionCard>
-            ))
+            snapshot.components
+              .filter((component) => component.step_id !== "design-architecture")
+              .map((component) => (
+                <SectionCard
+                  key={component.step_id}
+                  title={`🏗️ ${component.step_id.replace(/-/g, " ")}`}
+                  action={<Text size={200}>{component.recommended_by}</Text>}
+                >
+                  <ArchitectureComponentDiagram content={component.content} />
+                </SectionCard>
+              ))
           )}
         </div>
       ) : null}

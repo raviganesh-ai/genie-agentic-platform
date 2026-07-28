@@ -112,6 +112,7 @@ export function buildArchitectureSnapshot(): ArchitectureSnapshot {
     workflow_run_id: FIXTURE_WORKFLOW_RUN_ID,
     components: [
       { step_id: "design-architecture", recommended_by: "architecture-designer", content: "Use Azure Container Apps." },
+      { step_id: "build-solution", recommended_by: "architecture-designer", content: "Generated the customer-facing UI code." },
     ],
     decision_graph: buildDecisionGraph(),
   };
