@@ -15,6 +15,7 @@ from uuid import uuid4
 
 from app.agents.gateway import AgentGateway, create_agent_gateway
 from app.agents.registry import AgentRegistry
+from app.agents.tools.registration import build_default_tool_registry
 from app.config.settings import Settings
 from app.governance.approval_service import ApprovalService, create_approval_service
 from app.governance.decision_graph_service import DecisionGraphService
@@ -94,10 +95,10 @@ class AgentOrchestrator:
         self.collaboration_service = collaboration_service
         self.checkpoint_service = checkpoint_service
         # Exposed (read-only use expected) so Phase 7 API/services can render
-        # the Collaboration Graph / MissionControlSnapshot.decisionGraph, query
-        # governance events, read shared memory, and list registered agents -
-        # all against the exact same wired instances this orchestrator uses,
-        # rather than constructing separate, inconsistent duplicates.
+        # the architecture decision graph, query governance events, read
+        # shared memory, and list registered agents - all against the exact
+        # same wired instances this orchestrator uses, rather than
+        # constructing separate, inconsistent duplicates.
         self.decision_graph_service = decision_graph_service
         self.governance_service = governance_service
         self.memory_service = memory_service
@@ -112,31 +113,39 @@ class AgentOrchestrator:
         return self._execution_service.list_runs_for_session(session_id)
 
     async def provision_customer_agents(
-        self, *, session_id: str, trace_id: str | None = None
+        self, *, session_id: str, scope_id: str | None = None, trace_id: str | None = None
     ) -> list[ProvisionedAgentRecord]:
-        """Provision a dedicated Foundry agent fleet for one customer session.
+        """Provision a dedicated Foundry agent fleet for one customer session (or scope).
 
         Idempotent - see ``CustomerAgentProvisioningService.provision_for_session``.
+        ``scope_id``, when supplied (e.g. a requirement group id), provisions
+        a fleet dedicated to that scope instead of the whole session.
         """
 
         return await self._customer_agent_provisioning_service.provision_for_session(
-            session_id=session_id, trace_id=trace_id
+            session_id=session_id, scope_id=scope_id, trace_id=trace_id
         )
 
     async def deprovision_customer_agents(
-        self, *, session_id: str, trace_id: str | None = None
+        self, *, session_id: str, scope_id: str | None = None, trace_id: str | None = None
     ) -> None:
-        """Tear down a customer session's dedicated Foundry agent fleet, if any."""
+        """Tear down a customer session's (or scope's) dedicated Foundry agent fleet, if any."""
 
         await self._customer_agent_provisioning_service.deprovision_for_session(
-            session_id=session_id, trace_id=trace_id
+            session_id=session_id, scope_id=scope_id, trace_id=trace_id
         )
 
-    def customer_agents_provisioned(self, session_id: str) -> bool:
-        return self._customer_agent_provisioning_service.is_provisioned(session_id)
+    def customer_agents_provisioned(self, session_id: str, *, scope_id: str | None = None) -> bool:
+        return self._customer_agent_provisioning_service.is_provisioned(session_id, scope_id=scope_id)
 
-    def provisioned_customer_agent_count(self, session_id: str) -> int:
-        return len(self._customer_agent_provisioning_service.provisioned_agents(session_id))
+    def provisioned_customer_agent_count(
+        self, session_id: str, *, scope_id: str | None = None
+    ) -> int:
+        return len(
+            self._customer_agent_provisioning_service.provisioned_agents(
+                session_id, scope_id=scope_id
+            )
+        )
 
     async def run_workflow(
         self,
@@ -146,6 +155,7 @@ class AgentOrchestrator:
         trace_id: str | None = None,
         step_inputs: dict[str, WorkflowStepInput] | None = None,
         transcript_text: str = "",
+        agent_scope_id: str | None = None,
     ) -> WorkflowRunResult:
         return await self._execution_service.start_workflow(
             workflow_id=workflow_id,
@@ -153,6 +163,7 @@ class AgentOrchestrator:
             trace_id=trace_id or str(uuid4()),
             step_inputs=step_inputs,
             transcript_text=transcript_text,
+            agent_scope_id=agent_scope_id,
         )
 
     async def resume_workflow(
@@ -267,11 +278,17 @@ def create_agent_orchestrator(
         agent_registry=agent_registry,
         governance_service=resolved_governance_service,
     )
+    tool_registry = build_default_tool_registry(
+        memory_service=resolved_memory_service,
+        governance_service=resolved_governance_service,
+        customer_agent_provisioning_service=customer_agent_provisioning_service,
+    )
     resolved_agent_gateway = agent_gateway or create_agent_gateway(
         settings=settings,
         agent_registry=agent_registry,
         prompt_registry=prompt_registry,
         session_agent_resolver=customer_agent_provisioning_service,
+        tool_registry=tool_registry,
     )
     recommendation_lineage_service = RecommendationLineageService(
         InMemoryRecommendationLineageRepository(), governance_service=resolved_governance_service

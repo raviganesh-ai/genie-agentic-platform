@@ -77,7 +77,9 @@ class _FakeFoundryClient:
         self._error = error
         self.calls: list[dict[str, str]] = []
 
-    async def run(self, *, foundry_agent_id: str, input_text: str) -> FoundryRunResult:
+    async def run(
+        self, *, foundry_agent_id: str, input_text: str, tool_context=None
+    ) -> FoundryRunResult:
         self.calls.append({"foundry_agent_id": foundry_agent_id, "input_text": input_text})
         if self._error is not None:
             raise self._error
@@ -188,10 +190,12 @@ class _FakeSessionAgentResolver:
 
     def __init__(self, *, dedicated_id: str | None) -> None:
         self._dedicated_id = dedicated_id
-        self.calls: list[dict[str, str]] = []
+        self.calls: list[dict[str, str | None]] = []
 
-    def resolve(self, *, session_id: str, agent_id: str) -> str | None:
-        self.calls.append({"session_id": session_id, "agent_id": agent_id})
+    def resolve(
+        self, *, session_id: str, agent_id: str, scope_id: str | None = None
+    ) -> str | None:
+        self.calls.append({"session_id": session_id, "agent_id": agent_id, "scope_id": scope_id})
         return self._dedicated_id
 
 
@@ -211,8 +215,32 @@ async def test_execute_routes_to_a_dedicated_agent_when_resolver_returns_one(
 
     await gateway.execute(_request(session_id="cx-session-1"))
 
-    assert resolver.calls == [{"session_id": "cx-session-1", "agent_id": "requirements-analyst"}]
+    assert resolver.calls == [
+        {"session_id": "cx-session-1", "agent_id": "requirements-analyst", "scope_id": None}
+    ]
     assert fake_client.calls[0]["foundry_agent_id"] == "dedicated-agent-42"
+
+
+async def test_execute_forwards_agent_scope_id_to_the_resolver(
+    agent_registry: AgentRegistry, prompt_registry: PromptRegistry
+):
+    fake_client = _FakeFoundryClient(
+        result=FoundryRunResult(output_text="Scoped reply.", raw_status="completed", latency_ms=1.0)
+    )
+    resolver = _FakeSessionAgentResolver(dedicated_id="group-dedicated-agent-7")
+    gateway = AzureAgentGateway(
+        agent_registry=agent_registry,
+        prompt_registry=prompt_registry,
+        foundry_client=fake_client,
+        session_agent_resolver=resolver,
+    )
+
+    await gateway.execute(_request(session_id="cx-session-1", agent_scope_id="group-1"))
+
+    assert resolver.calls == [
+        {"session_id": "cx-session-1", "agent_id": "requirements-analyst", "scope_id": "group-1"}
+    ]
+    assert fake_client.calls[0]["foundry_agent_id"] == "group-dedicated-agent-7"
 
 
 async def test_execute_falls_back_to_shared_agent_when_resolver_returns_none(
@@ -231,7 +259,9 @@ async def test_execute_falls_back_to_shared_agent_when_resolver_returns_none(
 
     await gateway.execute(_request(session_id="cx-session-1"))
 
-    assert resolver.calls == [{"session_id": "cx-session-1", "agent_id": "requirements-analyst"}]
+    assert resolver.calls == [
+        {"session_id": "cx-session-1", "agent_id": "requirements-analyst", "scope_id": None}
+    ]
     assert fake_client.calls[0]["foundry_agent_id"] == "requirements-analyst-agent"
 
 

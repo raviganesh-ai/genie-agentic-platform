@@ -1,220 +1,105 @@
 # Workflow registry manifest.
 #
-# Defines the ordered collaboration steps agents follow for the Mission
-# Control experience described in docs/GENIE_BUILD_SPEC.md. Workflow
-# execution (the orchestration engine) is implemented in Phase 6; this
-# registry only describes *what* workflows exist.
+# Defines the ordered collaboration steps agents follow for the Genie
+# Mission Control experience described in docs/GENIE_BUILD_SPEC.md.
+# Workflow execution (the orchestration engine) is implemented in Phase 6;
+# this registry only describes *what* workflows exist.
 #
-# solution-discovery-workflow was expanded (Phase 10A follow-up) to wire in
-# every one of the 14 business agents from config/agents/
-# foundry_agents_catalog.yaml alongside the original 6 registry.yaml agents,
-# so all previously-provisioned-but-unreferenced catalog agents now actually
-# execute (in real, observable collaboration waves) during a real session -
-# not just appear as inert inventory entries.
+# solution-discovery-workflow was trimmed down (post Phase-10A) to the
+# single, dynamic Requirement -> Architecture -> Build -> Deploy mission:
+# every business/debugging agent that was previously wired in from the now
+# -deleted config/agents/foundry_agents_catalog.yaml has been removed, and
+# a real, independently provisioned Foundry "genie-orchestrator" agent
+# (config/agents/registry.yaml) now exists as the dynamic Connected-Agents
+# entry point for this same mission. This workflow entry remains the
+# generic wave-execution path every existing session/requirements/
+# architecture API route already resolves runs through - it is not a
+# duplicate of genie-orchestrator, it is today's concrete execution of the
+# same five-agent mission via the proven wave engine.
 #
-# Phase 1 (call transcript intake) additionally gives every step below a
-# `variable_sources` mapping so the whole graph can run automatically from
-# nothing but an uploaded call transcript/recording: 'transcript' resolves
-# to the session's combined transcribed text, 'step:<id>' resolves to that
-# already-completed step's output. Variables that should never be
-# auto-derived from a transcript (governance-review's `policies`,
-# failure-diagnosis-v1's `failure_details`) are deliberately left unmapped -
-# they still require an explicit step_inputs override, per
+# Every step below has a `variable_sources` mapping so the whole graph can
+# run automatically from nothing but an uploaded call transcript/recording:
+# 'transcript' resolves to the session's combined transcribed text,
+# 'step:<id>' resolves to that already-completed step's output. Variables
+# that should never be auto-derived from a transcript (governance-review's
+# `policies`, failure-diagnosis-v1's `failure_details`) are deliberately
+# left unmapped - they still require an explicit step_inputs override, per
 # app.workflows.models.WorkflowStep.variable_sources's fail-closed contract.
+#
+# `requires_approval_checkpoint` gates the Mission Control UI's guided,
+# linear flow (Upload -> Requirements -> Architecture -> UI & Agent Design
+# -> Governance -> Deploy & Launch) using the three checkpoints already
+# defined in config/policies/approval_policy.yaml: the run pauses (status
+# `waiting_for_approval`) immediately BEFORE the gated step executes, so a
+# human reviews/edits that step's upstream output before the mission
+# continues. requirement-discovery-approval gates design-architecture (the
+# human reviews/adds/removes discovered requirements before architecture is
+# designed); architecture-approval gates build-solution (the human approves
+# the recommended architecture before UI + agent-flow code is generated);
+# final-output-approval gates deploy-solution (the human gives final sign-
+# off - after governance review - before the app is provisioned/launched).
 workflows:
   - id: solution-discovery-workflow
     name: Solution Discovery Workflow
     description: >-
-      End-to-end discovery flow from ingested customer input through
-      architecture recommendation, enrichment, governance approval, and
-      an executive-ready summary - now spanning all 20 business/governance
-      agents in the catalog.
+      End-to-end mission from ingested customer input through requirement
+      discovery, architecture recommendation, UI/multi-agent-flow build,
+      governance approval, and deployment/launch.
     steps:
-      # --- Wave 0: initial discovery -----------------------------------
-      - id: discover-inputs
-        agent_id: discovery-agent
-        description: Lead initial customer discovery across ingested inputs.
-        depends_on: []
-        prompt_id: business-agent-workshop-v1
-        variable_sources:
-          context: transcript
-      - id: facilitate-workshop
-        agent_id: workshop-facilitator-agent
-        description: Facilitate the interactive customer workshop experience.
-        depends_on: []
-        prompt_id: business-agent-workshop-v1
-        variable_sources:
-          context: transcript
-
-      # --- Wave 1: requirements capture ---------------------------------
       - id: analyze-requirements
         agent_id: requirements-analyst
         description: Extract requirements, risks, assumptions, and constraints.
-        depends_on:
-          - discover-inputs
+        depends_on: []
         prompt_id: requirements-extraction-v1
         variable_sources:
           transcript_excerpt: transcript
-      - id: capture-requirements-detail
-        agent_id: requirements-agent
-        description: Capture and structure functional and non-functional requirements.
-        depends_on:
-          - discover-inputs
-        prompt_id: business-agent-workshop-v1
-        variable_sources:
-          context: transcript
 
-      # --- Wave 2: industry context + risk -------------------------------
-      - id: apply-industry-patterns
-        agent_id: industry-expert-agent
-        description: Supply industry-specific patterns and best practices.
-        depends_on:
-          - analyze-requirements
-          - capture-requirements-detail
-        prompt_id: business-agent-workshop-v1
-        variable_sources:
-          context: step:analyze-requirements
-      - id: assess-risk
-        agent_id: risk-assessor
-        description: Score business, technical, and compliance risk.
-        depends_on:
-          - analyze-requirements
-          - capture-requirements-detail
-        prompt_id: risk-assessment-v1
-        variable_sources:
-          requirements: step:analyze-requirements
-      - id: assess-risk-compliance
-        agent_id: risk-compliance-agent
-        description: Assess regulatory, compliance, and business risk.
-        depends_on:
-          - analyze-requirements
-          - capture-requirements-detail
-        prompt_id: business-agent-workshop-v1
-        variable_sources:
-          context: step:analyze-requirements
-
-      # --- Wave 3: architecture design -----------------------------------
       - id: design-architecture
         agent_id: architecture-designer
         description: Propose an Azure reference architecture with rationale.
         depends_on:
-          - apply-industry-patterns
+          - analyze-requirements
         prompt_id: architecture-recommendation-v1
+        requires_approval_checkpoint: requirement-discovery-approval
         variable_sources:
           approved_requirements: step:analyze-requirements
-      - id: design-data-architecture
-        agent_id: data-architect-agent
-        description: Design data architecture and integration patterns.
-        depends_on:
-          - apply-industry-patterns
-        prompt_id: business-agent-workshop-v1
-        variable_sources:
-          context: step:apply-industry-patterns
 
-      # --- Wave 4: end-to-end solution architecture -----------------------
-      - id: design-solution-architecture
-        agent_id: solution-architect-agent
-        description: Produce an end-to-end Azure solution architecture.
+      - id: build-solution
+        agent_id: build-agent
+        description: >-
+          Generate the customer-facing UI code and the dedicated
+          multi-agent workflow design for the approved requirement and
+          architecture.
         depends_on:
           - design-architecture
-          - design-data-architecture
-        prompt_id: business-agent-workshop-v1
-        variable_sources:
-          context: step:design-architecture
-
-      # --- Wave 5: parallel enrichment of the solution --------------------
-      - id: propose-innovation
-        agent_id: innovation-agent
-        description: Propose innovative or emerging-technology alternatives.
-        depends_on:
-          - design-solution-architecture
-        prompt_id: business-agent-workshop-v1
-        variable_sources:
-          context: step:design-solution-architecture
-      - id: design-ui
-        agent_id: ui-designer-agent
-        description: Design interactive UI/UX concepts for the proposed solution.
-        depends_on:
-          - design-solution-architecture
-        prompt_id: prototype-generation-v1
-        variable_sources:
-          solution_architecture: step:design-solution-architecture
-      - id: optimize-cost
-        agent_id: cost-optimization-agent
-        description: Evaluate and recommend Azure cost optimizations.
-        depends_on:
-          - design-solution-architecture
-        prompt_id: business-agent-workshop-v1
-        variable_sources:
-          context: step:design-solution-architecture
-      - id: review-responsible-ai
-        agent_id: responsible-ai-agent
-        description: Review the proposed solution for responsible AI considerations.
-        depends_on:
-          - design-solution-architecture
-        prompt_id: business-agent-workshop-v1
-        variable_sources:
-          context: step:design-solution-architecture
-      - id: build-roadmap
-        agent_id: roadmap-agent
-        description: Build a phased delivery roadmap from the proposed architecture.
-        depends_on:
-          - design-solution-architecture
-        prompt_id: business-agent-workshop-v1
-        variable_sources:
-          context: step:design-solution-architecture
-      - id: generate-prototype
-        agent_id: ui-designer-agent
-        description: >-
-          Generate a self-contained sample prototype for the customer-facing
-          preview surface (app/api/cx.py), reusing the ui-designer-agent
-          already provisioned for design-ui above and its same canonical
-          prompt_template_ref.
-        depends_on:
-          - design-solution-architecture
-        prompt_id: prototype-generation-v1
-        variable_sources:
-          solution_architecture: step:design-solution-architecture
-
-      # --- Wave 6: governance approval gate --------------------------------
-      - id: governance-review
-        agent_id: governance-reviewer
-        description: Review discovery and architecture outputs for approval.
-        depends_on:
-          - assess-risk
-          - assess-risk-compliance
-          - design-solution-architecture
-        prompt_id: governance-review-v1
+        prompt_id: build-generation-v1
         requires_approval_checkpoint: architecture-approval
         variable_sources:
-          artifact: step:design-solution-architecture
+          requirements: step:analyze-requirements
+          architecture: step:design-architecture
 
-      # --- Wave 7: cross-cutting governance coordination --------------------
-      - id: coordinate-governance
-        agent_id: governance-agent
-        description: Coordinate cross-cutting governance policy checks.
+      - id: governance-review
+        agent_id: governance-reviewer
+        description: >-
+          Review the build for policy compliance, assess its security
+          posture, and provision/record the access control needed for it
+          to run safely.
+        depends_on:
+          - build-solution
+        prompt_id: governance-review-v1
+        variable_sources:
+          artifact: step:build-solution
+
+      - id: deploy-solution
+        agent_id: deployment-agent
+        description: Provision the designed agents/UI and produce the customer launch summary.
         depends_on:
           - governance-review
-          - propose-innovation
-          - design-ui
-          - optimize-cost
-          - review-responsible-ai
-          - build-roadmap
-          - generate-prototype
-        prompt_id: business-agent-workshop-v1
-        variable_sources:
-          context: step:governance-review
-
-      # --- Wave 8: executive summary / final output gate ---------------------
-      - id: summarize-executive
-        agent_id: executive-summary-agent
-        description: Produce an executive-ready summary of session outcomes.
-        depends_on:
-          - coordinate-governance
-        prompt_id: business-agent-workshop-v1
+        prompt_id: deployment-v1
         requires_approval_checkpoint: final-output-approval
         variable_sources:
-          context: step:coordinate-governance
+          build_output: step:build-solution
+          governance_decision: step:governance-review
     enabled: true
 
   - id: debugging-workflow
@@ -222,56 +107,11 @@ workflows:
     description: >-
       Diagnoses a detected workflow or agent execution failure
       (FailureDetected) via the Azure-hosted debugging agent, executed
-      through the same AzureAgentGateway path as every other workflow. The 8
-      specialist debugging agents from the Foundry Supported Agents catalog
-      now run alongside the generic debugging-agent in parallel, each
-      diagnosing from its own domain angle, followed by a final synthesis
-      step that produces one consolidated remediation recommendation.
+      through the same AzureAgentGateway path as every other workflow.
     steps:
       - id: diagnose-failure
         agent_id: debugging-agent
         description: Diagnose the detected failure and recommend remediation.
         depends_on: []
         prompt_id: failure-diagnosis-v1
-      - id: diagnose-test-failure
-        agent_id: test-failure-analyst-agent
-        description: Diagnose automated test failures across the platform.
-        depends_on: []
-        prompt_id: failure-diagnosis-v1
-      - id: diagnose-backend-failure
-        agent_id: backend-debugging-agent
-        description: Diagnose backend service and API execution failures.
-        depends_on: []
-        prompt_id: failure-diagnosis-v1
-      - id: diagnose-frontend-failure
-        agent_id: frontend-debugging-agent
-        description: Diagnose frontend rendering and interaction failures.
-        depends_on: []
-        prompt_id: failure-diagnosis-v1
-      - id: diagnose-orchestration-failure
-        agent_id: agent-orchestration-debugging-agent
-        description: Diagnose workflow orchestration and handoff failures.
-        depends_on: []
-        prompt_id: failure-diagnosis-v1
-      - id: diagnose-security-failure
-        agent_id: security-debugging-agent
-        description: Diagnose authentication, authorization, and security failures.
-        depends_on: []
-        prompt_id: failure-diagnosis-v1
-      - id: diagnose-deployment-failure
-        agent_id: azure-deployment-debugging-agent
-        description: Diagnose Azure infrastructure and deployment failures.
-        depends_on: []
-        prompt_id: failure-diagnosis-v1
-      - id: diagnose-governance-trace-failure
-        agent_id: governance-trace-debugging-agent
-        description: Diagnose governance/decision lineage recording failures.
-        depends_on: []
-        prompt_id: failure-diagnosis-v1
-      - id: diagnose-memory-failure
-        agent_id: memory-debugging-agent
-        description: Diagnose memory read/write/promotion failures.
-        depends_on: []
-        prompt_id: failure-diagnosis-v1
     enabled: true
-

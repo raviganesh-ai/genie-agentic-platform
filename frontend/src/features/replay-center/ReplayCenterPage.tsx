@@ -1,4 +1,5 @@
-import { Badge, Text } from "@fluentui/react-components";
+import { useNavigate } from "react-router-dom";
+import { Badge, Button, Text } from "@fluentui/react-components";
 import { useSessionContext } from "@/state/SessionContext";
 import { useReplay } from "@/hooks/useReplay";
 import { PageHeader } from "@/layouts/AppShell";
@@ -14,8 +15,20 @@ const KIND_LABELS: Record<ReplayTimelineEntry["kind"], string> = {
 };
 
 export function ReplayCenterPage(): JSX.Element {
+  const navigate = useNavigate();
   const { sessionId } = useSessionContext();
   const { data, loading, error, refresh } = useReplay(sessionId);
+
+  if (!sessionId) {
+    return (
+      <div>
+        <PageHeader title="Replay Center" subtitle="No active session yet." />
+        <Button appearance="primary" onClick={() => navigate("/")}>
+          Start a session
+        </Button>
+      </div>
+    );
+  }
 
   return (
     <div>

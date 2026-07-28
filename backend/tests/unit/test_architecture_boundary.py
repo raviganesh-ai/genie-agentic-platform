@@ -8,6 +8,12 @@ directly, each isolating that SDK behind its own interface:
 - ``app/agents/foundry/project_service.py`` owns the AIProjectClient /
   DefaultAzureCredential lifecycle for agent execution
   (``AgentApiClient`` / ``FoundryAgentClient`` protocols).
+- ``app/agents/foundry/api_client.py`` constructs
+  ``azure.ai.projects.models`` request objects (e.g.
+  ``PromptAgentDefinition``) for the versioned Foundry Agents admin API
+  (``create_version``/``get``/``delete``) - it never constructs a
+  credential or SDK client itself (that remains ``project_service.py``'s
+  job), but it does need the SDK's request-model types.
 - ``app/deployment/provider_status_source.py`` owns the
   ResourceManagementClient / DefaultAzureCredential lifecycle for
   pre-provisioning Azure subscription readiness checks
@@ -31,6 +37,7 @@ _SDK_IMPORT_PATTERN = re.compile(r"^\s*(?:import|from)\s+azure\.(ai\.projects|id
 # depend on those protocols instead.
 _ALLOWED_RELATIVE_PATHS = {
     Path("agents/foundry/project_service.py"),
+    Path("agents/foundry/api_client.py"),
     Path("deployment/provider_status_source.py"),
     Path("transcription/speech_service.py"),
 }

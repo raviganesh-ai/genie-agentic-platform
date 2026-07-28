@@ -59,6 +59,16 @@ class WorkflowStepResult(BaseModel):
     error: str | None = None
     started_at: datetime
     completed_at: datetime
+    resolved_variables: dict[str, str] = Field(
+        default_factory=dict,
+        description=(
+            "The prompt variables actually resolved for this execution. Carried "
+            "forward as a base layer if this step is later re-executed on a "
+            "resumed run (e.g. a customer chat message), so explicit overrides "
+            "that cannot be re-derived from variable_sources - such as "
+            "governance-review's 'policies' - are not lost on re-run."
+        ),
+    )
 
 
 class WorkflowRunResult(BaseModel):
@@ -73,6 +83,17 @@ class WorkflowRunResult(BaseModel):
     waves: list[list[str]] = Field(default_factory=list)
     step_results: list[WorkflowStepResult] = Field(default_factory=list)
     detail: str = ""
+    agent_scope_id: str | None = Field(
+        default=None,
+        description=(
+            "Dedicated-agent-fleet scope key for this run, if any (e.g. a "
+            "requirement group id) - see SessionAgentResolver.resolve's "
+            "scope_id parameter. None means this run uses the session-level "
+            "fleet (or the shared catalog pool). Carried forward automatically "
+            "whenever this run is resumed, so follow-up chat/reanalyze "
+            "interactions keep reaching the same dedicated fleet."
+        ),
+    )
 
 
 class DeliverablePackage(BaseModel):

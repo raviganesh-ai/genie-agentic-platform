@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithProviders, mockFetchSequence } from "./testUtils";
-import { FIXTURE_SESSION_ID, FIXTURE_WORKFLOW_RUN_ID } from "./fixtures";
+import { buildWorkflowRunResult, FIXTURE_SESSION_ID, FIXTURE_WORKFLOW_RUN_ID } from "./fixtures";
 import { FinalOutputPage } from "@/features/final-output-center/FinalOutputPage";
 import type { DeliverablePackage } from "@/types/workflow";
 
@@ -34,5 +34,51 @@ describe("FinalOutputPage", () => {
     await waitFor(() => expect(screen.getByText(/All requirements approved\./i)).toBeInTheDocument());
     expect(screen.getByRole("button", { name: /Export JSON/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Export Markdown/i })).toBeInTheDocument();
+  });
+
+  it("shows a Launch App button with a sandboxed preview once the run has completed", async () => {
+    mockFetchSequence([
+      { match: "/outputs", response: [] },
+      {
+        match: `/workflows/runs/${FIXTURE_WORKFLOW_RUN_ID}`,
+        response: buildWorkflowRunResult({
+          status: "completed",
+          step_results: [
+            {
+              step_id: "build-solution",
+              agent_id: "build-agent",
+              status: "completed",
+              output_text: "<html><body>Hello App</body></html>",
+              error: null,
+              started_at: "2026-07-23T10:00:00Z",
+              completed_at: "2026-07-23T10:01:00Z",
+            },
+            {
+              step_id: "deploy-solution",
+              agent_id: "deployment-agent",
+              status: "completed",
+              output_text: "LAUNCH_SUMMARY: App provisioned and ready.",
+              error: null,
+              started_at: "2026-07-23T10:02:00Z",
+              completed_at: "2026-07-23T10:03:00Z",
+            },
+          ],
+        }),
+      },
+    ]);
+
+    renderWithProviders(<FinalOutputPage />, {
+      sessionId: FIXTURE_SESSION_ID,
+      workflowRunId: FIXTURE_WORKFLOW_RUN_ID,
+    });
+
+    await waitFor(() =>
+      expect(screen.getByText(/LAUNCH_SUMMARY: App provisioned and ready\./i)).toBeInTheDocument(),
+    );
+    const launchButton = screen.getByRole("button", { name: /Launch App/i });
+    const user = userEvent.setup();
+    await user.click(launchButton);
+
+    expect(screen.getByTitle(/Launched app preview/i)).toBeInTheDocument();
   });
 });

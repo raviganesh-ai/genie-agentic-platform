@@ -19,7 +19,7 @@ export function WorkshopPage(): JSX.Element {
       <div>
         <PageHeader title="Workshop" />
         <Text size={300} style={{ opacity: 0.7 }}>
-          Start a workflow run from Mission Control to open the workshop.
+          Start a workflow run from Upload to open the workshop.
         </Text>
       </div>
     );

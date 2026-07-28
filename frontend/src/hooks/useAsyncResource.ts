@@ -22,9 +22,10 @@ export interface AsyncResourceOptions {
 
 /**
  * Shared internal data-fetching hook used by every domain-specific hook
- * (useMissionControl, useAgentArena, etc.). Not part of the user-specified
- * hook list, but factors out identical loading/error/refresh/polling logic
- * so each domain hook stays a thin, readable wrapper around its API client.
+ * (useArchitectureStudio, useRequirementDiscovery, etc.). Not part of the
+ * user-specified hook list, but factors out identical loading/error/refresh/
+ * polling logic so each domain hook stays a thin, readable wrapper around
+ * its API client.
  */
 export function useAsyncResource<T>(
   fetcher: () => Promise<T>,

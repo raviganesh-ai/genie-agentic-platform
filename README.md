@@ -37,8 +37,8 @@ flowchart TB
     end
 
     subgraph Backend["FastAPI Backend (Python 3.12, async)"]
-        API["API layer\n(14 routers: sessions, uploads, ingestion,\nworkflows, mission-control, agents, memory,\ngovernance, approvals, architecture, workshop,\noutputs, debugging, foundry-admin)"]
-        SVC["Application services\n(session, mission-control, workshop,\narchitecture, output services)"]
+        API["API layer\n(16 routers: sessions, uploads, ingestion,\nworkflows, agents, memory, governance, approvals,\narchitecture, requirements, workshop, replay,\noutputs, debugging, foundry-admin, health)"]
+        SVC["Application services\n(session, requirements, workshop,\narchitecture, output services)"]
         ORCH["Orchestration\n(WorkflowRuntime, AgentOrchestrator,\nHandoff / Collaboration / Reanalysis)"]
         GW["AzureAgentGateway"]
         MEM["Memory Service\n(Personal / Shared / Enterprise)"]
@@ -91,6 +91,8 @@ flowchart TB
 ### Governance
 
 Every agent execution, agent-to-agent handoff, memory read/write, tool invocation, policy check, and approval decision is recorded as a `GovernanceEvent`, giving full session replay and decision-lineage traceability. `GovernanceProvider` is a pluggable interface (`Agent365GovernanceProvider` marker for production, `LocalGovernanceTraceProvider` for local/dev only) — production startup fails closed if no real provider is injected.
+
+**Triage Mode** (sidebar toggle, off by default) renders a full-height, right-docked panel that polls `GET /sessions/{id}/governance/events` and filters to `agent_execution` events. Because `WorkflowStepExecutor.execute_step()` records that event the instant an individual agent call resolves — not once a whole (possibly multi-step) workflow run/resume call returns — the panel reflects the orchestrator's real agent-call order and timing, including cases where several ungated steps execute back-to-back within one HTTP call. Each feed item shows a gamified XP/level readout plus a truncated preview of that agent's real output (`detail.output_preview`); there is no synthetic or simulated activity.
 
 ### Fail-closed startup
 
@@ -166,7 +168,7 @@ The backend (`RequirementsService.get_qualification`, `GET /sessions/{id}/requir
 backend/           FastAPI application (Python 3.12+)
   app/
     agents/        AgentRegistry, AzureAgentGateway, Foundry provider/sync/lifecycle
-    api/            14 routers (thin — auth + delegation only)
+    api/            16 routers (thin — auth + delegation only)
     architecture/   Architecture Studio services
     config/         Settings (pydantic-settings, env prefix GENIE_)
     debugging/      Debugging workflow trigger service
@@ -179,7 +181,8 @@ backend/           FastAPI application (Python 3.12+)
     prompts/        PromptRegistry
     repositories/   Protocol + in-memory repository implementations
     security/       Entra ID token validation, auth dependencies
-    services/       Session / Mission Control / Workshop / Architecture / Output services
+    services/       Session / Requirements / Workshop / Architecture / Output /
+                    Foundry agent provisioning & lifecycle services
     utils/          Shared YAML loader
     validation/     10 fail-closed startup validators + runner
     workflows/      WorkflowRegistry
@@ -189,10 +192,12 @@ frontend/           React + TypeScript Mission Control UI (Vite)
   src/
     app/            App bootstrap (MSAL init, router)
     components/     Shared UI components
-    features/       11 feature pages (landing, upload, mission-control, agent-arena,
-                     collaboration-graph, requirement-map, architecture-studio,
-                     workshop-center, governance-center, replay-center,
-                     final-output-center)
+    features/       9 feature pages (landing, upload, requirement-map,
+                     architecture-studio, workshop-center, governance-center,
+                     replay-center, final-output-center, triage) - plus two
+                     hub wrappers in layouts/ (RequirementsHubPage,
+                     OutputsHubPage) that group related pages under one
+                     linear nav step via sub-tabs
     hooks/          Data-fetching hooks per feature
     layouts/        AppShell (nav + auth status)
     services/        httpClient, authProvider (MSAL), one API client per backend router

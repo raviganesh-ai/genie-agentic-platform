@@ -36,7 +36,7 @@ export function UploadPage(): JSX.Element {
   const handleGeneratePrototype = useCallback(async () => {
     const result = await run(DISCOVERY_WORKFLOW_ID);
     setWorkflowRunId(result.workflow_run_id);
-    navigate("/discovery");
+    navigate("/requirements");
   }, [run, setWorkflowRunId, navigate]);
 
   if (!sessionId) {
@@ -119,10 +119,7 @@ export function UploadPage(): JSX.Element {
           disabled={running || !uploads || uploads.length === 0}
           onClick={() => void handleGeneratePrototype()}
         >
-          {running ? "Starting Discovery..." : "Generate Prototype"}
-        </Button>
-        <Button appearance="secondary" onClick={() => navigate("/mission-control")}>
-          Go to Mission Control
+          {running ? "Starting Mission..." : "Start Mission"}
         </Button>
       </div>
     </div>

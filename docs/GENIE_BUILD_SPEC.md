@@ -293,4 +293,49 @@ User can:
 - Challenge recommendations
 - Request alternatives
 - Request re-analysis
-- Modify 
+- Modify requirements and re-trigger downstream agents
+
+---
+
+## Per-Requirement Agentic Flows & Launchable UIs
+
+Genie does not produce a single monolithic workflow/UI for an entire
+solution. Instead:
+
+- Discovered requirements are grouped into logical requirement
+  groups/epics (not one flow per atomic requirement, and not one flow
+  for the whole solution).
+- For each requirement group, Genie runs its own agentic flow
+  (requirements refinement -> architecture -> solution design ->
+  prototype generation) scoped to just that group.
+- Each requirement group's flow produces its own generated, interactive
+  UI, wired to the real backend agent services (not a static mockup).
+- CX launches each requirement group's UI independently to interact
+  with that specific agentic flow, test it, and provide feedback that
+  re-triggers the agents for that group.
+- The Mission Control Dashboard / Agent Arena must show these as
+  distinct, separately trackable flows (own progress, own agent
+  statuses, own governance trace) rather than a single merged view.
+
+---
+
+## Final Output Center
+
+For each requirement group's completed flow, CX can download the
+generated artifacts as a takeaway "startup kit" for their own
+development, including:
+
+- The generated workflow/agent configuration for that requirement group
+- The generated prototype UI (HTML/CSS/JS or component source)
+- Any generated backend integration code/contracts for that UI
+- A manifest describing requirements, architecture decisions, and
+  governance trace that produced the artifacts
+
+Downloads must:
+
+- Be scoped to a single session + requirement group (no cross-customer
+  data leakage)
+- Be authorized the same way session/workflow access is authorized
+  today (no new implicit trust)
+- Never include secrets, credentials, or internal configuration values
+- Be packaged as a single downloadable archive (for example a zip)

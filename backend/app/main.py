@@ -23,14 +23,12 @@ from app.api import (
     agents,
     approvals,
     architecture,
-    cx,
     debugging,
     foundry_admin,
     governance,
     health,
     ingestion,
     memory,
-    mission_control,
     outputs,
     replay,
     requirements,
@@ -45,8 +43,6 @@ from app.governance.replay_service import ReplayService
 from app.governance.traceability_service import TraceabilityService
 from app.orchestration.agent_orchestrator import create_agent_orchestrator
 from app.prompts.registry import PromptRegistry
-from app.security.cx_rate_limiter import create_cx_rate_limiter
-from app.security.cx_tokens import create_cx_token_service
 from app.security.token_validator import create_token_validator
 from app.services.architecture_service import create_architecture_service
 from app.services.foundry_agent_inventory_service import FoundryAgentInventoryService
@@ -54,11 +50,9 @@ from app.services.foundry_agent_lifecycle_service import FoundryAgentLifecycleSe
 from app.services.foundry_agent_synchronization_service import (
     FoundryAgentSynchronizationService as RichFoundryAgentSynchronizationService,
 )
-from app.services.mission_control_service import create_mission_control_service
 from app.services.output_service import create_output_service
 from app.services.requirements_service import create_requirements_service
 from app.services.session_service import create_session_service
-from app.services.starter_kit_service import StarterKitService
 from app.services.workshop_service import create_workshop_service
 from app.transcription.speech_service import create_speech_to_text_service
 from app.validation.base import StartupValidationError
@@ -216,11 +210,6 @@ def create_app(
         session_service = create_session_service(orchestrator=orchestrator)
         app.state.session_service = session_service
         app.state.speech_to_text_service = create_speech_to_text_service(resolved_settings)
-        app.state.cx_token_service = create_cx_token_service(resolved_settings)
-        app.state.cx_rate_limiter = create_cx_rate_limiter(resolved_settings)
-        app.state.mission_control_service = create_mission_control_service(
-            orchestrator=orchestrator, session_service=session_service
-        )
         app.state.workshop_service = create_workshop_service(
             orchestrator=orchestrator, session_service=session_service
         )
@@ -235,7 +224,6 @@ def create_app(
             session_service=session_service,
             qualification_step_id=resolved_settings.requirements_qualification_step_id,
         )
-        app.state.starter_kit_service = StarterKitService()
         app.state.replay_service = ReplayService(
             governance_service=orchestrator.governance_service,
             approval_service=orchestrator.approval_service,
@@ -279,7 +267,6 @@ def create_app(
     app.include_router(uploads.router)
     app.include_router(ingestion.router)
     app.include_router(workflows.router)
-    app.include_router(mission_control.router)
     app.include_router(agents.router)
     app.include_router(memory.router)
     app.include_router(governance.router)
@@ -291,7 +278,6 @@ def create_app(
     app.include_router(debugging.router)
     app.include_router(replay.router)
     app.include_router(foundry_admin.router)
-    app.include_router(cx.router)
 
     return app
 

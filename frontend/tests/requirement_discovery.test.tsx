@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { renderWithProviders, mockFetchSequence } from "./testUtils";
 import {
   buildApprovalRequests,
   buildRequirementsQualification,
+  buildWorkflowRunResult,
   FIXTURE_SESSION_ID,
   FIXTURE_WORKFLOW_RUN_ID,
 } from "./fixtures";
@@ -57,5 +59,57 @@ describe("RequirementDiscoveryPage", () => {
     expect(
       screen.getByText(/single deterministic lookup with no ambiguity/i),
     ).toBeInTheDocument();
+  });
+
+  it("seeds an editable requirements draft and submits the edited text when approving", async () => {
+    const fetchMock = mockFetchSequence([
+      { match: "/approvals", response: buildApprovalRequests() },
+      {
+        match: `/requirements/${FIXTURE_WORKFLOW_RUN_ID}/qualification`,
+        response: buildRequirementsQualification({ status: "qualified" }),
+      },
+      {
+        match: `/workflows/runs/${FIXTURE_WORKFLOW_RUN_ID}`,
+        response: buildWorkflowRunResult({
+          step_results: [
+            {
+              step_id: "analyze-requirements",
+              agent_id: "requirements-analyst",
+              status: "completed",
+              output_text: "1. Support SSO login\n2. Export reports as PDF",
+              error: null,
+              started_at: "2026-07-23T10:00:00Z",
+              completed_at: "2026-07-23T10:01:00Z",
+            },
+          ],
+        }),
+      },
+      { match: "/decide", response: { id: "decision-1" } },
+      { match: "/resume", response: buildWorkflowRunResult({ status: "waiting_for_approval" }) },
+    ]);
+
+    renderWithProviders(<RequirementDiscoveryPage />, {
+      sessionId: FIXTURE_SESSION_ID,
+      workflowRunId: FIXTURE_WORKFLOW_RUN_ID,
+    });
+
+    const textbox = await screen.findByDisplayValue(/Support SSO login/i);
+    const user = userEvent.setup();
+    await user.type(textbox, "\n3. Add audit logging");
+
+    const approveButton = await screen.findByRole("button", { name: /^Approve$/i });
+    await user.click(approveButton);
+
+    await waitFor(() => {
+      const resumeCall = fetchMock.mock.calls.find((call) =>
+        String(call[0]).endsWith("/resume"),
+      );
+      expect(resumeCall).toBeDefined();
+      const [, resumeInit] = resumeCall as unknown as [string, RequestInit];
+      const body = JSON.parse(resumeInit.body as string);
+      expect(body.step_inputs["design-architecture"].variables.approved_requirements).toContain(
+        "Add audit logging",
+      );
+    });
   });
 });

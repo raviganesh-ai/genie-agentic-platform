@@ -33,24 +33,54 @@ export function LandingPage(): JSX.Element {
   }, [title, setSessionId, navigate]);
 
   return (
-    <div style={{ maxWidth: 560, margin: "10vh auto", textAlign: "center" }}>
-      <Text weight="bold" size={900} style={{ display: "block" }}>
+    <div className="genie-fade-in" style={{ maxWidth: 600, margin: "8vh auto", textAlign: "center" }}>
+      <Text
+        weight="bold"
+        size={900}
+        style={{
+          display: "block",
+          backgroundImage: "linear-gradient(135deg, #6ba3ea 0%, #a3c4f3 100%)",
+          backgroundClip: "text",
+          WebkitBackgroundClip: "text",
+          color: "transparent",
+          letterSpacing: -0.5,
+        }}
+      >
         Genie
       </Text>
-      <Text size={400} style={{ display: "block", opacity: 0.75, marginBottom: 32 }}>
-        Agentic Experience Center — watch requirement discovery, agent collaboration,
-        architecture design, and governance unfold in real time.
+      <Text size={400} style={{ display: "block", opacity: 0.85, marginTop: 6, marginBottom: 8 }}>
+        Your Agentic Experience Center
+      </Text>
+      <Text size={300} style={{ display: "block", opacity: 0.65, marginBottom: 32 }}>
+        Upload a transcript and watch requirement discovery, agent collaboration, architecture
+        design, and governance decisions unfold live - front-row seats to your own AI-built
+        solution.
       </Text>
 
-      <div style={{ display: "flex", gap: 8, justifyContent: "center", marginBottom: 16 }}>
+      <div
+        style={{
+          display: "flex",
+          gap: 8,
+          justifyContent: "center",
+          marginBottom: 16,
+          padding: 20,
+          borderRadius: 12,
+          border: "1px solid #232a33",
+          backgroundColor: "rgba(19, 25, 33, 0.55)",
+          boxShadow: "0 8px 30px rgba(0, 0, 0, 0.25)",
+        }}
+      >
         <Input
-          placeholder="Session title (optional)"
+          placeholder="Give this session a name (optional)"
           value={title}
           onChange={(_, data) => setTitle(data.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" && !creating) void handleCreate();
+          }}
           style={{ width: 320 }}
         />
         <Button appearance="primary" disabled={creating} onClick={() => void handleCreate()}>
-          {creating ? "Creating..." : "Start New Session"}
+          {creating ? "Creating your session..." : "✨ Start New Session"}
         </Button>
       </div>
 

@@ -29,7 +29,7 @@ export const genieDarkTheme: Theme = createDarkTheme(genieBrandRamp);
 
 /**
  * Semantic status colors for governance/risk/confidence indicators used
- * across Mission Control, Agent Arena, and Governance Center. These are
+ * across the Requirements, Architecture, and Governance pages. These are
  * deliberately restrained (no neon/arcade tones) per the executive-grade
  * design requirement.
  */
@@ -40,15 +40,4 @@ export const statusPalette = {
   incomplete: "#8a8f98",
   failed: "#b0362f",
   info: "#2f83e0",
-} as const;
-
-export const agentHealthPalette = {
-  idle: "#8a8f98",
-  analyzing: "#2f83e0",
-  collaborating: "#4e93e5",
-  waiting_for_approval: "#d8a325",
-  generating_output: "#1666c1",
-  completed: "#3fa66a",
-  blocked: "#c94f4f",
-  failed: "#b0362f",
 } as const;

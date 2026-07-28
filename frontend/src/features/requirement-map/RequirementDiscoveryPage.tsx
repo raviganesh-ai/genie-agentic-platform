@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import {
   Badge,
   Button,
@@ -16,7 +16,10 @@ import {
 } from "@/hooks/useRequirements";
 import { useAsyncResource } from "@/hooks/useAsyncResource";
 import { approvalApi } from "@/services/approvalApi";
+import { workflowApi } from "@/services/workflowApi";
 import { getTraceId } from "@/state/traceRegistry";
+import type { WorkflowStepInput } from "@/types/workflow";
+import type { ApiError } from "@/services/httpClient";
 import { PageHeader } from "@/layouts/AppShell";
 import { LoadingState } from "@/components/LoadingState";
 import { ErrorState } from "@/components/ErrorState";
@@ -30,6 +33,32 @@ export function RequirementDiscoveryPage(): JSX.Element {
   const { data: qualification } = useRequirementsQualification(sessionId, workflowRunId, POLL_MS);
   const { challenge } = useRequirementActions();
   const [rationaleByKey, setRationaleByKey] = useState<Record<string, string>>({});
+  const [policiesByRequest, setPoliciesByRequest] = useState<Record<string, string>>({});
+  const [requirementsDraft, setRequirementsDraft] = useState<string | null>(null);
+  const [resumeError, setResumeError] = useState<string | null>(null);
+  const [resumingRequestId, setResumingRequestId] = useState<string | null>(null);
+
+  // The analyst's discovered requirements are free text (the workflow run's
+  // analyze-requirements step output), separate from the (currently
+  // unpopulated - Shared Memory is never written to) structured records
+  // above. Editable here so the user can add/remove requirements before
+  // approving the design-architecture gate.
+  const runFetcher = useCallback(
+    () =>
+      sessionId && workflowRunId
+        ? workflowApi.getRun(sessionId, workflowRunId)
+        : Promise.reject(new Error("No active workflow run")),
+    [sessionId, workflowRunId],
+  );
+  const { data: run } = useAsyncResource(runFetcher, [sessionId, workflowRunId], {
+    enabled: Boolean(sessionId && workflowRunId),
+  });
+  const analyzedRequirementsText = useMemo(
+    () =>
+      run?.step_results.find((result) => result.step_id === "analyze-requirements")?.output_text ?? "",
+    [run],
+  );
+  const effectiveRequirementsDraft = requirementsDraft ?? analyzedRequirementsText;
 
   // Real ApprovalRequest entries for this session (subject_type is
   // currently always "workflow_step" per backend/app/orchestration/
@@ -47,12 +76,59 @@ export function RequirementDiscoveryPage(): JSX.Element {
     refresh: refreshApprovals,
   } = useAsyncResource(approvalsFetcher, [sessionId], { enabled: Boolean(sessionId) });
 
+  // Approving an ApprovalRequest only records the decision - it never
+  // resumes the gated workflow run on its own (backend/app/api/
+  // approvals.py's decide_approval is intentionally decision-only). Without
+  // this, the run permanently freezes at "waiting_for_approval" once
+  // approved. For the governance-review step specifically, its `policies`
+  // prompt variable is deliberately never auto-derived from the transcript
+  // (config/workflows/registry.yaml) - a human must supply it explicitly as
+  // a step_input, so we collect it here before resuming.
+  const approveAndResume = useCallback(
+    async (requestId: string, subjectId: string) => {
+      if (!sessionId || !workflowRunId) return;
+      setResumeError(null);
+      setResumingRequestId(requestId);
+      try {
+        await approvalApi.decide(sessionId, requestId, "approved");
+        await refreshApprovals();
+        const traceId = getTraceId(workflowRunId) ?? undefined;
+        const stepInputs: Record<string, WorkflowStepInput> | undefined =
+          subjectId === "design-architecture"
+            ? {
+                "design-architecture": {
+                  step_id: "design-architecture",
+                  variables: { approved_requirements: effectiveRequirementsDraft },
+                },
+              }
+            : subjectId === "build-solution"
+              ? {
+                  "governance-review": {
+                    step_id: "governance-review",
+                    variables: { policies: policiesByRequest[requestId] ?? "" },
+                  },
+                }
+              : undefined;
+        await workflowApi.resumeRun(sessionId, workflowRunId, traceId, stepInputs);
+        // Resuming can complete further steps that raise their own new
+        // approval requests (e.g. final-output-approval) - refetch so any
+        // newly pending request appears without requiring a manual reload.
+        await Promise.all([refresh(), refreshApprovals()]);
+      } catch (err) {
+        setResumeError((err as ApiError).message ?? "Failed to resume the workflow.");
+      } finally {
+        setResumingRequestId(null);
+      }
+    },
+[sessionId, workflowRunId, policiesByRequest, effectiveRequirementsDraft, refresh, refreshApprovals],
+  );
+
   if (!workflowRunId) {
     return (
       <div>
         <PageHeader title="Requirement Discovery Map" />
         <Text size={300} style={{ opacity: 0.7 }}>
-          Start a workflow run from Mission Control to begin discovering requirements.
+          Start a workflow run from Upload to begin discovering requirements.
         </Text>
       </div>
     );
@@ -75,6 +151,21 @@ export function RequirementDiscoveryPage(): JSX.Element {
               "The Requirements Analyst agent determined a simpler, non-agentic solution is more appropriate here."}
           </MessageBarBody>
         </MessageBar>
+      ) : null}
+
+      {analyzedRequirementsText ? (
+        <SectionCard title="Discovered Requirements (edit before approving)">
+          <Text size={300} style={{ display: "block", marginBottom: 8, opacity: 0.8 }}>
+            Add or remove requirements below - this text is what the architecture design step will
+            use once you approve.
+          </Text>
+          <Textarea
+            value={effectiveRequirementsDraft}
+            onChange={(_, dataEv) => setRequirementsDraft(dataEv.value)}
+            rows={12}
+            style={{ width: "100%", fontFamily: "monospace", fontSize: 12 }}
+          />
+        </SectionCard>
       ) : null}
 
       {data ? (
@@ -130,6 +221,14 @@ export function RequirementDiscoveryPage(): JSX.Element {
       <SectionCard title="Pending Approvals">
         {approvalsLoading && !approvals ? <LoadingState label="Loading approvals..." /> : null}
         {approvalsError ? <ErrorState error={approvalsError} onRetry={refreshApprovals} /> : null}
+        {resumeError ? (
+          <MessageBar intent="error" layout="multiline" style={{ marginBottom: 12 }}>
+            <MessageBarBody>
+              <MessageBarTitle>Failed to resume the workflow</MessageBarTitle>
+              {resumeError}
+            </MessageBarBody>
+          </MessageBar>
+        ) : null}
         {approvals && approvals.length === 0 ? (
           <Text size={300} style={{ opacity: 0.7 }}>
             No pending approvals.
@@ -155,28 +254,41 @@ export function RequirementDiscoveryPage(): JSX.Element {
               </Text>
             </div>
             {request.status === "pending" && sessionId ? (
-              <div style={{ display: "flex", gap: 8 }}>
-                <Button
-                  size="small"
-                  appearance="primary"
-                  onClick={() =>
-                    void approvalApi
-                      .decide(sessionId, request.id, "approved")
-                      .then(refreshApprovals)
-                  }
-                >
-                  Approve
-                </Button>
-                <Button
-                  size="small"
-                  onClick={() =>
-                    void approvalApi
-                      .decide(sessionId, request.id, "rejected")
-                      .then(refreshApprovals)
-                  }
-                >
-                  Reject
-                </Button>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8, alignItems: "flex-end" }}>
+                {request.subject_id === "build-solution" ? (
+                  <Textarea
+                    placeholder="Policies to review against (required to resume this step)"
+                    value={policiesByRequest[request.id] ?? ""}
+                    onChange={(_, dataEv) =>
+                      setPoliciesByRequest((prev) => ({ ...prev, [request.id]: dataEv.value }))
+                    }
+                    style={{ width: "100%" }}
+                  />
+                ) : null}
+                <div style={{ display: "flex", gap: 8 }}>
+                  <Button
+                    size="small"
+                    appearance="primary"
+                    disabled={
+                      resumingRequestId === request.id ||
+                      (request.subject_id === "build-solution" &&
+                        !policiesByRequest[request.id]?.trim())
+                    }
+                    onClick={() => void approveAndResume(request.id, request.subject_id)}
+                  >
+                    {resumingRequestId === request.id ? "Approving..." : "Approve"}
+                  </Button>
+                  <Button
+                    size="small"
+                    onClick={() =>
+                      void approvalApi
+                        .decide(sessionId, request.id, "rejected")
+                        .then(refreshApprovals)
+                    }
+                  >
+                    Reject
+                  </Button>
+                </div>
               </div>
             ) : null}
           </div>

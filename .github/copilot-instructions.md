@@ -276,15 +276,16 @@ Use:
 - React Flow
 - Recharts
 
-UI must include:
+UI must include a simple, linear primary flow:
 
-- Mission Control Dashboard
-- Agent Arena
-- Collaboration Graph
-- Requirement Discovery Map
-- Architecture Studio
-- Interactive Workshop
-- Final Output Center
+- Upload (ingest transcripts/recordings/documents)
+- Requirements (gathered/extracted from the uploaded material)
+- Architecture (the solution architecture to build)
+- UI & Agent Design (each requirement gets its own generated UI and its
+  own dedicated agentic workflow)
+- Governance (approvals/oversight)
+- Deploy & Launch (provision the per-requirement agents/UI and mint a
+  customer-facing launch link)
 
 Do not use hardcoded demo data in production.
 

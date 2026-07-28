@@ -24,7 +24,6 @@ from app.governance.approval_service import (
 from app.memory.memory_models import MemoryAccessDeniedError
 from app.orchestration.reanalysis_service import ReanalysisRoutingError
 from app.orchestration.workflow_execution_service import UnknownWorkflowRunError
-from app.security.cx_rate_limiter import CxRateLimitExceededError
 from app.services.customer_agent_provisioning_service import CustomerAgentProvisioningError
 from app.services.session_service import (
     SessionAccessDeniedError,
@@ -60,8 +59,6 @@ def _status_code_for(exc: Exception) -> int:
         return status.HTTP_404_NOT_FOUND
     if isinstance(exc, _CONFLICT_ERRORS):
         return status.HTTP_409_CONFLICT
-    if isinstance(exc, CxRateLimitExceededError):
-        return status.HTTP_429_TOO_MANY_REQUESTS
     if isinstance(exc, CustomerAgentProvisioningError):
         return status.HTTP_503_SERVICE_UNAVAILABLE
     if isinstance(exc, ReanalysisRoutingError):

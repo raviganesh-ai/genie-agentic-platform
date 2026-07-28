@@ -10,6 +10,14 @@ import type { SafeError } from "@/types/common";
 const API_BASE_URL: string =
   (import.meta.env.VITE_GENIE_API_BASE_URL as string | undefined) ?? "http://localhost:8000";
 
+/** Exposes the configured backend origin for building absolute links to
+ * backend-rendered routes (e.g. the cx customer prototype surface) that
+ * aren't fetched via `apiFetch` but still need to be shown/copied as a
+ * full URL in the UI. */
+export function getApiBaseUrl(): string {
+  return API_BASE_URL;
+}
+
 export class ApiError extends Error implements SafeError {
   status?: number;
   correlationId?: string;

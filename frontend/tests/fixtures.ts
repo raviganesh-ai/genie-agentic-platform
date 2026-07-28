@@ -1,5 +1,3 @@
-import type { MissionControlSnapshot } from "@/types/missionControl";
-import type { AgentDefinition } from "@/types/agent";
 import type { WorkflowRunResult } from "@/types/workflow";
 import type { ApprovalRequest, GovernanceEvent } from "@/types/governance";
 import type { DecisionGraph } from "@/types/collaboration";
@@ -25,49 +23,9 @@ export function buildDecisionGraph(): DecisionGraph {
   };
 }
 
-export function buildMissionControlSnapshot(): MissionControlSnapshot {
-  return {
-    session_id: FIXTURE_SESSION_ID,
-    workflow_run_id: FIXTURE_WORKFLOW_RUN_ID,
-    workflow_status: "running",
-    mission_progress: 42,
-    active_agents: ["requirements-analyst"],
-    completed_agents: [],
-    blocked_agents: [],
-    current_workflow_step: "extract-requirements",
-    timeline: [
-      { kind: "workflow_step", label: "Extracted goals", agent_id: "requirements-analyst", timestamp: "2026-07-23T10:00:00Z" },
-    ],
-    approvals: [],
-    handoffs: [],
-    memory_updates: [],
-    decision_graph: buildDecisionGraph(),
-    governance_status: "compliant",
-    business_value_score: 70,
-    risk_score: 20,
-    readiness_score: 55,
-  };
-}
-
-export function buildAgentDefinitions(): AgentDefinition[] {
-  return [
-    {
-      id: "requirements-analyst",
-      name: "Requirements Analyst",
-      role: "requirements",
-      description: "Extracts requirements from ingested content.",
-      capabilities: ["requirement_extraction"],
-      allowed_tools: [],
-      memory_access: ["shared"],
-      model_deployment_ref: "claude-sonnet-5",
-      foundry_agent_id: null,
-      enabled: true,
-      version: "1.0.0",
-    },
-  ];
-}
-
-export function buildWorkflowRunResult(): WorkflowRunResult {
+export function buildWorkflowRunResult(
+  overrides: Partial<WorkflowRunResult> = {},
+): WorkflowRunResult {
   return {
     workflow_run_id: FIXTURE_WORKFLOW_RUN_ID,
     workflow_id: "solution-discovery-workflow",
@@ -86,10 +44,13 @@ export function buildWorkflowRunResult(): WorkflowRunResult {
       },
     ],
     detail: "",
+    ...overrides,
   };
 }
 
-export function buildApprovalRequests(): ApprovalRequest[] {
+export function buildApprovalRequests(
+  overrides: Partial<ApprovalRequest> = {},
+): ApprovalRequest[] {
   return [
     {
       id: "approval-1",
@@ -102,6 +63,7 @@ export function buildApprovalRequests(): ApprovalRequest[] {
       status: "pending",
       requested_at: "2026-07-23T10:05:00Z",
       expires_at: null,
+      ...overrides,
     },
   ];
 }

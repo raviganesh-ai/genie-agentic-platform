@@ -231,6 +231,58 @@ async def test_deprovision_is_a_no_op_when_nothing_was_provisioned(local_setting
     assert api_client.deleted == []
 
 
+async def test_scope_id_provisions_an_isolated_fleet_distinct_from_the_session_fleet(
+    local_settings: Settings,
+):
+    """Two requirement groups in the same session get fully separate fleets."""
+
+    registry = _registry(_agent(agent_id="agent-a", foundry_agent_id="agent-a-foundry"))
+    service, api_client = _service(
+        api_client=_FakeAgentApiClient(), registry=registry, local_settings=local_settings
+    )
+
+    group_a_records = await service.provision_for_session(
+        session_id="session-1", scope_id="group-a", trace_id="trace-1"
+    )
+    group_b_records = await service.provision_for_session(
+        session_id="session-1", scope_id="group-b", trace_id="trace-2"
+    )
+
+    assert len(api_client.created) == 2
+    assert group_a_records[0].foundry_agent_id != group_b_records[0].foundry_agent_id
+    assert service.is_provisioned("session-1", scope_id="group-a")
+    assert service.is_provisioned("session-1", scope_id="group-b")
+    assert not service.is_provisioned("session-1")
+    assert (
+        service.resolve(session_id="session-1", agent_id="agent-a", scope_id="group-a")
+        == group_a_records[0].foundry_agent_id
+    )
+    assert (
+        service.resolve(session_id="session-1", agent_id="agent-a", scope_id="group-b")
+        == group_b_records[0].foundry_agent_id
+    )
+    # Looking up without a scope_id (session-level) finds neither group's fleet.
+    assert service.resolve(session_id="session-1", agent_id="agent-a") is None
+
+
+async def test_deprovision_by_scope_id_leaves_other_scopes_untouched(local_settings: Settings):
+    registry = _registry(_agent(agent_id="agent-a", foundry_agent_id="agent-a-foundry"))
+    service, api_client = _service(
+        api_client=_FakeAgentApiClient(), registry=registry, local_settings=local_settings
+    )
+    await service.provision_for_session(session_id="session-1", scope_id="group-a", trace_id="t1")
+    await service.provision_for_session(session_id="session-1", scope_id="group-b", trace_id="t2")
+
+    await service.deprovision_for_session(
+        session_id="session-1", scope_id="group-a", trace_id="t3"
+    )
+
+    assert not service.is_provisioned("session-1", scope_id="group-a")
+    assert service.is_provisioned("session-1", scope_id="group-b")
+    assert len(api_client.deleted) == 1
+
+
+
 async def test_deprovision_records_a_retired_lifecycle_event_per_agent(local_settings: Settings):
     registry = _registry(_agent(agent_id="agent-a", foundry_agent_id="agent-a-foundry"))
     service, _ = _service(

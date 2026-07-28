@@ -34,6 +34,7 @@ class WorkflowExecutionService:
         trace_id: str,
         step_inputs: dict[str, WorkflowStepInput] | None = None,
         transcript_text: str = "",
+        agent_scope_id: str | None = None,
     ) -> WorkflowRunResult:
         result = await self._runtime.run_workflow(
             workflow_id=workflow_id,
@@ -41,6 +42,7 @@ class WorkflowExecutionService:
             trace_id=trace_id,
             step_inputs=step_inputs,
             transcript_text=transcript_text,
+            agent_scope_id=agent_scope_id,
         )
         self._store(result, session_id)
         return result

@@ -1,13 +1,11 @@
 """Per-customer dedicated Foundry agent provisioning.
 
 Implements the "each customer gets their own agents" capability: on
-demand (today, when an internal user mints a customer-experience access
-link - see ``POST /sessions/{id}/cx-access`` in ``app.api.sessions``),
-``CustomerAgentProvisioningService`` clones every enabled, already-approved
-catalog agent (``config/agents/*.yaml``) into a brand new, dedicated Azure
-AI Foundry agent resource for that one session - never inventing new agent
-reasoning, since the cloned instructions are always exactly the catalog
-agent's own configured ``description``.
+demand, ``CustomerAgentProvisioningService`` clones every enabled,
+already-approved catalog agent (``config/agents/*.yaml``) into a brand new,
+dedicated Azure AI Foundry agent resource for that one session - never
+inventing new agent reasoning, since the cloned instructions are always
+exactly the catalog agent's own configured ``description``.
 
 Once provisioned, ``AzureAgentGateway`` (see ``app.agents.gateway``'s
 ``SessionAgentResolver`` seam) automatically routes every further
@@ -57,10 +55,18 @@ class ProvisionedAgentRecord:
 class CustomerAgentProvisioningService:
     """Creates and tears down a dedicated Foundry agent fleet per customer session.
 
-    State (the session -> {agent_id: dedicated foundry_agent_id} mapping) is
+    State (a scope key -> {agent_id: dedicated foundry_agent_id} mapping) is
     held in-process, the same precedent already established by
     ``DecisionGraphService`` / ``FoundryAgentInventoryService`` - a durable
     backend can replace this later without changing any caller.
+
+    Every method accepts an optional ``scope_id`` that, when supplied,
+    replaces ``session_id`` as the fleet's storage key - this lets a caller
+    provision a fleet dedicated to something narrower than a whole session
+    (e.g. one requirement group), so distinct requirement groups within the
+    same session never share dedicated agents. ``session_id`` is always
+    still required (and used whenever ``scope_id`` is omitted, and always
+    for governance lifecycle event attribution).
     """
 
     def __init__(
@@ -75,31 +81,37 @@ class CustomerAgentProvisioningService:
         self._governance_service = governance_service
         self._provisioned: dict[str, dict[str, ProvisionedAgentRecord]] = {}
 
-    def is_provisioned(self, session_id: str) -> bool:
-        return bool(self._provisioned.get(session_id))
+    def is_provisioned(self, session_id: str, *, scope_id: str | None = None) -> bool:
+        return bool(self._provisioned.get(scope_id or session_id))
 
-    def resolve(self, *, session_id: str, agent_id: str) -> str | None:
+    def resolve(
+        self, *, session_id: str, agent_id: str, scope_id: str | None = None
+    ) -> str | None:
         """``SessionAgentResolver`` implementation consulted by ``AzureAgentGateway``."""
 
-        record = self._provisioned.get(session_id, {}).get(agent_id)
+        record = self._provisioned.get(scope_id or session_id, {}).get(agent_id)
         return record.foundry_agent_id if record else None
 
-    def provisioned_agents(self, session_id: str) -> list[ProvisionedAgentRecord]:
-        return list(self._provisioned.get(session_id, {}).values())
+    def provisioned_agents(
+        self, session_id: str, *, scope_id: str | None = None
+    ) -> list[ProvisionedAgentRecord]:
+        return list(self._provisioned.get(scope_id or session_id, {}).values())
 
     async def provision_for_session(
-        self, *, session_id: str, trace_id: str | None = None
+        self, *, session_id: str, scope_id: str | None = None, trace_id: str | None = None
     ) -> list[ProvisionedAgentRecord]:
         """Provision a dedicated Foundry agent for every enabled catalog agent.
 
-        Idempotent: if ``session_id`` already has dedicated agents, they are
-        returned unchanged rather than re-created. Fails closed: if any
-        agent's ``create_agent`` call fails, every agent already created for
-        this session in this call is rolled back before the error is raised
-        - a session never ends up with a partially provisioned fleet.
+        Idempotent: if the resolved scope key (``scope_id`` or ``session_id``)
+        already has dedicated agents, they are returned unchanged rather than
+        re-created. Fails closed: if any agent's ``create_agent`` call fails,
+        every agent already created for this scope in this call is rolled
+        back before the error is raised - a scope never ends up with a
+        partially provisioned fleet.
         """
 
-        existing = self._provisioned.get(session_id)
+        key = scope_id or session_id
+        existing = self._provisioned.get(key)
         if existing:
             return list(existing.values())
 
@@ -117,7 +129,7 @@ class CustomerAgentProvisioningService:
                 if not agent.enabled or not agent.foundry_agent_id:
                     continue
                 dedicated_foundry_agent_id = client.create_agent(
-                    name=f"{agent.id}-cx-{session_id[:8]}",
+                    name=f"{agent.id}-cx-{key[:8]}",
                     model=agent.model_deployment_ref or "",
                     instructions=agent.description,
                 )
@@ -136,22 +148,22 @@ class CustomerAgentProvisioningService:
             for record in records.values():
                 self._safe_delete(record.foundry_agent_id)
             raise CustomerAgentProvisioningError(
-                f"Failed to provision dedicated agents for session '{session_id}': {exc}"
+                f"Failed to provision dedicated agents for scope '{key}': {exc}"
             ) from exc
 
-        self._provisioned[session_id] = records
+        self._provisioned[key] = records
         return list(records.values())
 
     async def deprovision_for_session(
-        self, *, session_id: str, trace_id: str | None = None
+        self, *, session_id: str, scope_id: str | None = None, trace_id: str | None = None
     ) -> None:
-        """Delete every dedicated Foundry agent provisioned for ``session_id``.
+        """Delete every dedicated Foundry agent provisioned for this scope.
 
-        A no-op if nothing was ever provisioned for this session. Only ever
-        called on an explicit session close - never on an idle timeout.
+        A no-op if nothing was ever provisioned for this scope. Only ever
+        called on an explicit session/group close - never on an idle timeout.
         """
 
-        records = self._provisioned.pop(session_id, None)
+        records = self._provisioned.pop(scope_id or session_id, None)
         if not records:
             return
 
@@ -185,22 +197,26 @@ class NullCustomerAgentProvisioningService:
     branch on whether per-customer provisioning is actually configured.
     """
 
-    def is_provisioned(self, session_id: str) -> bool:
+    def is_provisioned(self, session_id: str, *, scope_id: str | None = None) -> bool:
         return False
 
-    def resolve(self, *, session_id: str, agent_id: str) -> str | None:
+    def resolve(
+        self, *, session_id: str, agent_id: str, scope_id: str | None = None
+    ) -> str | None:
         return None
 
-    def provisioned_agents(self, session_id: str) -> list[ProvisionedAgentRecord]:
+    def provisioned_agents(
+        self, session_id: str, *, scope_id: str | None = None
+    ) -> list[ProvisionedAgentRecord]:
         return []
 
     async def provision_for_session(
-        self, *, session_id: str, trace_id: str | None = None
+        self, *, session_id: str, scope_id: str | None = None, trace_id: str | None = None
     ) -> list[ProvisionedAgentRecord]:
         return []
 
     async def deprovision_for_session(
-        self, *, session_id: str, trace_id: str | None = None
+        self, *, session_id: str, scope_id: str | None = None, trace_id: str | None = None
     ) -> None:
         return None
 

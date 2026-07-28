@@ -1,95 +1,84 @@
-"""Thin wrapper over the raw azure-ai-projects SDK "agents" operations.
+"""Thin wrapper over the raw azure-ai-projects SDK's versioned Agents admin API.
 
-This module (together with ``project_service.py``) is the only place that
-imports ``azure.ai.projects`` / ``azure.identity``. Everything above this
-layer (``FoundryAgentProvider``, ``AzureAgentGateway``, and every future
-orchestrator/API route) depends only on the ``AgentApiClient`` protocol
-below, never on the SDK types directly.
+This module (together with ``project_service.py``) is one of the only
+places allowed to reach into the azure-ai-projects SDK - see
+``tests/unit/test_architecture_boundary.py``. Everything above this layer
+(``FoundryAgentProvider``, ``AzureAgentGateway``, ``CustomerAgentProvisioningService``,
+the Phase 10A inventory/lifecycle/synchronization services, and every
+future orchestrator/API route) depends only on the ``AgentApiClient``
+protocol below, never on the SDK types directly.
 
-VERIFIED against the installed SDK (azure-ai-projects==1.1.0b4, which pulls
-in azure-ai-agents as a direct dependency - confirmed via
-``pip show azure-ai-projects``): the Azure AI Foundry Agent Service exposes
-thread/message/run operations under ``AIProjectClient(endpoint=...,
-credential=...).agents`` (a lazily-constructed ``azure.ai.agents.
-AgentsClient``), addressing an *existing* agent resource by id. Every
-method name and keyword-argument signature below was checked with
-``inspect.signature`` against the real ``AgentsClient``/``ThreadsOperations``/
-``MessagesOperations``/``RunsOperations`` classes and matches exactly,
-including ``create_agent``/``delete_agent``/``get_agent`` being top-level
-methods on ``AgentsClient`` itself (not nested under a sub-resource) and
-the returned ``Agent`` model having a required ``id`` field. Every shared,
-catalog-defined business agent (``AgentDefinition.foundry_agent_id``) is
-provisioned independently - e.g. via Foundry portal/CLI/IaC - never created
-ad hoc by this backend. The one exception is ``create_agent``/
-``delete_agent`` below, used exclusively by
-``CustomerAgentProvisioningService`` to clone a dedicated, per-customer
-copy of an already-approved catalog agent - never to invent new agent
-reasoning of any kind (the cloned agent's instructions are always exactly
-the catalog agent's own configured description):
+VERIFIED against the installed SDK (azure-ai-projects==2.3.0, which now
+ships ``client.agents`` as the *versioned* Foundry Agents admin surface -
+``azure.ai.projects.operations.AgentsOperations`` - confirmed via
+``inspect.signature``): agents are addressed by a human-readable
+``agent_name`` (chosen by the caller, not server-generated) and are
+immutable per version; every update creates a new version under the same
+name.
 
-    client.agents.threads.create() -> object with `.id`
-    client.agents.messages.create(thread_id, role="user", content=...) -> None
-    client.agents.runs.create(thread_id, agent_id=...) -> object with `.id`, `.status`
-    client.agents.runs.get(thread_id, run_id) -> object with `.id`, `.status`
-    client.agents.messages.list(thread_id) -> iterable of message objects
-    client.agents.get_agent(agent_id) -> object with `.id` (raises a
-        not-found style exception, normalized to False by
+    client.agents.get(agent_name) -> AgentDetails (raises a not-found
+        style exception, normalized to False by
         ``AzureAIProjectsApiClient.agent_exists``, if no such resource
-        exists)
-    client.agents.create_agent(model=..., name=..., instructions=...) ->
-        object with `.id`
-    client.agents.delete_agent(agent_id) -> None
+        exists). ``AgentDetails.versions.latest.version`` names the most
+        recently published (non-draft) version.
+    client.agents.create_version(agent_name, *, definition=PromptAgentDefinition(
+        kind="prompt", model=..., instructions=...)) -> AgentVersionDetails
+        (used exclusively by ``CustomerAgentProvisioningService`` to clone
+        a dedicated, per-customer copy of an already-approved catalog
+        agent - never to invent new agent reasoning of any kind; the
+        cloned agent's instructions are always exactly the catalog agent's
+        own configured description).
+    client.agents.delete(agent_name, force=None) -> DeleteAgentResponse
+        (deletes every version of the named agent resource).
+
+Actual run execution (threads/messages/tool-calling) no longer goes
+through this admin-plane client at all - see
+``app.agents.foundry.agent_provider.FoundryAgentProvider``, which executes
+runs via ``agent_framework.foundry.FoundryAgent`` instead, so this module
+only needs to expose existence/version-resolution/lifecycle operations.
 
 This preview SDK's exact method names have changed across versions and may
 change again in a future release; re-run the verification above (import
-each operations class and diff ``inspect.signature(...)``) whenever
-``azure-ai-projects``/``azure-ai-agents`` is upgraded. Every SDK call is
-isolated to ``AzureAIProjectsApiClient`` below so any drift only needs to
-be reconciled in this one class.
+``AgentsOperations`` and diff ``inspect.signature(...)``) whenever
+``azure-ai-projects`` is upgraded. Every SDK call is isolated to
+``AzureAIProjectsApiClient`` below so any drift only needs to be
+reconciled in this one class.
 """
 from __future__ import annotations
 
 from typing import Any, Protocol
 
+from azure.ai.projects.models import PromptAgentDefinition
+
 
 class AgentApiClient(Protocol):
-    """The minimal, low-level Foundry operations Genie depends on.
+    """The minimal, low-level Foundry admin operations Genie depends on.
 
     Isolating this behind a protocol means nothing above this module ever
     references the azure-ai-projects SDK's actual types.
     """
 
-    def create_thread(self) -> str:
-        """Create a new conversation thread and return its id."""
-        ...
-
-    def create_message(self, *, thread_id: str, role: str, content: str) -> None:
-        """Post a message onto an existing thread."""
-        ...
-
-    def create_run(self, *, thread_id: str, agent_id: str) -> Any:
-        """Start a run of the given (pre-existing) Foundry agent on a thread."""
-        ...
-
-    def get_run(self, *, thread_id: str, run_id: str) -> Any:
-        """Fetch the current status of a run."""
-        ...
-
-    def list_messages(self, *, thread_id: str) -> Any:
-        """List messages on a thread, most recent first."""
-        ...
-
     def agent_exists(self, agent_id: str) -> bool:
-        """Return True if an agent resource with this id exists in Foundry.
+        """Return True if a Foundry agent resource named ``agent_id`` exists.
 
         Used only for pre-execution synchronization checks (see
-        ``FoundryAgentSynchronizationService``), never for run execution
+        ``FoundryAgentSynchronizationService``) and to resolve whether a
+        catalog agent still needs provisioning, never for run execution
         itself.
         """
         ...
 
+    def get_latest_version(self, agent_id: str) -> str:
+        """Return the latest published version identifier for an agent resource.
+
+        Used by ``FoundryAgentProvider`` to resolve a concrete version to
+        execute against when ``AgentDefinition.foundry_agent_version`` is
+        not pinned.
+        """
+        ...
+
     def create_agent(self, *, name: str, model: str, instructions: str) -> str:
-        """Create a new Foundry agent resource and return its id.
+        """Create a new Foundry Prompt Agent version and return its agent_name.
 
         Used exclusively by ``CustomerAgentProvisioningService`` to clone a
         dedicated, per-customer copy of an already-approved catalog agent.
@@ -97,7 +86,7 @@ class AgentApiClient(Protocol):
         ...
 
     def delete_agent(self, agent_id: str) -> None:
-        """Delete a Foundry agent resource previously created by ``create_agent``.
+        """Delete every version of a Foundry agent resource previously created by ``create_agent``.
 
         Used exclusively by ``CustomerAgentProvisioningService`` to tear down
         a customer's dedicated agents on explicit session close.
@@ -106,30 +95,14 @@ class AgentApiClient(Protocol):
 
 
 class AzureAIProjectsApiClient:
-    """Concrete ``AgentApiClient`` backed by ``azure.ai.projects.AIProjectClient``."""
+    """Concrete ``AgentApiClient`` backed by ``azure.ai.projects``'s ``AgentsOperations``."""
 
     def __init__(self, sdk_client: Any) -> None:
         self._sdk_client = sdk_client
 
-    def create_thread(self) -> str:
-        thread = self._sdk_client.agents.threads.create()
-        return thread.id
-
-    def create_message(self, *, thread_id: str, role: str, content: str) -> None:
-        self._sdk_client.agents.messages.create(thread_id=thread_id, role=role, content=content)
-
-    def create_run(self, *, thread_id: str, agent_id: str) -> Any:
-        return self._sdk_client.agents.runs.create(thread_id=thread_id, agent_id=agent_id)
-
-    def get_run(self, *, thread_id: str, run_id: str) -> Any:
-        return self._sdk_client.agents.runs.get(thread_id=thread_id, run_id=run_id)
-
-    def list_messages(self, *, thread_id: str) -> Any:
-        return self._sdk_client.agents.messages.list(thread_id=thread_id)
-
     def agent_exists(self, agent_id: str) -> bool:
         try:
-            self._sdk_client.agents.get_agent(agent_id)
+            self._sdk_client.agents.get(agent_id)
         except Exception:  # noqa: BLE001 - any lookup failure means "not verified"
             # Any lookup failure (not-found, transient network error, etc.)
             # is treated as "not verified" here; the caller
@@ -138,11 +111,15 @@ class AzureAIProjectsApiClient:
             return False
         return True
 
+    def get_latest_version(self, agent_id: str) -> str:
+        details = self._sdk_client.agents.get(agent_id)
+        return details.versions.latest.version
+
     def create_agent(self, *, name: str, model: str, instructions: str) -> str:
-        agent = self._sdk_client.agents.create_agent(
-            model=model, name=name, instructions=instructions
-        )
-        return agent.id
+        definition = PromptAgentDefinition(kind="prompt", model=model, instructions=instructions)
+        version_details = self._sdk_client.agents.create_version(name, definition=definition)
+        return version_details.name
 
     def delete_agent(self, agent_id: str) -> None:
-        self._sdk_client.agents.delete_agent(agent_id)
+        self._sdk_client.agents.delete(agent_id)
+

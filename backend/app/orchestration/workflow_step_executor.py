@@ -22,6 +22,19 @@ from app.workflows.models import WorkflowStep
 
 __all__ = ["MissingMemoryReferenceError", "MissingPromptError", "WorkflowStepExecutor"]
 
+_PREVIEW_MAX_LENGTH = 240
+
+
+def _preview(output_text: str | None) -> str | None:
+    """Collapses whitespace and truncates a real agent output for a live trace event."""
+
+    if not output_text:
+        return None
+    flattened = " ".join(output_text.split())
+    if len(flattened) <= _PREVIEW_MAX_LENGTH:
+        return flattened
+    return f"{flattened[:_PREVIEW_MAX_LENGTH]}..."
+
 
 class MissingPromptError(RuntimeError):
     """Raised when a step has no resolvable prompt id (fail closed)."""
@@ -59,6 +72,8 @@ class WorkflowStepExecutor:
         step_input: WorkflowStepInput | None = None,
         transcript_text: str = "",
         step_outputs: dict[str, str] | None = None,
+        previous_variables: dict[str, str] | None = None,
+        agent_scope_id: str | None = None,
     ) -> WorkflowStepResult:
         started_at = datetime.now(UTC)
         agent = get_enabled_agent(self._agent_registry, step.agent_id)
@@ -79,6 +94,7 @@ class WorkflowStepExecutor:
             transcript_text=transcript_text,
             step_outputs=step_outputs or {},
             step_input=step_input,
+            previous_variables=previous_variables,
         )
         request = AgentExecutionRequest(
             agent_id=agent.id,
@@ -86,6 +102,7 @@ class WorkflowStepExecutor:
             variables=variables,
             correlation_id=correlation_id,
             session_id=session_id,
+            agent_scope_id=agent_scope_id,
         )
         # resolve_prompt_text is used only to fail fast (MissingPromptError's
         # sibling PromptResolutionError/UnknownPromptError) before handing
@@ -94,11 +111,26 @@ class WorkflowStepExecutor:
 
         result = await self._agent_gateway.execute(request)
 
+        # Recorded immediately once *this* agent's real call returns - not
+        # batched until the whole workflow run/resume call completes. The
+        # session's governance event trail (GET /sessions/{id}/governance/
+        # events) is therefore a genuinely live, per-agent-call feed: a
+        # concurrent poll can observe this event the moment it happens, even
+        # while a later step in the same run/resume call is still executing.
+        # ``output_preview`` carries a truncated slice of the same real
+        # output text returned above - never synthetic content - so live
+        # consumers (e.g. the Triage traceability panel) do not have to wait
+        # for the full ``WorkflowRunResult`` to be stored to show a concise
+        # summary of what the agent actually produced.
         await self._governance_service.record_execution(
             session_id=session_id,
             trace_id=trace_id,
             agent_id=agent.id,
-            detail={"step_id": step.id, "workflow_step": True},
+            detail={
+                "step_id": step.id,
+                "workflow_step": True,
+                "output_preview": _preview(result.output_text),
+            },
         )
 
         return WorkflowStepResult(
@@ -108,6 +140,7 @@ class WorkflowStepExecutor:
             output_text=result.output_text,
             started_at=started_at,
             completed_at=datetime.now(UTC),
+            resolved_variables=variables,
         )
 
     def _resolve_variables(
@@ -117,6 +150,7 @@ class WorkflowStepExecutor:
         transcript_text: str,
         step_outputs: dict[str, str],
         step_input: WorkflowStepInput | None,
+        previous_variables: dict[str, str] | None = None,
     ) -> dict[str, str]:
         """Merges ``step.variable_sources``-derived values with explicit overrides.
 
@@ -127,6 +161,16 @@ class WorkflowStepExecutor:
         ``resolve_prompt_text``'s missing-variable check rather than
         silently sending a blank value.
 
+        ``previous_variables`` (a prior execution's ``resolved_variables``,
+        when this step is being re-executed on a resumed run - e.g. a
+        customer chat message) seeds the base layer before
+        ``variable_sources``/``step_input`` are applied. This preserves any
+        variable that can only ever be supplied via an explicit override
+        (such as governance-review's ``policies``) across re-runs that only
+        intend to change an unrelated variable like ``user_message`` -
+        without it, re-running an already-completed step would otherwise
+        always fail closed with a missing-variable error.
+
         ``user_message`` always defaults to an empty string so that any
         prompt template which declares it (customer/user chat interactions
         - see ``app.api.cx``'s ``/chat`` route) can rely on it always being
@@ -136,7 +180,7 @@ class WorkflowStepExecutor:
         never changes the resolved output.
         """
 
-        resolved: dict[str, str] = {"user_message": ""}
+        resolved: dict[str, str] = {"user_message": "", **(previous_variables or {})}
         for variable_name, source in step.variable_sources.items():
             if source == "transcript":
                 resolved[variable_name] = transcript_text

@@ -71,12 +71,27 @@ prompts:
   - id: governance-review-v1
     name: Governance Review
     description: >-
-      Reviews a proposed artifact for policy compliance and records an
-      approval decision.
+      Reviews a proposed artifact for policy compliance, assesses its
+      security posture, provisions/records the access control it needs,
+      and records an approval decision.
     template: >-
       You are the Governance Reviewer agent for the Genie Agentic
       Experience Center. Review the following artifact against the
       provided policies and record an approval decision with rationale.
+
+      In addition, assess the security needs the artifact must satisfy to
+      function safely in production (authentication, authorization,
+      secret/credential handling, data protection) and describe the
+      access control that must be provisioned before it is deployed (who/
+      what may invoke it, least-privilege role assignments, any secrets
+      that must come from Key Vault/managed identity rather than being
+      embedded).
+
+      Conclude your response with EXACTLY these two lines, with no
+      additional text after them:
+      SECURITY_REVIEW: <one or two sentences summarizing the security
+      assessment and the access control provisioned>
+      GOVERNANCE_DECISION: <APPROVED or REJECTED>
 
       Artifact:
       {artifact}
@@ -89,26 +104,7 @@ prompts:
       - artifact
       - policies
       - user_message
-    version: "1.0.0"
-
-  - id: risk-assessment-v1
-    name: Risk Assessment
-    description: >-
-      Evaluates business, technical, and compliance risk across a set of
-      discovered requirements.
-    template: >-
-      You are the Risk Assessor agent for the Genie Agentic Experience
-      Center. Given the following requirements, identify and score the
-      business, technical, and compliance risks.
-
-      Requirements:
-      {requirements}
-
-      Customer message (if any): {user_message}
-    variables:
-      - requirements
-      - user_message
-    version: "1.0.0"
+    version: "1.1.0"
 
   - id: failure-diagnosis-v1
     name: Failure Diagnosis
@@ -129,83 +125,100 @@ prompts:
       - user_message
     version: "1.0.0"
 
-  - id: memory-curation-review-v1
-    name: Memory Curation Review
+  - id: build-generation-v1
+    name: Build Generation
     description: >-
-      Reviews an approved finding from shared collaboration memory and
-      recommends whether it should be promoted into enterprise knowledge
-      memory.
+      Generates the customer-facing UI code and the dedicated multi-agent
+      workflow design that fulfills one approved requirement and its
+      recommended architecture.
     template: >-
-      You are the Memory Curator agent for the Genie Agentic Experience
-      Center. Given the following approved finding, recommend whether it
-      should be promoted into enterprise knowledge memory and why.
-
-      Approved finding:
-      {approved_finding}
-
-      Customer message (if any): {user_message}
-    variables:
-      - approved_finding
-      - user_message
-    version: "1.0.0"
-
-  - id: business-agent-workshop-v1
-    name: Business Agent Workshop
-    description: >-
-      Generic primary prompt template for Phase 10A catalog business
-      agents not yet wired into a specific workflow step; each agent
-      resolves this with its own current workshop context.
-    template: >-
-      You are a Genie Agentic Experience Center business agent. Given the
-      following workshop context, respond within your configured role and
-      capabilities.
-
-      Context:
-      {context}
-
-      Customer message (if any): {user_message}
-    variables:
-      - context
-      - user_message
-    version: "1.0.0"
-
-  - id: prototype-generation-v1
-    name: Sample Prototype Generation
-    description: >-
-      Instructs the UI Designer agent to produce a self-contained sample
-      prototype (HTML/CSS/JS) for the customer-facing prototype surface
-      (app/api/cx.py), from the recommended solution architecture.
-    template: >-
-      You are the UI Designer agent for the Genie Agentic Experience
-      Center. Given the following solution architecture, produce a
-      self-contained sample prototype as a single HTML fragment (inline
-      CSS and JS only, no external script/style/link tags, no iframes).
+      You are the Build Agent for the Genie Agentic Experience Center.
+      Given the following approved requirements and recommended
+      architecture, produce two things: (1) a self-contained customer-
+      facing UI (a single HTML fragment with inline CSS/JS only, no
+      external script/style/link tags, no iframes) for interacting with
+      the solution, and (2) a multi-agent workflow design (which agents,
+      tools, and prompts are needed) that fulfills this requirement end to
+      end.
 
       Security rules you MUST follow: never hardcode any URL, hostname,
       port, API key, token, or credential anywhere in the output. If the
-      prototype needs to call a backend API, use a relative, same-origin
-      fetch call with credentials set to 'include' (to send the existing
-      session cookie), and read window.GENIE_SESSION_ID for any
-      session-scoped value - never invent or embed a session id, customer
-      name, or other identifier as a literal.
+      UI needs to call a backend API, use a relative, same-origin fetch
+      call with credentials set to 'include', and read
+      window.GENIE_SESSION_ID for any session-scoped value - never invent
+      or embed a session id, customer name, or other identifier as a
+      literal.
 
-      Interactivity: include a simple feedback control (for example a
-      small form or button set) that lets the customer challenge a
-      recommendation, ask for an alternative architecture, or request a
-      lower-cost, higher-security, MVP, or Fabric-first redesign. Submit
-      that request with a relative, same-origin POST to the path built as
-      "/cx/" plus window.GENIE_SESSION_ID plus "/reanalyze", credentials
-      set to 'include', a JSON content type, and a JSON body containing a
-      request_type field (one of challenge_recommendation,
-      modify_priorities, request_alternative_architecture,
-      lower_cost_redesign, higher_security_redesign, mvp_redesign, or
-      fabric_first_redesign) plus an optional rationale field describing
-      the customer's feedback in their own words. Show the customer a
-      simple confirmation once the request has been submitted.
+      Approved requirements:
+      {requirements}
 
-      Solution architecture:
-      {solution_architecture}
+      Recommended architecture:
+      {architecture}
+
+      Customer message (if any): {user_message}
     variables:
-      - solution_architecture
+      - requirements
+      - architecture
+      - user_message
+    version: "1.0.0"
+
+  - id: deployment-v1
+    name: Deployment
+    description: >-
+      Confirms governance approval, describes the concrete deployment
+      steps for the Build Agent's designed agents/UI, and produces the
+      customer-facing launch summary.
+    template: >-
+      You are the Deployment Agent for the Genie Agentic Experience
+      Center. Given the following build (UI code and multi-agent workflow
+      design) and its governance approval decision, describe the concrete
+      steps needed to provision the designed agents and publish the UI,
+      confirm the app has been tested and is ready, then produce a clear
+      launch summary for the customer.
+
+      Security rules you MUST follow: never hardcode any URL, hostname,
+      port, API key, token, or credential anywhere in the output.
+
+      Conclude your response with EXACTLY this line, with no additional
+      text after it:
+      LAUNCH_SUMMARY: <one or two plain-language sentences telling the
+      customer their app is ready to launch>
+
+      Build:
+      {build_output}
+
+      Governance decision:
+      {governance_decision}
+
+      Customer message (if any): {user_message}
+    variables:
+      - build_output
+      - governance_decision
+      - user_message
+    version: "1.1.0"
+
+  - id: orchestrator-mission-v1
+    name: Orchestrator Mission
+    description: >-
+      Primary system prompt for the Genie Orchestrator, describing the
+      end-to-end mission it drives via its connected agents.
+    template: >-
+      You are the Genie Orchestrator for the Genie Agentic Experience
+      Center. Given an uploaded customer call transcript, drive the full
+      mission end to end by calling your connected agents as needed:
+      requirements_analyst to gather requirements, architecture_designer
+      to design the architecture, build_agent to generate the UI and its
+      dedicated multi-agent workflow, governance_reviewer to get
+      compliance approval before deploying, and deployment_agent to
+      provision and launch. Never skip governance_reviewer before calling
+      deployment_agent.
+
+      Transcript:
+      {transcript}
+
+      Customer message (if any): {user_message}
+    variables:
+      - transcript
+      - user_message
     version: "1.0.0"
 

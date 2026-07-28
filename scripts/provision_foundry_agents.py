@@ -8,19 +8,20 @@ Usage (from the repo root, backend virtual environment activated)::
 This is the IaC/CLI-equivalent "provisioning" step referenced by
 ``config/agents/registry.yaml``'s own comments and by
 ``backend/app/agents/foundry/api_client.py``'s architecture assumption:
-every Genie agent is an independently deployed Azure AI Foundry agent
-resource, created here (by an operator, out-of-band) - never ad hoc by the
-running backend.
+every Genie agent is an independently deployed Azure AI Foundry Prompt
+Agent resource, created here (by an operator, out-of-band) - never ad hoc
+by the running backend.
 
-For every *enabled* agent in the local ``AgentRegistry`` whose
-``foundry_agent_id`` still looks like an unprovisioned placeholder (i.e.
-resolving it via ``agent_exists`` on the real Foundry project fails), this
-script creates a matching Foundry Agent resource (model = the agent's
-``model_deployment_ref`` or the platform default LLM) and prints the real
-Foundry-assigned agent id. It never writes back to
-``config/agents/registry.yaml`` itself - the operator is expected to copy
-the printed ids in after reviewing them, per the "never hardcode real ids"
-guidance in that file's header comment.
+Unlike the classic Assistants API, a Foundry Prompt Agent's ``agent_name``
+is chosen by the caller up front rather than server-generated - so each
+enabled agent in ``config/agents/registry.yaml`` MUST already have its
+intended ``foundry_agent_id`` (used here as the Foundry ``agent_name``) set
+before running this script; it is never invented here. For every such
+agent whose ``foundry_agent_id`` does not yet resolve to an existing
+Foundry resource, this script creates a new version (model =
+the agent's ``model_deployment_ref`` or the platform default LLM) under
+that same name. It never writes back to ``config/agents/registry.yaml``
+itself.
 """
 from __future__ import annotations
 
@@ -57,6 +58,7 @@ def main() -> None:
 
     try:
         from azure.ai.projects import AIProjectClient
+        from azure.ai.projects.models import PromptAgentDefinition
         from azure.identity import DefaultAzureCredential
     except ImportError as exc:
         print(f"ERROR: azure-ai-projects / azure-identity not installed: {exc}", file=sys.stderr)
@@ -69,13 +71,21 @@ def main() -> None:
         if not agent.enabled:
             continue
 
+        if not agent.foundry_agent_id:
+            print(
+                f"[skip] {agent.id}: no foundry_agent_id configured in "
+                f"config/agents/registry.yaml; set the intended Foundry agent_name "
+                f"there first (Prompt Agent names are chosen up front, not "
+                f"server-generated)."
+            )
+            continue
+
         already_provisioned = False
-        if agent.foundry_agent_id:
-            try:
-                client.agents.get_agent(agent.foundry_agent_id)
-                already_provisioned = True
-            except Exception:  # noqa: BLE001 - any lookup failure means "not yet provisioned"
-                already_provisioned = False
+        try:
+            client.agents.get(agent.foundry_agent_id)
+            already_provisioned = True
+        except Exception:  # noqa: BLE001 - any lookup failure means "not yet provisioned"
+            already_provisioned = False
 
         if already_provisioned:
             print(f"[skip] {agent.id}: foundry_agent_id '{agent.foundry_agent_id}' already exists.")
@@ -85,24 +95,31 @@ def main() -> None:
         instructions = _build_instructions(agent.name, agent.description, agent.capabilities)
 
         if args.dry_run:
-            print(f"[dry-run] would create agent for '{agent.id}' with model '{model}'.")
+            print(
+                f"[dry-run] would create agent_name '{agent.foundry_agent_id}' for "
+                f"'{agent.id}' with model '{model}'."
+            )
             continue
 
-        created_agent = client.agents.create_agent(
-            model=model,
-            name=agent.name,
+        definition = PromptAgentDefinition(kind="prompt", model=model, instructions=instructions)
+        version_details = client.agents.create_version(
+            agent.foundry_agent_id,
+            definition=definition,
+            metadata={"genie_agent_id": agent.id, "genie_owner": agent.owner or ""},
             description=agent.description.strip(),
-            instructions=instructions,
-            metadata={"genie_agent_id": agent.id, "genie_owner": agent.owner},
         )
-        created[agent.id] = created_agent.id
-        print(f"[created] {agent.id} -> foundry_agent_id: {created_agent.id} (model: {model})")
+        created[agent.id] = version_details.name
+        print(
+            f"[created] {agent.id} -> foundry_agent_id: {version_details.name} "
+            f"(version: {version_details.version}, model: {model})"
+        )
 
-    if created and not args.dry_run:
-        print("\nUpdate config/agents/registry.yaml with these real foundry_agent_id values:")
+    if created:
+        print("\nProvisioned the following agent_name(s) (already reflected in registry.yaml):")
         for agent_id, foundry_agent_id in created.items():
             print(f"  {agent_id}: {foundry_agent_id}")
 
 
 if __name__ == "__main__":
     main()
+

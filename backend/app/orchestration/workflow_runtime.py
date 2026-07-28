@@ -86,6 +86,7 @@ class WorkflowRuntime:
         step_inputs: dict[str, WorkflowStepInput] | None = None,
         transcript_text: str = "",
         resume_from: WorkflowRunResult | None = None,
+        agent_scope_id: str | None = None,
     ) -> WorkflowRunResult:
         try:
             workflow = self._workflow_registry.get(workflow_id)
@@ -93,6 +94,11 @@ class WorkflowRuntime:
             raise UnknownWorkflowError(f"Unknown workflow id '{workflow_id}'.") from exc
 
         workflow_run_id = resume_from.workflow_run_id if resume_from else str(uuid4())
+        # A resumed run always keeps its original dedicated-agent-fleet scope
+        # (e.g. a requirement group id), even if the caller (a customer chat/
+        # reanalyze interaction) does not re-supply it - so follow-up
+        # interactions on an already-scoped run keep reaching the same fleet.
+        effective_scope_id = resume_from.agent_scope_id if resume_from else agent_scope_id
         step_by_id = {step.id: step for step in workflow.steps}
         inputs_by_id = step_inputs or {}
         waves = _compute_waves(workflow.steps)
@@ -129,6 +135,7 @@ class WorkflowRuntime:
                 waves=waves,
                 step_results=step_results,
                 state_machine=state_machine,
+                agent_scope_id=effective_scope_id,
             )
             if gate_result is not None:
                 return gate_result
@@ -136,6 +143,9 @@ class WorkflowRuntime:
             try:
                 step_outputs = {
                     result.step_id: result.output_text or "" for result in step_results
+                }
+                previous_variables_by_id = {
+                    result.step_id: result.resolved_variables for result in step_results
                 }
                 wave_results = await asyncio.gather(
                     *(
@@ -147,6 +157,8 @@ class WorkflowRuntime:
                             step_input=inputs_by_id.get(step.id),
                             transcript_text=transcript_text,
                             step_outputs=step_outputs,
+                            previous_variables=previous_variables_by_id.get(step.id),
+                            agent_scope_id=effective_scope_id,
                         )
                         for step in pending_steps
                     )
@@ -190,6 +202,7 @@ class WorkflowRuntime:
             status="completed",
             waves=[[step.id for step in wave] for wave in waves],
             step_results=step_results,
+            agent_scope_id=effective_scope_id,
         )
 
     async def _enforce_approval_gate(
@@ -203,6 +216,7 @@ class WorkflowRuntime:
         waves: list[list[WorkflowStep]],
         step_results: list[WorkflowStepResult],
         state_machine: WorkflowStateMachine,
+        agent_scope_id: str | None = None,
     ) -> WorkflowRunResult | None:
         """Returns a paused/blocked ``WorkflowRunResult`` if a gate is not satisfied, else None."""
 
@@ -248,6 +262,7 @@ class WorkflowRuntime:
                     step_results=step_results,
                     detail=f"Approval checkpoint '{checkpoint_id}' for step '{step.id}' "
                     f"was not granted.",
+                    agent_scope_id=agent_scope_id,
                 )
 
             if not matching:
@@ -272,6 +287,7 @@ class WorkflowRuntime:
                 waves=[[s.id for s in wave] for wave in waves],
                 step_results=step_results,
                 detail=f"Waiting for approval checkpoint '{checkpoint_id}' on step '{step.id}'.",
+                agent_scope_id=agent_scope_id,
             )
 
         return None

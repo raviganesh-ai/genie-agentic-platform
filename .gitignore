@@ -28,3 +28,17 @@ build/
 Thumbs.db
 .vscode/*
 !.vscode/extensions.json
+
+# Local scratch / sample content (never tracked)
+/sample/
+
+# Ad hoc debug/output transcripts dropped at the repo root during dev
+# sessions (test/lint run captures, one-off demo output) - never source.
+/pytest_out*.txt
+/demo_output*.txt
+/be_*_cleanup.txt
+/fe_*_cleanup.txt
+/debug_agent.txt
+/dryrun_output.txt
+/fix_models.txt
+scripts/.generated_prototype.html

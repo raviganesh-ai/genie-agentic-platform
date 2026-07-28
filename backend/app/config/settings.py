@@ -20,11 +20,17 @@ MemoryStoreBackend = Literal["in_memory", "cosmos_db"]
 
 # Default LLM used by every agent unless it (or the caller) supplies an
 # explicit override. Not a secret or endpoint - a plain application default,
-# externally overridable via GENIE_DEFAULT_LLM. gpt-5.1 is used because it is
-# sold directly by Azure (no Azure Marketplace subscription/quota required);
-# Anthropic Claude models require a Marketplace subscription and, as of this
-# writing, this subscription has a default quota of 0 for every Claude SKU.
-DEFAULT_LLM = "gpt-5.1"
+# externally overridable via GENIE_DEFAULT_LLM. "gpt-5-1" (hyphenated) is
+# used because it is sold directly by Azure (no Azure Marketplace
+# subscription/quota required) AND because it is the EXACT Cognitive
+# Services deployment name provisioned on the real Foundry account - Foundry
+# agent run-time model resolution requires an exact deployment-name match
+# (unlike agent create/update, which silently accepts other string forms
+# such as the dotted "gpt-5.1" and only fails when a run is actually
+# attempted). Anthropic Claude models require a Marketplace subscription
+# and, as of this writing, this subscription has a default quota of 0 for
+# every Claude SKU.
+DEFAULT_LLM = "gpt-5-1"
 
 
 class Settings(BaseSettings):
@@ -100,34 +106,12 @@ class Settings(BaseSettings):
     entra_tenant_id: str | None = None
     entra_client_id: str | None = None
 
-    # --- Customer-experience (cx) session tokens ---------------------------------
-    # Signs the short-lived, session-scoped access tokens used by the
-    # customer-facing generated-prototype surface (app/api/cx.py) - a
-    # distinct, least-privilege identity from internal Mission Control users
-    # (see app.security.token_validator). Sourced from Key Vault in
-    # production (via a Container App Key Vault secret reference), never
-    # hardcoded. See app.security.cx_tokens.create_cx_token_service for the
-    # fail-closed resolution contract.
-    cx_token_signing_key: str | None = None
-    cx_token_ttl_seconds: int = 3600
-    # Id of the workflow step (config/workflows/*.yaml) whose output_text is
-    # the generated customer prototype HTML, served by app/api/cx.py.
-    # Mirrors debugging_workflow_id's pattern of naming a config entity from
-    # settings rather than hardcoding it in application code.
-    cx_prototype_step_id: str = "generate-prototype"
     # Id of the workflow step (config/workflows/*.yaml) whose output_text
     # carries the Requirements Analyst agent's structured agentic-workflow
     # qualification verdict (see app.services.requirements_service). Mirrors
-    # cx_prototype_step_id's pattern of naming a config entity from settings
-    # rather than hardcoding it in application code.
+    # debugging_workflow_id's pattern of naming a config entity from
+    # settings rather than hardcoding it in application code.
     requirements_qualification_step_id: str = "analyze-requirements"
-    # Least-privilege abuse safeguard for the one customer-triggerable write
-    # action (POST /cx/{session_id}/reanalyze - routes a challenge/redesign
-    # request through the unmodified Phase 6 ReanalysisService, exactly like
-    # the internal /sessions/{id}/workshop/reanalysis route). Enforced by
-    # app.security.cx_rate_limiter.CxRateLimiter, keyed per session_id, since
-    # a leaked/shared cx link must never be able to flood agent execution.
-    cx_reanalysis_rate_limit_per_hour: int = 10
 
     # --- CORS -------------------------------------------------------------------
     # Comma-separated list of browser origins allowed to call this API (e.g. the
@@ -169,7 +153,6 @@ class Settings(BaseSettings):
         "key_vault_uri",
         "memory_store_endpoint",
         "lineage_store_endpoint",
-        "cx_token_signing_key",
         mode="after",
     )
     @classmethod

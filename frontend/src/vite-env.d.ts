@@ -8,15 +8,12 @@ interface ImportMetaEnv {
   readonly VITE_ENTRA_TENANT_ID?: string;
   /** Full scope URI (e.g. api://<client-id>/access_as_user) requested for the Genie backend API. */
   readonly VITE_ENTRA_API_SCOPE?: string;
-  readonly VITE_MISSION_CONTROL_POLL_MS?: string;
-  readonly VITE_AGENT_ARENA_POLL_MS?: string;
-  readonly VITE_COLLABORATION_GRAPH_POLL_MS?: string;
   readonly VITE_REQUIREMENTS_POLL_MS?: string;
   readonly VITE_ARCHITECTURE_STUDIO_POLL_MS?: string;
   readonly VITE_GOVERNANCE_POLL_MS?: string;
   readonly VITE_REPLAY_POLL_MS?: string;
   readonly VITE_FINAL_OUTPUT_POLL_MS?: string;
-  /** Id of the workflow "Generate Prototype" starts (config/workflows/registry.yaml). */
+  /** Id of the workflow "Start Mission" starts (config/workflows/registry.yaml). */
   readonly VITE_DISCOVERY_WORKFLOW_ID?: string;
 }
 

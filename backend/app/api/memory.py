@@ -1,15 +1,14 @@
 """Memory API routes.
 
 Exposes read-only access to Shared Collaboration Memory for a session (the
-tier the Requirement Discovery Map / Mission Control UI renders): Personal
-Agent Memory is intentionally not exposed here (it is readable only by its
-owning agent, never by a human/UI caller, per the Memory Architecture in
+tier the Requirement Discovery Map renders): Personal Agent Memory is
+intentionally not exposed here (it is readable only by its owning agent,
+never by a human/UI caller, per the Memory Architecture in
 ``.github/copilot-instructions.md``); Enterprise Knowledge Memory promotion
 is a reviewer/governance workflow, not a plain read API.
 
-Reads are performed via the same synthetic UI-viewer identity
-``MissionControlService`` uses, so they flow through the identical policy
-and governance path every agent's memory read does.
+Reads are performed via a synthetic UI-viewer identity so they flow through
+the identical policy and governance path every agent's memory read does.
 """
 from __future__ import annotations
 

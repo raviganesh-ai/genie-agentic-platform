@@ -78,6 +78,14 @@ class AgentRegistry:
         if not definitions:
             raise AgentRegistryError(f"Agent registry under '{directory}' is empty.")
 
+        for agent in definitions.values():
+            for connected_agent_id in agent.connected_agent_ids or []:
+                if connected_agent_id not in definitions:
+                    raise AgentRegistryError(
+                        f"Agent '{agent.id}' declares unknown connected_agent_id "
+                        f"'{connected_agent_id}'."
+                    )
+
         return cls(definitions)
 
     def get(self, agent_id: str) -> AgentDefinition:

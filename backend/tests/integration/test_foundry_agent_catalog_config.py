@@ -55,11 +55,13 @@ def test_real_config_agent_registry_loads_every_catalog_agent(
         default_llm=real_config_production_settings.default_llm,
     )
 
-    # 6 original workflow-referenced agents + 22-agent Phase 10A catalog.
-    assert len(registry) == 28
+    # requirements-analyst, architecture-designer, governance-reviewer,
+    # debugging-agent, build-agent, deployment-agent, genie-orchestrator.
+    assert len(registry) == 7
     assert "requirements-analyst" in registry
-    assert "discovery-agent" in registry
-    assert "memory-debugging-agent" in registry
+    assert "genie-orchestrator" in registry
+    assert "build-agent" in registry
+    assert "deployment-agent" in registry
 
 
 def test_real_config_prompt_registry_resolves_every_agent_prompt_ref(

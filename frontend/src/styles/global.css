@@ -22,12 +22,33 @@ body {
     Helvetica,
     Arial,
     sans-serif;
+  /* A subtle brand-tinted glow behind the flat dark background gives the
+     whole app a bit more depth/warmth without being distracting or adding
+     any external image/font requests. */
   background-color: #0b0f14;
+  background-image:
+    radial-gradient(circle at 12% -10%, rgba(47, 131, 224, 0.16), transparent 45%),
+    radial-gradient(circle at 100% 0%, rgba(78, 147, 229, 0.08), transparent 40%);
+  background-attachment: fixed;
   color: #e6e9ee;
 }
 
 a {
   color: inherit;
+}
+
+::selection {
+  background-color: rgba(47, 131, 224, 0.35);
+}
+
+button,
+a,
+[role="button"] {
+  transition:
+    transform 120ms ease,
+    background-color 150ms ease,
+    box-shadow 150ms ease,
+    opacity 150ms ease;
 }
 
 ::-webkit-scrollbar {
@@ -40,6 +61,65 @@ a {
   border-radius: 6px;
 }
 
+::-webkit-scrollbar-thumb:hover {
+  background-color: #3a4552;
+}
+
 ::-webkit-scrollbar-track {
   background-color: transparent;
+}
+
+@keyframes genie-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.genie-fade-in {
+  animation: genie-fade-in 260ms ease both;
+}
+
+@keyframes genie-sparkle-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.75;
+    transform: scale(1.12);
+  }
+}
+
+.genie-sparkle {
+  display: inline-block;
+  animation: genie-sparkle-pulse 2.4s ease-in-out infinite;
+}
+
+@keyframes genie-live-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(63, 166, 106, 0.55);
+  }
+  50% {
+    box-shadow: 0 0 0 4px rgba(63, 166, 106, 0);
+  }
+}
+
+.genie-live-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: #3fa66a;
+  animation: genie-live-pulse 1.6s ease-in-out infinite;
+}
+
+.genie-xp-bar {
+  transition: width 400ms ease;
 }

@@ -24,6 +24,7 @@ from app.agents.gateway import (
 )
 from app.agents.models import AgentExecutionRequest, AgentExecutionResult
 from app.agents.registry import AgentRegistry
+from app.agents.tool_execution import ToolCallContext
 from app.prompts.registry import PromptRegistry
 
 __all__ = ["AzureAgentGateway"]
@@ -53,7 +54,9 @@ class AzureAgentGateway:
         foundry_agent_id = agent.foundry_agent_id
         if request.session_id and self._session_agent_resolver is not None:
             dedicated_agent_id = self._session_agent_resolver.resolve(
-                session_id=request.session_id, agent_id=agent.id
+                session_id=request.session_id,
+                agent_id=agent.id,
+                scope_id=request.agent_scope_id,
             )
             if dedicated_agent_id:
                 foundry_agent_id = dedicated_agent_id
@@ -69,10 +72,14 @@ class AzureAgentGateway:
 
         resolved_text = resolve_prompt_text(self._prompt_registry, request)
 
+        tool_context = ToolCallContext(
+            agent=agent, session_id=request.session_id, trace_id=request.correlation_id
+        )
         try:
             run_result = await self._foundry_client.run(
                 foundry_agent_id=foundry_agent_id,
                 input_text=resolved_text,
+                tool_context=tool_context,
             )
         except FoundryUnavailableError as exc:
             self._governance_recorder.record_unavailable(request=request, reason=str(exc))

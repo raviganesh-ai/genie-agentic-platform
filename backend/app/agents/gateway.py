@@ -13,12 +13,15 @@ prompt template a request names, then hands execution off to a gateway.
 """
 from __future__ import annotations
 
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from app.agents.models import AgentDefinition, AgentExecutionRequest, AgentExecutionResult
 from app.agents.registry import AgentRegistry
 from app.config.settings import Settings
 from app.prompts.registry import PromptRegistry
+
+if TYPE_CHECKING:
+    from app.agents.tool_execution import AgentToolRegistry
 
 
 class AgentGatewayError(RuntimeError):
@@ -63,9 +66,15 @@ class SessionAgentResolver(Protocol):
     of the shared, statically configured ``AgentDefinition.foundry_agent_id``
     - so customer chat/reanalysis interactions never reach the same Foundry
     agent resource another customer's session uses.
+
+    ``scope_id``, when supplied (e.g. a requirement group id), narrows the
+    lookup to a fleet dedicated to that scope rather than the whole
+    session - see "dedicated fleet of agents ... per requirement" in
+    ``docs/GENIE_BUILD_SPEC.md``. Implementations fall back to ``session_id``
+    when ``scope_id`` is None.
     """
 
-    def resolve(self, *, session_id: str, agent_id: str) -> str | None: ...
+    def resolve(self, *, session_id: str, agent_id: str, scope_id: str | None = None) -> str | None: ...
 
 
 class NullGovernanceTraceRecorder:
@@ -152,6 +161,7 @@ def create_agent_gateway(
     prompt_registry: PromptRegistry,
     governance_recorder: GovernanceTraceRecorder | None = None,
     session_agent_resolver: SessionAgentResolver | None = None,
+    tool_registry: AgentToolRegistry | None = None,
 ) -> AgentGateway:
     """Select the single execution gateway for the current provider mode.
 
@@ -167,6 +177,12 @@ def create_agent_gateway(
     route a given session's executions to that session's own dedicated
     Foundry agents (see ``CustomerAgentProvisioningService``) instead of the
     shared catalog pool - ignored by ``LocalAgentGateway``.
+
+    ``tool_registry``, when supplied, lets ``AzureAgentGateway``'s Foundry
+    runs resolve and execute function-tool calls (see
+    ``app.agents.tool_execution.AgentToolRegistry``) - ignored by
+    ``LocalAgentGateway``. A run that reaches ``requires_action`` with no
+    registry configured fails closed.
     """
 
     # Local import: keeps the (lazily-imported) azure-ai-projects SDK import
@@ -191,7 +207,7 @@ def create_agent_gateway(
         return AzureAgentGateway(
             agent_registry=agent_registry,
             prompt_registry=prompt_registry,
-            foundry_client=FoundryAgentProvider(project_service),
+            foundry_client=FoundryAgentProvider(project_service, tool_registry=tool_registry),
             governance_recorder=recorder,
             session_agent_resolver=session_agent_resolver,
         )

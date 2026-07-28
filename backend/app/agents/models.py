@@ -13,6 +13,42 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 MemoryTier = Literal["personal", "shared", "enterprise"]
 
+ToolParameterType = Literal["string", "number", "integer", "boolean", "array", "object"]
+
+
+class AgentToolParameter(BaseModel):
+    """One JSON-schema parameter of an ``AgentToolDefinition``.
+
+    Rendered into the ``parameters`` JSON schema passed to Azure AI
+    Foundry's ``FunctionTool`` when an agent resource is provisioned/
+    synchronized - never hardcoded per-agent in source, per the
+    Configuration Rules in ``.github/copilot-instructions.md``.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1)
+    type: ToolParameterType
+    description: str = Field(min_length=1)
+    required: bool = True
+
+
+class AgentToolDefinition(BaseModel):
+    """An externally configured function tool an agent may call at runtime.
+
+    Distinct from ``allowed_tools`` (a flat list of provider-managed tool
+    names such as ``azure_ai_search``): each entry here names a genuine
+    Python function-calling tool, dispatched via ``AgentToolRegistry``
+    (``app.agents.tool_execution``) when the agent's Foundry run reaches a
+    ``requires_action`` status.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1)
+    description: str = Field(min_length=1)
+    parameters: list[AgentToolParameter] = Field(default_factory=list)
+
 
 class AgentDefinition(BaseModel):
     """A single agent's externally configured identity and capabilities."""
@@ -39,15 +75,28 @@ class AgentDefinition(BaseModel):
     foundry_agent_id: str | None = Field(
         default=None,
         description=(
-            "The id of the independently deployed Azure AI Foundry agent "
-            "resource this Genie agent maps to. This agent's reasoning, "
-            "instructions, and tools are owned and versioned in Azure AI "
-            "Foundry, never in Genie source code. Required for any agent "
-            "executed via AzureAgentGateway in production; omitted only for "
-            "agents that are exclusively exercised through LocalAgentGateway "
-            "during local development."
+            "The Azure AI Foundry Prompt Agent 'agent_name' this Genie agent "
+            "maps to (a human-readable resource name, e.g. "
+            "'requirements-analyst' - used with the versioned "
+            "azure-ai-projects agents.get/create_version/delete API, not a "
+            "raw 'asst_...' id). This agent's reasoning, instructions, and "
+            "tools are owned and versioned in Azure AI Foundry, never in "
+            "Genie source code. Required for any agent executed via "
+            "AzureAgentGateway in production; omitted only for agents that "
+            "are exclusively exercised through LocalAgentGateway during "
+            "local development."
         ),
     )
+    foundry_agent_version: str | None = Field(
+        default=None,
+        description=(
+            "Optional pinned Foundry agent version (see foundry_agent_id). "
+            "When unset, execution resolves the resource's latest published "
+            "version at run time via AgentApiClient.get_latest_version - "
+            "never guessed or hardcoded."
+        ),
+    )
+
     enabled: bool = True
     version: str = Field(
         default="1.0.0",
@@ -88,9 +137,36 @@ class AgentDefinition(BaseModel):
             "prompt_id override."
         ),
     )
+    connected_agent_ids: list[str] | None = Field(
+        default=None,
+        description=(
+            "Ids of other registered agents this agent calls dynamically "
+            "via Azure AI Foundry's Connected Agents tool feature (as "
+            "opposed to a fixed declarative workflow step sequence). Only "
+            "meaningful for orchestrator-style agents; every id must "
+            "resolve to another agent in this same registry (see "
+            "AgentRegistry.load's cross-reference validation)."
+        ),
+    )
+    tool_definitions: list[AgentToolDefinition] = Field(
+        default_factory=list,
+        description=(
+            "Externally configured function-calling tools this agent may "
+            "invoke at runtime (see AgentToolDefinition). Each name must "
+            "have a matching implementation registered in the runtime "
+            "AgentToolRegistry (app.agents.tool_execution) for the agent's "
+            "id, or a run reaching 'requires_action' for this tool fails "
+            "closed."
+        ),
+    )
 
     @field_validator(
-        "model_deployment_ref", "foundry_agent_id", "owner", "governance_policy_id", "prompt_template_ref"
+        "model_deployment_ref",
+        "foundry_agent_id",
+        "foundry_agent_version",
+        "owner",
+        "governance_policy_id",
+        "prompt_template_ref",
     )
     @classmethod
     def _non_blank_if_set(cls, value: str | None) -> str | None:
@@ -114,6 +190,14 @@ class AgentExecutionRequest(BaseModel):
     variables: dict[str, str] = Field(default_factory=dict)
     correlation_id: str = Field(min_length=1)
     session_id: str | None = None
+    agent_scope_id: str | None = Field(
+        default=None,
+        description=(
+            "Optional dedicated-agent-fleet scope narrower than session_id, "
+            "e.g. a requirement group id - see SessionAgentResolver.resolve's "
+            "scope_id parameter."
+        ),
+    )
 
 
 class AgentExecutionResult(BaseModel):

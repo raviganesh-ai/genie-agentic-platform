@@ -8,20 +8,30 @@
 # Genie source code. This registry only describes *what* agents exist and
 # *which* Foundry resource (foundry_agent_id) each one maps to.
 #
-# foundry_agent_id is the id of that pre-provisioned Foundry agent
-# resource. It is required for AzureAgentGateway to execute the agent in
-# production; it may be left unset for agents only ever exercised through
-# LocalAgentGateway during local development. The values below are
-# placeholders - replace with the real Foundry agent ids for each
-# environment via deployment configuration, never hardcode real ids here.
+# foundry_agent_id is the Azure AI Foundry Prompt Agent's `agent_name` -
+# a human-readable resource name chosen up front by the operator (never
+# server-generated), used with the versioned azure-ai-projects
+# agents.get/create_version/delete API (NOT a raw classic Assistants API
+# "asst_..." id). It is required for AzureAgentGateway to execute the
+# agent in production; it may be left unset for agents only ever exercised
+# through LocalAgentGateway during local development. The values below
+# match each agent's own `id` for readability and are provisioned via
+# scripts/provision_foundry_agents.py - they name a resource, not a
+# secret, so unlike endpoints/keys they are fine to declare here directly.
 #
-# model_deployment_ref is optional and informational/telemetry only (the
-# model actually used is whatever the referenced foundry_agent_id resource
-# is configured with). When omitted, it defaults to the platform-wide
-# default LLM (Settings.default_llm / GENIE_DEFAULT_LLM, "gpt-5.1"
-# unless overridden). Anthropic Claude models were evaluated but are not
-# deployed: they require an Azure Marketplace subscription, and this
-# subscription currently has a default quota of 0 for every Claude SKU.
+# model_deployment_ref is optional and informational for already-provisioned
+# catalog agents (the model actually used for those is whatever the
+# referenced foundry_agent_id resource is configured with), but it IS the
+# real value passed to Foundry's create_agent(model=...) whenever a NEW
+# agent is provisioned/cloned at runtime (see
+# CustomerAgentProvisioningService, scripts/provision_foundry_agents.py) -
+# so it must always be the exact Cognitive Services deployment name, never
+# just any string the model accepts at creation time. When omitted, it
+# defaults to the platform-wide default LLM (Settings.default_llm /
+# GENIE_DEFAULT_LLM, "gpt-5-1" unless overridden). Anthropic Claude models
+# were evaluated but are not deployed: they require an Azure Marketplace
+# subscription, and this subscription currently has a default quota of 0
+# for every Claude SKU.
 #
 # owner / governance_policy_id / prompt_template_ref (Phase 10A, additive):
 # owner names the team accountable for this agent's Foundry deployment
@@ -47,7 +57,7 @@ agents:
     memory_access:
       - personal
       - shared
-    foundry_agent_id: asst_mTpdPnlPquK6GZs1Dw3QO3vL
+    foundry_agent_id: requirements-analyst
     owner: requirements-team
     governance_policy_id: standard-governance-policy-v1
     prompt_template_ref: requirements-extraction-v1
@@ -68,32 +78,78 @@ agents:
       - shared
       - enterprise
     # Explicit override, demonstrating per-agent LLM configurability. Set
-    # to the same model as the platform default today (gpt-5.1) because
+    # to the same model as the platform default today (gpt-5-1) because
     # gpt-4o is deprecating on this account; change this to any other
     # deployed model name to diverge from the default again.
-    model_deployment_ref: gpt-5.1
-    foundry_agent_id: asst_g9iKyn1tUi66oxWXPkxefljO
+    model_deployment_ref: gpt-5-1
+    foundry_agent_id: architecture-designer
     owner: architecture-team
     governance_policy_id: standard-governance-policy-v1
     prompt_template_ref: architecture-recommendation-v1
     enabled: true
 
-  - id: risk-assessor
-    name: Risk Assessor
-    role: risk_analysis
+  - id: build-agent
+    name: Build Agent
+    role: solution_build
     description: >-
-      Evaluates business, technical, and compliance risk across discovered
-      requirements and proposed architectures.
+      Generates the customer-facing UI code and designs the dedicated
+      multi-agent workflow needed to fulfill one approved requirement.
     capabilities:
-      - risk_scoring
-      - readiness_scoring
+      - ui_code_generation
+      - multi_agent_flow_design
     allowed_tools: []
     memory_access:
       - shared
-    foundry_agent_id: asst_IH2GCqawEs4yUd90EL1Htpuh
-    owner: risk-team
+    foundry_agent_id: build-agent
+    owner: architecture-team
     governance_policy_id: standard-governance-policy-v1
-    prompt_template_ref: risk-assessment-v1
+    prompt_template_ref: build-generation-v1
+    enabled: true
+
+  - id: deployment-agent
+    name: Deployment Agent
+    role: solution_deployment
+    description: >-
+      Provisions the agents and UI designed by the Build Agent, and
+      returns a launch link for the customer to interact with them.
+    capabilities:
+      - agent_provisioning
+      - launch_link_generation
+    allowed_tools: []
+    memory_access:
+      - shared
+    foundry_agent_id: deployment-agent
+    owner: architecture-team
+    governance_policy_id: standard-governance-policy-v1
+    prompt_template_ref: deployment-v1
+    enabled: true
+
+  - id: genie-orchestrator
+    name: Genie Orchestrator
+    role: mission_orchestration
+    description: >-
+      The single entry point that drives the end-to-end mission: given an
+      uploaded customer transcript, gathers requirements, designs the
+      architecture, builds the UI and its multi-agent workflow, gets
+      governance approval, and deploys/launches it. Uses Azure AI
+      Foundry's Connected Agents feature to call the agents named in
+      connected_agent_ids dynamically, in whatever order the mission
+      requires, rather than a fixed declarative workflow.
+    capabilities:
+      - mission_orchestration
+    allowed_tools: []
+    memory_access:
+      - shared
+    foundry_agent_id: genie-orchestrator
+    connected_agent_ids:
+      - requirements-analyst
+      - architecture-designer
+      - build-agent
+      - governance-reviewer
+      - deployment-agent
+    owner: platform-engineering-team
+    governance_policy_id: standard-governance-policy-v1
+    prompt_template_ref: orchestrator-mission-v1
     enabled: true
 
   - id: governance-reviewer
@@ -108,29 +164,10 @@ agents:
     allowed_tools: []
     memory_access:
       - shared
-    foundry_agent_id: asst_odSCN7XZ8rzzVz4Gm5c1HU3P
+    foundry_agent_id: governance-reviewer
     owner: governance-team
     governance_policy_id: standard-governance-policy-v1
     prompt_template_ref: governance-review-v1
-    enabled: true
-
-  - id: memory-curator
-    name: Memory Curator
-    role: memory_management
-    description: >-
-      Curates promotion of approved findings from shared collaboration
-      memory into enterprise knowledge memory.
-    capabilities:
-      - memory_promotion_review
-    allowed_tools:
-      - azure_ai_search
-    memory_access:
-      - shared
-      - enterprise
-    foundry_agent_id: asst_qda2RruIwkUnl0yvqB9Lrqvv
-    owner: memory-team
-    governance_policy_id: standard-governance-policy-v1
-    prompt_template_ref: memory-curation-review-v1
     enabled: true
 
   - id: debugging-agent
@@ -145,7 +182,7 @@ agents:
     allowed_tools: []
     memory_access:
       - shared
-    foundry_agent_id: asst_WobmsPWJJSuxbtDHSb1dIO7z
+    foundry_agent_id: debugging-agent
     owner: platform-engineering-team
     governance_policy_id: debugging-governance-policy-v1
     prompt_template_ref: failure-diagnosis-v1

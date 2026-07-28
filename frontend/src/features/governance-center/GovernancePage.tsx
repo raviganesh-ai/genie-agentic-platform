@@ -1,6 +1,13 @@
-import { Text } from "@fluentui/react-components";
+import { useCallback, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { Button, MessageBar, MessageBarBody, MessageBarTitle, Text } from "@fluentui/react-components";
 import { useSessionContext } from "@/state/SessionContext";
 import { useGovernanceTrace } from "@/hooks/useGovernanceTrace";
+import { useAsyncResource } from "@/hooks/useAsyncResource";
+import { approvalApi } from "@/services/approvalApi";
+import { workflowApi } from "@/services/workflowApi";
+import { getTraceId } from "@/state/traceRegistry";
+import type { ApiError } from "@/services/httpClient";
 import { PageHeader } from "@/layouts/AppShell";
 import { LoadingState } from "@/components/LoadingState";
 import { ErrorState } from "@/components/ErrorState";
@@ -10,8 +17,57 @@ import { GovernanceStatusBadge } from "@/components/StatusBadge";
 const POLL_MS = Number(import.meta.env.VITE_GOVERNANCE_POLL_MS ?? 5000);
 
 export function GovernancePage(): JSX.Element {
-  const { sessionId } = useSessionContext();
+  const navigate = useNavigate();
+  const { sessionId, workflowRunId } = useSessionContext();
   const { data, loading, error, refresh } = useGovernanceTrace(sessionId, POLL_MS);
+
+  const runFetcher = useCallback(
+    () =>
+      sessionId && workflowRunId
+        ? workflowApi.getRun(sessionId, workflowRunId)
+        : Promise.reject(new Error("No active workflow run")),
+    [sessionId, workflowRunId],
+  );
+  const { data: run } = useAsyncResource(runFetcher, [sessionId, workflowRunId], {
+    enabled: Boolean(sessionId && workflowRunId),
+  });
+  const governanceReviewText = useMemo(
+    () => run?.step_results.find((result) => result.step_id === "governance-review")?.output_text ?? "",
+    [run],
+  );
+
+  const pendingDeployApproval = data?.approvals.find(
+    (request) => request.status === "pending" && request.subject_id === "deploy-solution",
+  );
+  const [deploying, setDeploying] = useState(false);
+  const [deployError, setDeployError] = useState<string | null>(null);
+
+  const handleApproveDeploy = useCallback(async () => {
+    if (!sessionId || !workflowRunId || !pendingDeployApproval) return;
+    setDeploying(true);
+    setDeployError(null);
+    try {
+      await approvalApi.decide(sessionId, pendingDeployApproval.id, "approved");
+      const traceId = getTraceId(workflowRunId) ?? undefined;
+      await workflowApi.resumeRun(sessionId, workflowRunId, traceId);
+      await refresh();
+    } catch (err) {
+      setDeployError((err as ApiError).message ?? "Failed to resume the workflow.");
+    } finally {
+      setDeploying(false);
+    }
+  }, [sessionId, workflowRunId, pendingDeployApproval, refresh]);
+
+  if (!sessionId) {
+    return (
+      <div>
+        <PageHeader title="Governance Center" subtitle="No active session yet." />
+        <Button appearance="primary" onClick={() => navigate("/")}>
+          Start a session
+        </Button>
+      </div>
+    );
+  }
 
   return (
     <div>
@@ -48,6 +104,34 @@ export function GovernancePage(): JSX.Element {
               ) : null}
             </div>
           </SectionCard>
+
+          {governanceReviewText ? (
+            <SectionCard title="Security & Governance Review">
+              <Text size={300} style={{ whiteSpace: "pre-wrap" }}>
+                {governanceReviewText}
+              </Text>
+            </SectionCard>
+          ) : null}
+
+          {pendingDeployApproval ? (
+            <SectionCard title="Approve & Deploy">
+              {deployError ? (
+                <MessageBar intent="error" layout="multiline" style={{ marginBottom: 12 }}>
+                  <MessageBarBody>
+                    <MessageBarTitle>Failed to resume the workflow</MessageBarTitle>
+                    {deployError}
+                  </MessageBarBody>
+                </MessageBar>
+              ) : null}
+              <Text size={300} style={{ display: "block", marginBottom: 12, opacity: 0.8 }}>
+                Governance has reviewed the build above. Approving provisions access control and
+                deploys the UI and agent workflow.
+              </Text>
+              <Button appearance="primary" disabled={deploying} onClick={() => void handleApproveDeploy()}>
+                {deploying ? "Deploying..." : "Approve & Deploy"}
+              </Button>
+            </SectionCard>
+          ) : null}
 
           <SectionCard title="Approvals">
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
