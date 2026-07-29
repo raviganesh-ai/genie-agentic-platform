@@ -1,4 +1,4 @@
-/** Mirrors backend/app/models/{governance_event,approval_models,recommendation_lineage}.py 1:1. */
+/** Mirrors backend/app/models/{governance_event,approval_models,recommendation_lineage,governance_gate_report}.py 1:1. */
 
 export type GovernanceEventCategory =
   | "agent_registration"
@@ -11,7 +11,8 @@ export type GovernanceEventCategory =
   | "tool_request"
   | "policy_evaluation"
   | "access_denied"
-  | "human_checkpoint_confirmation";
+  | "human_checkpoint_confirmation"
+  | "risk_accepted";
 
 export interface GovernanceEvent {
   id: string;
@@ -90,3 +91,30 @@ export type GovernanceComplianceState =
   | "blocked"
   | "incomplete"
   | "failed";
+
+/** Mirrors backend/app/models/governance_gate_report.py 1:1. The Governance
+ * Reviewer's ("Peer Reviewer") consolidated 4-gate verdict for one workflow
+ * run: security, test coverage, architecture, and code quality. */
+export type GateStatus = "pass" | "fail";
+export type GateName = "security" | "test_coverage" | "architecture" | "code_quality";
+export type PeerReviewDecision = "approved" | "blocked";
+export type GovernanceGateReportStatus = "pending" | "reviewed" | "undetermined";
+
+export interface GovernanceFinding {
+  id: string;
+  gate: GateName;
+  severity: "critical" | "high" | "medium" | "low";
+  description: string;
+  recommendation: string;
+}
+
+export interface GovernanceGateReport {
+  status: GovernanceGateReportStatus;
+  security_gate: GateStatus | null;
+  test_coverage_gate: GateStatus | null;
+  architecture_gate: GateStatus | null;
+  code_quality_gate: GateStatus | null;
+  findings: GovernanceFinding[];
+  decision: PeerReviewDecision | null;
+  assessed_by_agent_id: string | null;
+}

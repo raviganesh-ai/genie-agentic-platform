@@ -21,6 +21,7 @@ from app.services.foundry_agent_inventory_service import FoundryAgentInventorySe
 from app.services.foundry_agent_lifecycle_service import FoundryAgentLifecycleService
 from app.services.foundry_agent_synchronization_service import FoundryAgentSynchronizationService
 from app.services.output_service import OutputService
+from app.services.peer_review_service import PeerReviewService
 from app.services.requirements_service import RequirementsService
 from app.services.session_service import SessionService
 from app.services.workshop_service import WorkshopService
@@ -36,6 +37,7 @@ __all__ = [
     "get_governance_service",
     "get_memory_service",
     "get_output_service",
+    "get_peer_review_service",
     "get_replay_service",
     "get_requirements_service",
     "get_session_service",
@@ -72,6 +74,10 @@ def get_output_service(request: Request) -> OutputService:
 
 def get_requirements_service(request: Request) -> RequirementsService:
     return request.app.state.requirements_service
+
+
+def get_peer_review_service(request: Request) -> PeerReviewService:
+    return request.app.state.peer_review_service
 
 
 def get_governance_service(request: Request) -> GovernanceService:

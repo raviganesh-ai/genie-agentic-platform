@@ -72,6 +72,10 @@ export function FinalOutputPage(): JSX.Element {
     () => run?.step_results.find((result) => result.step_id === "build-solution")?.output_text ?? "",
     [run],
   );
+  const testSuiteOutput = useMemo(
+    () => run?.step_results.find((result) => result.step_id === "test-generation")?.output_text ?? "",
+    [run],
+  );
   const launchSummary = useMemo(
     () => run?.step_results.find((result) => result.step_id === "deploy-solution")?.output_text ?? "",
     [run],
@@ -107,6 +111,14 @@ export function FinalOutputPage(): JSX.Element {
           label="Genie is working with the Governance Reviewer and Deployment Agent to finish and deploy your solution..."
           events={liveEvents}
         />
+      ) : null}
+
+      {testSuiteOutput ? (
+        <SectionCard title="🧪 Generated Test Suite">
+          <Text size={300} style={{ whiteSpace: "pre-wrap" }}>
+            {testSuiteOutput}
+          </Text>
+        </SectionCard>
       ) : null}
 
       {canLaunch ? (

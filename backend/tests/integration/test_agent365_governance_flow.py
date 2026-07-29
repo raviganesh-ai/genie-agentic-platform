@@ -90,6 +90,14 @@ async def test_all_tracked_categories_are_recorded(local_settings):
         stage_label="Requirement Discovery",
         confirmed_by="user-1",
     )
+    await service.record_risk_acceptance(
+        session_id="s1",
+        trace_id="t1",
+        workflow_run_id="run-1",
+        justification="Findings are low severity and will be fixed post-launch.",
+        accepted_finding_ids=["sec-1"],
+        accepted_by="user-1",
+    )
 
     events = await service.events_for_session("s1")
     categories = {event.category for event in events}
@@ -105,6 +113,7 @@ async def test_all_tracked_categories_are_recorded(local_settings):
         "policy_evaluation",
         "access_denied",
         "human_checkpoint_confirmation",
+        "risk_accepted",
     }
 
 
@@ -130,3 +139,45 @@ async def test_human_checkpoint_confirmation_records_stage_and_confirming_user(l
 
     events = await service.events_for_session("s1")
     assert events == [event]
+
+
+@pytest.mark.asyncio
+async def test_record_risk_acceptance_records_workflow_run_and_accepting_user(local_settings):
+    service = create_governance_service(settings=local_settings)
+
+    event = await service.record_risk_acceptance(
+        session_id="s1",
+        trace_id="t1",
+        workflow_run_id="run-1",
+        justification="Accepted for prototype demo; will remediate before GA.",
+        accepted_finding_ids=["sec-1", "test-1"],
+        accepted_by="user-42",
+    )
+
+    assert event.category == "risk_accepted"
+    assert event.agent_id is None
+    assert event.detail == {
+        "workflow_run_id": "run-1",
+        "justification": "Accepted for prototype demo; will remediate before GA.",
+        "accepted_finding_ids": ["sec-1", "test-1"],
+        "accepted_by": "user-42",
+    }
+
+
+@pytest.mark.asyncio
+async def test_has_risk_acceptance_is_false_until_recorded_for_that_workflow_run(local_settings):
+    service = create_governance_service(settings=local_settings)
+
+    assert await service.has_risk_acceptance(session_id="s1", workflow_run_id="run-1") is False
+
+    await service.record_risk_acceptance(
+        session_id="s1",
+        trace_id="t1",
+        workflow_run_id="run-1",
+        justification="Accepted.",
+        accepted_finding_ids=[],
+        accepted_by="user-1",
+    )
+
+    assert await service.has_risk_acceptance(session_id="s1", workflow_run_id="run-1") is True
+    assert await service.has_risk_acceptance(session_id="s1", workflow_run_id="run-2") is False

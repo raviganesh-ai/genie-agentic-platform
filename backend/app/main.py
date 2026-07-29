@@ -52,6 +52,7 @@ from app.services.foundry_agent_synchronization_service import (
     FoundryAgentSynchronizationService as RichFoundryAgentSynchronizationService,
 )
 from app.services.output_service import create_output_service
+from app.services.peer_review_service import create_peer_review_service
 from app.services.requirements_service import create_requirements_service
 from app.services.session_service import create_session_service
 from app.services.workshop_service import create_workshop_service
@@ -224,6 +225,12 @@ def create_app(
             orchestrator=orchestrator,
             session_service=session_service,
             qualification_step_id=resolved_settings.requirements_qualification_step_id,
+        )
+        app.state.peer_review_service = create_peer_review_service(
+            orchestrator=orchestrator,
+            session_service=session_service,
+            governance_review_step_id=resolved_settings.governance_review_step_id,
+            gated_step_ids=resolved_settings.peer_review_gated_step_ids,
         )
         app.state.replay_service = ReplayService(
             governance_service=orchestrator.governance_service,

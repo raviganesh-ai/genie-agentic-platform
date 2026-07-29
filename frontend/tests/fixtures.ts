@@ -1,5 +1,5 @@
 import type { WorkflowRunResult } from "@/types/workflow";
-import type { ApprovalRequest, GovernanceEvent } from "@/types/governance";
+import type { ApprovalRequest, GovernanceEvent, GovernanceGateReport } from "@/types/governance";
 import type { DecisionGraph } from "@/types/collaboration";
 import type { SessionReplayResponse } from "@/types/replay";
 import type { ArchitectureSnapshot } from "@/types/architecture";
@@ -81,6 +81,22 @@ export function buildGovernanceEvents(): GovernanceEvent[] {
       detail: {},
     },
   ];
+}
+
+export function buildGovernanceGateReport(
+  overrides: Partial<GovernanceGateReport> = {},
+): GovernanceGateReport {
+  return {
+    status: "reviewed",
+    security_gate: "pass",
+    test_coverage_gate: "pass",
+    architecture_gate: "pass",
+    code_quality_gate: "pass",
+    findings: [],
+    decision: "approved",
+    assessed_by_agent_id: "governance-reviewer",
+    ...overrides,
+  };
 }
 
 export function buildSessionReplayResponse(): SessionReplayResponse {

@@ -93,28 +93,73 @@ workflows:
           requirements: step:analyze-requirements
           architecture: step:design-architecture
 
+      - id: security-assessment
+        agent_id: genie-orchestrator
+        description: >-
+          Perform a full regression security assessment (OWASP Top 10) of
+          the generated build and report a pass/fail security gate
+          verdict with findings for the Governance Reviewer (Peer
+          Reviewer) to consolidate.
+        depends_on:
+          - build-solution
+        prompt_id: orchestrator-security-assessment-phase-v1
+        allowed_tool_names:
+          - call_security_assessment_agent
+        required_memory_references:
+          - build-solution
+        variable_sources:
+          artifact: step:build-solution
+
+      - id: test-generation
+        agent_id: genie-orchestrator
+        description: >-
+          Generate unit, integration, and UI test cases covering the
+          generated build and report a pass/fail test-coverage gate
+          verdict for the Governance Reviewer (Peer Reviewer) to
+          consolidate.
+        depends_on:
+          - build-solution
+        prompt_id: orchestrator-test-generation-phase-v1
+        allowed_tool_names:
+          - call_test_generation_agent
+        required_memory_references:
+          - analyze-requirements
+          - build-solution
+        variable_sources:
+          artifact: step:build-solution
+          requirements: step:analyze-requirements
+
       - id: governance-review
         agent_id: genie-orchestrator
         description: >-
-          Review the build for policy compliance, assess its security
-          posture, and provision/record the access control needed for it
-          to run safely.
+          Peer Review: review the build for policy compliance, assess its
+          security posture, provision/record the access control needed
+          for it to run safely, and consolidate the Security Assessment
+          Agent's and Test Generation Agent's findings with its own
+          architecture and code-quality review into one gate verdict.
         depends_on:
           - build-solution
+          - security-assessment
+          - test-generation
         prompt_id: orchestrator-governance-phase-v1
         allowed_tool_names:
           - call_governance_reviewer
         # Governance reviews everything produced so far, not just the build
         # artifact: this fails closed unless the requirements and
         # architecture findings are also already present in Shared
-        # Collaboration Memory, even though only `artifact` is substituted
-        # into the governance-reviewer's own prompt text below.
+        # Collaboration Memory, even though only `artifact`, `security_findings`,
+        # and `test_plan` are substituted into the governance-reviewer's own
+        # prompt text below.
         required_memory_references:
           - analyze-requirements
           - design-architecture
           - build-solution
+          - security-assessment
+          - test-generation
         variable_sources:
           artifact: step:build-solution
+          security_findings: step:security-assessment
+          test_plan: step:test-generation
 
       - id: deploy-solution
         agent_id: genie-orchestrator

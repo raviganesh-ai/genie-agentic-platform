@@ -112,10 +112,24 @@ _DELEGATIONS: tuple[_Delegation, ...] = (
         shared_memory_classification="roadmap_artifact",
     ),
     _Delegation(
+        tool_name="call_security_assessment_agent",
+        target_agent_id="security-assessment-agent",
+        target_prompt_id="security-assessment-v1",
+        variable_names=("artifact", "user_message"),
+        shared_memory_classification="risk",
+    ),
+    _Delegation(
+        tool_name="call_test_generation_agent",
+        target_agent_id="test-generation-agent",
+        target_prompt_id="test-generation-v1",
+        variable_names=("artifact", "requirements", "user_message"),
+        shared_memory_classification="roadmap_artifact",
+    ),
+    _Delegation(
         tool_name="call_governance_reviewer",
         target_agent_id="governance-reviewer",
         target_prompt_id="governance-review-v1",
-        variable_names=("artifact", "policies", "user_message"),
+        variable_names=("artifact", "policies", "security_findings", "test_plan", "user_message"),
         shared_memory_classification="approval",
     ),
     _Delegation(

@@ -113,6 +113,23 @@ class Settings(BaseSettings):
     # settings rather than hardcoding it in application code.
     requirements_qualification_step_id: str = "analyze-requirements"
 
+    # Id of the workflow step whose output_text carries the Governance
+    # Reviewer agent's structured Peer Review gate verdict (security,
+    # test-coverage, architecture, code-quality gates plus findings - see
+    # app.services.peer_review_service). Mirrors
+    # requirements_qualification_step_id's naming-from-settings pattern.
+    governance_review_step_id: str = "governance-review"
+
+    # Ids of the workflow steps that must be re-executed (alongside
+    # build-solution) whenever a customer applies selected Peer Review
+    # fixes, so the security/test/governance gates are re-evaluated
+    # against the regenerated build rather than showing stale results.
+    peer_review_gated_step_ids: tuple[str, ...] = (
+        "security-assessment",
+        "test-generation",
+        "governance-review",
+    )
+
     # --- CORS -------------------------------------------------------------------
     # Comma-separated list of browser origins allowed to call this API (e.g. the
     # Genie frontend's Static Web App hostname). Empty by default - no

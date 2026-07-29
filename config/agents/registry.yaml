@@ -99,6 +99,8 @@ agents:
     # sets in motion.
     connected_agent_ids:
       - build-agent
+      - security-assessment-agent
+      - test-generation-agent
       - governance-reviewer
       - deployment-agent
     enabled: true
@@ -126,6 +128,49 @@ agents:
     owner: architecture-team
     governance_policy_id: standard-governance-policy-v1
     prompt_template_ref: build-generation-v1
+    enabled: true
+
+  - id: security-assessment-agent
+    name: Security Assessment Agent
+    role: security_assessment
+    description: >-
+      Performs a full regression security assessment of the Build Agent's
+      generated UI and agent code against the OWASP Top 10 on every
+      review (not only what changed since a prior review), and reports a
+      pass/fail security gate verdict with findings and remediation
+      recommendations for the Governance Reviewer (Peer Reviewer) to
+      consolidate.
+    capabilities:
+      - security_review
+      - vulnerability_detection
+    allowed_tools: []
+    memory_access:
+      - shared
+    foundry_agent_id: security-assessment-agent
+    owner: governance-team
+    governance_policy_id: standard-governance-policy-v1
+    prompt_template_ref: security-assessment-v1
+    enabled: true
+
+  - id: test-generation-agent
+    name: Test Generation Agent
+    role: test_generation
+    description: >-
+      Generates unit, integration, and UI test cases covering every
+      function, endpoint, and interaction the Build Agent generated, and
+      reports a pass/fail test-coverage gate verdict based on structural
+      completeness against the approved requirements for the Governance
+      Reviewer (Peer Reviewer) to consolidate.
+    capabilities:
+      - test_case_generation
+      - coverage_assessment
+    allowed_tools: []
+    memory_access:
+      - shared
+    foundry_agent_id: test-generation-agent
+    owner: governance-team
+    governance_policy_id: standard-governance-policy-v1
+    prompt_template_ref: test-generation-v1
     enabled: true
 
   - id: deployment-agent
@@ -172,6 +217,8 @@ agents:
       - requirements-analyst
       - architecture-designer
       - build-agent
+      - security-assessment-agent
+      - test-generation-agent
       - governance-reviewer
       - deployment-agent
     tool_definitions:
@@ -211,6 +258,31 @@ agents:
           - name: user_message
             type: string
             description: Optional customer chat message for this phase, or empty.
+      - name: call_security_assessment_agent
+        description: >-
+          Delegate the security-assessment phase to the Security
+          Assessment Agent and return its real output verbatim.
+        parameters:
+          - name: artifact
+            type: string
+            description: The build artifact to assess for security posture.
+          - name: user_message
+            type: string
+            description: Optional customer chat message for this phase, or empty.
+      - name: call_test_generation_agent
+        description: >-
+          Delegate the test-generation phase to the Test Generation Agent
+          and return its real output verbatim.
+        parameters:
+          - name: artifact
+            type: string
+            description: The build artifact to generate test cases for.
+          - name: requirements
+            type: string
+            description: The approved requirements the generated tests must cover.
+          - name: user_message
+            type: string
+            description: Optional customer chat message for this phase, or empty.
       - name: call_governance_reviewer
         description: >-
           Delegate the governance-review phase to the Governance Reviewer
@@ -222,6 +294,12 @@ agents:
           - name: policies
             type: string
             description: The policies to review the artifact against.
+          - name: security_findings
+            type: string
+            description: The Security Assessment Agent's findings to consolidate.
+          - name: test_plan
+            type: string
+            description: The Test Generation Agent's test plan and coverage assessment to consolidate.
           - name: user_message
             type: string
             description: Optional customer chat message for this phase, or empty.
@@ -248,11 +326,18 @@ agents:
     name: Governance Reviewer
     role: governance
     description: >-
-      Reviews agent and workflow outputs for policy compliance and records
-      approval decisions and decision lineage.
+      Acts as Genie's Peer Reviewer and security/testing custodian:
+      reviews agent and workflow outputs for policy compliance, records
+      approval decisions and decision lineage, and consolidates the
+      Security Assessment Agent's and Test Generation Agent's findings
+      with its own architecture and code-quality review into a single
+      security / test-coverage / architecture / code-quality gate
+      verdict. Deployment is blocked unless every gate passes or a human
+      explicitly accepts the residual risk.
     capabilities:
       - policy_review
       - approval_recording
+      - security_test_architecture_quality_gate_review
     allowed_tools: []
     memory_access:
       - shared

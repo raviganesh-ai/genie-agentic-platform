@@ -7,7 +7,10 @@ registration, agent versions, agent lifecycle, agent executions, agent
 communication, memory reads/writes, tool requests, policy evaluations,
 denied access events, and (added post-Phase-8, for Responsible AI
 Accountability) human checkpoint confirmations - a person explicitly
-proceeding the Discovery Wizard past a workflow stage. A single shape
+proceeding the Discovery Wizard past a workflow stage - and (added
+post-Phase-9, for the Peer Review hardened Governance gate) risk
+acceptances, recording a human's explicit justification for proceeding to
+deploy despite Peer Review having blocked the build. A single shape
 (rather than one class per category) keeps storage, querying, and replay
 reconstruction uniform.
 """
@@ -30,6 +33,7 @@ GovernanceEventCategory = Literal[
     "policy_evaluation",
     "access_denied",
     "human_checkpoint_confirmation",
+    "risk_accepted",
 ]
 
 __all__ = ["GovernanceEvent", "GovernanceEventCategory"]
