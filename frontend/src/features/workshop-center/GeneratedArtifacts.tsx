@@ -1,6 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { Button, Text } from "@fluentui/react-components";
-import { extractCodeBlocks, splitIntoNamedSections, stripCodeBlocks } from "@/utils/textArtifacts";
+import {
+  extractAgentLabel,
+  extractCodeBlocks,
+  splitIntoNamedSections,
+  stripCodeBlocks,
+} from "@/utils/textArtifacts";
 
 interface Artifact {
   key: string;
@@ -10,17 +15,48 @@ interface Artifact {
   content: string;
 }
 
+const UI_CODE_LANGUAGES = new Set(["tsx", "jsx", "typescript", "javascript", "ts", "js"]);
+const AGENT_CODE_LANGUAGES = new Set(["python", "py"]);
+
+/** Labels each fenced code block using the build-generation-v1 contract's
+ * `# agent: <name>` / `// agent: ui` first-line comment when present - "ui"
+ * -> Generated UI Code, "orchestrator" -> Generated Orchestrator Agent
+ * Code, any other name -> Generated Agent Code for that specialist agent -
+ * so a response with one UI block, one block per specialist agent, and
+ * one Orchestrator Agent block are each titled precisely instead of all
+ * being lumped under one generic label. Falls back to a language-only
+ * label (older/unlabeled responses) rather than guessing when no `agent:`
+ * comment is present. */
+function labelForCodeBlock(language: string, agentLabel: string | null): { icon: string; title: string } {
+  if (agentLabel) {
+    const normalized = agentLabel.toLowerCase();
+    if (normalized === "ui") {
+      return { icon: "🖥️", title: `Generated UI Code (${language})` };
+    }
+    if (normalized === "orchestrator") {
+      return { icon: "🧭", title: `Generated Orchestrator Agent Code (${language})` };
+    }
+    return { icon: "🤖", title: `Generated Agent Code - ${agentLabel} (${language})` };
+  }
+  const normalized = language.toLowerCase();
+  if (UI_CODE_LANGUAGES.has(normalized)) {
+    return { icon: "🖥️", title: `Generated UI Code (${language})` };
+  }
+  if (AGENT_CODE_LANGUAGES.has(normalized)) {
+    return { icon: "🤖", title: `Generated Agent Code (${language})` };
+  }
+  return { icon: "📄", title: `Generated Code (${language})` };
+}
+
 function buildArtifacts(outputText: string): Artifact[] {
   const artifacts: Artifact[] = [];
   const codeBlocks = extractCodeBlocks(outputText);
   codeBlocks.forEach((block, index) => {
+    const { icon, title } = labelForCodeBlock(block.language, extractAgentLabel(block.code));
     artifacts.push({
       key: `code-${index}`,
-      icon: "🖥️",
-      title:
-        codeBlocks.length > 1
-          ? `Generated UI Code (${block.language}) #${index + 1}`
-          : "Generated UI Code",
+      icon,
+      title,
       kind: "code",
       content: block.code,
     });

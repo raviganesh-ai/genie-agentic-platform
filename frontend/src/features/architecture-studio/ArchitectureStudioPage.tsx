@@ -27,7 +27,8 @@ import { LiveWorkflowPulse } from "@/components/LiveWorkflowPulse";
 import { AgentActivityAnimation } from "@/components/AgentActivityAnimation";
 import { useWorkflowEventStream } from "@/hooks/useWorkflowEventStream";
 import { ArchitectureComponentDiagram } from "./ArchitectureComponentDiagram";
-import { splitTopLevelSections, splitIntoNamedSections } from "@/utils/textArtifacts";
+import { InteractiveFlowDiagram } from "./InteractiveFlowDiagram";
+import { splitTopLevelSections, splitIntoNamedSections, parseUiScreenFlows } from "@/utils/textArtifacts";
 import { ApiError } from "@/services/httpClient";
 import type { SafeError } from "@/types/common";
 
@@ -52,6 +53,11 @@ const TOP_SECTION_ICONS: Array<[RegExp, string]> = [
  * Workflow" section title - used to find that section's parsed agent list
  * so the user can deselect agents to limit the design. */
 const MULTI_AGENT_WORKFLOW_TITLE = /multi-agent workflow/i;
+
+/** Matches the architecture-recommendation-v1 contract's "## UI Design"
+ * section title - used to parse its bullets into a real hub-and-spoke
+ * Screen -> Orchestrator Agent flow diagram instead of raw prose. */
+const UI_DESIGN_TITLE = /ui design/i;
 
 /** These two sections are this mission's actual, requirement-derived
  * design output - the most important thing on this page - so they get the
@@ -165,28 +171,33 @@ export function ArchitectureStudioPage(): JSX.Element {
     setApproveError(null);
     try {
       await approvalApi.decide(sessionId, pendingArchitectureApproval.id, "approved");
-      await refreshApprovals();
       const traceId = getTraceId(workflowRunId) ?? undefined;
-      await workflowApi.resumeRun(sessionId, workflowRunId, traceId, {
-        "governance-review": {
-          step_id: "governance-review",
-          variables: { policies: effectiveGovernancePolicies },
-        },
-      });
-      await Promise.all([refresh(), refreshApprovals()]);
+      // Move to the UI & Agent Design page immediately - that page has its
+      // own live workflow event stream + polling and shows the "Genie is
+      // calling the Orchestrator Agent..." animation until build-solution's
+      // output arrives, then swaps in the generated artifacts. Resuming the
+      // run itself can take a while (it runs build-solution and, once
+      // governed, governance-review server-side), so we kick it off rather
+      // than block navigation on it - any failure surfaces there via the
+      // step's own recorded error instead of on this page the user has
+      // already left.
+      navigate("/workshop");
+      workflowApi
+        .resumeRun(sessionId, workflowRunId, traceId, {
+          "governance-review": {
+            step_id: "governance-review",
+            variables: { policies: effectiveGovernancePolicies },
+          },
+        })
+        .catch((err) => {
+          console.error("Failed to resume the workflow after architecture approval.", err);
+        });
     } catch (err) {
       setApproveError((err as ApiError).message ?? "Failed to resume the workflow.");
     } finally {
       setApproving(false);
     }
-  }, [
-    sessionId,
-    workflowRunId,
-    pendingArchitectureApproval,
-    effectiveGovernancePolicies,
-    refresh,
-    refreshApprovals,
-  ]);
+  }, [sessionId, workflowRunId, pendingArchitectureApproval, effectiveGovernancePolicies, navigate]);
 
   // Lets the user deselect specific agents from the "## Multi-Agent
   // Workflow" section and re-run design-architecture (still the same
@@ -304,6 +315,8 @@ export function ArchitectureStudioPage(): JSX.Element {
               const highlighted = isHighlightedSection(section.title);
               const isMultiAgentWorkflow = MULTI_AGENT_WORKFLOW_TITLE.test(section.title);
               const agentItems = isMultiAgentWorkflow ? splitIntoNamedSections(section.body) : [];
+              const isUiDesign = UI_DESIGN_TITLE.test(section.title);
+              const uiScreenFlows = isUiDesign ? parseUiScreenFlows(section.body) : [];
               return (
                 <SectionCard
                   key={section.title}
@@ -322,7 +335,25 @@ export function ArchitectureStudioPage(): JSX.Element {
                       {section.summary}
                     </Text>
                   ) : null}
-                  <ArchitectureComponentDiagram content={section.body} animated={highlighted} />
+                  {isUiDesign && uiScreenFlows.length > 0 ? (
+                    <InteractiveFlowDiagram
+                      hub={{
+                        id: "ui-orchestrator",
+                        title: uiScreenFlows[0].orchestrator,
+                        icon: "🤖",
+                        description:
+                          "The single entry point for this mission's UI - every screen calls only this agent, which coordinates every specialist agent internally.",
+                      }}
+                      nodes={uiScreenFlows.map((flow, index) => ({
+                        id: `screen-${index}`,
+                        title: flow.screen,
+                        icon: "🖥️",
+                        description: flow.description,
+                      }))}
+                    />
+                  ) : (
+                    <ArchitectureComponentDiagram content={section.body} animated={highlighted} />
+                  )}
                   {isMultiAgentWorkflow && agentItems.length > 1 ? (
                     <div style={{ marginTop: 16, paddingTop: 16, borderTop: "1px solid #232a33" }}>
                       <Text

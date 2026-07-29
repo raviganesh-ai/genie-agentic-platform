@@ -107,8 +107,14 @@ agents:
     name: Build Agent
     role: solution_build
     description: >-
-      Generates the customer-facing UI code and designs the dedicated
-      multi-agent workflow needed to fulfill one approved requirement.
+      Generates an extensive, multi-screen customer-facing React UI, one
+      independent Python 3.12/Azure AI Agent SDK module per specialist
+      agent, and a separate Orchestrator Agent module with the real
+      delegation/orchestration logic - each a real, individually
+      deployable piece - so that once deployed to Azure AI Foundry, the
+      generated backend service is the sole caller of the Orchestrator
+      Agent, which in turn coordinates every specialist agent, to fulfill
+      one approved requirement.
     capabilities:
       - ui_code_generation
       - multi_agent_flow_design

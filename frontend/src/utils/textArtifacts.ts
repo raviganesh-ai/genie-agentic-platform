@@ -109,6 +109,38 @@ export function splitTopLevelSections(text: string): TopLevelSection[] {
   return sections;
 }
 
+export interface UiScreenFlow {
+  screen: string;
+  orchestrator: string;
+  description: string;
+}
+
+/**
+ * Parses the architecture-recommendation-v1 UI Design section's bullet
+ * contract - each line shaped like
+ * `- **<Screen name>** --> **<Orchestrator Agent name>**: <description>` -
+ * into structured `{screen, orchestrator, description}` entries, so the UI
+ * can render an actual hub-and-spoke flow diagram (every screen fanning
+ * into the single Orchestrator Agent) instead of raw prose. Returns an
+ * empty array (caller should fall back to raw/diagrammed text) when no
+ * line matches this exact contract.
+ */
+export function parseUiScreenFlows(text: string): UiScreenFlow[] {
+  const flows: UiScreenFlow[] = [];
+  const pattern = /^[-*]\s*\*\*(.+?)\*\*\s*-->\s*\*\*(.+?)\*\*\s*:\s*(.+)$/;
+  for (const rawLine of text.split(/\r?\n/)) {
+    const match = rawLine.trim().match(pattern);
+    if (match) {
+      flows.push({
+        screen: match[1].trim(),
+        orchestrator: match[2].trim(),
+        description: match[3].trim(),
+      });
+    }
+  }
+  return flows;
+}
+
 export interface ParsedCodeBlock {
   language: string;
   code: string;
@@ -123,6 +155,24 @@ export function extractCodeBlocks(text: string): ParsedCodeBlock[] {
     blocks.push({ language: match[1] || "text", code: match[2].trim() });
   }
   return blocks;
+}
+
+const AGENT_LABEL_COMMENT = /^\s*(?:\/\/|#)\s*agent:\s*(.+?)\s*$/i;
+
+/**
+ * Returns the `agent: <name>` label declared in a code block's first
+ * line comment (`// agent: ui`, `# agent: orchestrator`, `# agent: <Agent
+ * Name>`) - the build-generation-v1 prompt contract's way of identifying
+ * which agent (or "ui") a given code block belongs to when a single
+ * response contains many blocks (one UI block, one per specialist agent,
+ * one for the Orchestrator Agent). Returns null when the code block
+ * doesn't declare one (e.g. an older cached response), so callers can
+ * fall back to a language-based label instead.
+ */
+export function extractAgentLabel(code: string): string | null {
+  const firstLine = code.split(/\r?\n/, 1)[0] ?? "";
+  const match = firstLine.match(AGENT_LABEL_COMMENT);
+  return match ? match[1].trim() : null;
 }
 
 /** Returns the text with every fenced code block removed (surrounding whitespace collapsed). */

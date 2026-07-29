@@ -126,9 +126,13 @@ prompts:
       the agentic workflow, show that agent flow's live progress, and
       present/let the user share its output - do not invent bespoke
       screens beyond that interaction/progress/output loop unless a
-      requirement explicitly demands something else. One bullet per key
-      screen/interaction, each as "**<Screen name>**: <what the user sees
-      and does there, and which requirement(s) it fulfills>".
+      requirement explicitly demands something else. The UI must only
+      ever be shown interacting with the single Orchestrator Agent you
+      designate below in "## Multi-Agent Workflow" - never name or depict
+      any other specialist agent here, since the UI never talks to them
+      directly. One bullet per key screen/interaction, each as "**<Screen
+      name>** --> **<Orchestrator Agent name>**: <what the user sees and
+      does there, and which requirement(s) it fulfills>".
 
       "## Multi-Agent Workflow" - decide how many specialist agents this
       solution needs and what each one is responsible for, based solely
@@ -136,15 +140,20 @@ prompts:
       actually trying to achieve (not on Genie's own internal
       requirement/architecture/build/governance/deployment pipeline,
       which is a separate, fixed meta-process that builds every mission
-      regardless of its content - do not describe it here). One bullet
-      per agent you decide is needed, as "**<Agent name>**: <its
-      responsibility, the requirement(s) it fulfills, its inputs, and
-      which other agent(s) in this list it hands off to or receives
-      from>".
+      regardless of its content - do not describe it here). Exactly one
+      of these agents must be designated the Orchestrator Agent (name it
+      "<something> Orchestrator Agent") - it is the single entry point
+      that receives every interaction coming from the UI and is
+      responsible for coordinating, sequencing, and handing off to every
+      other specialist agent in the list; no other agent in the list may
+      receive input directly from the UI. One bullet per agent you decide
+      is needed, as "**<Agent name>**: <its responsibility, the
+      requirement(s) it fulfills, its inputs, and which other agent(s) in
+      this list it hands off to or receives from>".
     variables:
       - approved_requirements
       - user_message
-    version: "3.1.0"
+    version: "3.2.0"
 
   - id: governance-review-v1
     name: Governance Review
@@ -206,26 +215,78 @@ prompts:
   - id: build-generation-v1
     name: Build Generation
     description: >-
-      Generates the customer-facing UI code and the dedicated multi-agent
-      workflow design that fulfills one approved requirement and its
-      recommended architecture.
+      Generates an extensive, multi-screen customer-facing React UI, one
+      independent Python 3.12/Azure AI Agent SDK module per specialist
+      agent, and a separate Orchestrator Agent module with the real
+      delegation/orchestration logic - each a real, individually
+      deployable piece rather than a single combined blob - for the
+      approved requirement and its recommended architecture.
     template: >-
       You are the Build Agent for the Genie Agentic Experience Center.
       Given the following approved requirements and recommended
-      architecture, produce two things: (1) a self-contained customer-
-      facing UI (a single HTML fragment with inline CSS/JS only, no
-      external script/style/link tags, no iframes) for interacting with
-      the solution, and (2) a multi-agent workflow design (which agents,
-      tools, and prompts are needed) that fulfills this requirement end to
-      end.
+      architecture, produce this mission's own customer-facing solution
+      end to end (not for Genie itself) as real, individually deployable
+      code - never a single monolithic blob combining multiple agents
+      together.
 
-      Security rules you MUST follow: never hardcode any URL, hostname,
-      port, API key, token, or credential anywhere in the output. If the
-      UI needs to call a backend API, use a relative, same-origin fetch
-      call with credentials set to 'include', and read
-      window.GENIE_SESSION_ID for any session-scoped value - never invent
-      or embed a session id, customer name, or other identifier as a
-      literal.
+      The recommended architecture below has a "## Multi-Agent Workflow"
+      section that names every specialist agent this mission needs and
+      designates exactly one of them the Orchestrator Agent. Generate all
+      of the following, each as its own separate, independently runnable
+      piece:
+
+      (1) UI code - an extensive React functional component
+      (TypeScript/TSX) that covers every screen listed in the
+      architecture's "## UI Design" section below, not just a single
+      intake form: a real interaction/kick-off screen, a live
+      progress/status view of the agent flow, and an output/results view,
+      each its own clearly separated section of the component. The UI
+      must only ever call the single Orchestrator Agent named below -
+      never any specialist agent directly - via a relative, same-origin
+      fetch call with credentials set to 'include', reading any
+      session-scoped value from a prop or environment variable rather
+      than a literal. Once this mission is deployed, that same-origin
+      call reaches this mission's own backend service, which is the only
+      caller of the Orchestrator Agent hosted in Azure AI Foundry - the
+      Orchestrator Agent itself is never called directly from the
+      browser. Return this as exactly one fenced ```tsx code block whose
+      first line is the comment `// agent: ui`.
+
+      (2) One agent code block per specialist agent listed in
+      "## Multi-Agent Workflow" below (every agent except the Orchestrator
+      Agent) - each its own independent Python 3.12 module built on the
+      Azure AI Agent SDK (azure-ai-projects), strongly typed, async, with
+      dependencies injected rather than hardcoded, implementing only that
+      one agent's own responsibility as described in the architecture.
+      Never combine two agents into one block, and do not invent
+      undocumented SDK APIs. Return each as its own fenced ```python code
+      block whose first line is the comment `# agent: <the exact agent
+      name from the architecture>`.
+
+      (3) Exactly one more agent code block for the Orchestrator Agent
+      itself, also Python 3.12 on the Azure AI Agent SDK, containing the
+      real orchestration logic: one delegation tool per specialist agent
+      from (2) (the same call_<agent> tool pattern Genie's own
+      genie-orchestrator uses), so it is this mission's single entry
+      point that sequences and hands off to every specialist agent.
+      Include a short comment near the top noting that once deployed to
+      Azure AI Foundry, this Orchestrator Agent is reachable only through
+      this mission's own backend service (the same one the UI calls) -
+      never directly from the browser. Return this as its own fenced
+      ```python code block whose first line is the comment `# agent:
+      orchestrator`.
+
+      Security rules you MUST follow in every code block above: never
+      hardcode any URL, hostname, port, API key, token, secret, or
+      credential anywhere - read every endpoint, deployment name, and
+      secret from configuration/environment variables, matching Genie's
+      own no-hardcoding rule.
+
+      After all the code blocks, add a short "## Multi-Agent Workflow"
+      section (plain text, not code) describing each agent's
+      responsibility and how it connects to the Orchestrator Agent - this
+      is the same lineup already established in the recommended
+      architecture below; do not introduce new agents here.
 
       Approved requirements:
       {requirements}
@@ -238,7 +299,7 @@ prompts:
       - requirements
       - architecture
       - user_message
-    version: "1.0.0"
+    version: "3.0.0"
 
   - id: deployment-v1
     name: Deployment

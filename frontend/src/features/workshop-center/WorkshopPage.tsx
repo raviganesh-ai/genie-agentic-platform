@@ -43,10 +43,12 @@ export function WorkshopPage(): JSX.Element {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lastLiveEvent]);
-  const buildOutputText = useMemo(
-    () => run?.step_results.find((result) => result.step_id === "build-solution")?.output_text ?? "",
+  const buildStepResult = useMemo(
+    () => run?.step_results.find((result) => result.step_id === "build-solution"),
     [run],
   );
+  const buildOutputText = buildStepResult?.output_text ?? "";
+  const buildError = buildStepResult?.error ?? null;
 
   if (!workflowRunId) {
     return (
@@ -63,7 +65,7 @@ export function WorkshopPage(): JSX.Element {
     <div>
       <PageHeader
         title="UI & Agent Design"
-        subtitle="Watch the Build Agent's generated UI and multi-agent workflow artifacts, then chat, challenge, and adjust priorities in real time."
+        subtitle="Watch Genie call the Orchestrator Agent to generate this mission's React UI code and multi-agent code, then chat, challenge, and adjust priorities in real time."
       />
       {workshop.error ? <ErrorState error={workshop.error} /> : null}
 
@@ -72,9 +74,11 @@ export function WorkshopPage(): JSX.Element {
       <SectionCard title="🛠️ Generated Artifacts">
         {buildOutputText ? (
           <GeneratedArtifacts outputText={buildOutputText} />
+        ) : buildError ? (
+          <ErrorState error={{ message: buildError }} />
         ) : (
           <AgentActivityAnimation
-            label="Genie is working with the Build Agent to generate your UI and multi-agent workflow..."
+            label="Genie is calling the Orchestrator Agent to generate your extensive UI, each specialist agent's own code, and the Orchestrator Agent's orchestration code..."
             events={liveEvents}
           />
         )}
