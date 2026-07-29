@@ -8,7 +8,6 @@ import { workflowApi } from "@/services/workflowApi";
 import { PageHeader } from "@/layouts/AppShell";
 import { ErrorState } from "@/components/ErrorState";
 import { SectionCard } from "@/components/SectionCard";
-import { LiveWorkflowPulse } from "@/components/LiveWorkflowPulse";
 import { AgentActivityAnimation } from "@/components/AgentActivityAnimation";
 import { useWorkflowEventStream } from "@/hooks/useWorkflowEventStream";
 import { GeneratedArtifacts } from "./GeneratedArtifacts";
@@ -34,7 +33,7 @@ export function WorkshopPage(): JSX.Element {
     enabled: Boolean(sessionId && workflowRunId),
     pollIntervalMs: Number(import.meta.env.VITE_ARCHITECTURE_STUDIO_POLL_MS ?? 0),
   });
-  const { events: liveEvents, connected: liveConnected } = useWorkflowEventStream(sessionId);
+  const { events: liveEvents } = useWorkflowEventStream(sessionId);
   const lastLiveEvent = liveEvents[liveEvents.length - 1] ?? null;
   useEffect(() => {
     if (lastLiveEvent?.event_type === "step_completed" || lastLiveEvent?.event_type === "step_failed") {
@@ -67,8 +66,6 @@ export function WorkshopPage(): JSX.Element {
         subtitle="Watch Genie call the Orchestrator Agent to generate this mission's React UI code and multi-agent code."
       />
       {workshop.error ? <ErrorState error={workshop.error} /> : null}
-
-      <LiveWorkflowPulse connected={liveConnected} events={liveEvents} />
 
       <SectionCard title="🛠️ Generated Artifacts">
         {buildOutputText ? (
