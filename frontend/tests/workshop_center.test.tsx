@@ -6,22 +6,50 @@ import { buildWorkflowRunResult, FIXTURE_SESSION_ID, FIXTURE_WORKFLOW_RUN_ID } f
 import { WorkshopPage } from "@/features/workshop-center/WorkshopPage";
 
 describe("WorkshopPage", () => {
-  it("sends a chat message and renders the real agent response returned by the backend", async () => {
-    mockFetchSequence([{ match: "/workshop/chat", response: buildWorkflowRunResult() }]);
+  it("shows only the generated code, and reveals Proceed to Governance once the review checkbox is checked", async () => {
+    mockFetchSequence([
+      {
+        match: `/workflows/runs/${FIXTURE_WORKFLOW_RUN_ID}`,
+        response: buildWorkflowRunResult({
+          step_results: [
+            {
+              step_id: "build-solution",
+              agent_id: "orchestrator",
+              status: "completed",
+              output_text: "```tsx\n// agent: ui\nexport function App() { return null; }\n```",
+              error: null,
+              started_at: "2026-07-23T10:00:00Z",
+              completed_at: "2026-07-23T10:01:00Z",
+            },
+          ],
+        }),
+      },
+    ]);
 
     renderWithProviders(<WorkshopPage />, {
       sessionId: FIXTURE_SESSION_ID,
       workflowRunId: FIXTURE_WORKFLOW_RUN_ID,
     });
 
-    const user = userEvent.setup();
-    const textarea = screen.getByPlaceholderText(/Ask a question or provide direction/i);
-    await user.type(textarea, "What are the top risks?");
-    await user.click(screen.getByRole("button", { name: /^Send$/i }));
-
     await waitFor(() =>
-      expect(screen.getByText(/Identified 3 goals\./i)).toBeInTheDocument(),
+      expect(screen.getByText(/Generated UI Code/i)).toBeInTheDocument(),
     );
-    expect(screen.getByText("requirements-analyst")).toBeInTheDocument();
+
+    // No chat/priority controls left on the page - just the generated code.
+    expect(screen.queryByPlaceholderText(/Ask a question or provide direction/i)).not.toBeInTheDocument();
+    expect(screen.queryByPlaceholderText(/Describe the priority change/i)).not.toBeInTheDocument();
+
+    expect(
+      screen.queryByRole("button", { name: /Proceed to Governance/i }),
+    ).not.toBeInTheDocument();
+
+    const user = userEvent.setup();
+    await user.click(
+      screen.getByRole("checkbox", {
+        name: /AI can perform mistake, the user has reviewed and is willing to proceed/i,
+      }),
+    );
+
+    expect(screen.getByRole("button", { name: /Proceed to Governance/i })).toBeInTheDocument();
   });
 });
