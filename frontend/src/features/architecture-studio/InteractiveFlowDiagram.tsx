@@ -23,12 +23,14 @@ function FlowCard({
   node,
   isActive,
   isHub,
+  showDescription,
   onHover,
   onLeave,
 }: {
   node: FlowDiagramNode;
   isActive: boolean;
   isHub?: boolean;
+  showDescription?: boolean;
   onHover: () => void;
   onLeave: () => void;
 }): JSX.Element {
@@ -45,7 +47,7 @@ function FlowCard({
         flexDirection: "column",
         alignItems: "center",
         gap: 6,
-        width: isHub ? 172 : 156,
+        width: isHub ? 172 : showDescription ? 220 : 156,
         padding: isHub ? "18px 12px" : "14px 10px",
         borderRadius: 12,
         border: "1px solid #232a33",
@@ -62,6 +64,11 @@ function FlowCard({
       <Text size={200} weight="semibold" style={{ lineHeight: 1.25 }}>
         {node.title}
       </Text>
+      {showDescription && node.description ? (
+        <Text size={100} style={{ lineHeight: 1.3, opacity: 0.75 }}>
+          {node.description}
+        </Text>
+      ) : null}
     </button>
   );
 }
@@ -94,7 +101,11 @@ function Connector({ active, vertical }: { active: boolean; vertical?: boolean }
 export function InteractiveFlowDiagram({ hub, nodes, emptyLabel }: InteractiveFlowDiagramProps): JSX.Element {
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const allNodes = useMemo(() => (hub ? [hub, ...nodes] : nodes), [hub, nodes]);
-  const activeId = hoveredId ?? allNodes[0]?.id ?? null;
+  // Default the highlighted node to the first spoke (e.g. the first UI
+  // screen) rather than the hub, so the detail panel below leads with
+  // what the user is looking at (a screen) instead of always defaulting
+  // to the Orchestrator Agent's own description.
+  const activeId = hoveredId ?? nodes[0]?.id ?? hub?.id ?? null;
   const activeNode = allNodes.find((node) => node.id === activeId) ?? null;
 
   if (allNodes.length === 0) {
@@ -137,6 +148,7 @@ export function InteractiveFlowDiagram({ hub, nodes, emptyLabel }: InteractiveFl
                   <FlowCard
                     node={node}
                     isActive={isActive}
+                    showDescription
                     onHover={() => setHoveredId(node.id)}
                     onLeave={() => setHoveredId(null)}
                   />
