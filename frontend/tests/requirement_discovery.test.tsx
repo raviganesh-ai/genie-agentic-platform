@@ -134,4 +134,53 @@ describe("RequirementDiscoveryPage", () => {
       );
     });
   });
+
+  it("moves a Functional Requirements item into Scope of Prototyping", async () => {
+    mockFetchSequence([
+      { match: "/approvals", response: buildApprovalRequests() },
+      {
+        match: `/requirements/${FIXTURE_WORKFLOW_RUN_ID}/qualification`,
+        response: buildRequirementsQualification({ status: "qualified" }),
+      },
+      {
+        match: `/workflows/runs/${FIXTURE_WORKFLOW_RUN_ID}`,
+        response: buildWorkflowRunResult({
+          step_results: [
+            {
+              step_id: "analyze-requirements",
+              agent_id: "requirements-analyst",
+              status: "completed",
+              output_text:
+                "Functional Requirements:\n- Support SSO login\n- Export reports as PDF\n\nCritical path:\n- Onboard the pilot customer",
+              error: null,
+              started_at: "2026-07-23T10:00:00Z",
+              completed_at: "2026-07-23T10:01:00Z",
+            },
+          ],
+        }),
+      },
+    ]);
+
+    renderWithProviders(<RequirementDiscoveryPage />, {
+      sessionId: FIXTURE_SESSION_ID,
+      workflowRunId: FIXTURE_WORKFLOW_RUN_ID,
+    });
+
+    const user = userEvent.setup();
+    const editButton = await screen.findByRole("button", { name: /Edit Requirements/i });
+    await user.click(editButton);
+
+    await screen.findByDisplayValue(/Support SSO login/i);
+    const moveButtons = screen.getAllByRole("button", { name: /Move to Scope of Prototyping/i });
+    await user.click(moveButtons[0]);
+
+    await waitFor(() => {
+      // Still exactly one "Support SSO login" textbox - it moved into
+      // Scope of Prototyping rather than being duplicated or dropped.
+      expect(screen.getAllByDisplayValue(/^Support SSO login$/i)).toHaveLength(1);
+    });
+    expect(screen.getByDisplayValue(/Onboard the pilot customer/i)).toBeInTheDocument();
+    expect(screen.getByDisplayValue(/^Export reports as PDF$/i)).toBeInTheDocument();
+  });
 });
+

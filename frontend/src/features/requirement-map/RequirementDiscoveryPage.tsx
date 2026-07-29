@@ -303,6 +303,29 @@ export function RequirementDiscoveryPage(): JSX.Element {
     },
     [withOverrides],
   );
+  // Lets the user promote a Functional/Non-Functional/etc. item straight
+  // into "Scope of Prototyping" (the Critical Path) instead of having to
+  // delete it here and retype it below - moves, rather than copies, so the
+  // item never ends up listed in both places.
+  const moveGroupItemToCriticalPath = useCallback(
+    (groupKey: string, index: number) => {
+      setRequirementOverrides((prev) => {
+        const base = withOverrides(prev);
+        const group = base.groups.find((candidate) => candidate.key === groupKey);
+        const item = group?.items[index];
+        if (item === undefined) return base;
+        return {
+          groups: base.groups.map((candidate) =>
+            candidate.key === groupKey
+              ? { ...candidate, items: candidate.items.filter((_, i) => i !== index) }
+              : candidate,
+          ),
+          criticalPath: [...base.criticalPath, item],
+        };
+      });
+    },
+    [withOverrides],
+  );
 
   const updateCriticalPathItem = useCallback(
     (index: number, value: string) => {
@@ -832,6 +855,15 @@ export function RequirementDiscoveryPage(): JSX.Element {
                         resize="vertical"
                         style={{ flex: 1 }}
                       />
+                      <Button
+                        appearance="subtle"
+                        size="small"
+                        title="Move to Scope of Prototyping (Critical Path)"
+                        aria-label="Move to Scope of Prototyping"
+                        onClick={() => moveGroupItemToCriticalPath(group.key, index)}
+                      >
+                        🎯 Move to Scope
+                      </Button>
                       <Button
                         appearance="subtle"
                         size="small"
