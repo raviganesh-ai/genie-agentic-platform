@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Button, Text } from "@fluentui/react-components";
+import { Button, Text, Textarea } from "@fluentui/react-components";
 import {
   extractAgentLabel,
   extractCodeBlocks,
@@ -13,10 +13,18 @@ interface Artifact {
   title: string;
   kind: "code" | "narrative";
   content: string;
+  /** For `kind === "code"` artifacts only: the matching agent's own
+   * description, lifted from the trailing "## Multi-Agent Workflow"
+   * section so it renders inline above the code instead of in a
+   * disconnected card at the bottom. */
+  description?: string;
 }
 
 const UI_CODE_LANGUAGES = new Set(["tsx", "jsx", "typescript", "javascript", "ts", "js"]);
 const AGENT_CODE_LANGUAGES = new Set(["python", "py"]);
+
+const UI_DESCRIPTION_FALLBACK =
+  "The customer-facing UI for this mission - the single entry point every screen calls into, which in turn calls only the Orchestrator Agent below.";
 
 /** Labels each fenced code block using the build-generation-v1 contract's
  * `# agent: <name>` / `// agent: ui` first-line comment when present - "ui"
@@ -48,24 +56,64 @@ function labelForCodeBlock(language: string, agentLabel: string | null): { icon:
   return { icon: "📄", title: `Generated Code (${language})` };
 }
 
+function normalizeAgentName(name: string): string {
+  return name.trim().toLowerCase().replace(/\*\*/g, "");
+}
+
 function buildArtifacts(outputText: string): Artifact[] {
   const artifacts: Artifact[] = [];
   const codeBlocks = extractCodeBlocks(outputText);
+  const remainder = stripCodeBlocks(outputText);
+  const narrativeSections = splitIntoNamedSections(remainder);
+  const usedSectionIndices = new Set<number>();
+
+  const findAgentSection = (agentLabel: string): { index: number; body: string } | null => {
+    const normalizedLabel = normalizeAgentName(agentLabel);
+    const isOrchestrator = normalizedLabel === "orchestrator";
+    for (let index = 0; index < narrativeSections.length; index += 1) {
+      if (usedSectionIndices.has(index)) continue;
+      const normalizedTitle = normalizeAgentName(narrativeSections[index].title);
+      const matches = isOrchestrator
+        ? normalizedTitle.includes("orchestrator")
+        : normalizedTitle === normalizedLabel ||
+          normalizedTitle.includes(normalizedLabel) ||
+          normalizedLabel.includes(normalizedTitle);
+      if (matches) {
+        return { index, body: narrativeSections[index].body };
+      }
+    }
+    return null;
+  };
+
   codeBlocks.forEach((block, index) => {
-    const { icon, title } = labelForCodeBlock(block.language, extractAgentLabel(block.code));
+    const agentLabel = extractAgentLabel(block.code);
+    const { icon, title } = labelForCodeBlock(block.language, agentLabel);
+    let description: string | undefined;
+    if (agentLabel) {
+      if (agentLabel.toLowerCase() === "ui") {
+        description = UI_DESCRIPTION_FALLBACK;
+      } else {
+        const found = findAgentSection(agentLabel);
+        if (found) {
+          usedSectionIndices.add(found.index);
+          description = found.body || undefined;
+        }
+      }
+    }
     artifacts.push({
       key: `code-${index}`,
       icon,
       title,
       kind: "code",
       content: block.code,
+      description,
     });
   });
 
-  const remainder = stripCodeBlocks(outputText);
-  const sections = splitIntoNamedSections(remainder);
-  if (sections.length > 0) {
-    sections.forEach((section, index) => {
+  if (narrativeSections.length > 0) {
+    narrativeSections.forEach((section, index) => {
+      if (usedSectionIndices.has(index)) return;
+      if (section.body.trim().length === 0) return;
       artifacts.push({
         key: `agent-${index}`,
         icon: "🤖",
@@ -89,18 +137,40 @@ function buildArtifacts(outputText: string): Artifact[] {
 
 /**
  * Turns the Build Agent's single free-text output into distinct artifact
- * cards (generated UI code, multi-agent workflow design sections) revealed
+ * cards (generated UI code, one card per specialist/orchestrator agent
+ * code block - each with its own agent's description shown inline above
+ * the code - plus any leftover multi-agent workflow narrative) revealed
  * one at a time on a short stagger - instead of dumping one giant text
  * blob, this reads as "watch the agent's artifacts appear" per the user's
  * request. The underlying generation already completed by the time this
  * data arrives (there is no live token stream from the backend), so the
  * stagger is a presentational reveal of real, already-produced content -
  * never fabricated or simulated text.
+ *
+ * When `onRegenerateArtifact` is supplied, every code artifact also gets
+ * an Edit control (inline textarea, kept only in local state/Copy output)
+ * and a Regenerate control (submits a free-text instruction back to the
+ * Build Agent for just that artifact; the parent is responsible for
+ * refetching the workflow run afterwards, which will naturally replace
+ * `outputText` with the freshly regenerated content).
  */
-export function GeneratedArtifacts({ outputText }: { outputText: string }): JSX.Element {
+export function GeneratedArtifacts({
+  outputText,
+  onRegenerateArtifact,
+}: {
+  outputText: string;
+  onRegenerateArtifact?: (artifactTitle: string, instruction: string) => Promise<void>;
+}): JSX.Element {
   const artifacts = useMemo(() => buildArtifacts(outputText), [outputText]);
   const [revealCount, setRevealCount] = useState(0);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  const [editingKey, setEditingKey] = useState<string | null>(null);
+  const [editDraft, setEditDraft] = useState("");
+  const [contentOverrides, setContentOverrides] = useState<Record<string, string>>({});
+  const [regeneratingKey, setRegeneratingKey] = useState<string | null>(null);
+  const [instructionDraft, setInstructionDraft] = useState("");
+  const [regenerateBusyKey, setRegenerateBusyKey] = useState<string | null>(null);
+  const [regenerateErrorKey, setRegenerateErrorKey] = useState<string | null>(null);
 
   useEffect(() => {
     setRevealCount(0);
@@ -110,6 +180,15 @@ export function GeneratedArtifacts({ outputText }: { outputText: string }): JSX.
     );
     return () => timers.forEach((id) => window.clearTimeout(id));
   }, [artifacts]);
+
+  useEffect(() => {
+    // Fresh generated output (e.g. after a regenerate completes) supersedes
+    // any local edit drafts/overrides and open edit/regenerate panels.
+    setContentOverrides({});
+    setEditingKey(null);
+    setRegeneratingKey(null);
+    setRegenerateErrorKey(null);
+  }, [outputText]);
 
   if (artifacts.length === 0) {
     return (
@@ -121,59 +200,181 @@ export function GeneratedArtifacts({ outputText }: { outputText: string }): JSX.
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      {artifacts.slice(0, revealCount).map((artifact) => (
-        <div
-          key={artifact.key}
-          className="genie-fade-in"
-          style={{
-            border: "1px solid #232a33",
-            borderRadius: 8,
-            padding: "10px 12px",
-            backgroundColor: "#161c24",
-          }}
-        >
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
-            <Text weight="semibold" size={300}>
-              {artifact.icon} {artifact.title}
-            </Text>
+      {artifacts.slice(0, revealCount).map((artifact) => {
+        const isEditing = editingKey === artifact.key;
+        const isRegenerating = regeneratingKey === artifact.key;
+        const isBusy = regenerateBusyKey === artifact.key;
+        const displayContent = contentOverrides[artifact.key] ?? artifact.content;
+
+        return (
+          <div
+            key={artifact.key}
+            className="genie-fade-in"
+            style={{
+              border: "1px solid #232a33",
+              borderRadius: 8,
+              padding: "10px 12px",
+              backgroundColor: "#161c24",
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+              <Text weight="semibold" size={300}>
+                {artifact.icon} {artifact.title}
+              </Text>
+              {artifact.kind === "code" ? (
+                <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                  {isEditing ? (
+                    <>
+                      <Button
+                        size="small"
+                        appearance="primary"
+                        onClick={() => {
+                          setContentOverrides((prev) => ({ ...prev, [artifact.key]: editDraft }));
+                          setEditingKey(null);
+                        }}
+                      >
+                        Save
+                      </Button>
+                      <Button size="small" appearance="subtle" onClick={() => setEditingKey(null)}>
+                        Cancel
+                      </Button>
+                    </>
+                  ) : (
+                    <Button
+                      size="small"
+                      appearance="subtle"
+                      onClick={() => {
+                        setEditDraft(displayContent);
+                        setEditingKey(artifact.key);
+                        setRegeneratingKey(null);
+                      }}
+                    >
+                      Edit
+                    </Button>
+                  )}
+                  {onRegenerateArtifact ? (
+                    <Button
+                      size="small"
+                      appearance="subtle"
+                      disabled={isBusy}
+                      onClick={() => {
+                        if (isRegenerating) {
+                          setRegeneratingKey(null);
+                        } else {
+                          setInstructionDraft("");
+                          setRegenerateErrorKey(null);
+                          setRegeneratingKey(artifact.key);
+                          setEditingKey(null);
+                        }
+                      }}
+                    >
+                      Regenerate
+                    </Button>
+                  ) : null}
+                  <Button
+                    size="small"
+                    appearance="subtle"
+                    onClick={() => {
+                      void navigator.clipboard.writeText(displayContent);
+                      setCopiedKey(artifact.key);
+                      window.setTimeout(
+                        () => setCopiedKey((prev) => (prev === artifact.key ? null : prev)),
+                        1500,
+                      );
+                    }}
+                  >
+                    {copiedKey === artifact.key ? "Copied!" : "Copy"}
+                  </Button>
+                </div>
+              ) : null}
+            </div>
+
+            {artifact.kind === "code" && artifact.description ? (
+              <Text size={200} style={{ display: "block", marginTop: 6, marginBottom: 8, opacity: 0.75 }}>
+                {artifact.description}
+              </Text>
+            ) : null}
+
             {artifact.kind === "code" ? (
-              <Button
-                size="small"
-                appearance="subtle"
-                onClick={() => {
-                  void navigator.clipboard.writeText(artifact.content);
-                  setCopiedKey(artifact.key);
-                  window.setTimeout(
-                    () => setCopiedKey((prev) => (prev === artifact.key ? null : prev)),
-                    1500,
-                  );
-                }}
-              >
-                {copiedKey === artifact.key ? "Copied!" : "Copy"}
-              </Button>
+              isEditing ? (
+                <Textarea
+                  value={editDraft}
+                  onChange={(_, data) => setEditDraft(data.value)}
+                  style={{ width: "100%", marginTop: 8 }}
+                  textarea={{ style: { fontFamily: "monospace", fontSize: 11, minHeight: 220 } }}
+                />
+              ) : (
+                <pre
+                  style={{
+                    fontSize: 11,
+                    whiteSpace: "pre-wrap",
+                    marginTop: 8,
+                    maxHeight: 260,
+                    overflowY: "auto",
+                    fontFamily: "monospace",
+                    opacity: 0.9,
+                  }}
+                >
+                  {displayContent}
+                </pre>
+              )
+            ) : (
+              <Text size={300} style={{ whiteSpace: "pre-wrap", display: "block", marginTop: 6, opacity: 0.85 }}>
+                {artifact.content || "(no additional detail provided)"}
+              </Text>
+            )}
+
+            {artifact.kind === "code" && isRegenerating ? (
+              <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 6 }}>
+                <Textarea
+                  value={instructionDraft}
+                  onChange={(_, data) => setInstructionDraft(data.value)}
+                  placeholder={`Describe how to change the ${artifact.title}...`}
+                  style={{ width: "100%" }}
+                />
+                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <Button
+                    size="small"
+                    appearance="primary"
+                    disabled={!instructionDraft.trim() || isBusy}
+                    onClick={() => {
+                      if (!onRegenerateArtifact) return;
+                      const instruction = instructionDraft.trim();
+                      setRegenerateBusyKey(artifact.key);
+                      setRegenerateErrorKey(null);
+                      void onRegenerateArtifact(artifact.title, instruction)
+                        .then(() => {
+                          setRegeneratingKey(null);
+                        })
+                        .catch(() => {
+                          setRegenerateErrorKey(artifact.key);
+                        })
+                        .finally(() => {
+                          setRegenerateBusyKey((prev) => (prev === artifact.key ? null : prev));
+                        });
+                    }}
+                  >
+                    {isBusy ? "Regenerating..." : "Submit"}
+                  </Button>
+                  <Button
+                    size="small"
+                    appearance="subtle"
+                    disabled={isBusy}
+                    onClick={() => setRegeneratingKey(null)}
+                  >
+                    Cancel
+                  </Button>
+                </div>
+                {regenerateErrorKey === artifact.key ? (
+                  <Text size={200} style={{ color: "#e5484d" }}>
+                    Regeneration failed. Please try again.
+                  </Text>
+                ) : null}
+              </div>
             ) : null}
           </div>
-          {artifact.kind === "code" ? (
-            <pre
-              style={{
-                fontSize: 11,
-                whiteSpace: "pre-wrap",
-                marginTop: 8,
-                maxHeight: 260,
-                overflowY: "auto",
-                fontFamily: "monospace",
-                opacity: 0.9,
-              }}
-            >
-              {artifact.content}
-            </pre>
-          ) : (
-            <Text size={300} style={{ whiteSpace: "pre-wrap", display: "block", marginTop: 6, opacity: 0.85 }}>
-              {artifact.content || "(no additional detail provided)"}
-            </Text>
-          )}
-        </div>
-      ))}
+        );
+      })}
       {revealCount < artifacts.length ? (
         <div style={{ display: "flex", alignItems: "center", gap: 8, opacity: 0.6 }}>
           <span className="genie-live-dot" aria-label="Generating" />
@@ -183,3 +384,4 @@ export function GeneratedArtifacts({ outputText }: { outputText: string }): JSX.
     </div>
   );
 }
+

@@ -216,18 +216,22 @@ prompts:
     name: Build Generation
     description: >-
       Generates an extensive, multi-screen customer-facing React UI, one
-      independent Python 3.12/Azure AI Agent SDK module per specialist
-      agent, and a separate Orchestrator Agent module with the real
+      independent Python 3.12 module per specialist agent built on the
+      Microsoft Agent Framework's Azure AI Foundry integration, and a
+      separate Orchestrator Agent module with the real
       delegation/orchestration logic - each a real, individually
-      deployable piece rather than a single combined blob - for the
-      approved requirement and its recommended architecture.
+      deployable piece rather than a single combined blob, with detailed
+      inline comments throughout - for the approved requirement and its
+      recommended architecture.
     template: >-
       You are the Build Agent for the Genie Agentic Experience Center.
       Given the following approved requirements and recommended
       architecture, produce this mission's own customer-facing solution
       end to end (not for Genie itself) as real, individually deployable
       code - never a single monolithic blob combining multiple agents
-      together.
+      together. Every code block you return, in every language, must
+      include detailed comments explaining what each significant
+      section/function does - never leave non-trivial logic unexplained.
 
       The recommended architecture below has a "## Multi-Agent Workflow"
       section that names every specialist agent this mission needs and
@@ -254,27 +258,35 @@ prompts:
 
       (2) One agent code block per specialist agent listed in
       "## Multi-Agent Workflow" below (every agent except the Orchestrator
-      Agent) - each its own independent Python 3.12 module built on the
-      Azure AI Agent SDK (azure-ai-projects), strongly typed, async, with
-      dependencies injected rather than hardcoded, implementing only that
-      one agent's own responsibility as described in the architecture.
-      Never combine two agents into one block, and do not invent
-      undocumented SDK APIs. Return each as its own fenced ```python code
-      block whose first line is the comment `# agent: <the exact agent
-      name from the architecture>`.
+      Agent) - each its own independent Python 3.12 module, strongly
+      typed, async, with dependencies injected rather than hardcoded,
+      implementing only that one agent's own responsibility as described
+      in the architecture. Because this agent will actually run hosted in
+      Azure AI Foundry, build it on the Microsoft Agent Framework
+      (`agent_framework` package) exactly the same way this platform's own
+      agents do: construct an `agent_framework.foundry.FoundryAgent`
+      against the mission's own Azure AI Foundry project client, referencing
+      that agent's own already-provisioned Foundry agent name/version (read
+      from configuration, never hardcoded), and call `.run(...)` on it -
+      never invent a different SDK or a lower-level manual thread/run
+      polling loop. Never combine two agents into one block, and do not
+      invent undocumented SDK APIs. Return each as its own fenced
+      ```python code block whose first line is the comment `# agent: <the
+      exact agent name from the architecture>`.
 
       (3) Exactly one more agent code block for the Orchestrator Agent
-      itself, also Python 3.12 on the Azure AI Agent SDK, containing the
-      real orchestration logic: one delegation tool per specialist agent
+      itself, also Python 3.12 on the Microsoft Agent Framework
+      (`agent_framework`), containing the real orchestration logic: one
+      `agent_framework.FunctionTool` delegation tool per specialist agent
       from (2) (the same call_<agent> tool pattern Genie's own
       genie-orchestrator uses), so it is this mission's single entry
-      point that sequences and hands off to every specialist agent.
-      Include a short comment near the top noting that once deployed to
-      Azure AI Foundry, this Orchestrator Agent is reachable only through
-      this mission's own backend service (the same one the UI calls) -
-      never directly from the browser. Return this as its own fenced
-      ```python code block whose first line is the comment `# agent:
-      orchestrator`.
+      point that sequences and hands off to every specialist agent by
+      invoking its own `FoundryAgent`. Include a short comment near the
+      top noting that once deployed to Azure AI Foundry, this Orchestrator
+      Agent is reachable only through this mission's own backend service
+      (the same one the UI calls) - never directly from the browser.
+      Return this as its own fenced ```python code block whose first line
+      is the comment `# agent: orchestrator`.
 
       Security rules you MUST follow in every code block above: never
       hardcode any URL, hostname, port, API key, token, secret, or
@@ -299,7 +311,7 @@ prompts:
       - requirements
       - architecture
       - user_message
-    version: "3.0.0"
+    version: "4.0.0"
 
   - id: deployment-v1
     name: Deployment
