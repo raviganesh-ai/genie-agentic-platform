@@ -12,6 +12,11 @@ interface Artifact {
   icon: string;
   title: string;
   kind: "code" | "narrative";
+  /** Drives the accent color/heading of each artifact's own bounded
+   * section, so the UI block, every specialist agent's block, the
+   * Orchestrator Agent block, and any leftover narrative are always
+   * visually distinct rather than blending together. */
+  variant: "ui" | "orchestrator" | "agent" | "narrative";
   content: string;
   /** For `kind === "code"` artifacts only: the matching agent's own
    * description, lifted from the trailing "## Multi-Agent Workflow"
@@ -22,6 +27,18 @@ interface Artifact {
 
 const UI_CODE_LANGUAGES = new Set(["tsx", "jsx", "typescript", "javascript", "ts", "js"]);
 const AGENT_CODE_LANGUAGES = new Set(["python", "py"]);
+
+/** Accent color per artifact variant - shown as a left border stripe and a
+ * tinted header background so each of this mission's own generated
+ * components (UI, each specialist agent, the Orchestrator Agent) reads as
+ * its own clearly bounded, colour-coded section instead of one
+ * undifferentiated list. */
+const VARIANT_ACCENTS: Record<Artifact["variant"], string> = {
+  ui: "#2f83e0",
+  orchestrator: "#c9a227",
+  agent: "#3fa66a",
+  narrative: "#6b7686",
+};
 
 const UI_DESCRIPTION_FALLBACK =
   "The customer-facing UI for this mission - the single entry point every screen calls into, which in turn calls only the Orchestrator Agent below.";
@@ -35,25 +52,36 @@ const UI_DESCRIPTION_FALLBACK =
  * being lumped under one generic label. Falls back to a language-only
  * label (older/unlabeled responses) rather than guessing when no `agent:`
  * comment is present. */
-function labelForCodeBlock(language: string, agentLabel: string | null): { icon: string; title: string } {
+function labelForCodeBlock(
+  language: string,
+  agentLabel: string | null,
+): { icon: string; title: string; variant: Artifact["variant"] } {
   if (agentLabel) {
     const normalized = agentLabel.toLowerCase();
     if (normalized === "ui") {
-      return { icon: "🖥️", title: `Generated UI Code (${language})` };
+      return { icon: "🖥️", title: `Generated UI Code (${language})`, variant: "ui" };
     }
     if (normalized === "orchestrator") {
-      return { icon: "🧭", title: `Generated Orchestrator Agent Code (${language})` };
+      return {
+        icon: "🧭",
+        title: `Generated Orchestrator Agent Code (${language})`,
+        variant: "orchestrator",
+      };
     }
-    return { icon: "🤖", title: `Generated Agent Code - ${agentLabel} (${language})` };
+    return {
+      icon: "🤖",
+      title: `Generated Agent Code - ${agentLabel} (${language})`,
+      variant: "agent",
+    };
   }
   const normalized = language.toLowerCase();
   if (UI_CODE_LANGUAGES.has(normalized)) {
-    return { icon: "🖥️", title: `Generated UI Code (${language})` };
+    return { icon: "🖥️", title: `Generated UI Code (${language})`, variant: "ui" };
   }
   if (AGENT_CODE_LANGUAGES.has(normalized)) {
-    return { icon: "🤖", title: `Generated Agent Code (${language})` };
+    return { icon: "🤖", title: `Generated Agent Code (${language})`, variant: "agent" };
   }
-  return { icon: "📄", title: `Generated Code (${language})` };
+  return { icon: "📄", title: `Generated Code (${language})`, variant: "agent" };
 }
 
 function normalizeAgentName(name: string): string {
@@ -87,7 +115,7 @@ function buildArtifacts(outputText: string): Artifact[] {
 
   codeBlocks.forEach((block, index) => {
     const agentLabel = extractAgentLabel(block.code);
-    const { icon, title } = labelForCodeBlock(block.language, agentLabel);
+    const { icon, title, variant } = labelForCodeBlock(block.language, agentLabel);
     let description: string | undefined;
     if (agentLabel) {
       if (agentLabel.toLowerCase() === "ui") {
@@ -105,6 +133,7 @@ function buildArtifacts(outputText: string): Artifact[] {
       icon,
       title,
       kind: "code",
+      variant,
       content: block.code,
       description,
     });
@@ -119,6 +148,7 @@ function buildArtifacts(outputText: string): Artifact[] {
         icon: "🤖",
         title: section.title,
         kind: "narrative",
+        variant: "narrative",
         content: section.body,
       });
     });
@@ -128,6 +158,7 @@ function buildArtifacts(outputText: string): Artifact[] {
       icon: "🤖",
       title: "Multi-Agent Workflow Design",
       kind: "narrative",
+      variant: "narrative",
       content: remainder,
     });
   }
@@ -162,6 +193,21 @@ export function GeneratedArtifacts({
   onRegenerateArtifact?: (artifactTitle: string, instruction: string) => Promise<void>;
 }): JSX.Element {
   const artifacts = useMemo(() => buildArtifacts(outputText), [outputText]);
+  const codeOrdinals = useMemo(() => {
+    const ordinals: Record<string, number> = {};
+    let counter = 0;
+    artifacts.forEach((artifact) => {
+      if (artifact.kind === "code") {
+        counter += 1;
+        ordinals[artifact.key] = counter;
+      }
+    });
+    return ordinals;
+  }, [artifacts]);
+  const totalCodeArtifacts = useMemo(
+    () => artifacts.filter((artifact) => artifact.kind === "code").length,
+    [artifacts],
+  );
   const [revealCount, setRevealCount] = useState(0);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [editingKey, setEditingKey] = useState<string | null>(null);
@@ -199,28 +245,52 @@ export function GeneratedArtifacts({
   }
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
       {artifacts.slice(0, revealCount).map((artifact) => {
         const isEditing = editingKey === artifact.key;
         const isRegenerating = regeneratingKey === artifact.key;
         const isBusy = regenerateBusyKey === artifact.key;
         const displayContent = contentOverrides[artifact.key] ?? artifact.content;
+        const accent = VARIANT_ACCENTS[artifact.variant];
+        const ordinal = codeOrdinals[artifact.key];
 
         return (
           <div
             key={artifact.key}
             className="genie-fade-in"
             style={{
-              border: "1px solid #232a33",
-              borderRadius: 8,
-              padding: "10px 12px",
-              backgroundColor: "#161c24",
+              border: `1px solid ${accent}55`,
+              borderLeft: `4px solid ${accent}`,
+              borderRadius: 10,
+              backgroundColor: "#10151c",
+              boxShadow: "0 1px 4px rgba(0, 0, 0, 0.35)",
+              overflow: "hidden",
             }}
           >
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
-              <Text weight="semibold" size={300}>
-                {artifact.icon} {artifact.title}
-              </Text>
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                gap: 8,
+                padding: "10px 14px",
+                backgroundColor: `${accent}1a`,
+                borderBottom: `1px solid ${accent}40`,
+              }}
+            >
+              <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                {artifact.kind === "code" ? (
+                  <Text
+                    size={100}
+                    style={{ textTransform: "uppercase", letterSpacing: 0.6, opacity: 0.65 }}
+                  >
+                    Component {ordinal} of {totalCodeArtifacts}
+                  </Text>
+                ) : null}
+                <Text weight="semibold" size={300}>
+                  {artifact.icon} {artifact.title}
+                </Text>
+              </div>
               {artifact.kind === "code" ? (
                 <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
                   {isEditing ? (
@@ -289,54 +359,59 @@ export function GeneratedArtifacts({
               ) : null}
             </div>
 
-            {artifact.kind === "code" && artifact.description ? (
-              <Text size={200} style={{ display: "block", marginTop: 6, marginBottom: 8, opacity: 0.75 }}>
-                {artifact.description}
-              </Text>
-            ) : null}
+            <div style={{ padding: "10px 14px" }}>
+              {artifact.kind === "code" && artifact.description ? (
+                <Text size={200} style={{ display: "block", marginBottom: 8, opacity: 0.75 }}>
+                  {artifact.description}
+                </Text>
+              ) : null}
 
-            {artifact.kind === "code" ? (
-              isEditing ? (
-                <Textarea
-                  value={editDraft}
-                  onChange={(_, data) => setEditDraft(data.value)}
-                  style={{ width: "100%", marginTop: 8 }}
-                  textarea={{ style: { fontFamily: "monospace", fontSize: 11, minHeight: 220 } }}
-                />
+              {artifact.kind === "code" ? (
+                isEditing ? (
+                  <Textarea
+                    value={editDraft}
+                    onChange={(_, data) => setEditDraft(data.value)}
+                    style={{ width: "100%" }}
+                    textarea={{ style: { fontFamily: "monospace", fontSize: 11, minHeight: 220 } }}
+                  />
+                ) : (
+                  <pre
+                    style={{
+                      fontSize: 11,
+                      whiteSpace: "pre-wrap",
+                      maxHeight: 260,
+                      overflowY: "auto",
+                      fontFamily: "monospace",
+                      opacity: 0.9,
+                      backgroundColor: "#0b0f14",
+                      border: "1px solid #232a33",
+                      borderRadius: 6,
+                      padding: "8px 10px",
+                      margin: 0,
+                    }}
+                  >
+                    {displayContent}
+                  </pre>
+                )
               ) : (
-                <pre
-                  style={{
-                    fontSize: 11,
-                    whiteSpace: "pre-wrap",
-                    marginTop: 8,
-                    maxHeight: 260,
-                    overflowY: "auto",
-                    fontFamily: "monospace",
-                    opacity: 0.9,
-                  }}
-                >
-                  {displayContent}
-                </pre>
-              )
-            ) : (
-              <Text size={300} style={{ whiteSpace: "pre-wrap", display: "block", marginTop: 6, opacity: 0.85 }}>
-                {artifact.content || "(no additional detail provided)"}
-              </Text>
-            )}
+                <Text size={300} style={{ whiteSpace: "pre-wrap", display: "block", opacity: 0.85 }}>
+                  {artifact.content || "(no additional detail provided)"}
+                </Text>
+              )}
 
-            {artifact.kind === "code" && isRegenerating ? (
-              <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 6 }}>
-                <Textarea
-                  value={instructionDraft}
-                  onChange={(_, data) => setInstructionDraft(data.value)}
-                  placeholder={`Describe how to change the ${artifact.title}...`}
-                  style={{ width: "100%" }}
-                />
-                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                  <Button
-                    size="small"
-                    appearance="primary"
-                    disabled={!instructionDraft.trim() || isBusy}
+              {artifact.kind === "code" && isRegenerating ? (
+                <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 6 }}>
+                  <Textarea
+                    value={instructionDraft}
+                    onChange={(_, data) => setInstructionDraft(data.value)}
+                    placeholder={`Describe how to change the ${artifact.title}...`}
+                    style={{ width: "100%" }}
+                  />
+                  <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                    <Button
+                      size="small"
+                      appearance="primary"
+                      disabled={!instructionDraft.trim() || isBusy}
                     onClick={() => {
                       if (!onRegenerateArtifact) return;
                       const instruction = instructionDraft.trim();
@@ -372,6 +447,7 @@ export function GeneratedArtifacts({
                 ) : null}
               </div>
             ) : null}
+            </div>
           </div>
         );
       })}
