@@ -347,35 +347,6 @@ a,
   background-color: #182534 !important;
 }
 
-@keyframes genie-flow-hub-pulse {
-  0%,
-  100% {
-    box-shadow:
-      0 0 0 0 rgba(47, 131, 224, 0.5),
-      0 0 18px 2px rgba(47, 131, 224, 0.4);
-  }
-  50% {
-    box-shadow:
-      0 0 0 10px rgba(47, 131, 224, 0),
-      0 0 28px 8px rgba(47, 131, 224, 0.7);
-  }
-}
-
-.genie-flow-hub {
-  animation: genie-flow-hub-pulse 2.4s ease-in-out infinite;
-}
-
-.genie-flow-hub.genie-flow-node-active,
-.genie-flow-hub:hover {
-  animation-play-state: paused;
-}
-
-.genie-flow-detail-panel {
-  transition:
-    opacity 200ms ease,
-    transform 200ms ease;
-}
-
 /* Architecture Studio's requirement-derived "UI Design" / "Multi-Agent
    Workflow" sections - the two most important, mission-specific outputs
    on that page - get a slow, subtle glow border so they visually stand
@@ -421,5 +392,23 @@ a,
    of all popping in at once. */
 .genie-stagger-in {
   animation: genie-fade-in 420ms ease both;
+}
+
+/* Architecture Studio's "UI Design" screen gallery (UiScreenShowcase) -
+   each screen mockup card lifts slightly on hover/focus so the journey
+   reads as a set of distinct, tappable screens rather than flat, static
+   boxes. */
+.genie-ui-screen-card {
+  transition:
+    transform 200ms ease,
+    box-shadow 200ms ease,
+    border-color 200ms ease;
+}
+
+.genie-ui-screen-card:hover,
+.genie-ui-screen-card:focus-visible {
+  transform: translateY(-4px);
+  border-color: rgba(47, 131, 224, 0.5) !important;
+  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.4);
 }
 

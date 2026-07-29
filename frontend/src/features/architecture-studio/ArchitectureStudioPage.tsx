@@ -27,7 +27,7 @@ import { LiveWorkflowPulse } from "@/components/LiveWorkflowPulse";
 import { AgentActivityAnimation } from "@/components/AgentActivityAnimation";
 import { useWorkflowEventStream } from "@/hooks/useWorkflowEventStream";
 import { ArchitectureComponentDiagram } from "./ArchitectureComponentDiagram";
-import { InteractiveFlowDiagram } from "./InteractiveFlowDiagram";
+import { UiScreenShowcase } from "./UiScreenShowcase";
 import { splitTopLevelSections, splitIntoNamedSections, parseUiScreenFlows } from "@/utils/textArtifacts";
 import { ApiError } from "@/services/httpClient";
 import type { SafeError } from "@/types/common";
@@ -316,7 +316,29 @@ export function ArchitectureStudioPage(): JSX.Element {
               const isMultiAgentWorkflow = MULTI_AGENT_WORKFLOW_TITLE.test(section.title);
               const agentItems = isMultiAgentWorkflow ? splitIntoNamedSections(section.body) : [];
               const isUiDesign = UI_DESIGN_TITLE.test(section.title);
-              const uiScreenFlows = isUiDesign ? parseUiScreenFlows(section.body) : [];
+              // The architecture-recommendation-v1 contract requires every
+              // UI Design bullet to also name the Orchestrator Agent (so the
+              // UI is only ever shown calling that one agent) - but this
+              // section should read as "what the UI looks like", not an
+              // agent diagram, so only the screen name/description are kept
+              // and the Orchestrator Agent name is deliberately dropped here
+              // (it already has its own card in "## Multi-Agent Workflow"
+              // below). Falls back to splitting plain named bullets when the
+              // body doesn't use the "-->" contract (e.g. older/simpler
+              // responses), so this section never falls back to the generic
+              // agent-flow diagram.
+              const uiScreens = isUiDesign
+                ? (() => {
+                    const flows = parseUiScreenFlows(section.body);
+                    if (flows.length > 0) {
+                      return flows.map((flow) => ({ title: flow.screen, description: flow.description }));
+                    }
+                    return splitIntoNamedSections(section.body).map((item) => ({
+                      title: item.title,
+                      description: item.body,
+                    }));
+                  })()
+                : [];
               return (
                 <SectionCard
                   key={section.title}
@@ -335,22 +357,8 @@ export function ArchitectureStudioPage(): JSX.Element {
                       {section.summary}
                     </Text>
                   ) : null}
-                  {isUiDesign && uiScreenFlows.length > 0 ? (
-                    <InteractiveFlowDiagram
-                      hub={{
-                        id: "ui-orchestrator",
-                        title: uiScreenFlows[0].orchestrator,
-                        icon: "🤖",
-                        description:
-                          "The single entry point for this mission's UI - every screen calls only this agent, which coordinates every specialist agent internally.",
-                      }}
-                      nodes={uiScreenFlows.map((flow, index) => ({
-                        id: `screen-${index}`,
-                        title: flow.screen,
-                        icon: "🖥️",
-                        description: flow.description,
-                      }))}
-                    />
+                  {isUiDesign && uiScreens.length > 0 ? (
+                    <UiScreenShowcase screens={uiScreens} />
                   ) : (
                     <ArchitectureComponentDiagram content={section.body} animated={highlighted} />
                   )}
