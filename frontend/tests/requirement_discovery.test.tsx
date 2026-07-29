@@ -112,8 +112,11 @@ describe("RequirementDiscoveryPage", () => {
       workflowRunId: FIXTURE_WORKFLOW_RUN_ID,
     });
 
-    const textbox = await screen.findByDisplayValue(/Support SSO login/i);
     const user = userEvent.setup();
+    const editButton = await screen.findByRole("button", { name: /Edit Requirements/i });
+    await user.click(editButton);
+
+    const textbox = await screen.findByDisplayValue(/Support SSO login/i);
     await user.type(textbox, "\n3. Add audit logging");
 
     const approveButton = await screen.findByRole("button", { name: /^Approve$/i });

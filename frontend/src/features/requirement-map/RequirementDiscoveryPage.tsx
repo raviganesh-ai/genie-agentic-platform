@@ -168,14 +168,6 @@ function serializeGroupedRequirements(parsed: ParsedRequirements): string {
   return lines.join("\n").trim();
 }
 
-const CLASSIFICATION_META: Record<string, { icon: string; accent: string }> = {
-  requirement: { icon: "📋", accent: "#2f83e0" },
-  goal: { icon: "🎯", accent: "#3fa66a" },
-  constraint: { icon: "🚧", accent: "#d99a2b" },
-  risk: { icon: "⚠️", accent: "#d1495b" },
-  assumption: { icon: "🧩", accent: "#8a63d2" },
-};
-
 const APPROVAL_STATUS_META: Record<string, { icon: string; accent: string }> = {
   approved: { icon: "✅", accent: "#3fa66a" },
   pending: { icon: "⏳", accent: "#d99a2b" },
@@ -200,6 +192,10 @@ export function RequirementDiscoveryPage(): JSX.Element {
   const [showRawText, setShowRawText] = useState(false);
   const [resumeError, setResumeError] = useState<string | null>(null);
   const [resumingRequestId, setResumingRequestId] = useState<string | null>(null);
+  // Defaults to a clean, read-only list so reviewing requirements doesn't
+  // look like a wall of form fields - the always-editable boxes/Textareas
+  // below are only shown once the user opts into "Edit Requirements".
+  const [editMode, setEditMode] = useState(false);
 
   // The analyst's discovered requirements are free text (the workflow run's
   // analyze-requirements step output), separate from the (currently
@@ -244,16 +240,15 @@ export function RequirementDiscoveryPage(): JSX.Element {
     [effectiveRequirements],
   );
 
-  // Live breakdown of discovered items by classification, driving the hero
-  // banner's stat pills below - purely derived from real Shared Memory
-  // records, never a hardcoded/synthetic count.
-  const classificationCounts = useMemo(() => {
+  // Live per-category counts driving the hero banner's stat pills below -
+  // derived from the same parsed/edited groups rendered on this page
+  // (Shared Memory's classification records are never populated for this
+  // step, so counting those always showed a dimmed row of zeros).
+  const groupCounts = useMemo(() => {
     const counts: Record<string, number> = {};
-    for (const { record } of data?.items ?? []) {
-      counts[record.classification] = (counts[record.classification] ?? 0) + 1;
-    }
+    for (const group of effectiveRequirements.groups) counts[group.key] = group.items.length;
     return counts;
-  }, [data]);
+  }, [effectiveRequirements]);
 
   const withOverrides = useCallback(
     (prev: ParsedRequirements | null): ParsedRequirements =>
@@ -359,6 +354,15 @@ export function RequirementDiscoveryPage(): JSX.Element {
     error: approvalsError,
     refresh: refreshApprovals,
   } = useAsyncResource(approvalsFetcher, [sessionId], { enabled: Boolean(sessionId) });
+
+  // Drives whether the Pending Approvals card below docks to the bottom of
+  // the viewport - only worth pinning when there's actually a decision
+  // waiting on the user, otherwise it should scroll normally like every
+  // other section.
+  const hasPendingApproval = useMemo(
+    () => (approvals ?? []).some((request) => request.status === "pending"),
+    [approvals],
+  );
 
   // Approving an ApprovalRequest only records the decision - it never
   // resumes the gated workflow run on its own (backend/app/api/
@@ -529,35 +533,57 @@ export function RequirementDiscoveryPage(): JSX.Element {
             </Text>
           </div>
           <Text size={300} style={{ opacity: 0.75, display: "block", marginTop: 6, maxWidth: 520 }}>
-            Goals, requirements, constraints, risks, and assumptions surfaced from Shared
-            Collaboration Memory - reviewed and refined here before the architecture gate opens.
+            Goals, requirements, constraints, risks, and assumptions extracted by the Requirements
+            Analyst agent - reviewed and refined here before the architecture gate opens.
           </Text>
         </div>
 
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          {Object.entries(CLASSIFICATION_META).map(([key, meta]) => {
-            const count = classificationCounts[key] ?? 0;
+          {effectiveRequirements.criticalPath.length > 0 ? (
+            <div
+              title="Critical Path"
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                padding: "6px 12px",
+                borderRadius: 999,
+                border: "1px solid #d99a2b55",
+                backgroundColor: "#d99a2b1a",
+              }}
+            >
+              <span style={{ fontSize: 15 }}>🎯</span>
+              <Text size={200} weight="semibold" style={{ color: "#d99a2b" }}>
+                {effectiveRequirements.criticalPath.length}
+              </Text>
+              <Text size={100} style={{ opacity: 0.7 }}>
+                Critical Path
+              </Text>
+            </div>
+          ) : null}
+          {CATEGORY_DEFS.map((def) => {
+            const count = groupCounts[def.key] ?? 0;
             return (
               <div
-                key={key}
-                title={key.replace(/_/g, " ")}
+                key={def.key}
+                title={def.label}
                 style={{
                   display: "flex",
                   alignItems: "center",
                   gap: 6,
                   padding: "6px 12px",
                   borderRadius: 999,
-                  border: `1px solid ${meta.accent}55`,
-                  backgroundColor: `${meta.accent}1a`,
+                  border: `1px solid ${def.accent}55`,
+                  backgroundColor: `${def.accent}1a`,
                   opacity: count > 0 ? 1 : 0.45,
                 }}
               >
-                <span style={{ fontSize: 15 }}>{meta.icon}</span>
-                <Text size={200} weight="semibold" style={{ color: meta.accent }}>
+                <span style={{ fontSize: 15 }}>{def.icon}</span>
+                <Text size={200} weight="semibold" style={{ color: def.accent }}>
                   {count}
                 </Text>
-                <Text size={100} style={{ opacity: 0.7, textTransform: "capitalize" }}>
-                  {key.replace(/_/g, " ")}
+                <Text size={100} style={{ opacity: 0.7 }}>
+                  {def.label}
                 </Text>
               </div>
             );
@@ -596,19 +622,26 @@ export function RequirementDiscoveryPage(): JSX.Element {
       ) : null}
 
       {analyzedRequirementsText ? (
-        <div style={{ marginBottom: 8 }}>
+        <div style={{ marginBottom: 8, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <Button appearance="subtle" size="small" onClick={() => setShowRawText((prev) => !prev)}>
             {showRawText ? "Hide raw analyst output" : "🔍 View raw analyst output"}
           </Button>
-          {showRawText ? (
-            <Textarea
-              value={analyzedRequirementsText}
-              readOnly
-              rows={10}
-              style={{ width: "100%", fontFamily: "monospace", fontSize: 12, marginTop: 8, opacity: 0.8 }}
-            />
-          ) : null}
+          <Button
+            appearance={editMode ? "primary" : "outline"}
+            size="small"
+            onClick={() => setEditMode((prev) => !prev)}
+          >
+            {editMode ? "✓ Done Editing" : "✏️ Edit Requirements"}
+          </Button>
         </div>
+      ) : null}
+      {analyzedRequirementsText && showRawText ? (
+        <Textarea
+          value={analyzedRequirementsText}
+          readOnly
+          rows={10}
+          style={{ width: "100%", fontFamily: "monospace", fontSize: 12, marginBottom: 16, opacity: 0.8 }}
+        />
       ) : null}
 
       {effectiveRequirements.criticalPath.length > 0 ? (
@@ -623,69 +656,102 @@ export function RequirementDiscoveryPage(): JSX.Element {
             </span>
           }
           action={
-            <Button appearance="secondary" size="small" onClick={addCriticalPathItem}>
-              + Add item
-            </Button>
+            editMode ? (
+              <Button appearance="secondary" size="small" onClick={addCriticalPathItem}>
+                + Add item
+              </Button>
+            ) : undefined
           }
         >
           <Text size={200} style={{ display: "block", marginBottom: 12, opacity: 0.8 }}>
             These requirements are what the initial prototype will actually build first - everything
             else depends on them being in place.
           </Text>
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {effectiveRequirements.criticalPath.map((item, index) => (
-              <div
-                key={index}
-                className="genie-fade-in genie-req-item"
-                style={{
-                  display: "flex",
-                  gap: 8,
-                  alignItems: "flex-start",
-                  padding: "8px 10px",
-                  borderRadius: 8,
-                  border: "1px solid #d99a2b55",
-                  backgroundColor: "rgba(217, 154, 43, 0.08)",
-                }}
-              >
-                <span
+          {editMode ? (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {effectiveRequirements.criticalPath.map((item, index) => (
+                <div
+                  key={index}
+                  className="genie-fade-in genie-req-item"
                   style={{
-                    flexShrink: 0,
-                    width: 22,
-                    height: 22,
-                    marginTop: 4,
-                    borderRadius: "50%",
-                    backgroundImage: "linear-gradient(135deg, #d99a2b, #e0b354)",
-                    color: "#1a1200",
                     display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    fontSize: 11,
-                    fontWeight: 700,
+                    gap: 8,
+                    alignItems: "flex-start",
+                    padding: "8px 10px",
+                    borderRadius: 8,
+                    border: "1px solid #d99a2b55",
+                    backgroundColor: "rgba(217, 154, 43, 0.08)",
                   }}
                 >
-                  {index + 1}
-                </span>
-                <Textarea
-                  value={item}
-                  onChange={(_, dataEv) => updateCriticalPathItem(index, dataEv.value)}
-                  resize="vertical"
-                  style={{ flex: 1 }}
-                />
-                <Button
-                  appearance="subtle"
-                  size="small"
-                  shape="circular"
-                  title="Remove this requirement"
-                  aria-label="Remove this requirement"
-                  onClick={() => removeCriticalPathItem(index)}
-                >
-                  ✕
-                </Button>
-              </div>
-            ))}
-          </div>
+                  <span
+                    style={{
+                      flexShrink: 0,
+                      width: 22,
+                      height: 22,
+                      marginTop: 4,
+                      borderRadius: "50%",
+                      backgroundImage: "linear-gradient(135deg, #d99a2b, #e0b354)",
+                      color: "#1a1200",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      fontSize: 11,
+                      fontWeight: 700,
+                    }}
+                  >
+                    {index + 1}
+                  </span>
+                  <Textarea
+                    value={item}
+                    onChange={(_, dataEv) => updateCriticalPathItem(index, dataEv.value)}
+                    resize="vertical"
+                    style={{ flex: 1 }}
+                  />
+                  <Button
+                    appearance="subtle"
+                    size="small"
+                    shape="circular"
+                    title="Remove this requirement"
+                    aria-label="Remove this requirement"
+                    onClick={() => removeCriticalPathItem(index)}
+                  >
+                    ✕
+                  </Button>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {effectiveRequirements.criticalPath.map((item, index) => (
+                <div key={index} className="genie-fade-in" style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+                  <span
+                    style={{
+                      flexShrink: 0,
+                      width: 20,
+                      height: 20,
+                      marginTop: 2,
+                      borderRadius: "50%",
+                      backgroundImage: "linear-gradient(135deg, #d99a2b, #e0b354)",
+                      color: "#1a1200",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      fontSize: 10,
+                      fontWeight: 700,
+                    }}
+                  >
+                    {index + 1}
+                  </span>
+                  <Text size={300} style={{ lineHeight: 1.5 }}>
+                    {item}
+                  </Text>
+                </div>
+              ))}
+            </div>
+          )}
         </SectionCard>
       ) : null}
+
 
       {effectiveRequirements.groups.map((group) => {
         const collapsed = collapsedGroups.has(group.key);
@@ -722,12 +788,12 @@ export function RequirementDiscoveryPage(): JSX.Element {
             }
           >
             {collapsed ? null : (
-              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: editMode ? 8 : 6 }}>
                 {group.items.length === 0 ? (
                   <Text size={200} style={{ opacity: 0.6 }}>
-                    No items yet - add one below.
+                    {editMode ? "No items yet - add one below." : "No items yet."}
                   </Text>
-                ) : (
+                ) : editMode ? (
                   group.items.map((item, index) => (
                     <div
                       key={index}
@@ -778,21 +844,50 @@ export function RequirementDiscoveryPage(): JSX.Element {
                       </Button>
                     </div>
                   ))
+                ) : (
+                  group.items.map((item, index) => (
+                    <div key={index} className="genie-fade-in" style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+                      <span
+                        style={{
+                          flexShrink: 0,
+                          width: 20,
+                          height: 20,
+                          marginTop: 2,
+                          borderRadius: "50%",
+                          backgroundColor: group.accent,
+                          color: "#0b0f14",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          fontSize: 10,
+                          fontWeight: 700,
+                        }}
+                      >
+                        {index + 1}
+                      </span>
+                      <Text size={300} style={{ lineHeight: 1.5 }}>
+                        {item}
+                      </Text>
+                    </div>
+                  ))
                 )}
-                <Button
-                  appearance="secondary"
-                  size="small"
-                  onClick={() => addGroupItem(group.key)}
-                  style={{ alignSelf: "flex-start" }}
-                >
-                  + Add item
-                </Button>
+                {editMode ? (
+                  <Button
+                    appearance="secondary"
+                    size="small"
+                    onClick={() => addGroupItem(group.key)}
+                    style={{ alignSelf: "flex-start" }}
+                  >
+                    + Add item
+                  </Button>
+                ) : null}
               </div>
             )}
           </SectionCard>
         );
       })}
 
+      <div style={hasPendingApproval ? { position: "sticky", bottom: 12, zIndex: 5 } : undefined}>
       <SectionCard title="🔑 Pending Approvals">
         {approvalsLoading && !approvals ? <LoadingState label="Loading approvals..." /> : null}
         {approvalsError ? <ErrorState error={approvalsError} onRetry={refreshApprovals} /> : null}
@@ -886,6 +981,7 @@ export function RequirementDiscoveryPage(): JSX.Element {
           );
         })}
       </SectionCard>
+      </div>
     </div>
   );
 }
