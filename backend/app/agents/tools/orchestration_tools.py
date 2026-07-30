@@ -30,12 +30,14 @@ from dataclasses import dataclass
 from typing import Any
 
 from app.agents.gateway import AgentGateway, get_enabled_agent
-from app.agents.models import AgentExecutionRequest
+from app.agents.models import AgentExecutionRequest, AgentExecutionResult
 from app.agents.registry import AgentRegistry
 from app.agents.tool_execution import AgentToolRegistry, ToolCallContext, ToolExecutionError
 from app.governance.governance_service import GovernanceService
 from app.memory.memory_models import SharedMemoryClassification
 from app.memory.memory_service import MemoryService
+from app.models.workflow_stream_models import WorkflowStreamEvent
+from app.orchestration.workflow_event_bus import WorkflowEventBus
 
 __all__ = ["register_orchestrator_delegation_tools", "resolve_delegate_agent_id"]
 
@@ -52,8 +54,8 @@ def _preview(output_text: str | None) -> str | None:
     return f"{flattened[:_PREVIEW_MAX_LENGTH]}..."
 
 
-def _extract_step_id(trace_id: str) -> str | None:
-    """Recovers the workflow step id a delegated call belongs to.
+def _split_trace_id(trace_id: str) -> tuple[str | None, str | None]:
+    """Recovers the ``(workflow_run_id, step_id)`` a delegated call belongs to.
 
     ``genie-orchestrator``'s delegation tools are only ever invoked from
     within a running workflow step, whose ``WorkflowStepExecutor.execute_step``
@@ -61,14 +63,15 @@ def _extract_step_id(trace_id: str) -> str | None:
     (``app.orchestration.workflow_runtime``) - that same value is threaded
     through to ``ToolCallContext.trace_id`` unchanged
     (``AzureAgentGateway.execute``). Recovering it here lets the delegated
-    specialist's own governance event carry the same ``step_id`` as the
-    orchestrator's, so a live consumer (the Triage panel) can group both
-    together as one step's real control flow instead of two unrelated
+    specialist's own governance/live-stream events carry the same
+    ``step_id``/``workflow_run_id`` as the orchestrator's, so a live
+    consumer (the Triage panel, the workflow-events SSE stream) can group
+    both together as one step's real control flow instead of two unrelated
     entries.
     """
 
-    _workflow_run_id, separator, step_id = trace_id.partition(":")
-    return step_id if separator else None
+    workflow_run_id, separator, step_id = trace_id.partition(":")
+    return (workflow_run_id, step_id) if separator else (None, None)
 
 
 @dataclass(frozen=True)
@@ -108,7 +111,7 @@ _DELEGATIONS: tuple[_Delegation, ...] = (
         tool_name="call_build_agent",
         target_agent_id="build-agent",
         target_prompt_id="build-generation-v1",
-        variable_names=("requirements", "architecture", "user_message"),
+        variable_names=("requirements", "architecture", "policies", "user_message"),
         shared_memory_classification="roadmap_artifact",
     ),
     _Delegation(
@@ -167,6 +170,7 @@ def register_orchestrator_delegation_tools(
     governance_service: GovernanceService,
     agent_registry: AgentRegistry | None = None,
     memory_service: MemoryService | None = None,
+    event_bus: WorkflowEventBus | None = None,
 ) -> None:
     """Register every ``call_<agent>`` delegation tool for ``genie-orchestrator``.
 
@@ -185,6 +189,19 @@ def register_orchestrator_delegation_tools(
     specialist's output back out of Shared Memory rather than relying only
     on the orchestrator's own in-process step output. Omit either to skip
     this (e.g. tests that do not exercise memory).
+
+    ``event_bus``, when supplied, makes each delegated call stream the
+    target specialist's own real Foundry completion (via
+    ``AgentGateway.execute_stream``) and publish one ``step_delta`` event
+    per incremental chunk - tagged with that specialist's own ``agent_id``
+    (e.g. ``"build-agent"``), never ``genie-orchestrator``'s - instead of
+    only calling the blocking ``execute``. Without this, a live SSE
+    consumer sees nothing at all for the delegated call's entire real
+    duration (which can be several minutes for a large generation such as
+    ``build-generation-v1``): genie-orchestrator's own run is paused on
+    ``requires_action`` the whole time, so its own ``step_started``/
+    ``step_delta``/``step_completed`` events only resume once this
+    (previously non-streamed) delegated call had already returned in full.
     """
 
     for delegation in _DELEGATIONS:
@@ -197,8 +214,57 @@ def register_orchestrator_delegation_tools(
                 governance_service=governance_service,
                 agent_registry=agent_registry,
                 memory_service=memory_service,
+                event_bus=event_bus,
             ),
         )
+
+
+async def _stream_and_publish_deltas(
+    agent_gateway: AgentGateway,
+    request: AgentExecutionRequest,
+    event_bus: WorkflowEventBus,
+    *,
+    session_id: str,
+    workflow_run_id: str,
+    step_id: str,
+    agent_id: str,
+) -> AgentExecutionResult:
+    """Streams a delegated specialist's own real completion via ``execute_stream``.
+
+    Publishes one ``step_delta`` event per incremental chunk the specialist
+    itself produces, tagged with ``agent_id`` (the specialist's own id, e.g.
+    ``"build-agent"`` - never ``genie-orchestrator``'s), so a live SSE
+    consumer (``useWorkflowEventStream`` on the Workshop page) can render
+    this specialist's real output as it is actually generated - e.g. the
+    Build Agent's multi-file code generation, which can take several
+    minutes - rather than only seeing it once genie-orchestrator's own run
+    finishes echoing the tool's full result back afterward. Tagging by the
+    specialist's own ``agent_id`` (distinct from genie-orchestrator's own
+    ``step_delta`` events for the same ``step_id``) lets a consumer
+    distinguish this real, first-generated content from genie-orchestrator's
+    own later, purely-repeated echo of the same text.
+    """
+
+    result: AgentExecutionResult | None = None
+    async for chunk in agent_gateway.execute_stream(request):
+        if chunk.delta:
+            await event_bus.publish(
+                WorkflowStreamEvent(
+                    event_type="step_delta",
+                    session_id=session_id,
+                    workflow_run_id=workflow_run_id,
+                    step_id=step_id,
+                    agent_id=agent_id,
+                    delta=chunk.delta,
+                )
+            )
+        if chunk.result is not None:
+            result = chunk.result
+    if result is None:
+        raise ToolExecutionError(
+            f"Agent gateway stream for delegated agent '{agent_id}' ended without a final result."
+        )
+    return result
 
 
 def _build_delegation_tool(
@@ -208,6 +274,7 @@ def _build_delegation_tool(
     governance_service: GovernanceService,
     agent_registry: AgentRegistry | None,
     memory_service: MemoryService | None,
+    event_bus: WorkflowEventBus | None = None,
 ):
     async def _delegate(arguments: dict[str, Any], context: ToolCallContext) -> dict[str, Any]:
         if context.session_id is None:
@@ -248,9 +315,19 @@ def _build_delegation_tool(
             correlation_id=context.trace_id,
             session_id=context.session_id,
         )
-        result = await agent_gateway.execute(request)
-
-        step_id = _extract_step_id(context.trace_id)
+        workflow_run_id, step_id = _split_trace_id(context.trace_id)
+        if event_bus is not None and workflow_run_id is not None and step_id is not None:
+            result = await _stream_and_publish_deltas(
+                agent_gateway,
+                request,
+                event_bus,
+                session_id=context.session_id,
+                workflow_run_id=workflow_run_id,
+                step_id=step_id,
+                agent_id=delegation.target_agent_id,
+            )
+        else:
+            result = await agent_gateway.execute(request)
 
         await governance_service.record_execution(
             session_id=context.session_id,

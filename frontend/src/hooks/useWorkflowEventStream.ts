@@ -10,6 +10,22 @@ export interface WorkflowEventStreamState {
   events: WorkflowStreamEvent[];
   lastEvent: WorkflowStreamEvent | null;
   connected: boolean;
+  /**
+   * Every `step_delta` chunk received so far, concatenated in arrival order
+   * and keyed by `${step_id}::${agent_id}` - deliberately NOT subject to the
+   * `MAX_RECENT_EVENTS` cap on `events` (that cap is fine for "trigger a
+   * refresh on any event" consumers, but would silently drop real generated
+   * content for a long-running step, e.g. the Build Agent's multi-minute
+   * code generation). Reset to an empty string for a key when a fresh
+   * `step_started` arrives for it (a re-run of that step), so stale content
+   * from a prior run is never shown alongside a new one.
+   */
+  stepDeltaText: Record<string, string>;
+}
+
+/** Builds the `stepDeltaText` lookup key for a given step/agent pair. */
+export function workflowStepDeltaKey(stepId: string, agentId: string): string {
+  return `${stepId}::${agentId}`;
 }
 
 /**
@@ -31,10 +47,12 @@ export interface WorkflowEventStreamState {
 export function useWorkflowEventStream(sessionId: string | null): WorkflowEventStreamState {
   const [events, setEvents] = useState<WorkflowStreamEvent[]>([]);
   const [connected, setConnected] = useState(false);
+  const [stepDeltaText, setStepDeltaText] = useState<Record<string, string>>({});
 
   useEffect(() => {
     setEvents([]);
     setConnected(false);
+    setStepDeltaText({});
     if (!sessionId) return;
 
     const controller = new AbortController();
@@ -50,10 +68,18 @@ export function useWorkflowEventStream(sessionId: string | null): WorkflowEventS
       try {
         const event = JSON.parse(dataLines.join("\n")) as WorkflowStreamEvent;
         setEvents((prev) => [...prev.slice(-(MAX_RECENT_EVENTS - 1)), event]);
+
+        const key = workflowStepDeltaKey(event.step_id, event.agent_id);
+        if (event.event_type === "step_started") {
+          setStepDeltaText((prev) => ({ ...prev, [key]: "" }));
+        } else if (event.event_type === "step_delta" && event.delta) {
+          setStepDeltaText((prev) => ({ ...prev, [key]: (prev[key] ?? "") + event.delta }));
+        }
       } catch {
         // Malformed frame - ignore rather than crash the whole stream.
       }
     };
+
 
     const connect = async () => {
       try {
@@ -100,5 +126,10 @@ export function useWorkflowEventStream(sessionId: string | null): WorkflowEventS
     };
   }, [sessionId]);
 
-  return { events, lastEvent: events.length > 0 ? events[events.length - 1] : null, connected };
+  return {
+    events,
+    lastEvent: events.length > 0 ? events[events.length - 1] : null,
+    connected,
+    stepDeltaText,
+  };
 }

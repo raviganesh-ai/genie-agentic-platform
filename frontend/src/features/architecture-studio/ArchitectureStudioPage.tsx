@@ -91,7 +91,8 @@ const OTHER_POLICY_OPTION = "Other";
 const POLL_MS = Number(import.meta.env.VITE_ARCHITECTURE_STUDIO_POLL_MS ?? 0);
 
 export function ArchitectureStudioPage(): JSX.Element {
-  const { sessionId, workflowRunId, missionError, setMissionError } = useSessionContext();
+  const { sessionId, workflowRunId, missionError, setMissionError, setGovernancePolicies } =
+    useSessionContext();
   const navigate = useNavigate();
   const { data: snapshot, loading, error, refresh } = useArchitectureStudio(
     sessionId,
@@ -172,6 +173,12 @@ export function ArchitectureStudioPage(): JSX.Element {
     try {
       await approvalApi.decide(sessionId, pendingArchitectureApproval.id, "approved");
       const traceId = getTraceId(workflowRunId) ?? undefined;
+      // Persisted in SessionContext (not just a local variable here) because
+      // governance-review only actually executes in a LATER, separate resume
+      // call - triggered from the Workshop page's "Proceed to Governance"
+      // button - which needs to re-supply the same policies as its own
+      // step_input override at that time.
+      setGovernancePolicies(effectiveGovernancePolicies);
       // Move to the UI & Agent Design page immediately - that page has its
       // own live workflow event stream + polling and shows the "Genie is
       // calling the Orchestrator Agent..." animation until build-solution's
@@ -184,8 +191,8 @@ export function ArchitectureStudioPage(): JSX.Element {
       navigate("/workshop");
       workflowApi
         .resumeRun(sessionId, workflowRunId, traceId, {
-          "governance-review": {
-            step_id: "governance-review",
+          "build-solution": {
+            step_id: "build-solution",
             variables: { policies: effectiveGovernancePolicies },
           },
         })
@@ -197,7 +204,14 @@ export function ArchitectureStudioPage(): JSX.Element {
     } finally {
       setApproving(false);
     }
-  }, [sessionId, workflowRunId, pendingArchitectureApproval, effectiveGovernancePolicies, navigate]);
+  }, [
+    sessionId,
+    workflowRunId,
+    pendingArchitectureApproval,
+    effectiveGovernancePolicies,
+    navigate,
+    setGovernancePolicies,
+  ]);
 
   // Lets the user deselect specific agents from the "## Multi-Agent
   // Workflow" section and re-run design-architecture (still the same

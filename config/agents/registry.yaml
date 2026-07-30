@@ -255,6 +255,12 @@ agents:
           - name: architecture
             type: string
             description: The approved architecture the build must follow.
+          - name: policies
+            type: string
+            description: >-
+              Governance/policy expectations the user selected on the
+              Architecture Studio page that the generated code must
+              satisfy (semicolon-separated, may be empty).
           - name: user_message
             type: string
             description: Optional customer chat message for this phase, or empty.

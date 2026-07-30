@@ -438,6 +438,17 @@ prompts:
       secret from configuration/environment variables, matching Genie's
       own no-hardcoding rule.
 
+      Governance policies the user selected on the Architecture Studio
+      page that this build MUST satisfy, in addition to the security
+      rules above (semicolon-separated; may be empty if none were
+      selected): {policies}
+
+      If that list is non-empty, visibly implement every policy it names
+      across ALL of the code you generate above - the UI, each specialist
+      agent module, and the Orchestrator Agent module alike - not just one
+      of them, and add a short inline comment at each place a policy is
+      applied noting which policy it satisfies.
+
       After all the code blocks, add a short "## Multi-Agent Workflow"
       section (plain text, not code) describing each agent's
       responsibility and how it connects to the Orchestrator Agent - this
@@ -454,8 +465,9 @@ prompts:
     variables:
       - requirements
       - architecture
+      - policies
       - user_message
-    version: "4.0.0"
+    version: "4.1.0"
 
   - id: deployment-v1
     name: Deployment
@@ -565,20 +577,23 @@ prompts:
     template: >-
       You are the Genie Orchestrator driving the build phase of this
       mission. Call the call_build_agent tool exactly once, passing
-      requirements, architecture, and user_message below unchanged, then
-      respond with EXACTLY that tool's returned output text and nothing
-      else - no additional commentary, no summary.
+      requirements, architecture, policies, and user_message below
+      unchanged, then respond with EXACTLY that tool's returned output
+      text and nothing else - no additional commentary, no summary.
 
       requirements: {requirements}
 
       architecture: {architecture}
 
+      policies: {policies}
+
       user_message: {user_message}
     variables:
       - requirements
       - architecture
+      - policies
       - user_message
-    version: "1.0.0"
+    version: "1.1.0"
 
   - id: orchestrator-security-assessment-phase-v1
     name: Orchestrator Security Assessment Phase

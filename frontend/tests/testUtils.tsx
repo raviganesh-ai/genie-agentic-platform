@@ -19,6 +19,7 @@ export function renderWithProviders(
     workflowRunId?: string | null;
     missionStartedAt?: number | null;
     missionError?: SafeError | null;
+    governancePolicies?: string;
   } = {},
 ) {
   return render(
@@ -29,6 +30,7 @@ export function renderWithProviders(
           initialWorkflowRunId={options.workflowRunId ?? null}
           initialMissionStartedAt={options.missionStartedAt ?? null}
           initialMissionError={options.missionError ?? null}
+          initialGovernancePolicies={options.governancePolicies ?? ""}
         >
           {ui}
         </SessionProvider>
@@ -39,11 +41,37 @@ export function renderWithProviders(
 
 /** Installs a `global.fetch` stub that resolves based on a pathname suffix match. */
 export function mockFetchSequence(
-  handlers: Array<{ match: string; response: unknown; status?: number }>,
+  handlers: Array<{
+    match: string;
+    response?: unknown;
+    status?: number;
+    /**
+     * Raw SSE frames (each including its own trailing `\n\n`) to stream back
+     * for this handler instead of a JSON body - use this to simulate the
+     * `/workflow-events/stream` route emitting real `step_started`/
+     * `step_delta`/... events for a test, instead of the default
+     * immediately-closed empty stream below.
+     */
+    sseChunks?: string[];
+  }>,
 ) {
   const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
     const url = typeof input === "string" ? input : input.toString();
     const pathname = new URL(url).pathname;
+    const handler = handlers.find((h) => pathname.endsWith(h.match));
+    if (handler?.sseChunks) {
+      const encoder = new TextEncoder();
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          for (const chunk of handler.sseChunks ?? []) controller.enqueue(encoder.encode(chunk));
+          controller.close();
+        },
+      });
+      return new Response(stream, {
+        status: handler.status ?? 200,
+        headers: { "Content-Type": "text/event-stream" },
+      });
+    }
     // Every page now opens a live workflow-events SSE connection
     // (useWorkflowEventStream) alongside its normal polled fetches. Tests
     // that don't care about that stream shouldn't need to register a
@@ -55,7 +83,6 @@ export function mockFetchSequence(
         headers: { "Content-Type": "text/event-stream" },
       });
     }
-    const handler = handlers.find((h) => pathname.endsWith(h.match));
     if (!handler) {
       throw new Error(`No mock handler registered for URL: ${url}`);
     }

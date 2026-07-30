@@ -18,10 +18,19 @@ export interface SessionContextValue {
    * approve -> Architecture Studio handoff (failed resuming an existing
    * run). Cleared by the destination page once shown/retried. */
   missionError: SafeError | null;
+  /** The governance/policy expectations the user selected on the
+   * Architecture Studio page (semicolon-joined, may be ""), carried
+   * forward so the Workshop page's "Proceed to Governance" action can
+   * still supply them as governance-review's step_input override - that
+   * step only actually executes in a LATER, separate resume call than the
+   * one Architecture Studio triggers, so the value can't just be a local
+   * variable on that page. */
+  governancePolicies: string;
   setSessionId: (sessionId: string | null) => void;
   setWorkflowRunId: (workflowRunId: string | null) => void;
   setMissionStartedAt: (missionStartedAt: number | null) => void;
   setMissionError: (missionError: SafeError | null) => void;
+  setGovernancePolicies: (governancePolicies: string) => void;
 }
 
 const SessionContext = createContext<SessionContextValue | null>(null);
@@ -38,6 +47,7 @@ export function SessionProvider({
   initialWorkflowRunId = null,
   initialMissionStartedAt = null,
   initialMissionError = null,
+  initialGovernancePolicies = "",
 }: {
   children: ReactNode;
   /** Test-only seams for rendering pages without going through LandingPage. */
@@ -45,11 +55,13 @@ export function SessionProvider({
   initialWorkflowRunId?: string | null;
   initialMissionStartedAt?: number | null;
   initialMissionError?: SafeError | null;
+  initialGovernancePolicies?: string;
 }): JSX.Element {
   const [sessionId, setSessionId] = useState<string | null>(initialSessionId);
   const [workflowRunId, setWorkflowRunId] = useState<string | null>(initialWorkflowRunId);
   const [missionStartedAt, setMissionStartedAt] = useState<number | null>(initialMissionStartedAt);
   const [missionError, setMissionError] = useState<SafeError | null>(initialMissionError);
+  const [governancePolicies, setGovernancePolicies] = useState<string>(initialGovernancePolicies);
 
   const value = useMemo(
     () => ({
@@ -57,12 +69,14 @@ export function SessionProvider({
       workflowRunId,
       missionStartedAt,
       missionError,
+      governancePolicies,
       setSessionId,
       setWorkflowRunId,
       setMissionStartedAt,
       setMissionError,
+      setGovernancePolicies,
     }),
-    [sessionId, workflowRunId, missionStartedAt, missionError],
+    [sessionId, workflowRunId, missionStartedAt, missionError, governancePolicies],
   );
 
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;

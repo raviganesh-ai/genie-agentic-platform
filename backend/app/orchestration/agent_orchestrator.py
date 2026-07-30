@@ -296,6 +296,11 @@ def create_agent_orchestrator(
         session_agent_resolver=customer_agent_provisioning_service,
         tool_registry=tool_registry,
     )
+    # Constructed here (rather than further below, where it was previously
+    # first needed) so register_orchestrator_delegation_tools can also
+    # publish live step_delta events for a delegated specialist's own real
+    # streamed output - see that function's event_bus parameter.
+    resolved_workflow_event_bus = workflow_event_bus or WorkflowEventBus()
     # Populates the same tool_registry instance already handed to
     # resolved_agent_gateway above (see register_orchestrator_delegation_
     # tools's docstring for why this ordering, rather than a circular
@@ -307,12 +312,11 @@ def create_agent_orchestrator(
         governance_service=resolved_governance_service,
         agent_registry=agent_registry,
         memory_service=resolved_memory_service,
+        event_bus=resolved_workflow_event_bus,
     )
     recommendation_lineage_service = RecommendationLineageService(
         InMemoryRecommendationLineageRepository(), governance_service=resolved_governance_service
     )
-
-    resolved_workflow_event_bus = workflow_event_bus or WorkflowEventBus()
 
     step_executor = WorkflowStepExecutor(
         agent_registry=agent_registry,

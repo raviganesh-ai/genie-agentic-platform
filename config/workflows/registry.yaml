@@ -25,9 +25,10 @@
 # run automatically from nothing but an uploaded call transcript/recording:
 # 'transcript' resolves to the session's combined transcribed text,
 # 'step:<id>' resolves to that already-completed step's output. Variables
-# that should never be auto-derived from a transcript (governance-review's
-# `policies`, failure-diagnosis-v1's `failure_details`) are deliberately
-# left unmapped - they still require an explicit step_inputs override, per
+# Variables that should never be auto-derived from a transcript
+# (build-solution's and governance-review's `policies`,
+# failure-diagnosis-v1's `failure_details`) are deliberately left unmapped -
+# they still require an explicit step_inputs override, per
 # app.workflows.models.WorkflowStep.variable_sources's fail-closed contract.
 #
 # `requires_approval_checkpoint` gates the Mission Control UI's guided,

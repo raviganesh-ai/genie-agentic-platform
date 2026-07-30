@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
-import { useWorkflowEventStream } from "@/hooks/useWorkflowEventStream";
+import { useWorkflowEventStream, workflowStepDeltaKey } from "@/hooks/useWorkflowEventStream";
 import type { WorkflowStreamEvent } from "@/types/workflowEvents";
 
 function sseResponse(chunks: string[]): Response {
@@ -60,5 +60,67 @@ describe("useWorkflowEventStream", () => {
     expect(result.current.connected).toBe(false);
     expect(result.current.events).toHaveLength(0);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("accumulates step_delta chunks per step/agent into stepDeltaText, unbounded by the recent-events cap", async () => {
+    const buildDelta = (delta: string): WorkflowStreamEvent => ({
+      event_type: "step_delta",
+      session_id: "session-1",
+      workflow_run_id: "run-1",
+      step_id: "build-solution",
+      agent_id: "build-agent",
+      delta,
+      output_preview: null,
+      error: null,
+      emitted_at: "2026-07-28T00:00:00Z",
+    });
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        sseResponse([
+          `data: ${JSON.stringify(buildDelta("function App() {"))}\n\n`,
+          `data: ${JSON.stringify(buildDelta("\n  return <div />;"))}\n\n`,
+          `data: ${JSON.stringify(buildDelta("\n}"))}\n\n`,
+        ]),
+      ),
+    );
+
+    const { result } = renderHook(() => useWorkflowEventStream("session-1"));
+
+    const key = workflowStepDeltaKey("build-solution", "build-agent");
+    await waitFor(() =>
+      expect(result.current.stepDeltaText[key]).toBe("function App() {\n  return <div />;\n}"),
+    );
+  });
+
+  it("resets a step's accumulated delta text when a fresh step_started event arrives for it", async () => {
+    const key = workflowStepDeltaKey("build-solution", "build-agent");
+    const started: WorkflowStreamEvent = {
+      event_type: "step_started",
+      session_id: "session-1",
+      workflow_run_id: "run-1",
+      step_id: "build-solution",
+      agent_id: "build-agent",
+      delta: null,
+      output_preview: null,
+      error: null,
+      emitted_at: "2026-07-28T00:00:00Z",
+    };
+    const delta: WorkflowStreamEvent = { ...started, event_type: "step_delta", delta: "stale text" };
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        sseResponse([
+          `data: ${JSON.stringify(delta)}\n\n`,
+          `data: ${JSON.stringify(started)}\n\n`,
+        ]),
+      ),
+    );
+
+    const { result } = renderHook(() => useWorkflowEventStream("session-1"));
+
+    await waitFor(() => expect(result.current.stepDeltaText[key]).toBe(""));
   });
 });

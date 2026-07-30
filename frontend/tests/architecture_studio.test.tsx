@@ -103,7 +103,7 @@ describe("ArchitectureStudioPage", () => {
       expect(resumeCall).toBeDefined();
       const [, resumeInit] = resumeCall as unknown as [string, RequestInit];
       const body = JSON.parse(resumeInit.body as string);
-      expect(body.step_inputs["governance-review"].variables.policies).toContain(
+      expect(body.step_inputs["build-solution"].variables.policies).toContain(
         "managed identity",
       );
     });
@@ -139,7 +139,7 @@ describe("ArchitectureStudioPage", () => {
       expect(resumeCall).toBeDefined();
       const [, resumeInit] = resumeCall as unknown as [string, RequestInit];
       const body = JSON.parse(resumeInit.body as string);
-      expect(body.step_inputs["governance-review"].variables.policies).toContain("HIPAA");
+      expect(body.step_inputs["build-solution"].variables.policies).toContain("HIPAA");
     });
   });
 });

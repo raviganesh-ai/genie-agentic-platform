@@ -173,10 +173,12 @@ function buildArtifacts(outputText: string): Artifact[] {
  * the code - plus any leftover multi-agent workflow narrative) revealed
  * one at a time on a short stagger - instead of dumping one giant text
  * blob, this reads as "watch the agent's artifacts appear" per the user's
- * request. The underlying generation already completed by the time this
- * data arrives (there is no live token stream from the backend), so the
- * stagger is a presentational reveal of real, already-produced content -
- * never fabricated or simulated text.
+ * request. `outputText` may be a still-growing live streaming buffer (see
+ * `revealImmediately`/`useWorkflowEventStream`'s `stepDeltaText`) or the
+ * final, already-complete text once the step finishes - `extractCodeBlocks`
+ * only ever recognizes a code block once its closing fence has actually
+ * streamed in, so partially-generated blocks are simply not shown yet
+ * rather than rendered incomplete.
  *
  * When `onRegenerateArtifact` is supplied, every code artifact also gets
  * an Edit control (inline textarea, kept only in local state/Copy output)
@@ -188,9 +190,21 @@ function buildArtifacts(outputText: string): Artifact[] {
 export function GeneratedArtifacts({
   outputText,
   onRegenerateArtifact,
+  revealImmediately = false,
 }: {
   outputText: string;
   onRegenerateArtifact?: (artifactTitle: string, instruction: string) => Promise<void>;
+  /**
+   * Skips the staggered reveal-one-at-a-time animation and shows every
+   * parsed artifact immediately instead. The staggered animation assumes
+   * `outputText` is a single, final, already-complete blob (true when this
+   * renders a finished `run.step_results` output) - but while rendering a
+   * live streaming buffer that grows on every `step_delta` chunk, `outputText`
+   * changes continuously, and re-running the stagger from zero each time
+   * would make already-shown artifacts repeatedly flicker away and back.
+   * Pass `true` only for a still-in-progress live buffer.
+   */
+  revealImmediately?: boolean;
 }): JSX.Element {
   const artifacts = useMemo(() => buildArtifacts(outputText), [outputText]);
   const codeOrdinals = useMemo(() => {
@@ -219,13 +233,17 @@ export function GeneratedArtifacts({
   const [regenerateErrorKey, setRegenerateErrorKey] = useState<string | null>(null);
 
   useEffect(() => {
+    if (revealImmediately) {
+      setRevealCount(artifacts.length);
+      return;
+    }
     setRevealCount(0);
     if (artifacts.length === 0) return;
     const timers = artifacts.map((_, index) =>
       window.setTimeout(() => setRevealCount((prev) => Math.max(prev, index + 1)), index * 350),
     );
     return () => timers.forEach((id) => window.clearTimeout(id));
-  }, [artifacts]);
+  }, [artifacts, revealImmediately]);
 
   useEffect(() => {
     // Fresh generated output (e.g. after a regenerate completes) supersedes

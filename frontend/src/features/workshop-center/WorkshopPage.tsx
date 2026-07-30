@@ -12,7 +12,7 @@ import { PageHeader } from "@/layouts/AppShell";
 import { ErrorState } from "@/components/ErrorState";
 import { SectionCard } from "@/components/SectionCard";
 import { AgentActivityAnimation } from "@/components/AgentActivityAnimation";
-import { useWorkflowEventStream } from "@/hooks/useWorkflowEventStream";
+import { useWorkflowEventStream, workflowStepDeltaKey } from "@/hooks/useWorkflowEventStream";
 import { GeneratedArtifacts } from "./GeneratedArtifacts";
 
 /** Gates entry into the automated governance phase (security-assessment,
@@ -22,9 +22,17 @@ import { GeneratedArtifacts } from "./GeneratedArtifacts";
  * architecture-approval gate on ArchitectureStudioPage. */
 const GOVERNANCE_CHECKPOINT_SUBJECT_ID = "security-assessment";
 
+/** The build-solution step always delegates to this specialist (see the
+ * `call_build_agent` entry in `_DELEGATIONS`, backend/app/agents/tools/
+ * orchestration_tools.py) - its own real streamed output (not
+ * genie-orchestrator's later echo of the same text) is what should be
+ * rendered live while the Build Agent is still generating. */
+const BUILD_STEP_ID = "build-solution";
+const BUILD_AGENT_ID = "build-agent";
+
 export function WorkshopPage(): JSX.Element {
   const navigate = useNavigate();
-  const { sessionId, workflowRunId } = useSessionContext();
+  const { sessionId, workflowRunId, governancePolicies } = useSessionContext();
   const workshop = useWorkshop(sessionId, workflowRunId);
   const [reviewed, setReviewed] = useState(false);
   const [approving, setApproving] = useState(false);
@@ -52,7 +60,7 @@ export function WorkshopPage(): JSX.Element {
   const { data: approvals, refresh: refreshApprovals } = useAsyncResource(approvalsFetcher, [sessionId], {
     enabled: Boolean(sessionId),
   });
-  const { events: liveEvents } = useWorkflowEventStream(sessionId);
+  const { events: liveEvents, stepDeltaText } = useWorkflowEventStream(sessionId);
   const lastLiveEvent = liveEvents[liveEvents.length - 1] ?? null;
   useEffect(() => {
     if (lastLiveEvent?.event_type === "step_completed" || lastLiveEvent?.event_type === "step_failed") {
@@ -67,6 +75,14 @@ export function WorkshopPage(): JSX.Element {
   );
   const buildOutputText = buildStepResult?.output_text ?? "";
   const buildError = buildStepResult?.error ?? null;
+  // The Build Agent's own real streamed content so far, tagged with its own
+  // agent_id (never genie-orchestrator's later verbatim echo of the same
+  // text - see _stream_and_publish_deltas in orchestration_tools.py) - shown
+  // progressively while build-solution is still running, before `run`'s
+  // next poll confirms `buildOutputText` above is the final, authoritative
+  // text.
+  const liveBuildText = stepDeltaText[workflowStepDeltaKey(BUILD_STEP_ID, BUILD_AGENT_ID)] ?? "";
+  const displayedBuildText = buildOutputText || liveBuildText;
   const pendingGovernanceApproval = approvals?.find(
     (request) => request.status === "pending" && request.subject_id === GOVERNANCE_CHECKPOINT_SUBJECT_ID,
   );
@@ -84,17 +100,30 @@ export function WorkshopPage(): JSX.Element {
       // Navigate immediately - the Governance page has its own live event
       // stream + polling and shows progress until governance-review's
       // output arrives, the same pattern ArchitectureStudioPage uses for
-      // the architecture-approval -> build-solution handoff.
+      // the architecture-approval -> build-solution handoff. This resume
+      // call is the one that actually reaches governance-review's wave
+      // (security-assessment/test-generation execute first in the same
+      // call, then governance-review immediately after), so it must
+      // re-supply the policies the user selected back on Architecture
+      // Studio - carried forward via SessionContext since that step never
+      // executes in the same call/page that originally captured them.
       navigate("/governance");
-      workflowApi.resumeRun(sessionId, workflowRunId, traceId).catch((err) => {
-        console.error("Failed to resume the workflow after the governance checkpoint approval.", err);
-      });
+      workflowApi
+        .resumeRun(sessionId, workflowRunId, traceId, {
+          "governance-review": {
+            step_id: "governance-review",
+            variables: { policies: governancePolicies },
+          },
+        })
+        .catch((err) => {
+          console.error("Failed to resume the workflow after the governance checkpoint approval.", err);
+        });
     } catch (err) {
       setApproveError((err as ApiError).message ?? "Failed to resume the workflow.");
     } finally {
       setApproving(false);
     }
-  }, [sessionId, workflowRunId, pendingGovernanceApproval, navigate]);
+  }, [sessionId, workflowRunId, pendingGovernanceApproval, navigate, governancePolicies]);
 
   if (!workflowRunId) {
     return (
@@ -116,9 +145,10 @@ export function WorkshopPage(): JSX.Element {
       {workshop.error ? <ErrorState error={workshop.error} /> : null}
 
       <SectionCard title="🛠️ Generated Artifacts">
-        {buildOutputText ? (
+        {displayedBuildText ? (
           <GeneratedArtifacts
-            outputText={buildOutputText}
+            outputText={displayedBuildText}
+            revealImmediately={!buildOutputText}
             onRegenerateArtifact={(artifactTitle, instruction) =>
               workshop
                 .regenerateBuild(
