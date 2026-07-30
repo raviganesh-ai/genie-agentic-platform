@@ -105,6 +105,15 @@ workflows:
         prompt_id: orchestrator-security-assessment-phase-v1
         allowed_tool_names:
           - call_security_assessment_agent
+        # Gates entry into the whole automated governance phase (this step
+        # and test-generation share the same wave - see _compute_waves in
+        # app/orchestration/workflow_runtime.py - so blocking this one step
+        # on approval blocks test-generation too, until the Workshop page's
+        # "Proceed to Governance" action approves it): the user must review
+        # the Build Agent's generated code on the Workshop page first,
+        # rather than security-assessment/test-generation/governance-review
+        # kicking off automatically the instant build-solution finishes.
+        requires_approval_checkpoint: build-review-approval
         required_memory_references:
           - build-solution
         variable_sources:
