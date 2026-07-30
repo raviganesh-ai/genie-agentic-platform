@@ -4,6 +4,7 @@ import type { GovernanceComplianceState } from "@/types/governance";
 
 const COMPLIANCE_LABELS: Record<GovernanceComplianceState, string> = {
   compliant: "Compliant",
+  pending: "Reviewing...",
   warning: "Attention Required",
   blocked: "Blocked",
   incomplete: "Incomplete",

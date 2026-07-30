@@ -15,6 +15,9 @@ import re
 from typing import Final
 
 from app.models.governance_gate_report import (
+    AgentAssessment,
+    AgentAssessmentsReport,
+    GateName,
     GateStatus,
     GovernanceFinding,
     GovernanceGateReport,
@@ -91,6 +94,65 @@ def _parse_gate_report(output_text: str, *, assessed_by_agent_id: str) -> Govern
     )
 
 
+_CODE_FENCE_PATTERN: Final = re.compile(r"^```", re.MULTILINE)
+
+
+def _count_code_blocks(output_text: str) -> int:
+    """Counts fenced code blocks (```...```) the Test Generation Agent actually
+    wrote, by counting fence markers in pairs - a real, directly-counted
+    quantity, never an estimated or invented test count."""
+    return len(_CODE_FENCE_PATTERN.findall(output_text)) // 2
+
+
+def _parse_agent_assessment(
+    output_text: str,
+    *,
+    gate_field_name: str,
+    gate_name: GateName,
+    assessed_by_agent_id: str,
+    count_tests: bool = False,
+) -> AgentAssessment:
+    """Parses one specialist agent's own single-gate verdict (Security
+    Assessment Agent's SECURITY_GATE, or Test Generation Agent's
+    TEST_COVERAGE_GATE) directly from that agent's own step output, reusing
+    the exact same gate/finding marker-line conventions as
+    ``_parse_gate_report`` - never invents a verdict the agent didn't
+    itself state.
+    """
+    gate_match = _GATE_PATTERNS[gate_field_name].search(output_text)
+    if gate_match is None:
+        return AgentAssessment(
+            status="undetermined", summary=output_text, assessed_by_agent_id=assessed_by_agent_id
+        )
+
+    findings: list[GovernanceFinding] = []
+    for line in output_text.splitlines():
+        finding_match = _FINDING_LINE_PATTERN.match(line.strip())
+        if finding_match is None:
+            continue
+        gate, severity, finding_id, description, recommendation = finding_match.groups()
+        if gate.lower() != gate_name:
+            continue
+        findings.append(
+            GovernanceFinding(
+                id=finding_id.strip(),
+                gate=gate_name,
+                severity=severity.lower(),  # type: ignore[arg-type]
+                description=description.strip(),
+                recommendation=(recommendation or "").strip(),
+            )
+        )
+
+    return AgentAssessment(
+        status="reviewed",
+        gate=gate_match.group(1).lower(),  # type: ignore[arg-type]
+        summary=output_text,
+        findings=findings,
+        tests_generated=_count_code_blocks(output_text) if count_tests else 0,
+        assessed_by_agent_id=assessed_by_agent_id,
+    )
+
+
 class PeerReviewService:
     """Reads the Peer Reviewer's gate verdict and applies human-selected fixes."""
 
@@ -100,11 +162,15 @@ class PeerReviewService:
         orchestrator: AgentOrchestrator,
         session_service: SessionService,
         governance_review_step_id: str,
+        security_assessment_step_id: str,
+        test_generation_step_id: str,
         gated_step_ids: tuple[str, ...],
     ) -> None:
         self._orchestrator = orchestrator
         self._session_service = session_service
         self._governance_review_step_id = governance_review_step_id
+        self._security_assessment_step_id = security_assessment_step_id
+        self._test_generation_step_id = test_generation_step_id
         self._gated_step_ids = gated_step_ids
 
     async def get_gate_report(
@@ -122,6 +188,55 @@ class PeerReviewService:
             return GovernanceGateReport(status="pending")
 
         return _parse_gate_report(step.output_text or "", assessed_by_agent_id=step.agent_id)
+
+    async def get_agent_assessments(
+        self, *, session_id: str, requesting_user_id: str, workflow_run_id: str
+    ) -> AgentAssessmentsReport:
+        """Returns each specialist agent's own single-gate assessment, read directly
+        from that agent's step output as soon as it completes - available well
+        before the slower, consolidated ``get_gate_report`` verdict (which also
+        waits on the Governance Reviewer's own review step).
+        """
+        await self._session_service.get_session(
+            session_id=session_id, requesting_user_id=requesting_user_id
+        )
+        run = self._get_run(workflow_run_id)
+
+        return AgentAssessmentsReport(
+            security_assessment=self._parse_step_assessment(
+                run,
+                step_id=self._security_assessment_step_id,
+                gate_field_name="security_gate",
+                gate_name="security",
+            ),
+            test_generation=self._parse_step_assessment(
+                run,
+                step_id=self._test_generation_step_id,
+                gate_field_name="test_coverage_gate",
+                gate_name="test_coverage",
+                count_tests=True,
+            ),
+        )
+
+    def _parse_step_assessment(
+        self,
+        run: WorkflowRunResult,
+        *,
+        step_id: str,
+        gate_field_name: str,
+        gate_name: GateName,
+        count_tests: bool = False,
+    ) -> AgentAssessment:
+        step = next((r for r in run.step_results if r.step_id == step_id), None)
+        if step is None or step.status != "completed":
+            return AgentAssessment(status="pending")
+        return _parse_agent_assessment(
+            step.output_text or "",
+            gate_field_name=gate_field_name,
+            gate_name=gate_name,
+            assessed_by_agent_id=step.agent_id,
+            count_tests=count_tests,
+        )
 
     async def apply_selected_fixes(
         self,
@@ -184,11 +299,15 @@ def create_peer_review_service(
     orchestrator: AgentOrchestrator,
     session_service: SessionService,
     governance_review_step_id: str = "governance-review",
+    security_assessment_step_id: str = "security-assessment",
+    test_generation_step_id: str = "test-generation",
     gated_step_ids: tuple[str, ...] = ("security-assessment", "test-generation", "governance-review"),
 ) -> PeerReviewService:
     return PeerReviewService(
         orchestrator=orchestrator,
         session_service=session_service,
         governance_review_step_id=governance_review_step_id,
+        security_assessment_step_id=security_assessment_step_id,
+        test_generation_step_id=test_generation_step_id,
         gated_step_ids=gated_step_ids,
     )

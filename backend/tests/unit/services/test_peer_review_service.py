@@ -16,7 +16,12 @@ from datetime import UTC, datetime
 import pytest
 
 from app.models.workflow_models import WorkflowRunResult, WorkflowStepInput, WorkflowStepResult
-from app.services.peer_review_service import PeerReviewService, _parse_gate_report
+from app.services.peer_review_service import (
+    PeerReviewService,
+    _count_code_blocks,
+    _parse_agent_assessment,
+    _parse_gate_report,
+)
 from app.services.session_service import create_session_service
 from app.services.workshop_service import UnknownWorkflowRunError
 
@@ -179,6 +184,8 @@ async def test_get_gate_report_returns_pending_when_governance_review_step_not_c
         orchestrator=orchestrator,  # type: ignore[arg-type]
         session_service=session_service,
         governance_review_step_id="governance-review",
+        security_assessment_step_id="security-assessment",
+        test_generation_step_id="test-generation",
         gated_step_ids=("security-assessment", "test-generation", "governance-review"),
     )
 
@@ -197,6 +204,8 @@ async def test_get_gate_report_returns_reviewed_blocked_report(blocked_run: Work
         orchestrator=orchestrator,  # type: ignore[arg-type]
         session_service=session_service,
         governance_review_step_id="governance-review",
+        security_assessment_step_id="security-assessment",
+        test_generation_step_id="test-generation",
         gated_step_ids=("security-assessment", "test-generation", "governance-review"),
     )
 
@@ -218,6 +227,8 @@ async def test_get_gate_report_raises_for_unknown_workflow_run(blocked_run: Work
         orchestrator=orchestrator,  # type: ignore[arg-type]
         session_service=session_service,
         governance_review_step_id="governance-review",
+        security_assessment_step_id="security-assessment",
+        test_generation_step_id="test-generation",
         gated_step_ids=("security-assessment", "test-generation", "governance-review"),
     )
 
@@ -237,6 +248,8 @@ async def test_apply_selected_fixes_re_runs_build_and_every_gated_step(
         orchestrator=orchestrator,  # type: ignore[arg-type]
         session_service=session_service,
         governance_review_step_id="governance-review",
+        security_assessment_step_id="security-assessment",
+        test_generation_step_id="test-generation",
         gated_step_ids=("security-assessment", "test-generation", "governance-review"),
     )
 
@@ -275,6 +288,8 @@ async def test_apply_selected_fixes_with_no_selected_findings_sends_empty_instru
         orchestrator=orchestrator,  # type: ignore[arg-type]
         session_service=session_service,
         governance_review_step_id="governance-review",
+        security_assessment_step_id="security-assessment",
+        test_generation_step_id="test-generation",
         gated_step_ids=("security-assessment", "test-generation", "governance-review"),
     )
 
@@ -287,3 +302,146 @@ async def test_apply_selected_fixes_with_no_selected_findings_sends_empty_instru
 
     build_input = orchestrator.resume_calls[0]["step_inputs"]["build-solution"]
     assert build_input.variables == {"user_message": ""}
+
+
+def test_count_code_blocks_counts_fence_pairs():
+    text = "intro\n```ts\nconst x = 1;\n```\nmiddle\n```python\ndef f(): pass\n```\n"
+
+    assert _count_code_blocks(text) == 2
+
+
+def test_count_code_blocks_returns_zero_for_no_fences():
+    assert _count_code_blocks("no code here") == 0
+
+
+def test_parse_agent_assessment_security_reviewed_with_matching_findings_only():
+    text = (
+        "Some narrative.\n"
+        "SECURITY_GATE: FAIL\n"
+        "FINDINGS:\n"
+        "- [security|critical|sec-1] SQL injection | Recommendation: Parameterize.\n"
+        "- [test_coverage|low|test-1] Unrelated finding for a different gate\n"
+    )
+
+    assessment = _parse_agent_assessment(
+        text,
+        gate_field_name="security_gate",
+        gate_name="security",
+        assessed_by_agent_id="security-assessment-agent",
+    )
+
+    assert assessment.status == "reviewed"
+    assert assessment.gate == "fail"
+    assert assessment.summary == text
+    assert assessment.assessed_by_agent_id == "security-assessment-agent"
+    assert assessment.tests_generated == 0
+    # Only the security-gate finding is kept, not the test_coverage one.
+    assert len(assessment.findings) == 1
+    assert assessment.findings[0].id == "sec-1"
+
+
+def test_parse_agent_assessment_test_generation_counts_code_blocks():
+    text = (
+        "```ts\n// unit test\nexpect(1).toBe(1);\n```\n"
+        "```ts\n// integration test\nexpect(2).toBe(2);\n```\n"
+        "TEST_COVERAGE_GATE: PASS\n"
+        "FINDINGS:\n"
+        "None.\n"
+    )
+
+    assessment = _parse_agent_assessment(
+        text,
+        gate_field_name="test_coverage_gate",
+        gate_name="test_coverage",
+        assessed_by_agent_id="test-generation-agent",
+        count_tests=True,
+    )
+
+    assert assessment.status == "reviewed"
+    assert assessment.gate == "pass"
+    assert assessment.tests_generated == 2
+    assert assessment.findings == []
+
+
+def test_parse_agent_assessment_returns_undetermined_when_no_gate_marker():
+    text = "[local-agent-gateway] agent='security-assessment-agent' resolved_prompt_length=10"
+
+    assessment = _parse_agent_assessment(
+        text,
+        gate_field_name="security_gate",
+        gate_name="security",
+        assessed_by_agent_id="security-assessment-agent",
+    )
+
+    assert assessment.status == "undetermined"
+    assert assessment.gate is None
+    assert assessment.summary == text
+
+
+async def test_get_agent_assessments_returns_pending_when_steps_not_completed(
+    blocked_run: WorkflowRunResult,
+) -> None:
+    run_without_gates = blocked_run.model_copy(update={"step_results": blocked_run.step_results[:1]})
+    orchestrator = _FakeOrchestrator(run=run_without_gates)
+    session_service = create_session_service(orchestrator=orchestrator)  # type: ignore[arg-type]
+    session = await session_service.create_session(owner_user_id="user-1", title="t")
+    service = PeerReviewService(
+        orchestrator=orchestrator,  # type: ignore[arg-type]
+        session_service=session_service,
+        governance_review_step_id="governance-review",
+        security_assessment_step_id="security-assessment",
+        test_generation_step_id="test-generation",
+        gated_step_ids=("security-assessment", "test-generation", "governance-review"),
+    )
+
+    report = await service.get_agent_assessments(
+        session_id=session.id, requesting_user_id="user-1", workflow_run_id="run-1"
+    )
+
+    assert report.security_assessment.status == "pending"
+    assert report.test_generation.status == "pending"
+
+
+async def test_get_agent_assessments_returns_reviewed_assessments_from_each_step(
+    blocked_run: WorkflowRunResult,
+) -> None:
+    orchestrator = _FakeOrchestrator(run=blocked_run)
+    session_service = create_session_service(orchestrator=orchestrator)  # type: ignore[arg-type]
+    session = await session_service.create_session(owner_user_id="user-1", title="t")
+    service = PeerReviewService(
+        orchestrator=orchestrator,  # type: ignore[arg-type]
+        session_service=session_service,
+        governance_review_step_id="governance-review",
+        security_assessment_step_id="security-assessment",
+        test_generation_step_id="test-generation",
+        gated_step_ids=("security-assessment", "test-generation", "governance-review"),
+    )
+
+    report = await service.get_agent_assessments(
+        session_id=session.id, requesting_user_id="user-1", workflow_run_id="run-1"
+    )
+
+    assert report.security_assessment.status == "reviewed"
+    assert report.security_assessment.gate == "fail"
+    assert report.security_assessment.assessed_by_agent_id == "genie-orchestrator"
+    assert report.test_generation.status == "reviewed"
+    assert report.test_generation.gate == "pass"
+
+
+async def test_get_agent_assessments_raises_for_unknown_workflow_run(blocked_run: WorkflowRunResult) -> None:
+    orchestrator = _FakeOrchestrator(run=blocked_run)
+    session_service = create_session_service(orchestrator=orchestrator)  # type: ignore[arg-type]
+    session = await session_service.create_session(owner_user_id="user-1", title="t")
+    service = PeerReviewService(
+        orchestrator=orchestrator,  # type: ignore[arg-type]
+        session_service=session_service,
+        governance_review_step_id="governance-review",
+        security_assessment_step_id="security-assessment",
+        test_generation_step_id="test-generation",
+        gated_step_ids=("security-assessment", "test-generation", "governance-review"),
+    )
+
+    with pytest.raises(UnknownWorkflowRunError):
+        await service.get_agent_assessments(
+            session_id=session.id, requesting_user_id="user-1", workflow_run_id="does-not-exist"
+        )

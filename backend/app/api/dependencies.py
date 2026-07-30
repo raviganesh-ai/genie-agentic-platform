@@ -23,6 +23,7 @@ from app.services.foundry_agent_synchronization_service import FoundryAgentSynch
 from app.services.output_service import OutputService
 from app.services.peer_review_service import PeerReviewService
 from app.services.requirements_service import RequirementsService
+from app.services.service_policy_service import ServicePolicyService
 from app.services.session_service import SessionService
 from app.services.workshop_service import WorkshopService
 from app.transcription.speech_service import SpeechToTextService
@@ -40,6 +41,7 @@ __all__ = [
     "get_peer_review_service",
     "get_replay_service",
     "get_requirements_service",
+    "get_service_policy_service",
     "get_session_service",
     "get_speech_to_text_service",
     "get_traceability_service",
@@ -78,6 +80,10 @@ def get_requirements_service(request: Request) -> RequirementsService:
 
 def get_peer_review_service(request: Request) -> PeerReviewService:
     return request.app.state.peer_review_service
+
+
+def get_service_policy_service(request: Request) -> ServicePolicyService:
+    return request.app.state.service_policy_service
 
 
 def get_governance_service(request: Request) -> GovernanceService:

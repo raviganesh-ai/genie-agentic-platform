@@ -8,10 +8,17 @@ one session, per the Governance Requirements in
 ``POST /checkpoints/confirm`` (the Discovery Wizard's Responsible AI
 Accountability "Proceed to Next Step" gate), ``GET .../gate-report`` (the
 Governance Reviewer's Peer Review verdict, see
-``app.services.peer_review_service``), ``POST .../fixes`` (regenerate the
-build to resolve selected findings and re-run every gate step), and
-``POST .../risk-acceptance`` (a human's explicit, justified acceptance of
-residual Peer Review risk before deploying anyway).
+``app.services.peer_review_service``), ``GET .../agent-assessments`` (the
+Security Assessment Agent's and Test Generation Agent's own early, per-
+agent gate verdicts - available before the consolidated gate report),
+``GET .../service-policy`` (the real, consolidated policy - deployment
+approval checkpoints, governance tracking, memory access policy, and the
+Governance Reviewer's own access-control narrative - that will govern this
+build once deployed, see ``app.services.service_policy_service``),
+``POST .../fixes`` (regenerate the build to resolve selected findings and
+re-run every gate step), and ``POST .../risk-acceptance`` (a human's
+explicit, justified acceptance of residual Peer Review risk before
+deploying anyway).
 """
 from __future__ import annotations
 
@@ -21,15 +28,18 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.api.dependencies import (
     get_governance_service,
     get_peer_review_service,
+    get_service_policy_service,
     get_session_service,
 )
 from app.governance.governance_service import GovernanceService
 from app.models.governance_event import GovernanceEvent
-from app.models.governance_gate_report import GovernanceGateReport
+from app.models.governance_gate_report import AgentAssessmentsReport, GovernanceGateReport
+from app.models.service_policy import ServicePolicy
 from app.models.workflow_models import WorkflowRunResult
 from app.security.auth_models import AuthenticatedUser
 from app.security.dependencies import get_current_user
 from app.services.peer_review_service import PeerReviewService
+from app.services.service_policy_service import ServicePolicyService
 from app.services.session_service import SessionService
 
 router = APIRouter(prefix="/sessions/{session_id}/governance", tags=["governance"])
@@ -95,6 +105,42 @@ async def get_gate_report(
     peer_review_service: PeerReviewService = Depends(get_peer_review_service),
 ) -> GovernanceGateReport:
     return await peer_review_service.get_gate_report(
+        session_id=session_id, requesting_user_id=user.user_id, workflow_run_id=workflow_run_id
+    )
+
+
+@router.get("/{workflow_run_id}/agent-assessments")
+async def get_agent_assessments(
+    session_id: str,
+    workflow_run_id: str,
+    user: AuthenticatedUser = Depends(get_current_user),
+    peer_review_service: PeerReviewService = Depends(get_peer_review_service),
+) -> AgentAssessmentsReport:
+    """Early-visibility per-agent verdicts (Security Assessment Agent's own
+    security gate, Test Generation Agent's own test-coverage gate) - each
+    available as soon as that agent's own step completes, without waiting
+    for the slower, consolidated Governance Reviewer verdict at
+    ``/gate-report``.
+    """
+    return await peer_review_service.get_agent_assessments(
+        session_id=session_id, requesting_user_id=user.user_id, workflow_run_id=workflow_run_id
+    )
+
+
+@router.get("/{workflow_run_id}/service-policy")
+async def get_service_policy(
+    session_id: str,
+    workflow_run_id: str,
+    user: AuthenticatedUser = Depends(get_current_user),
+    service_policy_service: ServicePolicyService = Depends(get_service_policy_service),
+) -> ServicePolicy:
+    """The real, consolidated policy that will govern this build once deployed:
+    the approval checkpoints gating deployment (with their actual per-session
+    status), the governance tracking/decision-lineage/session-replay policy,
+    the memory tier access policy, and the Governance Reviewer agent's own
+    real access-control narrative for this specific build.
+    """
+    return await service_policy_service.get_service_policy(
         session_id=session_id, requesting_user_id=user.user_id, workflow_run_id=workflow_run_id
     )
 

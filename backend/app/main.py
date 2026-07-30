@@ -42,6 +42,7 @@ from app.api.error_mapping import domain_error_handler
 from app.config.settings import Settings, get_settings
 from app.governance.replay_service import ReplayService
 from app.governance.traceability_service import TraceabilityService
+from app.memory.memory_access_policy_service import MemoryAccessPolicyService
 from app.orchestration.agent_orchestrator import create_agent_orchestrator
 from app.prompts.registry import PromptRegistry
 from app.security.token_validator import create_token_validator
@@ -54,6 +55,7 @@ from app.services.foundry_agent_synchronization_service import (
 from app.services.output_service import create_output_service
 from app.services.peer_review_service import create_peer_review_service
 from app.services.requirements_service import create_requirements_service
+from app.services.service_policy_service import create_service_policy_service
 from app.services.session_service import create_session_service
 from app.services.workshop_service import create_workshop_service
 from app.transcription.speech_service import create_speech_to_text_service
@@ -231,6 +233,14 @@ def create_app(
             session_service=session_service,
             governance_review_step_id=resolved_settings.governance_review_step_id,
             gated_step_ids=resolved_settings.peer_review_gated_step_ids,
+        )
+        app.state.service_policy_service = create_service_policy_service(
+            orchestrator=orchestrator,
+            session_service=session_service,
+            approval_service=orchestrator.approval_service,
+            governance_service=orchestrator.governance_service,
+            memory_policy_service=MemoryAccessPolicyService.load(resolved_settings.policies_path),
+            governance_review_step_id=resolved_settings.governance_review_step_id,
         )
         app.state.replay_service = ReplayService(
             governance_service=orchestrator.governance_service,

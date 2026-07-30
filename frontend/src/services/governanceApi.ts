@@ -1,5 +1,10 @@
 import { apiFetch } from "./httpClient";
-import type { GovernanceEvent, GovernanceGateReport } from "@/types/governance";
+import type {
+  AgentAssessmentsReport,
+  GovernanceEvent,
+  GovernanceGateReport,
+  ServicePolicy,
+} from "@/types/governance";
 import type { WorkflowRunResult } from "@/types/workflow";
 
 export const governanceApi = {
@@ -27,6 +32,28 @@ export const governanceApi = {
   getGateReport(sessionId: string, workflowRunId: string): Promise<GovernanceGateReport> {
     return apiFetch<GovernanceGateReport>(
       `/sessions/${sessionId}/governance/${workflowRunId}/gate-report`,
+    );
+  },
+  /**
+   * Each specialist agent's own early, single-gate verdict (Security
+   * Assessment Agent's security gate, Test Generation Agent's test-coverage
+   * gate) - available as soon as that agent's own step completes, without
+   * waiting for the slower, consolidated getGateReport verdict above.
+   */
+  getAgentAssessments(sessionId: string, workflowRunId: string): Promise<AgentAssessmentsReport> {
+    return apiFetch<AgentAssessmentsReport>(
+      `/sessions/${sessionId}/governance/${workflowRunId}/agent-assessments`,
+    );
+  },
+  /**
+   * The real, consolidated policy that will govern this build once deployed:
+   * deployment checkpoint approval statuses, the enforced governance-tracking
+   * and memory-access policy documents, and the Governance Reviewer agent's
+   * own narrative describing the access control it decided this build needs.
+   */
+  getServicePolicy(sessionId: string, workflowRunId: string): Promise<ServicePolicy> {
+    return apiFetch<ServicePolicy>(
+      `/sessions/${sessionId}/governance/${workflowRunId}/service-policy`,
     );
   },
   /**

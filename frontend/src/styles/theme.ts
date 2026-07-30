@@ -35,6 +35,7 @@ export const genieDarkTheme: Theme = createDarkTheme(genieBrandRamp);
  */
 export const statusPalette = {
   compliant: "#3fa66a",
+  pending: "#2f83e0",
   warning: "#d8a325",
   blocked: "#c94f4f",
   incomplete: "#8a8f98",

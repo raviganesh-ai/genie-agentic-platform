@@ -83,10 +83,16 @@ export interface RecommendationLineage {
   timestamp: string;
 }
 
-/** Aggregate governance health, derived client-side from governance events +
- * approvals already returned by the backend (see useGovernanceTrace). */
+/** Aggregate governance health, derived client-side from governance events,
+ * approvals, and the real GovernanceGateReport verdict (see
+ * useGovernanceTrace's deriveComplianceState) - "compliant" is only ever
+ * reported once the Governance Reviewer agent has actually returned a
+ * "reviewed" gate report with an "approved" decision; before that (or
+ * while nothing has happened yet) the state is "pending", never a
+ * premature default of "compliant". */
 export type GovernanceComplianceState =
   | "compliant"
+  | "pending"
   | "warning"
   | "blocked"
   | "incomplete"
@@ -116,5 +122,100 @@ export interface GovernanceGateReport {
   code_quality_gate: GateStatus | null;
   findings: GovernanceFinding[];
   decision: PeerReviewDecision | null;
+  assessed_by_agent_id: string | null;
+}
+
+/** Mirrors backend/app/models/governance_gate_report.py's AgentAssessment(s)
+ * 1:1. Each specialist agent's own single-gate verdict (Security Assessment
+ * Agent's security gate, Test Generation Agent's test-coverage gate), read
+ * directly from that agent's own step output - available as soon as that
+ * step completes, without waiting for the slower, consolidated
+ * GovernanceGateReport verdict above. */
+export type AgentAssessmentStatus = "pending" | "reviewed" | "undetermined";
+
+export interface AgentAssessment {
+  status: AgentAssessmentStatus;
+  gate: GateStatus | null;
+  summary: string;
+  findings: GovernanceFinding[];
+  tests_generated: number;
+  assessed_by_agent_id: string | null;
+}
+
+export interface AgentAssessmentsReport {
+  security_assessment: AgentAssessment;
+  test_generation: AgentAssessment;
+}
+
+/** Mirrors backend/app/models/service_policy.py 1:1. The real, consolidated
+ * policy that will govern a build once it is deployed - never fabricated:
+ * every field is either copied from an already-loaded, already-enforced
+ * policy document (config/policies/{approval,governance,memory}_policy.yaml)
+ * together with each deployment checkpoint's actual per-session approval
+ * status, or the Governance Reviewer agent's own real narrative describing
+ * the access control it decided this build needs, read verbatim from its
+ * governance-review step output. */
+export type ServicePolicyStatus = "pending" | "ready";
+
+export type DeploymentCheckpointRuntimeStatus = ApprovalRequestStatus | "not_reached";
+
+export interface DeploymentCheckpointStatus {
+  checkpoint_id: string;
+  name: string;
+  description: string;
+  required: boolean;
+  status: DeploymentCheckpointRuntimeStatus;
+}
+
+export interface GovernanceTrackingPolicy {
+  track_registration: boolean;
+  track_versions: boolean;
+  track_lifecycle: boolean;
+  track_executions: boolean;
+  track_communication: boolean;
+  track_memory_reads: boolean;
+  track_memory_writes: boolean;
+  track_tool_requests: boolean;
+  track_policy_evaluations: boolean;
+  track_denied_access: boolean;
+}
+
+export interface DecisionLineagePolicy {
+  require_evidence_references: boolean;
+}
+
+export interface SessionReplayPolicy {
+  enabled: boolean;
+}
+
+export interface PersonalAgentMemoryPolicy {
+  accessible_by: string;
+}
+
+export interface SharedCollaborationMemoryPolicy {
+  accessible_by: string;
+  emits_governance_events: boolean;
+  require_approval_for_overwrite: boolean;
+}
+
+export interface EnterpriseKnowledgeMemoryPolicy {
+  accessible_by: string;
+  requires_approval_to_promote: boolean;
+}
+
+export interface MemoryAccessPolicy {
+  personal_agent_memory: PersonalAgentMemoryPolicy;
+  shared_collaboration_memory: SharedCollaborationMemoryPolicy;
+  enterprise_knowledge_memory: EnterpriseKnowledgeMemoryPolicy;
+}
+
+export interface ServicePolicy {
+  status: ServicePolicyStatus;
+  deployment_checkpoints: DeploymentCheckpointStatus[];
+  governance_tracking: GovernanceTrackingPolicy;
+  decision_lineage: DecisionLineagePolicy;
+  session_replay: SessionReplayPolicy;
+  memory_access_policy: MemoryAccessPolicy;
+  access_control_summary: string;
   assessed_by_agent_id: string | null;
 }

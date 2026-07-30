@@ -1,5 +1,12 @@
 import type { WorkflowRunResult } from "@/types/workflow";
-import type { ApprovalRequest, GovernanceEvent, GovernanceGateReport } from "@/types/governance";
+import type {
+  AgentAssessment,
+  AgentAssessmentsReport,
+  ApprovalRequest,
+  GovernanceEvent,
+  GovernanceGateReport,
+  ServicePolicy,
+} from "@/types/governance";
 import type { DecisionGraph } from "@/types/collaboration";
 import type { SessionReplayResponse } from "@/types/replay";
 import type { ArchitectureSnapshot } from "@/types/architecture";
@@ -94,6 +101,90 @@ export function buildGovernanceGateReport(
     code_quality_gate: "pass",
     findings: [],
     decision: "approved",
+    assessed_by_agent_id: "governance-reviewer",
+    ...overrides,
+  };
+}
+
+function buildAgentAssessment(overrides: Partial<AgentAssessment> = {}): AgentAssessment {
+  return {
+    status: "pending",
+    gate: null,
+    summary: "",
+    findings: [],
+    tests_generated: 0,
+    assessed_by_agent_id: null,
+    ...overrides,
+  };
+}
+
+export function buildAgentAssessmentsReport(
+  overrides: Partial<AgentAssessmentsReport> = {},
+): AgentAssessmentsReport {
+  return {
+    security_assessment: buildAgentAssessment({
+      status: "reviewed",
+      gate: "pass",
+      summary: "SECURITY_GATE: PASS\nFINDINGS:\nNone.\n",
+      assessed_by_agent_id: "security-assessment-agent",
+    }),
+    test_generation: buildAgentAssessment({
+      status: "reviewed",
+      gate: "pass",
+      summary: "TEST_COVERAGE_GATE: PASS\nFINDINGS:\nNone.\n",
+      tests_generated: 4,
+      assessed_by_agent_id: "test-generation-agent",
+    }),
+    ...overrides,
+  };
+}
+
+export function buildServicePolicy(overrides: Partial<ServicePolicy> = {}): ServicePolicy {
+  return {
+    status: "ready",
+    deployment_checkpoints: [
+      {
+        checkpoint_id: "build-review-approval",
+        name: "Build Review Approval",
+        description: "A human must review and approve the generated build before deployment.",
+        required: true,
+        status: "approved",
+      },
+      {
+        checkpoint_id: "final-output-approval",
+        name: "Final Output Approval",
+        description: "A human must approve the final output before it is launched.",
+        required: true,
+        status: "not_reached",
+      },
+    ],
+    governance_tracking: {
+      track_registration: true,
+      track_versions: true,
+      track_lifecycle: true,
+      track_executions: true,
+      track_communication: true,
+      track_memory_reads: true,
+      track_memory_writes: true,
+      track_tool_requests: true,
+      track_policy_evaluations: true,
+      track_denied_access: true,
+    },
+    decision_lineage: { require_evidence_references: true },
+    session_replay: { enabled: true },
+    memory_access_policy: {
+      personal_agent_memory: { accessible_by: "owning_agent" },
+      shared_collaboration_memory: {
+        accessible_by: "session_participants",
+        emits_governance_events: true,
+        require_approval_for_overwrite: true,
+      },
+      enterprise_knowledge_memory: {
+        accessible_by: "approved_reviewers",
+        requires_approval_to_promote: true,
+      },
+    },
+    access_control_summary: "Least-privilege roles only; no secrets embedded.",
     assessed_by_agent_id: "governance-reviewer",
     ...overrides,
   };

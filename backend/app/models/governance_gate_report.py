@@ -17,6 +17,9 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 __all__ = [
+    "AgentAssessment",
+    "AgentAssessmentStatus",
+    "AgentAssessmentsReport",
     "GateName",
     "GateStatus",
     "GovernanceFinding",
@@ -73,3 +76,52 @@ class GovernanceGateReport(BaseModel):
         default=None,
         description="The agent id that produced the assessed step output, if the step has run.",
     )
+
+
+AgentAssessmentStatus = Literal["pending", "reviewed", "undetermined"]
+"""
+- pending: the underlying step (security-assessment or test-generation) has
+  not completed yet.
+- reviewed: the step completed and its own output contained a parseable
+  single-gate verdict.
+- undetermined: the step completed but its output did not contain a
+  parseable verdict.
+"""
+
+
+class AgentAssessment(BaseModel):
+    """One specialist agent's own single-gate assessment (Security Assessment
+    Agent's security gate, or Test Generation Agent's test-coverage gate),
+    read directly from that agent's own step output - available as soon as
+    that step completes, without waiting for the Governance Reviewer's
+    slower consolidated Peer Review verdict (see ``GovernanceGateReport``)
+    to also finish. Never invents a verdict: mirrors the exact same
+    "agents return marker-line text, Genie only reports what the agent
+    itself stated" convention as ``GovernanceGateReport``.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    status: AgentAssessmentStatus
+    gate: GateStatus | None = None
+    summary: str = Field(
+        default="", description="The agent's full raw narrative output text, verbatim."
+    )
+    findings: list[GovernanceFinding] = Field(default_factory=list)
+    tests_generated: int = Field(
+        default=0,
+        description="Count of fenced code blocks in the Test Generation Agent's own "
+        "output (a real, directly-counted quantity - never an estimated or invented "
+        "percentage). Always 0 for the security assessment.",
+    )
+    assessed_by_agent_id: str | None = None
+
+
+class AgentAssessmentsReport(BaseModel):
+    """Combined early-visibility view of the two specialist agents that feed the
+    Governance Reviewer's consolidated Peer Review verdict."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    security_assessment: AgentAssessment
+    test_generation: AgentAssessment
