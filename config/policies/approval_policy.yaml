@@ -21,6 +21,14 @@ checkpoints:
       output generation.
     required: true
 
+  - id: build-review-approval
+    name: Build Review Approval
+    description: >-
+      Human approval of the Build Agent's generated code (Workshop page)
+      before the automated governance phase (security assessment, test
+      generation, governance review) proceeds.
+    required: true
+
   - id: final-output-approval
     name: Final Output Approval
     description: >-
