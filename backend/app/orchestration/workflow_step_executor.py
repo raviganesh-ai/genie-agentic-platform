@@ -14,6 +14,7 @@ from datetime import UTC, datetime
 from app.agents.gateway import AgentGateway, get_enabled_agent, resolve_prompt_text
 from app.agents.models import AgentDefinition, AgentExecutionRequest, AgentExecutionResult
 from app.agents.registry import AgentRegistry
+from app.agents.tools.orchestration_tools import resolve_delegate_agent_id
 from app.governance.governance_service import GovernanceService
 from app.memory.memory_service import MemoryService
 from app.models.workflow_models import WorkflowStepInput, WorkflowStepResult
@@ -36,6 +37,30 @@ def _preview(output_text: str | None) -> str | None:
     if len(flattened) <= _PREVIEW_MAX_LENGTH:
         return flattened
     return f"{flattened[:_PREVIEW_MAX_LENGTH]}..."
+
+
+def _display_agent_id(step: WorkflowStep, fallback_agent_id: str) -> str:
+    """Returns the real specialist agent id a live step event should be attributed to.
+
+    Every ``solution-discovery-workflow`` step's own configured ``agent_id``
+    is ``"genie-orchestrator"`` (see ``config/workflows/registry.yaml`` -
+    the orchestrator delegates the real work via its one allowed
+    ``call_<specialist>`` tool). Live ``step_started``/``step_delta``/
+    ``step_completed``/``step_failed`` events shown to users (e.g.
+    ``LiveWorkflowPulse``) must attribute to that real specialist - never
+    the orchestrator itself - so they read consistently with the delegated
+    tool call's own ``step_delta`` events (see
+    ``orchestration_tools._stream_and_publish_deltas``), which already tag
+    with the specialist's id. Falls back to ``fallback_agent_id`` (the
+    step's configured agent) if no delegation is resolvable (e.g. a step
+    with no ``allowed_tool_names``).
+    """
+
+    for tool_name in step.allowed_tool_names or []:
+        target_agent_id = resolve_delegate_agent_id(tool_name)
+        if target_agent_id is not None:
+            return target_agent_id
+    return fallback_agent_id
 
 
 class MissingPromptError(RuntimeError):
@@ -184,13 +209,15 @@ class WorkflowStepExecutor:
         if self._event_bus is None or not workflow_run_id:
             return await self._agent_gateway.execute(request)
 
+        display_agent_id = _display_agent_id(step, agent.id)
+
         await self._event_bus.publish(
             WorkflowStreamEvent(
                 event_type="step_started",
                 session_id=session_id,
                 workflow_run_id=workflow_run_id,
                 step_id=step.id,
-                agent_id=agent.id,
+                agent_id=display_agent_id,
             )
         )
         try:
@@ -203,7 +230,7 @@ class WorkflowStepExecutor:
                             session_id=session_id,
                             workflow_run_id=workflow_run_id,
                             step_id=step.id,
-                            agent_id=agent.id,
+                            agent_id=display_agent_id,
                             delta=chunk.delta,
                         )
                     )
@@ -216,7 +243,7 @@ class WorkflowStepExecutor:
                     session_id=session_id,
                     workflow_run_id=workflow_run_id,
                     step_id=step.id,
-                    agent_id=agent.id,
+                    agent_id=display_agent_id,
                     error=str(exc),
                 )
             )
@@ -230,7 +257,7 @@ class WorkflowStepExecutor:
                     session_id=session_id,
                     workflow_run_id=workflow_run_id,
                     step_id=step.id,
-                    agent_id=agent.id,
+                    agent_id=display_agent_id,
                     error=reason,
                 )
             )
@@ -242,7 +269,7 @@ class WorkflowStepExecutor:
                 session_id=session_id,
                 workflow_run_id=workflow_run_id,
                 step_id=step.id,
-                agent_id=agent.id,
+                agent_id=display_agent_id,
                 output_preview=_preview(result.output_text),
             )
         )

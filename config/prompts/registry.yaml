@@ -121,18 +121,30 @@ prompts:
       each as a markdown "## " header followed by a one-sentence summary
       of that section, then its own items:
 
-      "## UI Design" - every new requirement's UI need only do three
-      things: let the user interact with (kick off, respond to, or steer)
-      the agentic workflow, show that agent flow's live progress, and
-      present/let the user share its output - do not invent bespoke
-      screens beyond that interaction/progress/output loop unless a
-      requirement explicitly demands something else. The UI must only
-      ever be shown interacting with the single Orchestrator Agent you
-      designate below in "## Multi-Agent Workflow" - never name or depict
-      any other specialist agent here, since the UI never talks to them
-      directly. One bullet per key screen/interaction, each as "**<Screen
-      name>** --> **<Orchestrator Agent name>**: <what the user sees and
-      does there, and which requirement(s) it fulfills>".
+      "## UI Design" - this UI exists for exactly one purpose: let
+      someone quickly try out and be wowed by the actual agentic workflow
+      you design below, not to simulate a finished production product.
+      Default to exactly three screens, no more: one to let the user
+      interact with (kick off, respond to, or steer) the agentic
+      workflow, one that shows that agent flow's live progress as it
+      genuinely happens (which agent is working, what it is doing/
+      producing, in real time), and one that presents/lets the user share
+      its final output. Do not add extra screens for administration,
+      configuration, rules/settings management, exception or correction
+      queues, audit logs, or operational metrics/reporting dashboards -
+      none of those help a first-time user experience or test the
+      agentic flow itself, and only add a fourth screen at all if the
+      requirements' own "Critical path:" scope explicitly and
+      unavoidably demands one. Keep every screen's description realistic
+      and concrete about what the live agent flow looks like on it (not
+      generic form/dashboard boilerplate), since showing that flow
+      happen is the entire point of this UI. The UI must only ever be
+      shown interacting with the single Orchestrator Agent you designate
+      below in "## Multi-Agent Workflow" - never name or depict any other
+      specialist agent here, since the UI never talks to them directly.
+      One bullet per screen/interaction, each as "**<Screen name>** -->
+      **<Orchestrator Agent name>**: <what the user sees and does there,
+      and which requirement(s) it fulfills>".
 
       "## Multi-Agent Workflow" - decide how many specialist agents this
       solution needs and what each one is responsible for, based solely
@@ -153,7 +165,7 @@ prompts:
     variables:
       - approved_requirements
       - user_message
-    version: "3.2.0"
+    version: "3.3.0"
 
   - id: security-assessment-v1
     name: Security Assessment
