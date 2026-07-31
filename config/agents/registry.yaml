@@ -93,16 +93,15 @@ agents:
     # The Agentic Workflow this architecture leads into for the approved
     # requirement scope: once the architecture is designed, the Build
     # Agent generates the UI + dedicated multi-agent workflow, the
-    # Governance Reviewer evaluates it against policy, and the Deployment
-    # Agent provisions/launches it - this mirrors genie-orchestrator's own
-    # connected_agent_ids above, scoped to what this agent's own design
-    # sets in motion.
+    # Peer Review Agent evaluates it against policy, and the real Deploy
+    # & Launch pipeline provisions/launches it - this mirrors
+    # genie-orchestrator's own connected_agent_ids above, scoped to what
+    # this agent's own design sets in motion.
     connected_agent_ids:
       - build-agent
       - security-assessment-agent
       - test-generation-agent
-      - governance-reviewer
-      - deployment-agent
+      - peer-review-agent
     enabled: true
 
   - id: build-agent
@@ -138,8 +137,7 @@ agents:
       generated UI and agent code against the OWASP Top 10 on every
       review (not only what changed since a prior review), and reports a
       pass/fail security gate verdict with findings and remediation
-      recommendations for the Governance Reviewer (Peer Reviewer) to
-      consolidate.
+      recommendations for the Peer Review Agent to consolidate.
     capabilities:
       - security_review
       - vulnerability_detection
@@ -159,8 +157,8 @@ agents:
       Generates unit, integration, and UI test cases covering every
       function, endpoint, and interaction the Build Agent generated, and
       reports a pass/fail test-coverage gate verdict based on structural
-      completeness against the approved requirements for the Governance
-      Reviewer (Peer Reviewer) to consolidate.
+      completeness against the approved requirements for the Peer Review
+      Agent to consolidate.
     capabilities:
       - test_case_generation
       - coverage_assessment
@@ -171,24 +169,6 @@ agents:
     owner: governance-team
     governance_policy_id: standard-governance-policy-v1
     prompt_template_ref: test-generation-v1
-    enabled: true
-
-  - id: deployment-agent
-    name: Deployment Agent
-    role: solution_deployment
-    description: >-
-      Provisions the agents and UI designed by the Build Agent, and
-      returns a launch link for the customer to interact with them.
-    capabilities:
-      - agent_provisioning
-      - launch_link_generation
-    allowed_tools: []
-    memory_access:
-      - shared
-    foundry_agent_id: deployment-agent
-    owner: architecture-team
-    governance_policy_id: standard-governance-policy-v1
-    prompt_template_ref: deployment-v1
     enabled: true
 
   - id: genie-orchestrator
@@ -219,8 +199,7 @@ agents:
       - build-agent
       - security-assessment-agent
       - test-generation-agent
-      - governance-reviewer
-      - deployment-agent
+      - peer-review-agent
     tool_definitions:
       - name: call_requirements_analyst
         description: >-
@@ -289,10 +268,10 @@ agents:
           - name: user_message
             type: string
             description: Optional customer chat message for this phase, or empty.
-      - name: call_governance_reviewer
+      - name: call_peer_review_agent
         description: >-
-          Delegate the governance-review phase to the Governance Reviewer
-          agent and return its real output verbatim.
+          Delegate the peer-review phase to the Peer Review Agent and
+          return its real output verbatim.
         parameters:
           - name: artifact
             type: string
@@ -309,36 +288,22 @@ agents:
           - name: user_message
             type: string
             description: Optional customer chat message for this phase, or empty.
-      - name: call_deployment_agent
-        description: >-
-          Delegate the deployment phase to the Deployment Agent and
-          return its real output verbatim.
-        parameters:
-          - name: build_output
-            type: string
-            description: The approved build output to deploy.
-          - name: governance_decision
-            type: string
-            description: The governance reviewer's recorded decision.
-          - name: user_message
-            type: string
-            description: Optional customer chat message for this phase, or empty.
     owner: platform-engineering-team
     governance_policy_id: standard-governance-policy-v1
     prompt_template_ref: orchestrator-mission-v1
     enabled: true
 
-  - id: governance-reviewer
-    name: Governance Reviewer
-    role: governance
+  - id: peer-review-agent
+    name: Peer Review Agent
+    role: peer_review
     description: >-
-      Acts as Genie's Peer Reviewer and security/testing custodian:
-      reviews agent and workflow outputs for policy compliance, records
-      approval decisions and decision lineage, and consolidates the
-      Security Assessment Agent's and Test Generation Agent's findings
-      with its own architecture and code-quality review into a single
-      security / test-coverage / architecture / code-quality gate
-      verdict. Deployment is blocked unless every gate passes or a human
+      Independently reviews every code component the Build Agent
+      generated for policy compliance, records approval decisions and
+      decision lineage, and consolidates the Security Assessment Agent's
+      and Test Generation Agent's findings with its own architecture and
+      code-quality review into a single security / test-coverage /
+      architecture / code-quality gate verdict with per-component
+      feedback. Deployment is blocked unless every gate passes or a human
       explicitly accepts the residual risk.
     capabilities:
       - policy_review
@@ -347,10 +312,10 @@ agents:
     allowed_tools: []
     memory_access:
       - shared
-    foundry_agent_id: governance-reviewer
+    foundry_agent_id: peer-review-agent
     owner: governance-team
     governance_policy_id: standard-governance-policy-v1
-    prompt_template_ref: governance-review-v1
+    prompt_template_ref: peer-review-v1
     enabled: true
 
   - id: debugging-agent

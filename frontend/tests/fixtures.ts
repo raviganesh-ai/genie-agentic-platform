@@ -5,7 +5,6 @@ import type {
   ApprovalRequest,
   GovernanceEvent,
   GovernanceGateReport,
-  ServicePolicy,
 } from "@/types/governance";
 import type { DecisionGraph } from "@/types/collaboration";
 import type { SessionReplayResponse } from "@/types/replay";
@@ -101,7 +100,7 @@ export function buildGovernanceGateReport(
     code_quality_gate: "pass",
     findings: [],
     decision: "approved",
-    assessed_by_agent_id: "governance-reviewer",
+    assessed_by_agent_id: "peer-review-agent",
     ...overrides,
   };
 }
@@ -135,57 +134,6 @@ export function buildAgentAssessmentsReport(
       tests_generated: 4,
       assessed_by_agent_id: "test-generation-agent",
     }),
-    ...overrides,
-  };
-}
-
-export function buildServicePolicy(overrides: Partial<ServicePolicy> = {}): ServicePolicy {
-  return {
-    status: "ready",
-    deployment_checkpoints: [
-      {
-        checkpoint_id: "build-review-approval",
-        name: "Build Review Approval",
-        description: "A human must review and approve the generated build before deployment.",
-        required: true,
-        status: "approved",
-      },
-      {
-        checkpoint_id: "final-output-approval",
-        name: "Final Output Approval",
-        description: "A human must approve the final output before it is launched.",
-        required: true,
-        status: "not_reached",
-      },
-    ],
-    governance_tracking: {
-      track_registration: true,
-      track_versions: true,
-      track_lifecycle: true,
-      track_executions: true,
-      track_communication: true,
-      track_memory_reads: true,
-      track_memory_writes: true,
-      track_tool_requests: true,
-      track_policy_evaluations: true,
-      track_denied_access: true,
-    },
-    decision_lineage: { require_evidence_references: true },
-    session_replay: { enabled: true },
-    memory_access_policy: {
-      personal_agent_memory: { accessible_by: "owning_agent" },
-      shared_collaboration_memory: {
-        accessible_by: "session_participants",
-        emits_governance_events: true,
-        require_approval_for_overwrite: true,
-      },
-      enterprise_knowledge_memory: {
-        accessible_by: "approved_reviewers",
-        requires_approval_to_promote: true,
-      },
-    },
-    access_control_summary: "Least-privilege roles only; no secrets embedded.",
-    assessed_by_agent_id: "governance-reviewer",
     ...overrides,
   };
 }
@@ -260,7 +208,7 @@ export function buildAgentSummaries(): AgentSummary[] {
       name: "Architecture Designer",
       role: "architecture_design",
       description: "Derives a customer-specific multi-agent workflow and UI design from approved requirements.",
-      connected_agent_ids: ["build-agent", "governance-reviewer", "deployment-agent"],
+      connected_agent_ids: ["build-agent", "security-assessment-agent", "test-generation-agent", "peer-review-agent"],
       enabled: true,
     },
     {
@@ -272,18 +220,10 @@ export function buildAgentSummaries(): AgentSummary[] {
       enabled: true,
     },
     {
-      id: "governance-reviewer",
-      name: "Governance Reviewer",
-      role: "governance",
+      id: "peer-review-agent",
+      name: "Peer Review Agent",
+      role: "peer_review",
       description: "Evaluates generated artifacts against governance and security policies.",
-      connected_agent_ids: null,
-      enabled: true,
-    },
-    {
-      id: "deployment-agent",
-      name: "Deployment Agent",
-      role: "solution_deployment",
-      description: "Provisions the agents and UI, and returns a launch link.",
       connected_agent_ids: null,
       enabled: true,
     },

@@ -1,11 +1,11 @@
 """Integration test: the Discovery Wizard's human-in-the-loop confirmation endpoint.
 
-Exercises ``POST /sessions/{id}/governance/checkpoints/confirm`` end to end -
+Exercises ``POST /sessions/{id}/peer-review/checkpoints/confirm`` end to end -
 the Responsible AI Accountability control that permanently records, as a
 real ``GovernanceEvent``, every time a person explicitly proceeds the
 Discovery Wizard past a workflow stage. Confirms the recorded event is
 attributable to the authenticated caller (never a client-supplied value)
-and is visible via the existing read-only ``GET .../governance/events``.
+and is visible via the existing read-only ``GET .../peer-review/events``.
 """
 from __future__ import annotations
 
@@ -29,7 +29,7 @@ def test_confirm_checkpoint_records_a_governance_event_attributed_to_the_caller(
         session_id = session_resp.json()["id"]
 
         confirm_resp = client.post(
-            f"/sessions/{session_id}/governance/checkpoints/confirm",
+            f"/sessions/{session_id}/peer-review/checkpoints/confirm",
             json={
                 "trace_id": "trace-1",
                 "stage_key": "requirements",
@@ -48,7 +48,7 @@ def test_confirm_checkpoint_records_a_governance_event_attributed_to_the_caller(
             "confirmed_by": "user-1",
         }
 
-        events_resp = client.get(f"/sessions/{session_id}/governance/events", headers=headers)
+        events_resp = client.get(f"/sessions/{session_id}/peer-review/events", headers=headers)
         assert events_resp.status_code == 200
         assert any(e["id"] == event["id"] for e in events_resp.json())
 
@@ -64,7 +64,7 @@ def test_confirm_checkpoint_ignores_any_client_supplied_confirmed_by(local_setti
         session_id = session_resp.json()["id"]
 
         confirm_resp = client.post(
-            f"/sessions/{session_id}/governance/checkpoints/confirm",
+            f"/sessions/{session_id}/peer-review/checkpoints/confirm",
             json={
                 "trace_id": "trace-1",
                 "stage_key": "governance",
@@ -82,7 +82,7 @@ def test_confirm_checkpoint_requires_a_valid_session(local_settings) -> None:
 
     with TestClient(app) as client:
         resp = client.post(
-            "/sessions/does-not-exist/governance/checkpoints/confirm",
+            "/sessions/does-not-exist/peer-review/checkpoints/confirm",
             json={"trace_id": "trace-1", "stage_key": "requirements", "stage_label": "Requirement Discovery"},
             headers=headers,
         )

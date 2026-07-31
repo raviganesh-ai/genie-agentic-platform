@@ -15,12 +15,12 @@ import { AgentActivityAnimation } from "@/components/AgentActivityAnimation";
 import { useWorkflowEventStream, workflowStepDeltaKey } from "@/hooks/useWorkflowEventStream";
 import { GeneratedArtifacts } from "./GeneratedArtifacts";
 
-/** Gates entry into the automated governance phase (security-assessment,
- * test-generation, governance-review - see config/workflows/registry.yaml)
+/** Gates entry into the automated peer review phase (security-assessment,
+ * test-generation, peer-review - see config/workflows/registry.yaml)
  * until the user has reviewed the Build Agent's generated code here and
- * explicitly clicked "Proceed to Governance" - mirrors the
+ * explicitly clicked "Proceed to Peer Review" - mirrors the
  * architecture-approval gate on ArchitectureStudioPage. */
-const GOVERNANCE_CHECKPOINT_SUBJECT_ID = "security-assessment";
+const PEER_REVIEW_CHECKPOINT_SUBJECT_ID = "security-assessment";
 
 /** The build-solution step always delegates to this specialist (see the
  * `call_build_agent` entry in `_DELEGATIONS`, backend/app/agents/tools/
@@ -39,7 +39,7 @@ export function WorkshopPage(): JSX.Element {
   const [approveError, setApproveError] = useState<string | null>(null);
 
   // The Build Agent's UI + multi-agent workflow design is the
-  // build-solution step's own output (same run the Architecture/Governance
+  // build-solution step's own output (same run the Architecture/Peer Review
   // pages read from) - shown as one-by-one generated artifact cards below
   // instead of buried in chat.
   const runFetcher = useCallback(
@@ -83,35 +83,35 @@ export function WorkshopPage(): JSX.Element {
   // text.
   const liveBuildText = stepDeltaText[workflowStepDeltaKey(BUILD_STEP_ID, BUILD_AGENT_ID)] ?? "";
   const displayedBuildText = buildOutputText || liveBuildText;
-  const pendingGovernanceApproval = approvals?.find(
-    (request) => request.status === "pending" && request.subject_id === GOVERNANCE_CHECKPOINT_SUBJECT_ID,
+  const pendingPeerReviewApproval = approvals?.find(
+    (request) => request.status === "pending" && request.subject_id === PEER_REVIEW_CHECKPOINT_SUBJECT_ID,
   );
-  const governanceAlreadyStarted = Boolean(
-    run?.step_results.some((result) => result.step_id === GOVERNANCE_CHECKPOINT_SUBJECT_ID),
+  const peerReviewAlreadyStarted = Boolean(
+    run?.step_results.some((result) => result.step_id === PEER_REVIEW_CHECKPOINT_SUBJECT_ID),
   );
 
-  const handleProceedToGovernance = useCallback(async () => {
-    if (!sessionId || !workflowRunId || !pendingGovernanceApproval) return;
+  const handleProceedToPeerReview = useCallback(async () => {
+    if (!sessionId || !workflowRunId || !pendingPeerReviewApproval) return;
     setApproving(true);
     setApproveError(null);
     try {
-      await approvalApi.decide(sessionId, pendingGovernanceApproval.id, "approved");
+      await approvalApi.decide(sessionId, pendingPeerReviewApproval.id, "approved");
       const traceId = getTraceId(workflowRunId) ?? undefined;
-      // Navigate immediately - the Governance page has its own live event
-      // stream + polling and shows progress until governance-review's
-      // output arrives, the same pattern ArchitectureStudioPage uses for
-      // the architecture-approval -> build-solution handoff. This resume
-      // call is the one that actually reaches governance-review's wave
+      // Navigate immediately - the Peer Review page has its own live event
+      // stream + polling and shows progress until peer-review's output
+      // arrives, the same pattern ArchitectureStudioPage uses for the
+      // architecture-approval -> build-solution handoff. This resume call
+      // is the one that actually reaches peer-review's wave
       // (security-assessment/test-generation execute first in the same
-      // call, then governance-review immediately after), so it must
-      // re-supply the policies the user selected back on Architecture
-      // Studio - carried forward via SessionContext since that step never
-      // executes in the same call/page that originally captured them.
-      navigate("/governance");
+      // call, then peer-review immediately after), so it must re-supply
+      // the policies the user selected back on Architecture Studio -
+      // carried forward via SessionContext since that step never executes
+      // in the same call/page that originally captured them.
+      navigate("/peer-review");
       workflowApi
         .resumeRun(sessionId, workflowRunId, traceId, {
-          "governance-review": {
-            step_id: "governance-review",
+          "peer-review": {
+            step_id: "peer-review",
             variables: { policies: governancePolicies },
           },
         })
@@ -123,7 +123,7 @@ export function WorkshopPage(): JSX.Element {
     } finally {
       setApproving(false);
     }
-  }, [sessionId, workflowRunId, pendingGovernanceApproval, navigate, governancePolicies]);
+  }, [sessionId, workflowRunId, pendingPeerReviewApproval, navigate, governancePolicies]);
 
   if (!workflowRunId) {
     return (
@@ -169,7 +169,7 @@ export function WorkshopPage(): JSX.Element {
         )}
       </SectionCard>
 
-      {buildOutputText && !governanceAlreadyStarted ? (
+      {buildOutputText && !peerReviewAlreadyStarted ? (
         <SectionCard title="✅ Ready to proceed?">
           {approveError ? (
             <MessageBar intent="error" style={{ marginBottom: 8 }}>
@@ -188,14 +188,14 @@ export function WorkshopPage(): JSX.Element {
             <Button
               appearance="primary"
               style={{ marginTop: 8 }}
-              disabled={!pendingGovernanceApproval || approving}
-              onClick={() => void handleProceedToGovernance()}
+              disabled={!pendingPeerReviewApproval || approving}
+              onClick={() => void handleProceedToPeerReview()}
             >
               {approving
                 ? "Continuing..."
-                : pendingGovernanceApproval
-                  ? "Proceed to Governance"
-                  : "Preparing governance checkpoint..."}
+                : pendingPeerReviewApproval
+                  ? "Proceed to Peer Review"
+                  : "Preparing peer review checkpoint..."}
             </Button>
           ) : null}
         </SectionCard>

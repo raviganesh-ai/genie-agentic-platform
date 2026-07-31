@@ -36,7 +36,7 @@ describe("TriagePanel", () => {
   it("shows a gamified, concise live feed sourced from real agent_execution governance events", async () => {
     mockFetchSequence([
       {
-        match: "/governance/events",
+        match: "/peer-review/events",
         response: [
           buildAgentExecutionEvent(),
           buildAgentExecutionEvent({

@@ -114,36 +114,6 @@ async def test_call_requirements_analyst_delegates_and_records_governance_event(
     assert event["detail"]["output_preview"] == "Extracted requirements."
 
 
-async def test_call_deployment_agent_forwards_all_declared_variables():
-    registry = AgentToolRegistry()
-    gateway = _RecordingAgentGateway(output_text="Launch summary ready.")
-    governance_service = _RecordingGovernanceService()
-    register_orchestrator_delegation_tools(
-        registry, agent_gateway=gateway, governance_service=governance_service
-    )
-    context = ToolCallContext(agent=_orchestrator_agent(), session_id="session-1", trace_id="trace-1")
-
-    await registry.execute(
-        agent_id="genie-orchestrator",
-        tool_name="call_deployment_agent",
-        arguments={
-            "build_output": "The build.",
-            "governance_decision": "APPROVED",
-            "user_message": "",
-        },
-        context=context,
-    )
-
-    [request] = gateway.requests
-    assert request.agent_id == "deployment-agent"
-    assert request.prompt_id == "deployment-v1"
-    assert request.variables == {
-        "build_output": "The build.",
-        "governance_decision": "APPROVED",
-        "user_message": "",
-    }
-
-
 async def test_delegation_tool_fails_closed_without_a_session_id():
     registry = AgentToolRegistry()
     gateway = _RecordingAgentGateway()

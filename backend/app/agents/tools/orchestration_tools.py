@@ -129,18 +129,11 @@ _DELEGATIONS: tuple[_Delegation, ...] = (
         shared_memory_classification="roadmap_artifact",
     ),
     _Delegation(
-        tool_name="call_governance_reviewer",
-        target_agent_id="governance-reviewer",
-        target_prompt_id="governance-review-v1",
+        tool_name="call_peer_review_agent",
+        target_agent_id="peer-review-agent",
+        target_prompt_id="peer-review-v1",
         variable_names=("artifact", "policies", "security_findings", "test_plan", "user_message"),
         shared_memory_classification="approval",
-    ),
-    _Delegation(
-        tool_name="call_deployment_agent",
-        target_agent_id="deployment-agent",
-        target_prompt_id="deployment-v1",
-        variable_names=("build_output", "governance_decision", "user_message"),
-        shared_memory_classification="roadmap_artifact",
     ),
 )
 

@@ -20,8 +20,8 @@ export interface SessionContextValue {
   missionError: SafeError | null;
   /** The governance/policy expectations the user selected on the
    * Architecture Studio page (semicolon-joined, may be ""), carried
-   * forward so the Workshop page's "Proceed to Governance" action can
-   * still supply them as governance-review's step_input override - that
+   * forward so the Workshop page's "Proceed to Peer Review" action can
+   * still supply them as peer-review's step_input override - that
    * step only actually executes in a LATER, separate resume call than the
    * one Architecture Studio triggers, so the value can't just be a local
    * variable on that page. */

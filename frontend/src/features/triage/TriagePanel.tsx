@@ -73,8 +73,7 @@ const PHASE_ICONS: Record<string, string> = {
   "analyze-requirements": "📋",
   "design-architecture": "🏗️",
   "build-solution": "🤖",
-  "governance-review": "🔐",
-  "deploy-solution": "🚀",
+  "peer-review": "🔐",
 };
 
 type FlowNodeStatus = "complete" | "active" | "pending";
@@ -192,11 +191,11 @@ function ControlFlowMap({ completedStepIds, activeStepId }: { completedStepIds: 
 /**
  * Floating "triage mode" overlay: a concise, gamified live feed of real
  * agent calls made by the orchestrator, driven by the session's governance
- * event trail (`GET /sessions/{id}/governance/events`, category
+ * event trail (`GET /sessions/{id}/peer-review/events`, category
  * `agent_execution`) rather than the batched `WorkflowRunResult`.
  *
  * Why this data source matters: `WorkflowRuntime.run_workflow` can execute
- * several ungated steps (e.g. build-solution -> governance-review) inside
+ * several ungated steps (e.g. build-solution -> peer-review) inside
  * one synchronous run/resume HTTP call, and the run's stored result is only
  * updated once that whole call returns - polling the run would make the
  * feed jump in batches, not calls. Each individual agent call, by contrast,

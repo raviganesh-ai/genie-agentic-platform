@@ -138,6 +138,36 @@ export async function openEventStream(path: string, signal: AbortSignal): Promis
   return response;
 }
 
+/**
+ * Downloads a binary response (currently only the Deploy & Launch code +
+ * access-policy zip archive) as a `Blob`, using the same in-memory bearer
+ * token as every other call. Kept here - rather than in the calling
+ * service - for the same "every HTTP call goes through httpClient" reason
+ * as `openEventStream` above: `apiFetch` always parses its response body as
+ * JSON, which would corrupt a binary zip archive.
+ */
+export async function downloadBinary(path: string): Promise<{ blob: Blob; filename: string }> {
+  const headers: Record<string, string> = {};
+  const token = getAccessToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
+
+  let response: Response;
+  try {
+    response = await fetch(buildUrl(path), { headers });
+  } catch {
+    throw new ApiError("Unable to reach the Genie backend. Check your connection and try again.");
+  }
+
+  if (!response.ok) {
+    throw new ApiError(mapStatusToMessage(response.status), response.status);
+  }
+
+  const disposition = response.headers.get("Content-Disposition") ?? "";
+  const filenameMatch = /filename="?([^"]+)"?/.exec(disposition);
+  const filename = filenameMatch?.[1] ?? "download.zip";
+  return { blob: await response.blob(), filename };
+}
+
 function safeJsonParse(text: string): unknown {
   try {
     return JSON.parse(text);

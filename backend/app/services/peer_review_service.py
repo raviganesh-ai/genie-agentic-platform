@@ -1,13 +1,13 @@
 """Peer Review application service.
 
-Parses the Governance Reviewer agent's own structured Peer Review verdict
-(see ``governance-review-v1`` in ``config/prompts/registry.yaml``) out of
-the ``governance-review`` workflow step's ``output_text`` - following the
-exact same "agents return marker-line text, never JSON, Genie only
-reports the agent's own stated verdict" convention already established by
+Parses the Peer Review Agent's own structured Peer Review verdict (see
+``peer-review-v1`` in ``config/prompts/registry.yaml``) out of the
+``peer-review`` workflow step's ``output_text`` - following the exact same
+"agents return marker-line text, never JSON, Genie only reports the
+agent's own stated verdict" convention already established by
 ``app.services.requirements_service``. Also drives "Apply Selected Fixes":
 regenerating the build with a customer-selected subset of findings and
-forcing the security/test/governance gate steps to re-run against it.
+forcing the security/test/peer-review gate steps to re-run against it.
 """
 from __future__ import annotations
 
@@ -161,14 +161,14 @@ class PeerReviewService:
         *,
         orchestrator: AgentOrchestrator,
         session_service: SessionService,
-        governance_review_step_id: str,
+        peer_review_step_id: str,
         security_assessment_step_id: str,
         test_generation_step_id: str,
         gated_step_ids: tuple[str, ...],
     ) -> None:
         self._orchestrator = orchestrator
         self._session_service = session_service
-        self._governance_review_step_id = governance_review_step_id
+        self._peer_review_step_id = peer_review_step_id
         self._security_assessment_step_id = security_assessment_step_id
         self._test_generation_step_id = test_generation_step_id
         self._gated_step_ids = gated_step_ids
@@ -182,7 +182,7 @@ class PeerReviewService:
         run = self._get_run(workflow_run_id)
 
         step = next(
-            (r for r in run.step_results if r.step_id == self._governance_review_step_id), None
+            (r for r in run.step_results if r.step_id == self._peer_review_step_id), None
         )
         if step is None or step.status != "completed":
             return GovernanceGateReport(status="pending")
@@ -195,7 +195,7 @@ class PeerReviewService:
         """Returns each specialist agent's own single-gate assessment, read directly
         from that agent's step output as soon as it completes - available well
         before the slower, consolidated ``get_gate_report`` verdict (which also
-        waits on the Governance Reviewer's own review step).
+        waits on the Peer Review Agent's own review step).
         """
         await self._session_service.get_session(
             session_id=session_id, requesting_user_id=requesting_user_id
@@ -298,15 +298,15 @@ def create_peer_review_service(
     *,
     orchestrator: AgentOrchestrator,
     session_service: SessionService,
-    governance_review_step_id: str = "governance-review",
+    peer_review_step_id: str = "peer-review",
     security_assessment_step_id: str = "security-assessment",
     test_generation_step_id: str = "test-generation",
-    gated_step_ids: tuple[str, ...] = ("security-assessment", "test-generation", "governance-review"),
+    gated_step_ids: tuple[str, ...] = ("security-assessment", "test-generation", "peer-review"),
 ) -> PeerReviewService:
     return PeerReviewService(
         orchestrator=orchestrator,
         session_service=session_service,
-        governance_review_step_id=governance_review_step_id,
+        peer_review_step_id=peer_review_step_id,
         security_assessment_step_id=security_assessment_step_id,
         test_generation_step_id=test_generation_step_id,
         gated_step_ids=gated_step_ids,

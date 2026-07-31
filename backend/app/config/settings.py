@@ -66,6 +66,11 @@ class Settings(BaseSettings):
     azure_foundry_endpoint: str | None = None
     azure_foundry_project_name: str | None = None
 
+    # Azure subscription every real Deploy & Launch pipeline Azure mgmt SDK
+    # call (ACR, Container Apps, Storage) targets. Never hardcoded to a real
+    # subscription id (Configuration Rules).
+    azure_subscription_id: str | None = None
+
     # --- Azure AI Speech (call transcript/recording transcription) --------------
     # Full resource endpoint host, e.g. "https://<resource>.cognitiveservices.azure.com"
     # - either a dedicated Speech resource or a unified AIServices account that
@@ -113,21 +118,21 @@ class Settings(BaseSettings):
     # settings rather than hardcoding it in application code.
     requirements_qualification_step_id: str = "analyze-requirements"
 
-    # Id of the workflow step whose output_text carries the Governance
-    # Reviewer agent's structured Peer Review gate verdict (security,
-    # test-coverage, architecture, code-quality gates plus findings - see
+    # Id of the workflow step whose output_text carries the Peer Review
+    # Agent's structured Peer Review gate verdict (security, test-coverage,
+    # architecture, code-quality gates plus per-component findings - see
     # app.services.peer_review_service). Mirrors
     # requirements_qualification_step_id's naming-from-settings pattern.
-    governance_review_step_id: str = "governance-review"
+    peer_review_step_id: str = "peer-review"
 
     # Ids of the workflow steps that must be re-executed (alongside
     # build-solution) whenever a customer applies selected Peer Review
-    # fixes, so the security/test/governance gates are re-evaluated
+    # fixes, so the security/test/peer-review gates are re-evaluated
     # against the regenerated build rather than showing stale results.
     peer_review_gated_step_ids: tuple[str, ...] = (
         "security-assessment",
         "test-generation",
-        "governance-review",
+        "peer-review",
     )
 
     # --- CORS -------------------------------------------------------------------
@@ -136,6 +141,25 @@ class Settings(BaseSettings):
     # cross-origin browser access - so this must be explicitly configured per
     # deployment; never hardcoded to a real environment hostname in source.
     cors_allowed_origins: str = ""
+
+    # --- Deploy & Launch pipeline (real Azure automation for each mission's
+    # generated build) -----------------------------------------------------------
+    # The Azure resource group, container registry, Container Apps managed
+    # environment, storage account, and region every mission's generated
+    # backend/frontend are deployed into. All optional and unset by default -
+    # never hardcoded to a real subscription/resource - so a deployment must
+    # explicitly configure these before the Deploy & Launch pipeline's real
+    # steps (provision Foundry agents, deploy backend, deploy frontend) can
+    # run; see app.deploy_launch.pipeline_service.
+    deployment_resource_group: str | None = None
+    deployment_acr_name: str | None = None
+    deployment_container_apps_environment_id: str | None = None
+    deployment_storage_account_name: str | None = None
+    deployment_location: str | None = None
+    # Local filesystem root the pipeline materializes each mission's generated
+    # build under (one subdirectory per pipeline run id) before packaging it
+    # for ACR/Storage upload - never a customer-specific path in source.
+    deployment_build_workspace_root: Path = Path("var/deploy-launch-builds")
 
     @property
     def cors_allowed_origins_list(self) -> list[str]:
@@ -170,6 +194,12 @@ class Settings(BaseSettings):
         "key_vault_uri",
         "memory_store_endpoint",
         "lineage_store_endpoint",
+        "azure_subscription_id",
+        "deployment_resource_group",
+        "deployment_acr_name",
+        "deployment_container_apps_environment_id",
+        "deployment_storage_account_name",
+        "deployment_location",
         mode="after",
     )
     @classmethod

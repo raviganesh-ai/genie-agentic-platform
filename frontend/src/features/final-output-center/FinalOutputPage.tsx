@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Button, Text } from "@fluentui/react-components";
+import { useNavigate } from "react-router-dom";
 import { useSessionContext } from "@/state/SessionContext";
 import { useFinalOutput, useFinalOutputTypes, exportDeliverable } from "@/hooks/useFinalOutput";
 import { useAsyncResource } from "@/hooks/useAsyncResource";
@@ -11,7 +12,6 @@ import { SectionCard } from "@/components/SectionCard";
 import { LiveWorkflowPulse } from "@/components/LiveWorkflowPulse";
 import { AgentActivityAnimation } from "@/components/AgentActivityAnimation";
 import { useWorkflowEventStream } from "@/hooks/useWorkflowEventStream";
-import { splitIntoNamedSections } from "@/utils/textArtifacts";
 import type { DeliverablePackage, DeliverableType } from "@/types/workflow";
 
 const DELIVERABLE_LABELS: Record<DeliverableType, string> = {
@@ -43,11 +43,11 @@ function iconForSectionTitle(title: string): string {
 }
 
 export function FinalOutputPage(): JSX.Element {
+  const navigate = useNavigate();
   const { sessionId, workflowRunId } = useSessionContext();
   const { data: types, loading, error, refresh } = useFinalOutputTypes(sessionId);
   const { generate, generating, error: generateError } = useFinalOutput(sessionId);
   const [generated, setGenerated] = useState<DeliverablePackage | null>(null);
-  const [launched, setLaunched] = useState(false);
 
   const runFetcher = useCallback(
     () =>
@@ -68,20 +68,13 @@ export function FinalOutputPage(): JSX.Element {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lastLiveEvent]);
-  const buildOutput = useMemo(
-    () => run?.step_results.find((result) => result.step_id === "build-solution")?.output_text ?? "",
-    [run],
-  );
   const testSuiteOutput = useMemo(
     () => run?.step_results.find((result) => result.step_id === "test-generation")?.output_text ?? "",
     [run],
   );
-  const launchSummary = useMemo(
-    () => run?.step_results.find((result) => result.step_id === "deploy-solution")?.output_text ?? "",
-    [run],
+  const reviewComplete = Boolean(
+    run?.step_results.some((result) => result.step_id === "peer-review"),
   );
-  const launchSections = useMemo(() => splitIntoNamedSections(launchSummary), [launchSummary]);
-  const canLaunch = run?.status === "completed" && Boolean(launchSummary);
 
   if (!workflowRunId) {
     return (
@@ -106,9 +99,9 @@ export function FinalOutputPage(): JSX.Element {
 
       <LiveWorkflowPulse connected={liveConnected} events={liveEvents} />
 
-      {!canLaunch ? (
+      {!reviewComplete ? (
         <AgentActivityAnimation
-          label="Genie is working with the Governance Reviewer and Deployment Agent to finish and deploy your solution..."
+          label="Genie is working with the Peer Review agent to finish reviewing your solution..."
           events={liveEvents}
         />
       ) : null}
@@ -121,41 +114,20 @@ export function FinalOutputPage(): JSX.Element {
         </SectionCard>
       ) : null}
 
-      {canLaunch ? (
+      {reviewComplete ? (
         <SectionCard
-          title="🚀 Launch"
+          title="🚀 Deploy & Launch"
           action={
-            <Button appearance="primary" onClick={() => setLaunched(true)}>
-              Launch App
+            <Button appearance="primary" onClick={() => navigate("/outputs")}>
+              Go to Deploy & Launch
             </Button>
           }
         >
-          {launchSections.length > 0 ? (
-            <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 12 }}>
-              {launchSections.map((section) => (
-                <div key={section.title}>
-                  <Text weight="semibold" size={300} style={{ display: "block" }}>
-                    {iconForSectionTitle(section.title)} {section.title}
-                  </Text>
-                  <Text size={300} style={{ whiteSpace: "pre-wrap", opacity: 0.85 }}>
-                    {section.body}
-                  </Text>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <Text size={300} style={{ whiteSpace: "pre-wrap", display: "block", marginBottom: 12 }}>
-              {launchSummary}
-            </Text>
-          )}
-          {launched ? (
-            <iframe
-              title="Launched app preview"
-              sandbox="allow-scripts"
-              srcDoc={buildOutput}
-              style={{ width: "100%", height: 480, border: "1px solid #232a33", borderRadius: 8, background: "#fff" }}
-            />
-          ) : null}
+          <Text size={300} style={{ opacity: 0.8 }}>
+            Peer Review has finished. Head to Deploy & Launch to provision access control, deploy
+            the agents and app, run full testing and a security scan, and get the customer-facing
+            launch link.
+          </Text>
         </SectionCard>
       ) : null}
 

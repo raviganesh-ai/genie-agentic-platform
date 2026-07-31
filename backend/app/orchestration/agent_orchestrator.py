@@ -287,7 +287,6 @@ def create_agent_orchestrator(
     tool_registry = build_default_tool_registry(
         memory_service=resolved_memory_service,
         governance_service=resolved_governance_service,
-        customer_agent_provisioning_service=customer_agent_provisioning_service,
     )
     resolved_agent_gateway = agent_gateway or create_agent_gateway(
         settings=settings,

@@ -24,12 +24,13 @@ from app.api import (
     approvals,
     architecture,
     debugging,
+    deploy_launch,
     foundry_admin,
-    governance,
     health,
     ingestion,
     memory,
     outputs,
+    peer_review,
     replay,
     requirements,
     sessions,
@@ -40,9 +41,15 @@ from app.api import (
 )
 from app.api.error_mapping import domain_error_handler
 from app.config.settings import Settings, get_settings
+from app.deploy_launch.access_policy_service import AccessPolicyService
+from app.deploy_launch.backend_deployment_service import create_backend_deployment_service
+from app.deploy_launch.frontend_deployment_service import create_frontend_deployment_service
+from app.deploy_launch.mission_agent_provisioning_service import (
+    create_mission_agent_provisioning_service,
+)
+from app.deploy_launch.pipeline_service import create_deployment_pipeline_service
 from app.governance.replay_service import ReplayService
 from app.governance.traceability_service import TraceabilityService
-from app.memory.memory_access_policy_service import MemoryAccessPolicyService
 from app.orchestration.agent_orchestrator import create_agent_orchestrator
 from app.prompts.registry import PromptRegistry
 from app.security.token_validator import create_token_validator
@@ -55,7 +62,6 @@ from app.services.foundry_agent_synchronization_service import (
 from app.services.output_service import create_output_service
 from app.services.peer_review_service import create_peer_review_service
 from app.services.requirements_service import create_requirements_service
-from app.services.service_policy_service import create_service_policy_service
 from app.services.session_service import create_session_service
 from app.services.workshop_service import create_workshop_service
 from app.transcription.speech_service import create_speech_to_text_service
@@ -231,16 +237,8 @@ def create_app(
         app.state.peer_review_service = create_peer_review_service(
             orchestrator=orchestrator,
             session_service=session_service,
-            governance_review_step_id=resolved_settings.governance_review_step_id,
+            peer_review_step_id=resolved_settings.peer_review_step_id,
             gated_step_ids=resolved_settings.peer_review_gated_step_ids,
-        )
-        app.state.service_policy_service = create_service_policy_service(
-            orchestrator=orchestrator,
-            session_service=session_service,
-            approval_service=orchestrator.approval_service,
-            governance_service=orchestrator.governance_service,
-            memory_policy_service=MemoryAccessPolicyService.load(resolved_settings.policies_path),
-            governance_review_step_id=resolved_settings.governance_review_step_id,
         )
         app.state.replay_service = ReplayService(
             governance_service=orchestrator.governance_service,
@@ -252,6 +250,19 @@ def create_app(
             recommendation_lineage_service=orchestrator.recommendation_lineage_service,
             approval_service=orchestrator.approval_service,
             governance_service=orchestrator.governance_service,
+        )
+        app.state.deployment_pipeline_service = create_deployment_pipeline_service(
+            settings=resolved_settings,
+            orchestrator=orchestrator,
+            session_service=session_service,
+            approval_service=orchestrator.approval_service,
+            event_bus=orchestrator.workflow_event_bus,
+            access_policy_service=AccessPolicyService(agent_registry=orchestrator.agent_registry),
+            mission_agent_provisioning_service=create_mission_agent_provisioning_service(
+                settings=resolved_settings
+            ),
+            backend_deployment_service=create_backend_deployment_service(settings=resolved_settings),
+            frontend_deployment_service=create_frontend_deployment_service(settings=resolved_settings),
         )
 
         app.state.ready = True
@@ -288,7 +299,7 @@ def create_app(
     app.include_router(workflow_events.router)
     app.include_router(agents.router)
     app.include_router(memory.router)
-    app.include_router(governance.router)
+    app.include_router(peer_review.router)
     app.include_router(approvals.router)
     app.include_router(architecture.router)
     app.include_router(workshop.router)
@@ -297,6 +308,7 @@ def create_app(
     app.include_router(debugging.router)
     app.include_router(replay.router)
     app.include_router(foundry_admin.router)
+    app.include_router(deploy_launch.router)
 
     return app
 

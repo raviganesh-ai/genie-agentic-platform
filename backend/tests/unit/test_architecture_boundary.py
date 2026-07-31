@@ -21,6 +21,20 @@ directly, each isolating that SDK behind its own interface:
 - ``app/transcription/speech_service.py`` owns the ``DefaultAzureCredential``
   lifecycle for Azure AI Speech call-transcript transcription
   (``SpeechToTextService`` protocol).
+- ``app/deploy_launch/backend_deployment_service.py`` owns the
+  ContainerRegistryManagementClient / ContainerAppsAPIClient /
+  DefaultAzureCredential lifecycle for the Deploy & Launch pipeline's real
+  ACR build + Container Apps deploy steps.
+- ``app/deploy_launch/frontend_deployment_service.py`` owns the
+  BlobServiceClient / StorageManagementClient / DefaultAzureCredential
+  lifecycle for the Deploy & Launch pipeline's real Storage static website
+  deploy step.
+- ``app/deploy_launch/code_materializer.py`` does not itself import either
+  SDK - it only contains a deterministic ``main.py`` *template string*
+  (generated, never executed, code for the mission's own backend service)
+  that happens to mention ``azure.ai.projects``/``azure.identity`` import
+  lines as plain text. Allow-listed here to avoid a false positive rather
+  than obfuscating the generated template's own real import lines.
 
 Every other module must depend only on those protocols, never on the SDK
 directly. This test fails closed if that boundary is ever violated.
@@ -40,6 +54,9 @@ _ALLOWED_RELATIVE_PATHS = {
     Path("agents/foundry/api_client.py"),
     Path("deployment/provider_status_source.py"),
     Path("transcription/speech_service.py"),
+    Path("deploy_launch/backend_deployment_service.py"),
+    Path("deploy_launch/frontend_deployment_service.py"),
+    Path("deploy_launch/code_materializer.py"),
 }
 
 

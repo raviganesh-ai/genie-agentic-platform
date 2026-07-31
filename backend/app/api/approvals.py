@@ -7,7 +7,7 @@ client-supplied value - so every decision is attributable to the
 authenticated caller.
 
 Approving the ``final-output-approval`` checkpoint (the deploy gate) is
-additionally hardened: it fails closed unless the Governance Reviewer's
+additionally hardened: it fails closed unless the Peer Review Agent's
 Peer Review verdict passed every gate, or a risk acceptance has already
 been recorded for the named ``workflow_run_id`` (see
 ``app.services.peer_review_service`` / ``GovernanceService.record_risk_acceptance``).

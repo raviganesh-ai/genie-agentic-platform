@@ -12,7 +12,6 @@ import {
 import { useSessionContext } from "@/state/SessionContext";
 import { deriveComplianceState, useGovernanceTrace } from "@/hooks/useGovernanceTrace";
 import { useAsyncResource } from "@/hooks/useAsyncResource";
-import { approvalApi } from "@/services/approvalApi";
 import { governanceApi } from "@/services/governanceApi";
 import { workflowApi } from "@/services/workflowApi";
 import { getTraceId } from "@/state/traceRegistry";
@@ -31,7 +30,6 @@ import type {
   GateName,
   GovernanceEventCategory,
   GovernanceFinding,
-  ServicePolicy,
 } from "@/types/governance";
 import type { WorkflowStreamEvent } from "@/types/workflowEvents";
 
@@ -93,8 +91,8 @@ const GATE_STATUS_COLORS: Record<"pass" | "fail", string> = {
 
 /** One specialist agent's (Security Assessment Agent, or Test Generation
  * Agent) own early single-gate assessment section - available as soon as
- * that agent's own step completes, without waiting for the Governance
- * Reviewer's slower consolidated Peer Review verdict. */
+ * that agent's own step completes, without waiting for the Peer Review
+ * Agent's slower consolidated verdict. */
 function AgentAssessmentSection({
   title,
   waitingLabel,
@@ -222,141 +220,7 @@ function AgentAssessmentSection({
   );
 }
 
-const CHECKPOINT_STATUS_COLORS: Record<string, string> = {
-  approved: "#3fa66a",
-  pending: "#d99a2b",
-  rejected: "#d1495b",
-  expired: "#d1495b",
-  not_reached: "#8a8f98",
-};
-
-const CHECKPOINT_STATUS_LABELS: Record<string, string> = {
-  approved: "✅ Approved",
-  pending: "⏳ Pending",
-  rejected: "🚫 Rejected",
-  expired: "⌛ Expired",
-  not_reached: "— Not reached yet",
-};
-
-/** The real, consolidated policy that will govern this build once deployed -
- * every value shown here is either a live per-session deployment checkpoint
- * status, the actually-enforced governance-tracking / memory-access policy
- * documents, or the Governance Reviewer agent's own real narrative (never a
- * placeholder). Rendered ahead of "Approve & Deploy" so a reviewer sees what
- * will actually govern the deployed build before approving it. */
-function ServicePolicySection({
-  servicePolicy,
-  liveEvents,
-  liveText,
-}: {
-  servicePolicy: ServicePolicy | null | undefined;
-  liveEvents: WorkflowStreamEvent[];
-  /** The Governance Reviewer agent's own real streamed output so far (same
-   * governance-review step this section's data ultimately comes from). */
-  liveText: string;
-}): JSX.Element {
-  if (!servicePolicy || servicePolicy.status === "pending") {
-    return (
-      <SectionCard title="🔐 Service Policy — Deploy & Launch">
-        {liveText ? (
-          <Text size={200} style={{ whiteSpace: "pre-wrap", display: "block", opacity: 0.85 }}>
-            {liveText}
-          </Text>
-        ) : (
-          <AgentActivityAnimation
-            label="Genie is working with the Governance Reviewer agent to determine the access control policy for this build..."
-            events={liveEvents}
-          />
-        )}
-      </SectionCard>
-    );
-  }
-
-  const trackedCategories = Object.entries(servicePolicy.governance_tracking).filter(([, tracked]) => tracked);
-  const { personal_agent_memory, shared_collaboration_memory, enterprise_knowledge_memory } =
-    servicePolicy.memory_access_policy;
-
-  return (
-    <SectionCard title="🔐 Service Policy — Deploy & Launch">
-      <Text size={300} weight="semibold" style={{ display: "block", marginBottom: 8 }}>
-        Deployment checkpoints
-      </Text>
-      <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 16 }}>
-        {servicePolicy.deployment_checkpoints.map((checkpoint) => (
-          <div
-            key={checkpoint.checkpoint_id}
-            style={{
-              border: `1px solid ${CHECKPOINT_STATUS_COLORS[checkpoint.status] ?? "#8a8f98"}`,
-              borderRadius: 6,
-              padding: "6px 10px",
-            }}
-          >
-            <Text size={300} weight="semibold">
-              {checkpoint.name}
-              {checkpoint.required ? "" : " (optional)"}
-            </Text>
-            <Text size={200} style={{ display: "block", opacity: 0.75 }}>
-              {checkpoint.description}
-            </Text>
-            <Text size={200} style={{ color: CHECKPOINT_STATUS_COLORS[checkpoint.status] ?? "#8a8f98" }}>
-              {CHECKPOINT_STATUS_LABELS[checkpoint.status] ?? checkpoint.status}
-            </Text>
-          </div>
-        ))}
-      </div>
-
-      <Text size={300} weight="semibold" style={{ display: "block", marginBottom: 8 }}>
-        Governance tracking enforced at runtime
-      </Text>
-      <Text size={200} style={{ display: "block", marginBottom: 16, opacity: 0.85 }}>
-        {trackedCategories.map(([category]) => category.replace(/^track_/, "").replace(/_/g, " ")).join(" · ")}
-      </Text>
-
-      <Text size={300} weight="semibold" style={{ display: "block", marginBottom: 8 }}>
-        Decision lineage &amp; session replay
-      </Text>
-      <Text size={200} style={{ display: "block", marginBottom: 16, opacity: 0.85 }}>
-        {servicePolicy.decision_lineage.require_evidence_references
-          ? "Every recommendation must reference supporting evidence. "
-          : ""}
-        {servicePolicy.session_replay.enabled
-          ? "Full session replay reconstruction is enabled."
-          : "Session replay reconstruction is disabled."}
-      </Text>
-
-      <Text size={300} weight="semibold" style={{ display: "block", marginBottom: 8 }}>
-        Memory access policy
-      </Text>
-      <div style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: 16 }}>
-        <Text size={200} style={{ opacity: 0.85 }}>
-          Personal Agent Memory — accessible by: {personal_agent_memory.accessible_by}
-        </Text>
-        <Text size={200} style={{ opacity: 0.85 }}>
-          Shared Collaboration Memory — accessible by: {shared_collaboration_memory.accessible_by}
-          {shared_collaboration_memory.require_approval_for_overwrite ? "; overwrites require approval" : ""}
-        </Text>
-        <Text size={200} style={{ opacity: 0.85 }}>
-          Enterprise Knowledge Memory — accessible by: {enterprise_knowledge_memory.accessible_by}
-          {enterprise_knowledge_memory.requires_approval_to_promote ? "; promotion requires approval" : ""}
-        </Text>
-      </div>
-
-      {servicePolicy.access_control_summary ? (
-        <>
-          <Text size={300} weight="semibold" style={{ display: "block", marginBottom: 8 }}>
-            Governance Reviewer's access control assessment
-            {servicePolicy.assessed_by_agent_id ? ` (${servicePolicy.assessed_by_agent_id})` : ""}
-          </Text>
-          <Text size={300} style={{ whiteSpace: "pre-wrap" }}>
-            {servicePolicy.access_control_summary}
-          </Text>
-        </>
-      ) : null}
-    </SectionCard>
-  );
-}
-
-export function GovernancePage(): JSX.Element {
+export function PeerReviewPage(): JSX.Element {
   const navigate = useNavigate();
   const { sessionId, workflowRunId } = useSessionContext();
   const { data, loading, error, refresh } = useGovernanceTrace(sessionId, POLL_MS);
@@ -398,19 +262,6 @@ export function GovernancePage(): JSX.Element {
     { enabled: Boolean(sessionId && workflowRunId) },
   );
 
-  const servicePolicyFetcher = useCallback(
-    () =>
-      sessionId && workflowRunId
-        ? governanceApi.getServicePolicy(sessionId, workflowRunId)
-        : Promise.reject(new Error("No active workflow run")),
-    [sessionId, workflowRunId],
-  );
-  const { data: servicePolicy, refresh: refreshServicePolicy } = useAsyncResource(
-    servicePolicyFetcher,
-    [sessionId, workflowRunId],
-    { enabled: Boolean(sessionId && workflowRunId) },
-  );
-
   const { events: liveEvents, connected: liveConnected, stepDeltaText } = useWorkflowEventStream(sessionId);
   const lastLiveEvent = liveEvents[liveEvents.length - 1] ?? null;
   useEffect(() => {
@@ -418,15 +269,14 @@ export function GovernancePage(): JSX.Element {
       void refresh();
       refreshGateReport();
       refreshAgentAssessments();
-      refreshServicePolicy();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lastLiveEvent]);
-  const governanceReviewText = useMemo(
-    () => run?.step_results.find((result) => result.step_id === "governance-review")?.output_text ?? "",
+  const peerReviewText = useMemo(
+    () => run?.step_results.find((result) => result.step_id === "peer-review")?.output_text ?? "",
     [run],
   );
-  // Each governance specialist's own real streamed output so far (never
+  // Each specialist's own real streamed output so far (never
   // genie-orchestrator's later verbatim echo of the same text - see
   // _stream_and_publish_deltas in orchestration_tools.py) - shown in each
   // section below in place of a generic "waiting" animation while that
@@ -436,8 +286,8 @@ export function GovernancePage(): JSX.Element {
     stepDeltaText[workflowStepDeltaKey("security-assessment", "security-assessment-agent")] ?? "";
   const liveTestGenerationText =
     stepDeltaText[workflowStepDeltaKey("test-generation", "test-generation-agent")] ?? "";
-  const liveGovernanceReviewText =
-    stepDeltaText[workflowStepDeltaKey("governance-review", "governance-reviewer")] ?? "";
+  const livePeerReviewText =
+    stepDeltaText[workflowStepDeltaKey("peer-review", "peer-review-agent")] ?? "";
 
   const riskAccepted = useMemo(
     () =>
@@ -449,12 +299,12 @@ export function GovernancePage(): JSX.Element {
     [data, workflowRunId],
   );
 
-  // The prominent "Overall status" badge must reflect the Governance
-  // Reviewer agent's own real verdict (gateReport), not just approval
-  // bookkeeping - deriveComplianceState only ever reports "compliant" once
-  // gateReport is actually "reviewed" with an "approved" decision, so this
-  // correctly shows "Reviewing..." while genie-orchestrator is still
-  // working the governance-review step instead of a premature default.
+  // The prominent "Overall status" badge must reflect the Peer Review
+  // Agent's own real verdict (gateReport), not just approval bookkeeping -
+  // deriveComplianceState only ever reports "compliant" once gateReport is
+  // actually "reviewed" with an "approved" decision, so this correctly
+  // shows "Reviewing..." while genie-orchestrator is still working the
+  // peer-review step instead of a premature default.
   const complianceState = useMemo(
     () => deriveComplianceState(data?.events ?? [], data?.approvals ?? [], gateReport, riskAccepted),
     [data, gateReport, riskAccepted],
@@ -474,10 +324,10 @@ export function GovernancePage(): JSX.Element {
 
   // Findings can come from three real, independent sources - the Security
   // Assessment Agent's own early verdict, the Test Generation Agent's own
-  // early verdict, and the Governance Reviewer's later consolidated Peer
-  // Review verdict. "Apply Selected Fixes" must work no matter which
-  // section a customer checked a finding in, so every known finding is
-  // indexed here by its own id, regardless of source.
+  // early verdict, and the Peer Review Agent's later consolidated verdict.
+  // "Apply Selected Fixes" must work no matter which section a customer
+  // checked a finding in, so every known finding is indexed here by its own
+  // id, regardless of source.
   const allKnownFindings = useMemo(() => {
     const byId = new Map<string, GovernanceFinding>();
     for (const finding of gateReport?.findings ?? []) byId.set(finding.id, finding);
@@ -534,36 +384,15 @@ export function GovernancePage(): JSX.Element {
     }
   }, [sessionId, workflowRunId, gateReport, justification, refresh]);
 
-  const pendingDeployApproval = data?.approvals.find(
-    (request) => request.status === "pending" && request.subject_id === "deploy-solution",
-  );
-  const [deploying, setDeploying] = useState(false);
-  const [deployError, setDeployError] = useState<string | null>(null);
   const [acknowledgedRisk, setAcknowledgedRisk] = useState(false);
-
   const isBlocked = gateReport?.decision === "blocked";
-  const canDeploy = acknowledgedRisk && (!isBlocked || riskAccepted);
-
-  const handleApproveDeploy = useCallback(async () => {
-    if (!sessionId || !workflowRunId || !pendingDeployApproval) return;
-    setDeploying(true);
-    setDeployError(null);
-    try {
-      await approvalApi.decide(sessionId, pendingDeployApproval.id, "approved", "", workflowRunId);
-      const traceId = getTraceId(workflowRunId) ?? undefined;
-      await workflowApi.resumeRun(sessionId, workflowRunId, traceId);
-      await refresh();
-    } catch (err) {
-      setDeployError((err as ApiError).message ?? "Failed to resume the workflow.");
-    } finally {
-      setDeploying(false);
-    }
-  }, [sessionId, workflowRunId, pendingDeployApproval, refresh]);
+  const reviewComplete = Boolean(gateReport && gateReport.status === "reviewed");
+  const canProceedToDeploy = reviewComplete && acknowledgedRisk && (!isBlocked || riskAccepted);
 
   if (!sessionId) {
     return (
       <div>
-        <PageHeader title="Governance Center" subtitle="No active session yet." />
+        <PageHeader title="Peer Review" subtitle="No active session yet." />
         <Button appearance="primary" onClick={() => navigate("/")}>
           Start a session
         </Button>
@@ -573,8 +402,11 @@ export function GovernancePage(): JSX.Element {
 
   return (
     <div>
-      <PageHeader title="Governance Center" subtitle="Policy checks, authorization decisions, and compliance status." />
-      {loading && !data ? <LoadingState label="Loading governance trace..." /> : null}
+      <PageHeader
+        title="Peer Review"
+        subtitle="Independent code review, security assessment, and test coverage verdict for this build."
+      />
+      {loading && !data ? <LoadingState label="Loading peer review trace..." /> : null}
       {error ? <ErrorState error={error} onRetry={refresh} /> : null}
 
       <LiveWorkflowPulse connected={liveConnected} events={liveEvents} />
@@ -733,50 +565,35 @@ export function GovernancePage(): JSX.Element {
             </div>
           </SectionCard>
 
-          {governanceReviewText ? (
-            <SectionCard title="Security & Governance Review">
+          {peerReviewText ? (
+            <SectionCard title="Peer Review">
               <Text size={300} style={{ whiteSpace: "pre-wrap" }}>
-                {governanceReviewText}
+                {peerReviewText}
               </Text>
             </SectionCard>
-          ) : liveGovernanceReviewText ? (
-            <SectionCard title="Security & Governance Review">
+          ) : livePeerReviewText ? (
+            <SectionCard title="Peer Review">
               <Text size={200} style={{ whiteSpace: "pre-wrap", opacity: 0.85 }}>
-                {liveGovernanceReviewText}
+                {livePeerReviewText}
               </Text>
             </SectionCard>
           ) : (
             <AgentActivityAnimation
-              label="Genie is working with the Governance Reviewer agent to evaluate your selected policies..."
+              label="Genie is working with the Peer Review agent to evaluate this build..."
               events={liveEvents}
             />
           )}
 
-          <ServicePolicySection
-            servicePolicy={servicePolicy}
-            liveEvents={liveEvents}
-            liveText={liveGovernanceReviewText}
-          />
-
-          {pendingDeployApproval ? (
-            <SectionCard title="Approve & Deploy">
+          {reviewComplete ? (
+            <SectionCard title="Proceed to Deploy & Launch">
               <MessageBar intent="warning" layout="multiline" style={{ marginBottom: 12 }}>
                 <MessageBarBody>
                   <MessageBarTitle>Prototype notice</MessageBarTitle>
-                  Genie is an early-stage system. AI-generated recommendations, code, and
-                  governance verdicts may contain mistakes. Review everything above carefully
-                  before deploying.
+                  Genie is an early-stage system. AI-generated recommendations, code, and review
+                  verdicts may contain mistakes. Review everything above carefully before
+                  deploying.
                 </MessageBarBody>
               </MessageBar>
-
-              {deployError ? (
-                <MessageBar intent="error" layout="multiline" style={{ marginBottom: 12 }}>
-                  <MessageBarBody>
-                    <MessageBarTitle>Failed to resume the workflow</MessageBarTitle>
-                    {deployError}
-                  </MessageBarBody>
-                </MessageBar>
-              ) : null}
 
               {isBlocked && !riskAccepted ? (
                 <div style={{ marginBottom: 12 }}>
@@ -809,8 +626,9 @@ export function GovernancePage(): JSX.Element {
               ) : null}
 
               <Text size={300} style={{ display: "block", marginBottom: 8, opacity: 0.8 }}>
-                Governance has reviewed the build above. Approving provisions access control and
-                deploys the UI and agent workflow.
+                Peer Review has reviewed the build above. Proceeding takes you to Deploy & Launch,
+                which provisions access control, agents, backend/frontend, and runs full testing
+                and a security scan before minting the customer-facing launch link.
               </Text>
               <Checkbox
                 label="I understand this is a prototype and AI can make mistakes."
@@ -821,10 +639,10 @@ export function GovernancePage(): JSX.Element {
               <div>
                 <Button
                   appearance="primary"
-                  disabled={deploying || !canDeploy}
-                  onClick={() => void handleApproveDeploy()}
+                  disabled={!canProceedToDeploy}
+                  onClick={() => navigate("/outputs")}
                 >
-                  {deploying ? "Deploying..." : "Proceed to Deploy"}
+                  Proceed to Deploy & Launch
                 </Button>
               </div>
             </SectionCard>
@@ -850,4 +668,3 @@ export function GovernancePage(): JSX.Element {
     </div>
   );
 }
-

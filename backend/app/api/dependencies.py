@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from fastapi import Request
 
+from app.deploy_launch.pipeline_service import DeploymentPipelineService
 from app.governance.approval_service import ApprovalService
 from app.governance.governance_service import GovernanceService
 from app.governance.replay_service import ReplayService
@@ -23,7 +24,6 @@ from app.services.foundry_agent_synchronization_service import FoundryAgentSynch
 from app.services.output_service import OutputService
 from app.services.peer_review_service import PeerReviewService
 from app.services.requirements_service import RequirementsService
-from app.services.service_policy_service import ServicePolicyService
 from app.services.session_service import SessionService
 from app.services.workshop_service import WorkshopService
 from app.transcription.speech_service import SpeechToTextService
@@ -32,6 +32,7 @@ __all__ = [
     "get_agent_orchestrator",
     "get_approval_service",
     "get_architecture_service",
+    "get_deployment_pipeline_service",
     "get_foundry_inventory_service",
     "get_foundry_lifecycle_service",
     "get_foundry_synchronization_service",
@@ -41,7 +42,6 @@ __all__ = [
     "get_peer_review_service",
     "get_replay_service",
     "get_requirements_service",
-    "get_service_policy_service",
     "get_session_service",
     "get_speech_to_text_service",
     "get_traceability_service",
@@ -82,10 +82,6 @@ def get_peer_review_service(request: Request) -> PeerReviewService:
     return request.app.state.peer_review_service
 
 
-def get_service_policy_service(request: Request) -> ServicePolicyService:
-    return request.app.state.service_policy_service
-
-
 def get_governance_service(request: Request) -> GovernanceService:
     return request.app.state.agent_orchestrator.governance_service
 
@@ -104,6 +100,10 @@ def get_memory_service(request: Request) -> MemoryService:
 
 def get_replay_service(request: Request) -> ReplayService:
     return request.app.state.replay_service
+
+
+def get_deployment_pipeline_service(request: Request) -> DeploymentPipelineService:
+    return request.app.state.deployment_pipeline_service
 
 
 def get_traceability_service(request: Request) -> TraceabilityService:

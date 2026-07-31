@@ -1,11 +1,12 @@
 """Peer Review gate report domain model.
 
-Genie's Governance Reviewer agent acts as a "Peer Reviewer" custodian: it
-consolidates the Security Assessment Agent's and Test Generation Agent's
-findings with its own architecture and code-quality review into a single
-verdict across four hard gates (security, test coverage, architecture,
-code quality). This module never invents or overrides that verdict - it
-only parses the agent's own structured, marker-line output (see
+Genie's Peer Review Agent independently reviews every code component the
+Build Agent generated: it consolidates the Security Assessment Agent's and
+Test Generation Agent's findings with its own architecture and
+code-quality review into a single verdict across four hard gates
+(security, test coverage, architecture, code quality). This module never
+invents or overrides that verdict - it only parses the agent's own
+structured, marker-line output (see
 ``app.services.peer_review_service``), following the exact same
 "agents return marker lines, never JSON" convention already established by
 ``app.models.requirements_qualification``.
@@ -36,7 +37,7 @@ PeerReviewDecision = Literal["approved", "blocked"]
 
 GovernanceGateReportStatus = Literal["pending", "reviewed", "undetermined"]
 """
-- pending: the governance-review step has not completed yet.
+- pending: the peer-review step has not completed yet.
 - reviewed: the step completed and its output contained a parseable gate
   verdict.
 - undetermined: the step completed but its output did not contain a
@@ -58,7 +59,7 @@ class GovernanceFinding(BaseModel):
 
 
 class GovernanceGateReport(BaseModel):
-    """The Governance Reviewer's own consolidated Peer Review verdict."""
+    """The Peer Review Agent's own consolidated Peer Review verdict."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -93,13 +94,12 @@ class AgentAssessment(BaseModel):
     """One specialist agent's own single-gate assessment (Security Assessment
     Agent's security gate, or Test Generation Agent's test-coverage gate),
     read directly from that agent's own step output - available as soon as
-    that step completes, without waiting for the Governance Reviewer's
+    that step completes, without waiting for the Peer Review Agent's
     slower consolidated Peer Review verdict (see ``GovernanceGateReport``)
     to also finish. Never invents a verdict: mirrors the exact same
     "agents return marker-line text, Genie only reports what the agent
     itself stated" convention as ``GovernanceGateReport``.
     """
-
     model_config = ConfigDict(extra="forbid")
 
     status: AgentAssessmentStatus
@@ -119,7 +119,7 @@ class AgentAssessment(BaseModel):
 
 class AgentAssessmentsReport(BaseModel):
     """Combined early-visibility view of the two specialist agents that feed the
-    Governance Reviewer's consolidated Peer Review verdict."""
+    Peer Review Agent's consolidated Peer Review verdict."""
 
     model_config = ConfigDict(extra="forbid")
 

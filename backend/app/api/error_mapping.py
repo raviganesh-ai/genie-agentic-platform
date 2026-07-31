@@ -18,6 +18,15 @@ from fastapi import Request, status
 from fastapi.responses import JSONResponse
 
 from app.agents.foundry.errors import FoundryAgentSynchronizationError, FoundryUnavailableError
+from app.deploy_launch.backend_deployment_service import BackendDeploymentError
+from app.deploy_launch.code_materializer import MaterializedCodeError
+from app.deploy_launch.frontend_deployment_service import FrontendDeploymentError
+from app.deploy_launch.mission_agent_provisioning_service import MissionAgentProvisioningError
+from app.deploy_launch.pipeline_service import (
+    DeploymentApprovalBlockedError,
+    DeploymentApprovalPendingError,
+    DeploymentPipelineStepFailedError,
+)
 from app.governance.approval_service import (
     ApprovalAlreadyDecidedError,
     ApprovalExpiredError,
@@ -44,6 +53,9 @@ _SERVICE_UNAVAILABLE_ERRORS = (
     CustomerAgentProvisioningError,
     FoundryUnavailableError,
     FoundryAgentSynchronizationError,
+    MissionAgentProvisioningError,
+    BackendDeploymentError,
+    FrontendDeploymentError,
 )
 
 _NOT_FOUND_ERRORS = (
@@ -55,14 +67,17 @@ _NOT_FOUND_ERRORS = (
     UnknownApprovalRequestError,
 )
 
-_FORBIDDEN_ERRORS = (SessionAccessDeniedError,)
+_FORBIDDEN_ERRORS = (SessionAccessDeniedError, DeploymentApprovalBlockedError)
 
 _CONFLICT_ERRORS = (
     ApprovalAlreadyDecidedError,
     ApprovalExpiredError,
     MemoryAccessDeniedError,
     PeerReviewGateBlockedError,
+    DeploymentApprovalPendingError,
 )
+
+_UNPROCESSABLE_ERRORS = (MaterializedCodeError, DeploymentPipelineStepFailedError)
 
 
 def _status_code_for(exc: Exception) -> int:
@@ -74,6 +89,8 @@ def _status_code_for(exc: Exception) -> int:
         return status.HTTP_409_CONFLICT
     if isinstance(exc, _SERVICE_UNAVAILABLE_ERRORS):
         return status.HTTP_503_SERVICE_UNAVAILABLE
+    if isinstance(exc, _UNPROCESSABLE_ERRORS):
+        return status.HTTP_422_UNPROCESSABLE_ENTITY
     if isinstance(exc, ReanalysisRoutingError):
         return status.HTTP_422_UNPROCESSABLE_ENTITY
     return status.HTTP_400_BAD_REQUEST

@@ -36,7 +36,7 @@ describe("FinalOutputPage", () => {
     expect(screen.getByRole("button", { name: /Export Markdown/i })).toBeInTheDocument();
   });
 
-  it("shows a Launch App button with a sandboxed preview once the run has completed", async () => {
+  it("shows a Go to Deploy & Launch action once peer-review has completed", async () => {
     mockFetchSequence([
       { match: "/outputs", response: [] },
       {
@@ -54,10 +54,10 @@ describe("FinalOutputPage", () => {
               completed_at: "2026-07-23T10:01:00Z",
             },
             {
-              step_id: "deploy-solution",
-              agent_id: "deployment-agent",
+              step_id: "peer-review",
+              agent_id: "peer-review-agent",
               status: "completed",
-              output_text: "LAUNCH_SUMMARY: App provisioned and ready.",
+              output_text: "GOVERNANCE_DECISION: APPROVED",
               error: null,
               started_at: "2026-07-23T10:02:00Z",
               completed_at: "2026-07-23T10:03:00Z",
@@ -73,13 +73,8 @@ describe("FinalOutputPage", () => {
     });
 
     await waitFor(() =>
-      expect(screen.getByText(/LAUNCH_SUMMARY: App provisioned and ready\./i)).toBeInTheDocument(),
+      expect(screen.getByRole("button", { name: /Go to Deploy & Launch/i })).toBeInTheDocument(),
     );
-    const launchButton = screen.getByRole("button", { name: /Launch App/i });
-    const user = userEvent.setup();
-    await user.click(launchButton);
-
-    expect(screen.getByTitle(/Launched app preview/i)).toBeInTheDocument();
   });
 
   it("shows the Generated Test Suite section when a test-generation step result exists", async () => {

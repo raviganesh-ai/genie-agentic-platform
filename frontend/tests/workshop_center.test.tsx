@@ -6,7 +6,7 @@ import { buildApprovalRequests, buildWorkflowRunResult, FIXTURE_SESSION_ID, FIXT
 import { WorkshopPage } from "@/features/workshop-center/WorkshopPage";
 
 describe("WorkshopPage", () => {
-  it("shows only the generated code, and reveals Proceed to Governance once the review checkbox is checked", async () => {
+  it("shows only the generated code, and reveals Proceed to Peer Review once the review checkbox is checked", async () => {
     mockFetchSequence([
       {
         match: `/workflows/runs/${FIXTURE_WORKFLOW_RUN_ID}`,
@@ -50,7 +50,7 @@ describe("WorkshopPage", () => {
     expect(screen.queryByPlaceholderText(/Describe the priority change/i)).not.toBeInTheDocument();
 
     expect(
-      screen.queryByRole("button", { name: /Proceed to Governance/i }),
+      screen.queryByRole("button", { name: /Proceed to Peer Review/i }),
     ).not.toBeInTheDocument();
 
     const user = userEvent.setup();
@@ -60,7 +60,7 @@ describe("WorkshopPage", () => {
       }),
     );
 
-    expect(screen.getByRole("button", { name: /Proceed to Governance/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Proceed to Peer Review/i })).toBeInTheDocument();
   });
 
   it("renders the Build Agent's own live streamed code before build-solution has completed", async () => {
@@ -103,14 +103,14 @@ describe("WorkshopPage", () => {
     });
 
     await waitFor(() => expect(screen.getByText(/Generated UI Code/i)).toBeInTheDocument());
-    // No completed build-solution result yet, so "Proceed to Governance" must
+    // No completed build-solution result yet, so "Proceed to Peer Review" must
     // not be offered while the code is only a live, in-progress buffer.
     expect(
       screen.queryByRole("checkbox", { name: /AI can perform mistake/i }),
     ).not.toBeInTheDocument();
   });
 
-  it("forwards the governance policies selected on Architecture Studio to governance-review on proceed", async () => {
+  it("forwards the governance policies selected on Architecture Studio to peer-review on proceed", async () => {
     const fetchMock = mockFetchSequence([
       {
         match: `/workflows/runs/${FIXTURE_WORKFLOW_RUN_ID}`,
@@ -156,14 +156,14 @@ describe("WorkshopPage", () => {
         name: /AI can perform mistake, the user has reviewed and is willing to proceed/i,
       }),
     );
-    await user.click(screen.getByRole("button", { name: /Proceed to Governance/i }));
+    await user.click(screen.getByRole("button", { name: /Proceed to Peer Review/i }));
 
     await waitFor(() => {
       const resumeCall = fetchMock.mock.calls.find((call) => String(call[0]).endsWith("/resume"));
       expect(resumeCall).toBeDefined();
       const [, resumeInit] = resumeCall as unknown as [string, RequestInit];
       const body = JSON.parse(resumeInit.body as string);
-      expect(body.step_inputs["governance-review"].variables.policies).toBe(
+      expect(body.step_inputs["peer-review"].variables.policies).toBe(
         "Must use managed identity (no embedded credentials)",
       );
     });

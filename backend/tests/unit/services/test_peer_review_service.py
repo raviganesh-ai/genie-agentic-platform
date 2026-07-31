@@ -30,8 +30,7 @@ def test_parse_gate_report_all_gates_pass_yields_approved_decision_and_no_findin
     text = (
         "Some narrative review text.\n"
         "SECURITY_REVIEW: Looks fine.\n"
-        "GOVERNANCE_DECISION: APPROVED\n"
-        "SECURITY_GATE: PASS\n"
+                "SECURITY_GATE: PASS\n"
         "TEST_COVERAGE_GATE: PASS\n"
         "ARCHITECTURE_GATE: PASS\n"
         "CODE_QUALITY_GATE: PASS\n"
@@ -40,7 +39,7 @@ def test_parse_gate_report_all_gates_pass_yields_approved_decision_and_no_findin
         "PEER_REVIEW_DECISION: APPROVED\n"
     )
 
-    report = _parse_gate_report(text, assessed_by_agent_id="governance-reviewer")
+    report = _parse_gate_report(text, assessed_by_agent_id="peer-review-agent")
 
     assert report.status == "reviewed"
     assert report.security_gate == "pass"
@@ -49,7 +48,7 @@ def test_parse_gate_report_all_gates_pass_yields_approved_decision_and_no_findin
     assert report.code_quality_gate == "pass"
     assert report.decision == "approved"
     assert report.findings == []
-    assert report.assessed_by_agent_id == "governance-reviewer"
+    assert report.assessed_by_agent_id == "peer-review-agent"
 
 
 def test_parse_gate_report_extracts_findings_and_blocked_decision():
@@ -64,7 +63,7 @@ def test_parse_gate_report_extracts_findings_and_blocked_decision():
         "PEER_REVIEW_DECISION: BLOCKED\n"
     )
 
-    report = _parse_gate_report(text, assessed_by_agent_id="governance-reviewer")
+    report = _parse_gate_report(text, assessed_by_agent_id="peer-review-agent")
 
     assert report.status == "reviewed"
     assert report.security_gate == "fail"
@@ -85,7 +84,7 @@ def test_parse_gate_report_extracts_findings_and_blocked_decision():
 def test_parse_gate_report_is_case_insensitive():
     text = "security_gate: pass\ntest_coverage_gate: fail\npeer_review_decision: blocked"
 
-    report = _parse_gate_report(text, assessed_by_agent_id="governance-reviewer")
+    report = _parse_gate_report(text, assessed_by_agent_id="peer-review-agent")
 
     assert report.security_gate == "pass"
     assert report.test_coverage_gate == "fail"
@@ -93,9 +92,9 @@ def test_parse_gate_report_is_case_insensitive():
 
 
 def test_parse_gate_report_returns_undetermined_when_no_markers_present():
-    text = "[local-agent-gateway] agent='governance-reviewer' resolved_prompt_length=42"
+    text = "[local-agent-gateway] agent='peer-review-agent' resolved_prompt_length=42"
 
-    report = _parse_gate_report(text, assessed_by_agent_id="governance-reviewer")
+    report = _parse_gate_report(text, assessed_by_agent_id="peer-review-agent")
 
     assert report.status == "undetermined"
     assert report.decision is None
@@ -153,13 +152,13 @@ def blocked_run() -> WorkflowRunResult:
         workflow_id="solution-discovery-workflow",
         session_id="session-1",
         status="waiting_for_approval",
-        waves=[["build-solution"], ["security-assessment", "test-generation"], ["governance-review"]],
+        waves=[["build-solution"], ["security-assessment", "test-generation"], ["peer-review"]],
         step_results=[
             _step_result("build-solution", output_text="```tsx\nconst x = 1;\n```"),
             _step_result("security-assessment", output_text="SECURITY_GATE: FAIL\nFINDINGS:\nNone.\n"),
             _step_result("test-generation", output_text="TEST_COVERAGE_GATE: PASS\nFINDINGS:\nNone.\n"),
             _step_result(
-                "governance-review",
+                "peer-review",
                 output_text=(
                     "SECURITY_GATE: FAIL\nTEST_COVERAGE_GATE: PASS\nARCHITECTURE_GATE: PASS\n"
                     "CODE_QUALITY_GATE: PASS\nFINDINGS:\n"
@@ -171,22 +170,22 @@ def blocked_run() -> WorkflowRunResult:
     )
 
 
-async def test_get_gate_report_returns_pending_when_governance_review_step_not_completed(
+async def test_get_gate_report_returns_pending_when_peer_review_step_not_completed(
     blocked_run: WorkflowRunResult,
 ) -> None:
-    run_without_governance = blocked_run.model_copy(
+    run_without_peer_review = blocked_run.model_copy(
         update={"step_results": blocked_run.step_results[:2]}
     )
-    orchestrator = _FakeOrchestrator(run=run_without_governance)
+    orchestrator = _FakeOrchestrator(run=run_without_peer_review)
     session_service = create_session_service(orchestrator=orchestrator)  # type: ignore[arg-type]
     session = await session_service.create_session(owner_user_id="user-1", title="t")
     service = PeerReviewService(
         orchestrator=orchestrator,  # type: ignore[arg-type]
         session_service=session_service,
-        governance_review_step_id="governance-review",
+        peer_review_step_id="peer-review",
         security_assessment_step_id="security-assessment",
         test_generation_step_id="test-generation",
-        gated_step_ids=("security-assessment", "test-generation", "governance-review"),
+        gated_step_ids=("security-assessment", "test-generation", "peer-review"),
     )
 
     report = await service.get_gate_report(
@@ -203,10 +202,10 @@ async def test_get_gate_report_returns_reviewed_blocked_report(blocked_run: Work
     service = PeerReviewService(
         orchestrator=orchestrator,  # type: ignore[arg-type]
         session_service=session_service,
-        governance_review_step_id="governance-review",
+        peer_review_step_id="peer-review",
         security_assessment_step_id="security-assessment",
         test_generation_step_id="test-generation",
-        gated_step_ids=("security-assessment", "test-generation", "governance-review"),
+        gated_step_ids=("security-assessment", "test-generation", "peer-review"),
     )
 
     report = await service.get_gate_report(
@@ -226,10 +225,10 @@ async def test_get_gate_report_raises_for_unknown_workflow_run(blocked_run: Work
     service = PeerReviewService(
         orchestrator=orchestrator,  # type: ignore[arg-type]
         session_service=session_service,
-        governance_review_step_id="governance-review",
+        peer_review_step_id="peer-review",
         security_assessment_step_id="security-assessment",
         test_generation_step_id="test-generation",
-        gated_step_ids=("security-assessment", "test-generation", "governance-review"),
+        gated_step_ids=("security-assessment", "test-generation", "peer-review"),
     )
 
     with pytest.raises(UnknownWorkflowRunError):
@@ -247,10 +246,10 @@ async def test_apply_selected_fixes_re_runs_build_and_every_gated_step(
     service = PeerReviewService(
         orchestrator=orchestrator,  # type: ignore[arg-type]
         session_service=session_service,
-        governance_review_step_id="governance-review",
+        peer_review_step_id="peer-review",
         security_assessment_step_id="security-assessment",
         test_generation_step_id="test-generation",
-        gated_step_ids=("security-assessment", "test-generation", "governance-review"),
+        gated_step_ids=("security-assessment", "test-generation", "peer-review"),
     )
 
     result = await service.apply_selected_fixes(
@@ -270,11 +269,11 @@ async def test_apply_selected_fixes_re_runs_build_and_every_gated_step(
         "build-solution",
         "security-assessment",
         "test-generation",
-        "governance-review",
+        "peer-review",
     }
     build_input = call["step_inputs"]["build-solution"]
     assert "SQL injection in the search endpoint" in build_input.variables["user_message"]
-    for gated_step_id in ("security-assessment", "test-generation", "governance-review"):
+    for gated_step_id in ("security-assessment", "test-generation", "peer-review"):
         assert call["step_inputs"][gated_step_id].variables == {"user_message": ""}
 
 
@@ -287,10 +286,10 @@ async def test_apply_selected_fixes_with_no_selected_findings_sends_empty_instru
     service = PeerReviewService(
         orchestrator=orchestrator,  # type: ignore[arg-type]
         session_service=session_service,
-        governance_review_step_id="governance-review",
+        peer_review_step_id="peer-review",
         security_assessment_step_id="security-assessment",
         test_generation_step_id="test-generation",
-        gated_step_ids=("security-assessment", "test-generation", "governance-review"),
+        gated_step_ids=("security-assessment", "test-generation", "peer-review"),
     )
 
     await service.apply_selected_fixes(
@@ -388,10 +387,10 @@ async def test_get_agent_assessments_returns_pending_when_steps_not_completed(
     service = PeerReviewService(
         orchestrator=orchestrator,  # type: ignore[arg-type]
         session_service=session_service,
-        governance_review_step_id="governance-review",
+        peer_review_step_id="peer-review",
         security_assessment_step_id="security-assessment",
         test_generation_step_id="test-generation",
-        gated_step_ids=("security-assessment", "test-generation", "governance-review"),
+        gated_step_ids=("security-assessment", "test-generation", "peer-review"),
     )
 
     report = await service.get_agent_assessments(
@@ -411,10 +410,10 @@ async def test_get_agent_assessments_returns_reviewed_assessments_from_each_step
     service = PeerReviewService(
         orchestrator=orchestrator,  # type: ignore[arg-type]
         session_service=session_service,
-        governance_review_step_id="governance-review",
+        peer_review_step_id="peer-review",
         security_assessment_step_id="security-assessment",
         test_generation_step_id="test-generation",
-        gated_step_ids=("security-assessment", "test-generation", "governance-review"),
+        gated_step_ids=("security-assessment", "test-generation", "peer-review"),
     )
 
     report = await service.get_agent_assessments(
@@ -435,10 +434,10 @@ async def test_get_agent_assessments_raises_for_unknown_workflow_run(blocked_run
     service = PeerReviewService(
         orchestrator=orchestrator,  # type: ignore[arg-type]
         session_service=session_service,
-        governance_review_step_id="governance-review",
+        peer_review_step_id="peer-review",
         security_assessment_step_id="security-assessment",
         test_generation_step_id="test-generation",
-        gated_step_ids=("security-assessment", "test-generation", "governance-review"),
+        gated_step_ids=("security-assessment", "test-generation", "peer-review"),
     )
 
     with pytest.raises(UnknownWorkflowRunError):

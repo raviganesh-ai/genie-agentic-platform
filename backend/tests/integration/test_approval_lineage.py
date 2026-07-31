@@ -39,7 +39,7 @@ async def test_approval_audit_trace_id_matches_recommendation_trace_id(local_set
         checkpoint_id="final-output-approval",
         session_id="session-1",
         trace_id="trace-42",
-        requested_by_agent_id="governance-reviewer",
+        requested_by_agent_id="peer-review-agent",
         subject_type="recommendation",
         subject_id="rec-1",
     )
@@ -50,7 +50,7 @@ async def test_approval_audit_trace_id_matches_recommendation_trace_id(local_set
         trace_id="trace-42",
         recommendation_id="rec-1",
         recommendation_type="final_output",
-        produced_by_agent_id="governance-reviewer",
+        produced_by_agent_id="peer-review-agent",
         produced_by_agent_version="1.0.0",
         evidence_references=["doc://1"],
         approval_ids=[request.id],

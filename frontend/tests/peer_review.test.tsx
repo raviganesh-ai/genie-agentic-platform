@@ -7,21 +7,20 @@ import {
   buildApprovalRequests,
   buildGovernanceEvents,
   buildGovernanceGateReport,
-  buildServicePolicy,
   buildWorkflowRunResult,
   FIXTURE_SESSION_ID,
   FIXTURE_WORKFLOW_RUN_ID,
 } from "./fixtures";
-import { GovernancePage } from "@/features/governance-center/GovernancePage";
+import { PeerReviewPage } from "@/features/peer-review/PeerReviewPage";
 
-describe("GovernancePage", () => {
+describe("PeerReviewPage", () => {
   it("derives a compliance state from real approvals and governance events", async () => {
     mockFetchSequence([
-      { match: "/governance/events", response: buildGovernanceEvents() },
+      { match: "/peer-review/events", response: buildGovernanceEvents() },
       { match: "/approvals", response: buildApprovalRequests() },
     ]);
 
-    renderWithProviders(<GovernancePage />, { sessionId: FIXTURE_SESSION_ID });
+    renderWithProviders(<PeerReviewPage />, { sessionId: FIXTURE_SESSION_ID });
 
     await waitFor(() => expect(screen.getByText(/Overall status/i)).toBeInTheDocument());
     // one pending approval in the fixture -> "warning" compliance state
@@ -29,18 +28,18 @@ describe("GovernancePage", () => {
     expect(screen.getByText(/agent execution/i)).toBeInTheDocument();
   });
 
-  it("shows the security review and requires acknowledgement before deploying when every gate passes", async () => {
-    const fetchMock = mockFetchSequence([
-      { match: "/governance/events", response: buildGovernanceEvents() },
-      { match: "/approvals", response: buildApprovalRequests({ subject_id: "deploy-solution" }) },
+  it("shows the peer review verdict and enables Proceed to Deploy & Launch once every gate passes", async () => {
+    mockFetchSequence([
+      { match: "/peer-review/events", response: buildGovernanceEvents() },
+      { match: "/approvals", response: buildApprovalRequests({ subject_id: "build-solution" }) },
       { match: "/gate-report", response: buildGovernanceGateReport() },
       {
         match: `/workflows/runs/${FIXTURE_WORKFLOW_RUN_ID}`,
         response: buildWorkflowRunResult({
           step_results: [
             {
-              step_id: "governance-review",
-              agent_id: "governance-reviewer",
+              step_id: "peer-review",
+              agent_id: "peer-review-agent",
               status: "completed",
               output_text: "SECURITY_REVIEW: Looks good.\nGOVERNANCE_DECISION: APPROVED",
               error: null,
@@ -50,12 +49,9 @@ describe("GovernancePage", () => {
           ],
         }),
       },
-      { match: "/decide", response: { id: "decision-1" } },
-      { match: "/resume", response: { status: "running" } },
-      { match: "/service-policy", response: buildServicePolicy() },
     ]);
 
-    renderWithProviders(<GovernancePage />, {
+    renderWithProviders(<PeerReviewPage />, {
       sessionId: FIXTURE_SESSION_ID,
       workflowRunId: FIXTURE_WORKFLOW_RUN_ID,
     });
@@ -63,24 +59,18 @@ describe("GovernancePage", () => {
     await waitFor(() => expect(screen.getByText(/GOVERNANCE_DECISION: APPROVED/i)).toBeInTheDocument());
     await waitFor(() => expect(screen.getByText(/Peer Review decision/i)).toBeInTheDocument());
 
-    const deployButton = screen.getByRole("button", { name: /Proceed to Deploy/i });
-    expect(deployButton).toBeDisabled();
+    const proceedButton = screen.getByRole("button", { name: /Proceed to Deploy & Launch/i });
+    expect(proceedButton).toBeDisabled();
 
     const user = userEvent.setup();
     await user.click(screen.getByRole("checkbox", { name: /AI can make mistakes/i }));
-    expect(deployButton).toBeEnabled();
-    await user.click(deployButton);
-
-    await waitFor(() => {
-      expect(fetchMock.mock.calls.some((call) => String(call[0]).endsWith("/decide"))).toBe(true);
-      expect(fetchMock.mock.calls.some((call) => String(call[0]).endsWith("/resume"))).toBe(true);
-    });
+    expect(proceedButton).toBeEnabled();
   });
 
   it("lists Peer Review findings and applies selected fixes", async () => {
     const fetchMock = mockFetchSequence([
-      { match: "/governance/events", response: buildGovernanceEvents() },
-      { match: "/approvals", response: buildApprovalRequests({ subject_id: "deploy-solution" }) },
+      { match: "/peer-review/events", response: buildGovernanceEvents() },
+      { match: "/approvals", response: buildApprovalRequests({ subject_id: "build-solution" }) },
       {
         match: "/gate-report",
         response: buildGovernanceGateReport({
@@ -102,8 +92,8 @@ describe("GovernancePage", () => {
         response: buildWorkflowRunResult({
           step_results: [
             {
-              step_id: "governance-review",
-              agent_id: "governance-reviewer",
+              step_id: "peer-review",
+              agent_id: "peer-review-agent",
               status: "completed",
               output_text: "SECURITY_REVIEW: Needs work.\nGOVERNANCE_DECISION: REJECTED",
               error: null,
@@ -114,10 +104,9 @@ describe("GovernancePage", () => {
         }),
       },
       { match: "/fixes", response: { status: "running" } },
-      { match: "/service-policy", response: buildServicePolicy() },
     ]);
 
-    renderWithProviders(<GovernancePage />, {
+    renderWithProviders(<PeerReviewPage />, {
       sessionId: FIXTURE_SESSION_ID,
       workflowRunId: FIXTURE_WORKFLOW_RUN_ID,
     });
@@ -135,10 +124,10 @@ describe("GovernancePage", () => {
     });
   });
 
-  it("requires a justified risk acceptance before deploy is enabled when Peer Review is blocked", async () => {
+  it("requires a justified risk acceptance before Proceed to Deploy & Launch is enabled when Peer Review is blocked", async () => {
     const fetchMock = mockFetchSequence([
-      { match: "/governance/events", response: buildGovernanceEvents() },
-      { match: "/approvals", response: buildApprovalRequests({ subject_id: "deploy-solution" }) },
+      { match: "/peer-review/events", response: buildGovernanceEvents() },
+      { match: "/approvals", response: buildApprovalRequests({ subject_id: "build-solution" }) },
       {
         match: "/gate-report",
         response: buildGovernanceGateReport({ security_gate: "fail", decision: "blocked" }),
@@ -148,8 +137,8 @@ describe("GovernancePage", () => {
         response: buildWorkflowRunResult({
           step_results: [
             {
-              step_id: "governance-review",
-              agent_id: "governance-reviewer",
+              step_id: "peer-review",
+              agent_id: "peer-review-agent",
               status: "completed",
               output_text: "SECURITY_REVIEW: Needs work.\nGOVERNANCE_DECISION: REJECTED",
               error: null,
@@ -160,10 +149,9 @@ describe("GovernancePage", () => {
         }),
       },
       { match: "/risk-acceptance", response: { id: "event-risk-1", category: "risk_accepted" } },
-      { match: "/service-policy", response: buildServicePolicy() },
     ]);
 
-    renderWithProviders(<GovernancePage />, {
+    renderWithProviders(<PeerReviewPage />, {
       sessionId: FIXTURE_SESSION_ID,
       workflowRunId: FIXTURE_WORKFLOW_RUN_ID,
     });
@@ -186,33 +174,32 @@ describe("GovernancePage", () => {
     });
   });
 
-  it("shows Overall status as still Reviewing while governance-review has not completed, even though earlier steps were approved", async () => {
+  it("shows Overall status as still Reviewing while peer-review has not completed, even though earlier steps were approved", async () => {
     mockFetchSequence([
-      { match: "/governance/events", response: buildGovernanceEvents() },
+      { match: "/peer-review/events", response: buildGovernanceEvents() },
       // Every earlier checkpoint is already approved - no pending, rejected,
       // or expired approval exists - but the gate report has not been
-      // produced yet (governance-review step still running).
+      // produced yet (peer-review step still running).
       { match: "/approvals", response: buildApprovalRequests({ status: "approved" }) },
       { match: "/gate-report", response: buildGovernanceGateReport({ status: "pending", decision: null }) },
       { match: "/agent-assessments", response: buildAgentAssessmentsReport() },
-      { match: "/service-policy", response: buildServicePolicy({ status: "pending" }) },
     ]);
 
-    renderWithProviders(<GovernancePage />, {
+    renderWithProviders(<PeerReviewPage />, {
       sessionId: FIXTURE_SESSION_ID,
       workflowRunId: FIXTURE_WORKFLOW_RUN_ID,
     });
 
     await waitFor(() => expect(screen.getByText(/Overall status/i)).toBeInTheDocument());
-    // Must NOT prematurely claim "Compliant" while the real governance
-    // review verdict is still pending.
+    // Must NOT prematurely claim "Compliant" while the real peer review
+    // verdict is still pending.
     expect(screen.getByText(/Reviewing/i)).toBeInTheDocument();
     expect(screen.queryByText(/^Compliant$/i)).not.toBeInTheDocument();
   });
 
-  it("shows the Security Assessment section's findings and fix option as soon as that agent's step completes, without waiting for governance-review", async () => {
+  it("shows the Security Assessment section's findings and fix option as soon as that agent's step completes, without waiting for peer-review", async () => {
     const fetchMock = mockFetchSequence([
-      { match: "/governance/events", response: buildGovernanceEvents() },
+      { match: "/peer-review/events", response: buildGovernanceEvents() },
       { match: "/approvals", response: buildApprovalRequests({ status: "approved" }) },
       { match: "/gate-report", response: buildGovernanceGateReport({ status: "pending", decision: null }) },
       {
@@ -237,10 +224,9 @@ describe("GovernancePage", () => {
         }),
       },
       { match: "/fixes", response: { status: "running" } },
-      { match: "/service-policy", response: buildServicePolicy({ status: "pending" }) },
     ]);
 
-    renderWithProviders(<GovernancePage />, {
+    renderWithProviders(<PeerReviewPage />, {
       sessionId: FIXTURE_SESSION_ID,
       workflowRunId: FIXTURE_WORKFLOW_RUN_ID,
     });
@@ -261,7 +247,7 @@ describe("GovernancePage", () => {
 
   it("shows the Test Coverage section with the tests-generated count once test-generation completes", async () => {
     mockFetchSequence([
-      { match: "/governance/events", response: buildGovernanceEvents() },
+      { match: "/peer-review/events", response: buildGovernanceEvents() },
       { match: "/approvals", response: buildApprovalRequests({ status: "approved" }) },
       { match: "/gate-report", response: buildGovernanceGateReport({ status: "pending", decision: null }) },
       {
@@ -277,10 +263,9 @@ describe("GovernancePage", () => {
           },
         }),
       },
-      { match: "/service-policy", response: buildServicePolicy() },
     ]);
 
-    renderWithProviders(<GovernancePage />, {
+    renderWithProviders(<PeerReviewPage />, {
       sessionId: FIXTURE_SESSION_ID,
       workflowRunId: FIXTURE_WORKFLOW_RUN_ID,
     });
@@ -289,26 +274,6 @@ describe("GovernancePage", () => {
     // Both the Security Assessment and Test Coverage sections report no
     // findings in this fixture.
     expect(screen.getAllByText(/No findings raised/i)).toHaveLength(2);
-  });
-
-  it("shows a waiting animation for Service Policy until the governance review completes", async () => {
-    mockFetchSequence([
-      { match: "/governance/events", response: buildGovernanceEvents() },
-      { match: "/approvals", response: buildApprovalRequests({ status: "approved" }) },
-      { match: "/gate-report", response: buildGovernanceGateReport({ status: "pending", decision: null }) },
-      { match: "/agent-assessments", response: buildAgentAssessmentsReport() },
-      { match: "/service-policy", response: buildServicePolicy({ status: "pending" }) },
-    ]);
-
-    renderWithProviders(<GovernancePage />, {
-      sessionId: FIXTURE_SESSION_ID,
-      workflowRunId: FIXTURE_WORKFLOW_RUN_ID,
-    });
-
-    await waitFor(() => expect(screen.getByText(/🔐 Service Policy/i)).toBeInTheDocument());
-    expect(
-      screen.getByText(/Genie is working with the Governance Reviewer agent to determine the access control policy/i),
-    ).toBeInTheDocument();
   });
 
   it("renders the Security Assessment Agent's own live streamed output before its step has completed", async () => {
@@ -325,7 +290,7 @@ describe("GovernancePage", () => {
     });
 
     mockFetchSequence([
-      { match: "/governance/events", response: buildGovernanceEvents() },
+      { match: "/peer-review/events", response: buildGovernanceEvents() },
       { match: "/approvals", response: buildApprovalRequests({ status: "approved" }) },
       { match: "/gate-report", response: buildGovernanceGateReport({ status: "pending", decision: null }) },
       {
@@ -341,7 +306,6 @@ describe("GovernancePage", () => {
           },
         }),
       },
-      { match: "/service-policy", response: buildServicePolicy({ status: "pending" }) },
       {
         match: "/workflow-events/stream",
         sseChunks: [
@@ -351,7 +315,7 @@ describe("GovernancePage", () => {
       },
     ]);
 
-    renderWithProviders(<GovernancePage />, {
+    renderWithProviders(<PeerReviewPage />, {
       sessionId: FIXTURE_SESSION_ID,
       workflowRunId: FIXTURE_WORKFLOW_RUN_ID,
     });
@@ -366,28 +330,5 @@ describe("GovernancePage", () => {
     expect(
       screen.queryByText(/Genie is working with the Security Assessment Agent/i),
     ).not.toBeInTheDocument();
-  });
-
-  it("shows the real deployment checkpoint statuses, enforced policy documents, and access control assessment once Service Policy is ready", async () => {
-    mockFetchSequence([
-      { match: "/governance/events", response: buildGovernanceEvents() },
-      { match: "/approvals", response: buildApprovalRequests({ status: "approved" }) },
-      { match: "/gate-report", response: buildGovernanceGateReport({ status: "pending", decision: null }) },
-      { match: "/agent-assessments", response: buildAgentAssessmentsReport() },
-      { match: "/service-policy", response: buildServicePolicy() },
-    ]);
-
-    renderWithProviders(<GovernancePage />, {
-      sessionId: FIXTURE_SESSION_ID,
-      workflowRunId: FIXTURE_WORKFLOW_RUN_ID,
-    });
-
-    await waitFor(() => expect(screen.getByText(/Build Review Approval/i)).toBeInTheDocument());
-    expect(screen.getByText(/✅ Approved/i)).toBeInTheDocument();
-    expect(screen.getByText(/Final Output Approval/i)).toBeInTheDocument();
-    expect(screen.getByText(/— Not reached yet/i)).toBeInTheDocument();
-    expect(screen.getByText(/Personal Agent Memory — accessible by: owning_agent/i)).toBeInTheDocument();
-    expect(screen.getByText(/Least-privilege roles only; no secrets embedded\./i)).toBeInTheDocument();
-    expect(screen.getByText(/governance-reviewer/i)).toBeInTheDocument();
   });
 });

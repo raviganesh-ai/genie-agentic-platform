@@ -1,24 +1,21 @@
-"""Governance API routes.
+"""Peer Review API routes.
 
-Thin, read-only wrapper over ``GovernanceService.events_for_session`` - the
-full governance/audit trail (agent registration, executions, communication,
-memory reads/writes, tool requests, policy evaluations, denied access) for
-one session, per the Governance Requirements in
-``.github/copilot-instructions.md``. Also exposes write endpoints:
-``POST /checkpoints/confirm`` (the Discovery Wizard's Responsible AI
-Accountability "Proceed to Next Step" gate), ``GET .../gate-report`` (the
-Governance Reviewer's Peer Review verdict, see
-``app.services.peer_review_service``), ``GET .../agent-assessments`` (the
-Security Assessment Agent's and Test Generation Agent's own early, per-
-agent gate verdicts - available before the consolidated gate report),
-``GET .../service-policy`` (the real, consolidated policy - deployment
-approval checkpoints, governance tracking, memory access policy, and the
-Governance Reviewer's own access-control narrative - that will govern this
-build once deployed, see ``app.services.service_policy_service``),
-``POST .../fixes`` (regenerate the build to resolve selected findings and
-re-run every gate step), and ``POST .../risk-acceptance`` (a human's
-explicit, justified acceptance of residual Peer Review risk before
-deploying anyway).
+Exposes the Peer Review Agent's independent code review of the Build
+Agent's generated components: ``GET .../gate-report`` (the Peer Review
+Agent's consolidated verdict, see ``app.services.peer_review_service``),
+``GET .../agent-assessments`` (the Security Assessment Agent's and Test
+Generation Agent's own early, per-agent gate verdicts - available before
+the consolidated gate report), ``POST .../fixes`` (regenerate the build to
+resolve selected findings and re-run every gate step - the "regenerate
+code based on feedback" action), and ``POST .../risk-acceptance`` (a
+human's explicit, justified acceptance of residual Peer Review risk before
+deploying anyway). Also exposes the general session audit/approval-gate
+endpoints ``GET /events`` (the full governance/audit trail - agent
+registration, executions, communication, memory reads/writes, tool
+requests, policy evaluations, denied access) and ``POST
+/checkpoints/confirm`` (the Discovery Wizard's Responsible AI
+Accountability "Proceed to Next Step" gate) - unchanged from before, just
+no longer branded as a "Governance" section.
 """
 from __future__ import annotations
 
@@ -28,21 +25,18 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.api.dependencies import (
     get_governance_service,
     get_peer_review_service,
-    get_service_policy_service,
     get_session_service,
 )
 from app.governance.governance_service import GovernanceService
 from app.models.governance_event import GovernanceEvent
 from app.models.governance_gate_report import AgentAssessmentsReport, GovernanceGateReport
-from app.models.service_policy import ServicePolicy
 from app.models.workflow_models import WorkflowRunResult
 from app.security.auth_models import AuthenticatedUser
 from app.security.dependencies import get_current_user
 from app.services.peer_review_service import PeerReviewService
-from app.services.service_policy_service import ServicePolicyService
 from app.services.session_service import SessionService
 
-router = APIRouter(prefix="/sessions/{session_id}/governance", tags=["governance"])
+router = APIRouter(prefix="/sessions/{session_id}/peer-review", tags=["peer-review"])
 
 
 class ConfirmCheckpointRequest(BaseModel):
@@ -119,28 +113,10 @@ async def get_agent_assessments(
     """Early-visibility per-agent verdicts (Security Assessment Agent's own
     security gate, Test Generation Agent's own test-coverage gate) - each
     available as soon as that agent's own step completes, without waiting
-    for the slower, consolidated Governance Reviewer verdict at
+    for the slower, consolidated Peer Review Agent verdict at
     ``/gate-report``.
     """
     return await peer_review_service.get_agent_assessments(
-        session_id=session_id, requesting_user_id=user.user_id, workflow_run_id=workflow_run_id
-    )
-
-
-@router.get("/{workflow_run_id}/service-policy")
-async def get_service_policy(
-    session_id: str,
-    workflow_run_id: str,
-    user: AuthenticatedUser = Depends(get_current_user),
-    service_policy_service: ServicePolicyService = Depends(get_service_policy_service),
-) -> ServicePolicy:
-    """The real, consolidated policy that will govern this build once deployed:
-    the approval checkpoints gating deployment (with their actual per-session
-    status), the governance tracking/decision-lineage/session-replay policy,
-    the memory tier access policy, and the Governance Reviewer agent's own
-    real access-control narrative for this specific build.
-    """
-    return await service_policy_service.get_service_policy(
         session_id=session_id, requesting_user_id=user.user_id, workflow_run_id=workflow_run_id
     )
 

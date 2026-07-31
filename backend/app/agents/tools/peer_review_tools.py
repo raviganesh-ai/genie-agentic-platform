@@ -1,4 +1,4 @@
-"""Governance Reviewer function tool: ``record_governance_decision``.
+"""Peer Review Agent function tool: ``record_peer_review_decision``.
 
 Records the agent's policy-compliance decision as a genuine governance
 event via ``GovernanceService.record_policy_evaluation`` (the same audit
@@ -12,19 +12,19 @@ from typing import Any
 from app.agents.tool_execution import AgentToolRegistry, ToolCallContext, ToolExecutionError
 from app.governance.governance_service import GovernanceService
 
-__all__ = ["register_governance_tools"]
+__all__ = ["register_peer_review_tools"]
 
-_AGENT_ID = "governance-reviewer"
-_TOOL_NAME = "record_governance_decision"
+_AGENT_ID = "peer-review-agent"
+_TOOL_NAME = "record_peer_review_decision"
 _VALID_DECISIONS = frozenset({"approved", "rejected"})
 
 
-def register_governance_tools(
+def register_peer_review_tools(
     registry: AgentToolRegistry, *, governance_service: GovernanceService
 ) -> None:
-    """Register ``record_governance_decision`` for the ``governance-reviewer`` agent."""
+    """Register ``record_peer_review_decision`` for the ``peer-review-agent`` agent."""
 
-    async def _record_governance_decision(
+    async def _record_peer_review_decision(
         arguments: dict[str, Any], context: ToolCallContext
     ) -> dict[str, Any]:
         if context.session_id is None:
@@ -51,4 +51,4 @@ def register_governance_tools(
 
         return {"recorded": True, "event_id": event.id, "decision": decision}
 
-    registry.register(agent_id=_AGENT_ID, tool_name=_TOOL_NAME, fn=_record_governance_decision)
+    registry.register(agent_id=_AGENT_ID, tool_name=_TOOL_NAME, fn=_record_peer_review_decision)

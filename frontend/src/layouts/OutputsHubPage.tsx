@@ -1,7 +1,8 @@
 import { NavLink, Outlet } from "react-router-dom";
 
 const TABS: Array<{ to: string; label: string; end?: boolean }> = [
-  { to: "/outputs", label: "Replay Center", end: true },
+  { to: "/outputs", label: "Deploy & Launch", end: true },
+  { to: "/outputs/replay", label: "Replay Center" },
   { to: "/outputs/final", label: "Final Output" },
 ];
 
