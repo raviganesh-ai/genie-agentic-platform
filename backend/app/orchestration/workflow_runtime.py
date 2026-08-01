@@ -12,8 +12,10 @@ delegated to ``WorkflowStepExecutor`` -> ``AgentGateway``
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime
 from uuid import uuid4
 
+from app.agents.foundry.errors import FoundryUnavailableError
 from app.governance.approval_service import ApprovalService
 from app.models.workflow_models import WorkflowRunResult, WorkflowStepInput, WorkflowStepResult
 from app.orchestration.collaboration_service import CollaborationService
@@ -104,7 +106,13 @@ class WorkflowRuntime:
         waves = _compute_waves(workflow.steps)
 
         step_results: list[WorkflowStepResult] = list(resume_from.step_results) if resume_from else []
-        completed_ids: set[str] = {result.step_id for result in step_results}
+        # Only a genuinely-completed prior step counts as done - a
+        # previously FAILED step (see the retryable "failed" WorkflowRunResult
+        # returned below) must NOT be treated as completed here, or resuming
+        # that same run would silently skip retrying it forever.
+        completed_ids: set[str] = {
+            result.step_id for result in step_results if result.status == "completed"
+        }
 
         state_machine = WorkflowStateMachine.start(
             workflow_run_id=workflow_run_id, workflow_id=workflow_id, session_id=session_id
@@ -140,39 +148,102 @@ class WorkflowRuntime:
             if gate_result is not None:
                 return gate_result
 
-            try:
-                step_outputs = {
-                    result.step_id: result.output_text or "" for result in step_results
-                }
-                previous_variables_by_id = {
-                    result.step_id: result.resolved_variables for result in step_results
-                }
-                wave_results = await asyncio.gather(
-                    *(
-                        self._step_executor.execute_step(
-                            step=step,
-                            session_id=session_id,
-                            trace_id=trace_id,
-                            correlation_id=f"{workflow_run_id}:{step.id}",
-                            step_input=inputs_by_id.get(step.id),
-                            transcript_text=transcript_text,
-                            step_outputs=step_outputs,
-                            previous_variables=previous_variables_by_id.get(step.id),
-                            agent_scope_id=effective_scope_id,
-                            workflow_run_id=workflow_run_id,
-                        )
-                        for step in pending_steps
+            step_outputs = {result.step_id: result.output_text or "" for result in step_results}
+            previous_variables_by_id = {
+                result.step_id: result.resolved_variables for result in step_results
+            }
+            # ``return_exceptions=True`` so one step's transient agent-execution
+            # failure (``FoundryUnavailableError`` - a model hallucination, a
+            # malformed tool-call, a real Foundry outage, ...) never discards
+            # the OTHER already-completed steps in this same call/wave, and so
+            # this run can still be stored below as a retryable "failed" result
+            # instead of an unhandled exception silently losing every earlier
+            # wave's real output (see "Approval checkpoint gating pattern" /
+            # deploy-backend.md session notes for the prior incarnation of this
+            # exact class of bug). Any OTHER exception type (unknown agent,
+            # missing memory reference, governance write failure, ...)
+            # represents a genuine configuration/system-integrity fault, not a
+            # retryable agent hiccup, and must keep failing closed by
+            # propagating immediately - never silently downgraded to a
+            # "failed" step result.
+            raw_results = await asyncio.gather(
+                *(
+                    self._step_executor.execute_step(
+                        step=step,
+                        session_id=session_id,
+                        trace_id=trace_id,
+                        correlation_id=f"{workflow_run_id}:{step.id}",
+                        step_input=inputs_by_id.get(step.id),
+                        transcript_text=transcript_text,
+                        step_outputs=step_outputs,
+                        previous_variables=previous_variables_by_id.get(step.id),
+                        agent_scope_id=effective_scope_id,
+                        workflow_run_id=workflow_run_id,
                     )
-                )
-            except Exception as exc:
-                state_machine.transition("failed", detail=str(exc))
-                raise
+                    for step in pending_steps
+                ),
+                return_exceptions=True,
+            )
 
-            rerun_ids = {step.id for step in pending_steps if step.id in completed_ids}
-            if rerun_ids:
-                step_results = [result for result in step_results if result.step_id not in rerun_ids]
+            wave_results: list[WorkflowStepResult] = []
+            step_failed = False
+            for step, outcome in zip(pending_steps, raw_results, strict=True):
+                if isinstance(outcome, BaseException):
+                    if not isinstance(outcome, FoundryUnavailableError):
+                        state_machine.transition("failed", detail=str(outcome))
+                        raise outcome
+                    step_failed = True
+                    now = datetime.now(UTC)
+                    wave_results.append(
+                        WorkflowStepResult(
+                            step_id=step.id,
+                            agent_id=step.agent_id,
+                            status="failed",
+                            error=str(outcome),
+                            started_at=now,
+                            completed_at=now,
+                        )
+                    )
+                else:
+                    wave_results.append(outcome)
+
+            # Drop any earlier result (completed OR failed) for every step id
+            # about to be (re)executed in this wave - covers both the
+            # existing "explicit step_inputs override an already-completed
+            # step" case and the new "retry a previously-failed step" case
+            # (see completed_ids.update below: a failed step's id is never
+            # added to completed_ids, so it naturally reappears in
+            # pending_steps on the next resume_workflow call).
+            pending_ids = {step.id for step in pending_steps}
+            step_results = [result for result in step_results if result.step_id not in pending_ids]
             step_results.extend(wave_results)
-            completed_ids.update(result.step_id for result in wave_results)
+            # Only genuinely-completed steps count as "completed" - a failed
+            # step's id is deliberately left out of completed_ids so that a
+            # later resume_workflow call for this same workflow_run_id (see
+            # ``resume_from`` above) naturally re-attempts exactly this step
+            # again as a still-pending one, instead of skipping it forever.
+            completed_ids.update(
+                result.step_id for result in wave_results if result.status == "completed"
+            )
+
+            if step_failed:
+                # Store (never discard) whatever earlier waves already
+                # completed in this same call, plus this wave's failed step
+                # result, as a genuinely retryable "failed" run - a caller
+                # can resume_workflow the same workflow_run_id to re-attempt
+                # exactly this still-pending step (and any steps after it)
+                # without losing prior progress or having to restart the
+                # whole mission from scratch.
+                state_machine.transition("failed", detail="One or more steps failed.")
+                return WorkflowRunResult(
+                    workflow_run_id=workflow_run_id,
+                    workflow_id=workflow_id,
+                    session_id=session_id,
+                    status="failed",
+                    waves=[[step.id for step in wave] for wave in waves],
+                    step_results=step_results,
+                    agent_scope_id=effective_scope_id,
+                )
 
             await self._record_handoffs(
                 pending_steps,

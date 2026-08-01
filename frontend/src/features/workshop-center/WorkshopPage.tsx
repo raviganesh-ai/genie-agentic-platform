@@ -37,6 +37,8 @@ export function WorkshopPage(): JSX.Element {
   const [reviewed, setReviewed] = useState(false);
   const [approving, setApproving] = useState(false);
   const [approveError, setApproveError] = useState<string | null>(null);
+  const [retrying, setRetrying] = useState(false);
+  const [retryError, setRetryError] = useState<string | null>(null);
 
   // The Build Agent's UI + multi-agent workflow design is the
   // build-solution step's own output (same run the Architecture/Peer Review
@@ -89,6 +91,26 @@ export function WorkshopPage(): JSX.Element {
   const peerReviewAlreadyStarted = Boolean(
     run?.step_results.some((result) => result.step_id === PEER_REVIEW_CHECKPOINT_SUBJECT_ID),
   );
+
+  // The build-solution step can fail (e.g. a transient Foundry/agent
+  // execution error) - the backend now stores that as a retryable "failed"
+  // WorkflowRunResult (see workflow_runtime.py) instead of losing all
+  // progress, so simply resuming the SAME workflow_run_id re-attempts
+  // exactly this still-pending step without restarting the whole mission.
+  const handleRetryBuild = useCallback(async () => {
+    if (!sessionId || !workflowRunId) return;
+    setRetrying(true);
+    setRetryError(null);
+    try {
+      const traceId = getTraceId(workflowRunId) ?? undefined;
+      await workflowApi.resumeRun(sessionId, workflowRunId, traceId);
+      await refreshRun();
+    } catch (err) {
+      setRetryError((err as ApiError).message ?? "Failed to retry the build step.");
+    } finally {
+      setRetrying(false);
+    }
+  }, [sessionId, workflowRunId, refreshRun]);
 
   const handleProceedToPeerReview = useCallback(async () => {
     if (!sessionId || !workflowRunId || !pendingPeerReviewApproval) return;
@@ -148,7 +170,10 @@ export function WorkshopPage(): JSX.Element {
         {displayedBuildText ? (
           <GeneratedArtifacts outputText={displayedBuildText} revealImmediately={!buildOutputText} />
         ) : buildError ? (
-          <ErrorState error={{ message: buildError }} />
+          <ErrorState
+            error={{ message: retryError ?? buildError }}
+            onRetry={retrying ? undefined : handleRetryBuild}
+          />
         ) : (
           <AgentActivityAnimation
             label="Genie is calling the Orchestrator Agent to generate your extensive UI, each specialist agent's own code, and the Orchestrator Agent's orchestration code..."

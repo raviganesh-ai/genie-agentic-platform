@@ -204,90 +204,126 @@ agents:
       - name: call_requirements_analyst
         description: >-
           Delegate the requirements-discovery phase to the Requirements
-          Analyst agent and return its real output verbatim.
+          Analyst agent and return its real output verbatim. The platform
+          always supplies the real transcript_excerpt/user_message for
+          this step automatically - do not repeat their full text here;
+          short placeholders or empty strings are fine.
         parameters:
           - name: transcript_excerpt
             type: string
             description: The customer call transcript excerpt to analyze.
+            required: false
           - name: user_message
             type: string
             description: Optional customer chat message for this phase, or empty.
+            required: false
       - name: call_architecture_designer
         description: >-
           Delegate the architecture-design phase to the Architecture
-          Designer agent and return its real output verbatim.
+          Designer agent and return its real output verbatim. The
+          platform always supplies the real approved_requirements/
+          user_message for this step automatically - do not repeat their
+          full text here; short placeholders or empty strings are fine.
         parameters:
           - name: approved_requirements
             type: string
             description: The human-approved requirements to design an architecture for.
+            required: false
           - name: user_message
             type: string
             description: Optional customer chat message for this phase, or empty.
+            required: false
       - name: call_build_agent
         description: >-
           Delegate the build phase to the Build Agent and return its real
-          output verbatim.
+          output verbatim. The platform always supplies the real
+          requirements/architecture/policies/user_message for this step
+          automatically - do not repeat their full text here; short
+          placeholders or empty strings are fine.
         parameters:
           - name: requirements
             type: string
             description: The approved requirements the build must satisfy.
+            required: false
           - name: architecture
             type: string
             description: The approved architecture the build must follow.
+            required: false
           - name: policies
             type: string
             description: >-
               Governance/policy expectations the user selected on the
               Architecture Studio page that the generated code must
               satisfy (semicolon-separated, may be empty).
+            required: false
           - name: user_message
             type: string
             description: Optional customer chat message for this phase, or empty.
+            required: false
       - name: call_security_assessment_agent
         description: >-
           Delegate the security-assessment phase to the Security
-          Assessment Agent and return its real output verbatim.
+          Assessment Agent and return its real output verbatim. The
+          platform always supplies the real artifact/user_message for
+          this step automatically - do not repeat their full text here;
+          short placeholders or empty strings are fine.
         parameters:
           - name: artifact
             type: string
             description: The build artifact to assess for security posture.
+            required: false
           - name: user_message
             type: string
             description: Optional customer chat message for this phase, or empty.
+            required: false
       - name: call_test_generation_agent
         description: >-
           Delegate the test-generation phase to the Test Generation Agent
-          and return its real output verbatim.
+          and return its real output verbatim. The platform always
+          supplies the real artifact/requirements/user_message for this
+          step automatically - do not repeat their full text here; short
+          placeholders or empty strings are fine.
         parameters:
           - name: artifact
             type: string
             description: The build artifact to generate test cases for.
+            required: false
           - name: requirements
             type: string
             description: The approved requirements the generated tests must cover.
+            required: false
           - name: user_message
             type: string
             description: Optional customer chat message for this phase, or empty.
+            required: false
       - name: call_peer_review_agent
         description: >-
           Delegate the peer-review phase to the Peer Review Agent and
-          return its real output verbatim.
+          return its real output verbatim. The platform always supplies
+          the real artifact/policies/security_findings/test_plan/
+          user_message for this step automatically - do not repeat their
+          full text here; short placeholders or empty strings are fine.
         parameters:
           - name: artifact
             type: string
             description: The build artifact to review for policy compliance.
+            required: false
           - name: policies
             type: string
             description: The policies to review the artifact against.
+            required: false
           - name: security_findings
             type: string
             description: The Security Assessment Agent's findings to consolidate.
+            required: false
           - name: test_plan
             type: string
             description: The Test Generation Agent's test plan and coverage assessment to consolidate.
+            required: false
           - name: user_message
             type: string
             description: Optional customer chat message for this phase, or empty.
+            required: false
     owner: platform-engineering-team
     governance_policy_id: standard-governance-policy-v1
     prompt_template_ref: orchestrator-mission-v1
