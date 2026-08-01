@@ -180,20 +180,18 @@ function buildArtifacts(outputText: string): Artifact[] {
  * streamed in, so partially-generated blocks are simply not shown yet
  * rather than rendered incomplete.
  *
- * When `onRegenerateArtifact` is supplied, every code artifact also gets
- * an Edit control (inline textarea, kept only in local state/Copy output)
- * and a Regenerate control (submits a free-text instruction back to the
- * Build Agent for just that artifact; the parent is responsible for
- * refetching the workflow run afterwards, which will naturally replace
- * `outputText` with the freshly regenerated content).
+ * Every code artifact also gets an Edit control (inline textarea, kept
+ * only in local state) and a Copy control - there is no regenerate
+ * action: each component is generated once, straight from the Build
+ * Agent's per-component pass over the approved architecture, so this view
+ * is a simple, read-then-copy presentation of that output rather than an
+ * editing/regeneration workflow.
  */
 export function GeneratedArtifacts({
   outputText,
-  onRegenerateArtifact,
   revealImmediately = false,
 }: {
   outputText: string;
-  onRegenerateArtifact?: (artifactTitle: string, instruction: string) => Promise<void>;
   /**
    * Skips the staggered reveal-one-at-a-time animation and shows every
    * parsed artifact immediately instead. The staggered animation assumes
@@ -227,10 +225,6 @@ export function GeneratedArtifacts({
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState("");
   const [contentOverrides, setContentOverrides] = useState<Record<string, string>>({});
-  const [regeneratingKey, setRegeneratingKey] = useState<string | null>(null);
-  const [instructionDraft, setInstructionDraft] = useState("");
-  const [regenerateBusyKey, setRegenerateBusyKey] = useState<string | null>(null);
-  const [regenerateErrorKey, setRegenerateErrorKey] = useState<string | null>(null);
 
   useEffect(() => {
     if (revealImmediately) {
@@ -246,12 +240,10 @@ export function GeneratedArtifacts({
   }, [artifacts, revealImmediately]);
 
   useEffect(() => {
-    // Fresh generated output (e.g. after a regenerate completes) supersedes
-    // any local edit drafts/overrides and open edit/regenerate panels.
+    // Fresh generated output supersedes any local edit drafts/overrides and
+    // any open edit panel.
     setContentOverrides({});
     setEditingKey(null);
-    setRegeneratingKey(null);
-    setRegenerateErrorKey(null);
   }, [outputText]);
 
   if (artifacts.length === 0) {
@@ -266,8 +258,6 @@ export function GeneratedArtifacts({
     <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
       {artifacts.slice(0, revealCount).map((artifact) => {
         const isEditing = editingKey === artifact.key;
-        const isRegenerating = regeneratingKey === artifact.key;
-        const isBusy = regenerateBusyKey === artifact.key;
         const displayContent = contentOverrides[artifact.key] ?? artifact.content;
         const accent = VARIANT_ACCENTS[artifact.variant];
         const ordinal = codeOrdinals[artifact.key];
@@ -334,31 +324,11 @@ export function GeneratedArtifacts({
                       onClick={() => {
                         setEditDraft(displayContent);
                         setEditingKey(artifact.key);
-                        setRegeneratingKey(null);
                       }}
                     >
                       Edit
                     </Button>
                   )}
-                  {onRegenerateArtifact ? (
-                    <Button
-                      size="small"
-                      appearance="subtle"
-                      disabled={isBusy}
-                      onClick={() => {
-                        if (isRegenerating) {
-                          setRegeneratingKey(null);
-                        } else {
-                          setInstructionDraft("");
-                          setRegenerateErrorKey(null);
-                          setRegeneratingKey(artifact.key);
-                          setEditingKey(null);
-                        }
-                      }}
-                    >
-                      Regenerate
-                    </Button>
-                  ) : null}
                   <Button
                     size="small"
                     appearance="subtle"
@@ -417,54 +387,6 @@ export function GeneratedArtifacts({
                 </Text>
               )}
 
-              {artifact.kind === "code" && isRegenerating ? (
-                <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 6 }}>
-                  <Textarea
-                    value={instructionDraft}
-                    onChange={(_, data) => setInstructionDraft(data.value)}
-                    placeholder={`Describe how to change the ${artifact.title}...`}
-                    style={{ width: "100%" }}
-                  />
-                  <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                    <Button
-                      size="small"
-                      appearance="primary"
-                      disabled={!instructionDraft.trim() || isBusy}
-                    onClick={() => {
-                      if (!onRegenerateArtifact) return;
-                      const instruction = instructionDraft.trim();
-                      setRegenerateBusyKey(artifact.key);
-                      setRegenerateErrorKey(null);
-                      void onRegenerateArtifact(artifact.title, instruction)
-                        .then(() => {
-                          setRegeneratingKey(null);
-                        })
-                        .catch(() => {
-                          setRegenerateErrorKey(artifact.key);
-                        })
-                        .finally(() => {
-                          setRegenerateBusyKey((prev) => (prev === artifact.key ? null : prev));
-                        });
-                    }}
-                  >
-                    {isBusy ? "Regenerating..." : "Submit"}
-                  </Button>
-                  <Button
-                    size="small"
-                    appearance="subtle"
-                    disabled={isBusy}
-                    onClick={() => setRegeneratingKey(null)}
-                  >
-                    Cancel
-                  </Button>
-                </div>
-                {regenerateErrorKey === artifact.key ? (
-                  <Text size={200} style={{ color: "#e5484d" }}>
-                    Regeneration failed. Please try again.
-                  </Text>
-                ) : null}
-              </div>
-            ) : null}
             </div>
           </div>
         );

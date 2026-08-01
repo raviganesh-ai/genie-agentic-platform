@@ -4,10 +4,8 @@ Covers the pure ``_parse_gate_report`` marker-line parser directly (no real
 LLM available in tests, same convention as
 ``tests/unit/services/test_requirements_service.py``), plus
 ``get_gate_report``'s pending/undetermined handling and
-``apply_selected_fixes``'s step_inputs construction - mirroring
-``tests/unit/services/test_workshop_service.py``'s fake-orchestrator
-approach exactly, since ``apply_selected_fixes`` deliberately extends the
-same ``regenerate_build_artifacts`` pattern.
+``apply_selected_fixes``'s step_inputs construction using a fake
+orchestrator that records the ``resume_workflow`` call it received.
 """
 from __future__ import annotations
 

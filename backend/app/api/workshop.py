@@ -41,14 +41,6 @@ class SubmitReanalysisRequest(ReanalysisActionRequest):
     request_type: ReanalysisRequestType
 
 
-class RegenerateBuildRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    workflow_run_id: str = Field(min_length=1)
-    instruction: str = Field(min_length=1)
-    trace_id: str | None = None
-
-
 @router.post("/chat")
 async def chat_with_all_agents(
     session_id: str,
@@ -147,20 +139,4 @@ async def update_priorities(
         workflow_run_id=body.workflow_run_id,
         trace_id=body.trace_id,
         rationale=body.rationale,
-    )
-
-
-@router.post("/build/regenerate")
-async def regenerate_build_artifacts(
-    session_id: str,
-    body: RegenerateBuildRequest,
-    user: AuthenticatedUser = Depends(get_current_user),
-    workshop_service: WorkshopService = Depends(get_workshop_service),
-) -> WorkflowRunResult:
-    return await workshop_service.regenerate_build_artifacts(
-        session_id=session_id,
-        requesting_user_id=user.user_id,
-        workflow_run_id=body.workflow_run_id,
-        instruction=body.instruction,
-        trace_id=body.trace_id,
     )

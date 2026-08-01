@@ -33,6 +33,7 @@ from app.agents.gateway import AgentGateway, get_enabled_agent
 from app.agents.models import AgentExecutionRequest, AgentExecutionResult
 from app.agents.registry import AgentRegistry
 from app.agents.tool_execution import AgentToolRegistry, ToolCallContext, ToolExecutionError
+from app.agents.tools.architecture_parsing import parse_architecture_build_plan
 from app.governance.governance_service import GovernanceService
 from app.memory.memory_models import SharedMemoryClassification
 from app.memory.memory_service import MemoryService
@@ -43,6 +44,8 @@ __all__ = ["register_orchestrator_delegation_tools", "resolve_delegate_agent_id"
 
 _ORCHESTRATOR_AGENT_ID = "genie-orchestrator"
 _PREVIEW_MAX_LENGTH = 240
+_BUILD_AGENT_TOOL_NAME = "call_build_agent"
+_BUILD_COMPONENT_PROMPT_ID = "build-generation-component-v1"
 
 
 def _preview(output_text: str | None) -> str | None:
@@ -260,6 +263,104 @@ async def _stream_and_publish_deltas(
     return result
 
 
+async def _generate_build_by_component(
+    *,
+    delegation: _Delegation,
+    base_variables: dict[str, str],
+    agent_gateway: AgentGateway,
+    context: ToolCallContext,
+    event_bus: WorkflowEventBus | None,
+    workflow_run_id: str | None,
+    step_id: str | None,
+) -> AgentExecutionResult:
+    """Generates the ``build-solution`` step's code one component at a time
+    (each specialist agent, then the Orchestrator Agent, then the UI)
+    instead of one long combined completion, so the Workshop page streams
+    each component's own real code as soon as it is done - see
+    ``build-generation-component-v1`` and ``parse_architecture_build_plan``.
+
+    Falls back to a single combined ``build-generation-v1`` call (the
+    prior behavior) whenever the architecture document's own "##
+    Multi-Agent Workflow" section does not parse into a clean agent list -
+    this split is purely a streaming-UX improvement, never a reason to
+    fail the whole build over a structural parsing gap.
+    """
+
+    plan = parse_architecture_build_plan(base_variables.get("architecture", ""))
+    if plan is None:
+        request = AgentExecutionRequest(
+            agent_id=delegation.target_agent_id,
+            prompt_id=delegation.target_prompt_id,
+            variables=base_variables,
+            correlation_id=context.trace_id,
+            session_id=context.session_id,
+        )
+        if event_bus is not None and workflow_run_id is not None and step_id is not None:
+            return await _stream_and_publish_deltas(
+                agent_gateway,
+                request,
+                event_bus,
+                session_id=context.session_id,
+                workflow_run_id=workflow_run_id,
+                step_id=step_id,
+                agent_id=delegation.target_agent_id,
+            )
+        return await agent_gateway.execute(request)
+
+    components: list[tuple[str, str]] = [("agent", name) for name in plan.specialist_agent_names]
+    components.append(("orchestrator", plan.orchestrator_agent_name))
+    components.append(("ui", "ui"))
+
+    pieces: list[str] = []
+    for index, (component_kind, component_name) in enumerate(components):
+        component_variables = {
+            **base_variables,
+            "component_kind": component_kind,
+            "component_name": component_name,
+        }
+        request = AgentExecutionRequest(
+            agent_id=delegation.target_agent_id,
+            prompt_id=_BUILD_COMPONENT_PROMPT_ID,
+            variables=component_variables,
+            correlation_id=context.trace_id,
+            session_id=context.session_id,
+        )
+        if event_bus is not None and workflow_run_id is not None and step_id is not None:
+            if index > 0:
+                # A blank-line separator between components' own streamed
+                # text, so consecutive fenced code blocks never glue
+                # together with no whitespace between them - matches how
+                # the final concatenation below joins each piece.
+                await event_bus.publish(
+                    WorkflowStreamEvent(
+                        event_type="step_delta",
+                        session_id=context.session_id,
+                        workflow_run_id=workflow_run_id,
+                        step_id=step_id,
+                        agent_id=delegation.target_agent_id,
+                        delta="\n\n",
+                    )
+                )
+            component_result = await _stream_and_publish_deltas(
+                agent_gateway,
+                request,
+                event_bus,
+                session_id=context.session_id,
+                workflow_run_id=workflow_run_id,
+                step_id=step_id,
+                agent_id=delegation.target_agent_id,
+            )
+        else:
+            component_result = await agent_gateway.execute(request)
+        pieces.append(component_result.output_text)
+
+    return AgentExecutionResult(
+        agent_id=delegation.target_agent_id,
+        output_text="\n\n".join(pieces),
+        correlation_id=context.trace_id,
+    )
+
+
 def _build_delegation_tool(
     delegation: _Delegation,
     *,
@@ -309,7 +410,17 @@ def _build_delegation_tool(
             session_id=context.session_id,
         )
         workflow_run_id, step_id = _split_trace_id(context.trace_id)
-        if event_bus is not None and workflow_run_id is not None and step_id is not None:
+        if delegation.tool_name == _BUILD_AGENT_TOOL_NAME:
+            result = await _generate_build_by_component(
+                delegation=delegation,
+                base_variables=variables,
+                agent_gateway=agent_gateway,
+                context=context,
+                event_bus=event_bus,
+                workflow_run_id=workflow_run_id,
+                step_id=step_id,
+            )
+        elif event_bus is not None and workflow_run_id is not None and step_id is not None:
             result = await _stream_and_publish_deltas(
                 agent_gateway,
                 request,

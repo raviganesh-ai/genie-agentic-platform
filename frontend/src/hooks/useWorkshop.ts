@@ -16,7 +16,6 @@ export interface WorkshopController {
     rationale: string,
   ) => Promise<ReanalysisResult>;
   updatePriorities: (rationale: string) => Promise<ReanalysisResult>;
-  regenerateBuild: (instruction: string) => Promise<WorkflowRunResult>;
   busy: boolean;
   error: SafeError | null;
 }
@@ -123,26 +122,12 @@ export function useWorkshop(
     [guard, sessionId, workflowRunId, resolveTraceId],
   );
 
-  const regenerateBuild = useCallback(
-    (instruction: string) =>
-      guard(() => {
-        if (!sessionId || !workflowRunId) throw new Error("No active session/workflow run");
-        return workshopApi.regenerateBuild(sessionId, {
-          workflow_run_id: workflowRunId,
-          trace_id: resolveTraceId(),
-          instruction,
-        });
-      }),
-    [guard, sessionId, workflowRunId, resolveTraceId],
-  );
-
   return {
     sendMessage,
     challenge,
     requestAlternative,
     submitReanalysis,
     updatePriorities,
-    regenerateBuild,
     busy,
     error,
   };

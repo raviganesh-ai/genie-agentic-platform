@@ -250,12 +250,10 @@ class PeerReviewService:
         """Regenerates the build to resolve ``selected_findings`` and re-runs every
         Peer Review gate step against the regenerated build.
 
-        Mirrors ``WorkshopService.regenerate_build_artifacts``'s targeted
-        instruction-text approach exactly, but additionally names every
-        configured ``gated_step_ids`` in ``step_inputs`` so
-        ``WorkflowRuntime`` re-executes those already-completed steps too
-        (a step is only ever re-run if it is either still pending or
-        explicitly named in ``step_inputs`` - see
+        Additionally names every configured ``gated_step_ids`` in
+        ``step_inputs`` so ``WorkflowRuntime`` re-executes those
+        already-completed steps too (a step is only ever re-run if it is
+        either still pending or explicitly named in ``step_inputs`` - see
         ``WorkflowRuntime.run_workflow``), instead of silently leaving
         stale gate results in place after the build changes.
         """

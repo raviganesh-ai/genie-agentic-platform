@@ -1,13 +1,20 @@
 """Unit tests for genie-orchestrator's delegation function tools."""
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from typing import Any
 
 import pytest
 
-from app.agents.models import AgentDefinition, AgentExecutionRequest, AgentExecutionResult
+from app.agents.models import (
+    AgentDefinition,
+    AgentExecutionRequest,
+    AgentExecutionResult,
+    AgentExecutionStreamChunk,
+)
 from app.agents.tool_execution import AgentToolRegistry, ToolCallContext, ToolExecutionError
 from app.agents.tools.orchestration_tools import register_orchestrator_delegation_tools
+from app.models.workflow_stream_models import WorkflowStreamEvent
 
 
 class _RecordingAgentGateway:
@@ -22,6 +29,52 @@ class _RecordingAgentGateway:
             output_text=self._output_text,
             correlation_id=request.correlation_id,
         )
+
+
+class _StreamingAgentGateway:
+    """Records every request and supports both `execute` and
+    `execute_stream`, returning each component's own text based on its
+    `component_name` variable (falling back to a shared default text for
+    non-component requests, e.g. the single-combined-call fallback path)."""
+
+    def __init__(self, *, texts_by_component: dict[str, str] | None = None, default_text: str = "x") -> None:
+        self.requests: list[AgentExecutionRequest] = []
+        self._texts_by_component = texts_by_component or {}
+        self._default_text = default_text
+
+    def _text_for(self, request: AgentExecutionRequest) -> str:
+        component_name = request.variables.get("component_name")
+        if component_name is not None:
+            return self._texts_by_component.get(component_name, self._default_text)
+        return self._default_text
+
+    async def execute(self, request: AgentExecutionRequest) -> AgentExecutionResult:
+        self.requests.append(request)
+        return AgentExecutionResult(
+            agent_id=request.agent_id,
+            output_text=self._text_for(request),
+            correlation_id=request.correlation_id,
+        )
+
+    async def execute_stream(
+        self, request: AgentExecutionRequest
+    ) -> AsyncIterator[AgentExecutionStreamChunk]:
+        self.requests.append(request)
+        text = self._text_for(request)
+        yield AgentExecutionStreamChunk(delta=text)
+        yield AgentExecutionStreamChunk(
+            result=AgentExecutionResult(
+                agent_id=request.agent_id, output_text=text, correlation_id=request.correlation_id
+            )
+        )
+
+
+class _RecordingEventBus:
+    def __init__(self) -> None:
+        self.events: list[WorkflowStreamEvent] = []
+
+    async def publish(self, event: WorkflowStreamEvent) -> None:
+        self.events.append(event)
 
 
 class _RecordingGovernanceService:
@@ -277,3 +330,203 @@ async def test_delegation_skips_shared_memory_write_without_a_resolvable_step_id
     )
 
     assert memory_service.shared.writes == []
+
+
+_ARCHITECTURE_WITH_TWO_SPECIALISTS = """
+## UI Design
+
+- **Kickoff Screen** --> **Support Triage Orchestrator Agent**: lets the
+  user describe their issue.
+
+## Multi-Agent Workflow
+
+- **Ticket Classifier Agent**: classifies the incoming issue by category.
+- **Resolution Drafter Agent**: drafts a resolution based on the category.
+- **Support Triage Orchestrator Agent**: the single entry point.
+"""
+
+_ARCHITECTURE_WITHOUT_A_PARSEABLE_WORKFLOW_SECTION = """
+## UI Design
+
+Some unrelated UI section text with no Multi-Agent Workflow section at all.
+"""
+
+
+def _build_agent() -> AgentDefinition:
+    return AgentDefinition(
+        id="build-agent",
+        name="Build Agent",
+        role="build_generation",
+        description="Generates the mission's UI and multi-agent workflow code.",
+        foundry_agent_id="build-agent",
+        memory_access=["shared"],
+    )
+
+
+async def test_call_build_agent_generates_one_component_at_a_time_when_architecture_parses():
+    """When the architecture's own "## Multi-Agent Workflow" section parses
+    cleanly, call_build_agent must invoke the Build Agent once per
+    component (each specialist, then the orchestrator, then the UI) using
+    build-generation-component-v1, rather than one single combined call -
+    and still record exactly one governance event/memory write for the
+    whole build-solution step, combining every component's own output."""
+
+    registry = AgentToolRegistry()
+    gateway = _StreamingAgentGateway(
+        texts_by_component={
+            "Ticket Classifier Agent": "```python\n# agent: Ticket Classifier Agent\nclassifier code\n```",
+            "Resolution Drafter Agent": "```python\n# agent: Resolution Drafter Agent\ndrafter code\n```",
+            "Support Triage Orchestrator Agent": "```python\n# agent: orchestrator\norchestrator code\n```",
+            "ui": "```tsx\n// agent: ui\nui code\n```",
+        }
+    )
+    governance_service = _RecordingGovernanceService()
+    memory_service = _FakeMemoryService()
+    agent_registry = _FakeAgentRegistry({"build-agent": _build_agent()})
+    register_orchestrator_delegation_tools(
+        registry,
+        agent_gateway=gateway,
+        governance_service=governance_service,
+        agent_registry=agent_registry,
+        memory_service=memory_service,
+    )
+    context = ToolCallContext(
+        agent=_orchestrator_agent(),
+        session_id="session-1",
+        trace_id="run-1:build-solution",
+    )
+
+    result = await registry.execute(
+        agent_id="genie-orchestrator",
+        tool_name="call_build_agent",
+        arguments={
+            "requirements": "Approved requirements text.",
+            "architecture": _ARCHITECTURE_WITH_TWO_SPECIALISTS,
+            "policies": "Must use managed identity (no embedded credentials)",
+            "user_message": "",
+        },
+        context=context,
+    )
+
+    assert len(gateway.requests) == 4
+    assert [r.prompt_id for r in gateway.requests] == ["build-generation-component-v1"] * 4
+    assert [
+        (r.variables["component_kind"], r.variables["component_name"]) for r in gateway.requests
+    ] == [
+        ("agent", "Ticket Classifier Agent"),
+        ("agent", "Resolution Drafter Agent"),
+        ("orchestrator", "Support Triage Orchestrator Agent"),
+        ("ui", "ui"),
+    ]
+    # Every component call still carries the shared build context unchanged,
+    # including the governance policy checklist the user selected on
+    # Architecture Studio - each generated component must satisfy it, not
+    # just the combined build as a whole.
+    for r in gateway.requests:
+        assert r.variables["requirements"] == "Approved requirements text."
+        assert r.variables["architecture"] == _ARCHITECTURE_WITH_TWO_SPECIALISTS
+        assert r.variables["policies"] == "Must use managed identity (no embedded credentials)"
+
+    expected_combined = (
+        "```python\n# agent: Ticket Classifier Agent\nclassifier code\n```"
+        "\n\n"
+        "```python\n# agent: Resolution Drafter Agent\ndrafter code\n```"
+        "\n\n"
+        "```python\n# agent: orchestrator\norchestrator code\n```"
+        "\n\n"
+        "```tsx\n// agent: ui\nui code\n```"
+    )
+    assert result == {"output_text": expected_combined}
+
+    [event] = governance_service.calls
+    assert event["agent_id"] == "build-agent"
+    assert event["detail"]["step_id"] == "build-solution"
+
+    [write] = memory_service.shared.writes
+    assert write["key"] == "build-solution"
+    assert write["content"] == {"output_text": expected_combined}
+
+
+async def test_call_build_agent_streams_each_components_own_deltas_via_the_event_bus():
+    registry = AgentToolRegistry()
+    gateway = _StreamingAgentGateway(
+        texts_by_component={
+            "Ticket Classifier Agent": "classifier-code",
+            "Resolution Drafter Agent": "drafter-code",
+            "Support Triage Orchestrator Agent": "orchestrator-code",
+            "ui": "ui-code",
+        }
+    )
+    governance_service = _RecordingGovernanceService()
+    event_bus = _RecordingEventBus()
+    register_orchestrator_delegation_tools(
+        registry,
+        agent_gateway=gateway,
+        governance_service=governance_service,
+        event_bus=event_bus,
+    )
+    context = ToolCallContext(
+        agent=_orchestrator_agent(),
+        session_id="session-1",
+        trace_id="run-1:build-solution",
+    )
+
+    await registry.execute(
+        agent_id="genie-orchestrator",
+        tool_name="call_build_agent",
+        arguments={
+            "requirements": "Approved requirements text.",
+            "architecture": _ARCHITECTURE_WITH_TWO_SPECIALISTS,
+            "policies": "",
+            "user_message": "",
+        },
+        context=context,
+    )
+
+    deltas = [event.delta for event in event_bus.events if event.event_type == "step_delta"]
+    # One delta per component's own real streamed chunk, plus a "\n\n"
+    # separator published between each pair of components (3 separators
+    # for 4 components) - proving each component streams independently,
+    # in order, rather than one single combined stream.
+    assert deltas == [
+        "classifier-code",
+        "\n\n",
+        "drafter-code",
+        "\n\n",
+        "orchestrator-code",
+        "\n\n",
+        "ui-code",
+    ]
+    assert all(event.agent_id == "build-agent" for event in event_bus.events)
+    assert all(event.step_id == "build-solution" for event in event_bus.events)
+
+
+async def test_call_build_agent_falls_back_to_a_single_combined_call_when_architecture_does_not_parse():
+    registry = AgentToolRegistry()
+    gateway = _StreamingAgentGateway(default_text="The whole combined build output.")
+    governance_service = _RecordingGovernanceService()
+    register_orchestrator_delegation_tools(
+        registry, agent_gateway=gateway, governance_service=governance_service
+    )
+    context = ToolCallContext(
+        agent=_orchestrator_agent(),
+        session_id="session-1",
+        trace_id="run-1:build-solution",
+    )
+
+    result = await registry.execute(
+        agent_id="genie-orchestrator",
+        tool_name="call_build_agent",
+        arguments={
+            "requirements": "Approved requirements text.",
+            "architecture": _ARCHITECTURE_WITHOUT_A_PARSEABLE_WORKFLOW_SECTION,
+            "policies": "",
+            "user_message": "",
+        },
+        context=context,
+    )
+
+    [request] = gateway.requests
+    assert request.prompt_id == "build-generation-v1"
+    assert result == {"output_text": "The whole combined build output."}
+

@@ -80,39 +80,6 @@ class WorkshopService:
             step_inputs=step_inputs,
         )
 
-    async def regenerate_build_artifacts(
-        self,
-        *,
-        session_id: str,
-        requesting_user_id: str,
-        workflow_run_id: str,
-        instruction: str,
-        trace_id: str | None = None,
-    ) -> WorkflowRunResult:
-        """Re-runs only the ``build-solution`` step with an extra customer
-        instruction supplied as its ``user_message`` variable - lets the
-        Workshop UI regenerate one generated artifact (or the whole build)
-        without resubmitting the entire mission.
-
-        Always targets the fixed ``build-solution`` step id directly,
-        rather than resolving it via ``_step_id_for_agent``: every step in
-        solution-discovery-workflow executes as ``genie-orchestrator`` (see
-        config/workflows/registry.yaml), so an agent-id-based lookup always
-        resolves to the first such step instead of this one.
-        """
-        await self._authorize(session_id, requesting_user_id)
-        step_inputs = {
-            "build-solution": WorkflowStepInput(
-                step_id="build-solution", variables={"user_message": instruction}
-            )
-        }
-        return await self._orchestrator.resume_workflow(
-            workflow_run_id=workflow_run_id,
-            session_id=session_id,
-            trace_id=trace_id,
-            step_inputs=step_inputs,
-        )
-
     async def challenge_recommendation(
         self,
         *,

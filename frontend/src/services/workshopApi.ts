@@ -66,13 +66,4 @@ export const workshopApi = {
       body,
     });
   },
-  regenerateBuild(
-    sessionId: string,
-    body: { workflow_run_id: string; instruction: string; trace_id?: string },
-  ): Promise<WorkflowRunResult> {
-    return apiFetch<WorkflowRunResult>(`/sessions/${sessionId}/workshop/build/regenerate`, {
-      method: "POST",
-      body,
-    });
-  },
 };

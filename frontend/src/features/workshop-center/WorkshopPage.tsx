@@ -146,19 +146,7 @@ export function WorkshopPage(): JSX.Element {
 
       <SectionCard title="🛠️ Generated Artifacts">
         {displayedBuildText ? (
-          <GeneratedArtifacts
-            outputText={displayedBuildText}
-            revealImmediately={!buildOutputText}
-            onRegenerateArtifact={(artifactTitle, instruction) =>
-              workshop
-                .regenerateBuild(
-                  `Regenerate only the "${artifactTitle}" artifact based on this instruction, keeping every other artifact (the UI code, every other agent's code, and the Multi-Agent Workflow section) exactly the same as before: ${instruction}`,
-                )
-                .then(() => {
-                  void refreshRun();
-                })
-            }
-          />
+          <GeneratedArtifacts outputText={displayedBuildText} revealImmediately={!buildOutputText} />
         ) : buildError ? (
           <ErrorState error={{ message: buildError }} />
         ) : (
