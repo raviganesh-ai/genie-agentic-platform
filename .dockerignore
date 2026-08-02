@@ -14,3 +14,7 @@ backend/.env
 .git/
 .github/
 docs/
+frontend/
+e2e/
+infra/
+scripts/

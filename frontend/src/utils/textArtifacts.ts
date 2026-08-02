@@ -222,6 +222,30 @@ export function extractAgentLabel(code: string): string | null {
   return match ? match[1].trim() : null;
 }
 
+/**
+ * Returns true once `text` contains a fully-closed `# agent: ui` /
+ * `// agent: ui` code block - the UI component is always generated LAST
+ * (see the backend's `_generate_build_by_component`: each specialist
+ * agent -> the Orchestrator Agent -> the UI), so its closing fence
+ * appearing means every real component has finished streaming, even
+ * while genie-orchestrator's own outer Foundry run is still separately
+ * regenerating a verbatim echo of the same text as its "final answer"
+ * (see `WorkflowStepExecutor._run_agent` - that echo is what eventually
+ * populates a workflow step's own `output_text`/marks it "completed"
+ * server-side, which can take substantially longer than the real
+ * generation this checks for). Callers that only need to know "is the
+ * actual generated content done" (e.g. gating a review-and-approve
+ * action) should use this instead of waiting for the step to be marked
+ * completed server-side.
+ */
+export function isBuildOutputComplete(text: string): boolean {
+  const openBlock = extractTrailingOpenCodeBlock(text);
+  const closedText = openBlock ? text.slice(0, openBlock.startIndex) : text;
+  return extractCodeBlocks(closedText).some(
+    (block) => extractAgentLabel(block.code)?.toLowerCase() === "ui",
+  );
+}
+
 /** Returns the text with every fenced code block removed (surrounding whitespace collapsed). */
 export function stripCodeBlocks(text: string): string {
   return text

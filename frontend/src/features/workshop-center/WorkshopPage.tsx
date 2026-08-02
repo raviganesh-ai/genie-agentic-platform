@@ -13,6 +13,7 @@ import { ErrorState } from "@/components/ErrorState";
 import { SectionCard } from "@/components/SectionCard";
 import { AgentActivityAnimation } from "@/components/AgentActivityAnimation";
 import { useWorkflowEventStream, workflowStepDeltaKey } from "@/hooks/useWorkflowEventStream";
+import { isBuildOutputComplete } from "@/utils/textArtifacts";
 import { GeneratedArtifacts } from "./GeneratedArtifacts";
 
 /** Gates entry into the automated peer review phase (security-assessment,
@@ -85,6 +86,16 @@ export function WorkshopPage(): JSX.Element {
   // text.
   const liveBuildText = stepDeltaText[workflowStepDeltaKey(BUILD_STEP_ID, BUILD_AGENT_ID)] ?? "";
   const displayedBuildText = buildOutputText || liveBuildText;
+  // True as soon as the Build Agent's own real generation (every
+  // specialist agent, the Orchestrator Agent, then the UI) has actually
+  // finished streaming - well before `buildOutputText` above is populated,
+  // since that instead waits for genie-orchestrator's own separate,
+  // strictly-slower verbatim echo of the same text to complete server-side
+  // (see isBuildOutputComplete's own doc comment). Gating the checkbox/
+  // proceed button below on this instead means the user is not stuck
+  // staring at fully-generated code with no way to proceed while that
+  // redundant echo is still being generated.
+  const buildGenerationComplete = Boolean(buildOutputText) || isBuildOutputComplete(displayedBuildText);
   const pendingPeerReviewApproval = approvals?.find(
     (request) => request.status === "pending" && request.subject_id === PEER_REVIEW_CHECKPOINT_SUBJECT_ID,
   );
@@ -182,7 +193,7 @@ export function WorkshopPage(): JSX.Element {
         )}
       </SectionCard>
 
-      {buildOutputText && !peerReviewAlreadyStarted ? (
+      {buildGenerationComplete && !peerReviewAlreadyStarted ? (
         <SectionCard title="✅ Ready to proceed?">
           {approveError ? (
             <MessageBar intent="error" style={{ marginBottom: 8 }}>
