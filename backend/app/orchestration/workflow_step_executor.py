@@ -210,6 +210,25 @@ class WorkflowStepExecutor:
             return await self._agent_gateway.execute(request)
 
         display_agent_id = _display_agent_id(step, agent.id)
+        # A step is "delegated" when its allowed_tool_names resolve to a
+        # real specialist (display_agent_id differs from this step's own
+        # configured agent.id, always "genie-orchestrator"). Every
+        # orchestrator-*-phase-v1 prompt (config/prompts/registry.yaml)
+        # instructs the model to, once the delegated call returns, "respond
+        # with EXACTLY that tool's returned output text and nothing else" -
+        # so genie-orchestrator's own completion below is always a verbatim
+        # re-typing of content the delegated tool call already published its
+        # own step_delta events for, tagged with this same
+        # display_agent_id/step_id (see
+        # orchestration_tools._stream_and_publish_deltas). Re-publishing
+        # that echoed completion's own deltas here would make a live
+        # consumer (e.g. the Workshop page's per-component build view)
+        # accumulate the whole already-finished generation a second time,
+        # appearing to restart from the beginning right after it just
+        # completed. Delegated steps therefore only publish the
+        # step_started/step_completed lifecycle events here - step_delta is
+        # left entirely to the delegated tool call's own publishing.
+        is_delegated = display_agent_id != agent.id
 
         await self._event_bus.publish(
             WorkflowStreamEvent(
@@ -223,7 +242,7 @@ class WorkflowStepExecutor:
         try:
             result: AgentExecutionResult | None = None
             async for chunk in self._agent_gateway.execute_stream(request):
-                if chunk.delta:
+                if chunk.delta and not is_delegated:
                     await self._event_bus.publish(
                         WorkflowStreamEvent(
                             event_type="step_delta",

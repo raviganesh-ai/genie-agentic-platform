@@ -97,8 +97,26 @@ function buildArtifacts(outputText: string): Artifact[] {
   // it as a clean "generating this component" placeholder appended at the
   // very end, after every already-CLOSED code block/narrative section.
   const openBlock = extractTrailingOpenCodeBlock(outputText);
-  const closedText = openBlock ? outputText.slice(0, openBlock.startIndex) : outputText;
-  const codeBlocks = extractCodeBlocks(closedText);
+  const closedTextFull = openBlock ? outputText.slice(0, openBlock.startIndex) : outputText;
+  const codeBlocksFull = extractCodeBlocks(closedTextFull);
+
+  // The UI component is always generated last (see the backend's
+  // _generate_build_by_component: each specialist agent -> the
+  // Orchestrator Agent -> the UI) - once its code block has closed, the
+  // build is complete. Ignore anything else that might still follow it
+  // (e.g. genie-orchestrator's own trailing verbatim echo of the whole
+  // build output, which the orchestrator-*-phase-v1 prompts require it to
+  // produce as its "final answer") instead of rendering more cards or a
+  // "generating next component" placeholder past this point.
+  const uiBlockIndex = codeBlocksFull.findIndex(
+    (block) => extractAgentLabel(block.code)?.toLowerCase() === "ui",
+  );
+  const buildComplete = uiBlockIndex !== -1;
+  const codeBlocks = buildComplete ? codeBlocksFull.slice(0, uiBlockIndex + 1) : codeBlocksFull;
+  const closedText = buildComplete
+    ? closedTextFull.slice(0, codeBlocks[codeBlocks.length - 1].endIndex)
+    : closedTextFull;
+
   const remainder = stripCodeBlocks(closedText);
   const narrativeSections = splitIntoNamedSections(remainder);
   const usedSectionIndices = new Set<number>();
@@ -171,13 +189,15 @@ function buildArtifacts(outputText: string): Artifact[] {
     });
   }
 
-  if (openBlock) {
+  if (openBlock && !buildComplete) {
     // The model always writes the `# agent: <name>` / `// agent: ui`
     // label as the very first line of a component's fence (see
     // build-generation-component-v1), so it's already known as soon as
     // the fence opens - well before the code finishes streaming in -
     // letting this placeholder name the exact component in progress
-    // instead of a generic "working..." message.
+    // instead of a generic "working..." message. Never shown once the UI
+    // component has already closed (buildComplete) - the build is done,
+    // so nothing further should ever be presented as "still generating".
     const agentLabel = extractAgentLabel(openBlock.code);
     if (agentLabel) {
       const { icon, title, variant } = labelForCodeBlock(openBlock.language, agentLabel);

@@ -144,6 +144,8 @@ export function parseUiScreenFlows(text: string): UiScreenFlow[] {
 export interface ParsedCodeBlock {
   language: string;
   code: string;
+  /** Index, within the original text, immediately after this block's closing ``` fence. */
+  endIndex: number;
 }
 
 /** Extracts every fenced ```lang ... ``` code block from free text. */
@@ -152,7 +154,11 @@ export function extractCodeBlocks(text: string): ParsedCodeBlock[] {
   const regex = /```([a-zA-Z0-9_-]*)\n([\s\S]*?)```/g;
   let match: RegExpExecArray | null;
   while ((match = regex.exec(text)) !== null) {
-    blocks.push({ language: match[1] || "text", code: match[2].trim() });
+    blocks.push({
+      language: match[1] || "text",
+      code: match[2].trim(),
+      endIndex: match.index + match[0].length,
+    });
   }
   return blocks;
 }
