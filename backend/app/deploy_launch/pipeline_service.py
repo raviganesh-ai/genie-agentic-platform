@@ -155,6 +155,7 @@ class DeploymentPipelineService:
         self._runs: dict[str, DeploymentPipelineRun] = {}
         self._workspaces: dict[str, _RunWorkspace] = {}
         self._materialized_builds: dict[str, MaterializedBuild] = {}
+        self._agent_foundry_names: dict[str, dict[str, str]] = {}
 
     def get_run(self, pipeline_run_id: str) -> DeploymentPipelineRun | None:
         return self._runs.get(pipeline_run_id)
@@ -320,12 +321,17 @@ class DeploymentPipelineService:
                     if orchestrator_record is not None:
                         orchestrator_foundry_name = orchestrator_record.foundry_agent_name
                     self._materialized_builds[pipeline_run.id] = materialized
+                    self._agent_foundry_names[pipeline_run.id] = {
+                        record.agent_name: record.foundry_agent_name for record in provisioned
+                    }
                     detail = f"Provisioned {len(provisioned)} Foundry agent(s) for this mission."
 
                 elif step_id == "deploy-backend-service":
                     materialized = self._materialized_builds[pipeline_run.id]
                     scaffold = generate_backend_service_scaffold(
-                        mission_title=mission_slug, orchestrator_agent_name=orchestrator_foundry_name
+                        mission_title=mission_slug,
+                        orchestrator_agent_name=orchestrator_foundry_name,
+                        agent_foundry_names=self._agent_foundry_names[pipeline_run.id],
                     )
                     materialized.write_to_directory(backend_root, backend_service_scaffold=scaffold)
                     backend_result = await self._backend_deployment_service.deploy(

@@ -83,12 +83,16 @@ class BackendDeploymentService:
         acr_name: str,
         container_apps_environment_id: str,
         location: str,
+        foundry_endpoint: str,
+        foundry_project_name: str,
     ) -> None:
         self._subscription_id = subscription_id
         self._resource_group = resource_group
         self._acr_name = acr_name
         self._container_apps_environment_id = container_apps_environment_id
         self._location = location
+        self._foundry_endpoint = foundry_endpoint
+        self._foundry_project_name = foundry_project_name
 
     def _acr_client(self) -> Any:
         """Client pinned to the ``2019-06-01-preview`` API version - the version
@@ -202,6 +206,7 @@ class BackendDeploymentService:
                 Configuration,
                 Container,
                 ContainerApp,
+                EnvironmentVar,
                 Ingress,
                 RegistryCredentials,
                 Secret,
@@ -210,6 +215,16 @@ class BackendDeploymentService:
 
             app_name = f"genie-{mission_slug}-backend"
             secret_name = "acr-password"
+            # The mission backend's own generated main.py (see
+            # ``code_materializer._MAIN_PY_TEMPLATE``) reads
+            # os.environ["FOUNDRY_ENDPOINT"]/os.environ["FOUNDRY_PROJECT_NAME"] at
+            # request time to reach this mission's own already-provisioned
+            # Foundry orchestrator agent - these must be real Container App
+            # environment variables, not just baked into the image.
+            env_vars = [
+                EnvironmentVar(name="FOUNDRY_ENDPOINT", value=self._foundry_endpoint),
+                EnvironmentVar(name="FOUNDRY_PROJECT_NAME", value=self._foundry_project_name),
+            ]
             envelope = ContainerApp(
                 location=self._location,
                 managed_environment_id=self._container_apps_environment_id,
@@ -226,7 +241,7 @@ class BackendDeploymentService:
                 ),
                 template=Template(
                     containers=[
-                        Container(name="backend", image=image_tag),
+                        Container(name="backend", image=image_tag, env=env_vars),
                     ]
                 ),
             )
@@ -264,6 +279,8 @@ def create_backend_deployment_service(
         settings.deployment_acr_name,
         settings.deployment_container_apps_environment_id,
         settings.deployment_location,
+        settings.azure_foundry_endpoint,
+        settings.azure_foundry_project_name,
     )
 
     def _build_real() -> BackendDeploymentService:
@@ -271,7 +288,8 @@ def create_backend_deployment_service(
             raise BackendDeploymentError(
                 "azure_subscription_id, deployment_resource_group, "
                 "deployment_acr_name, deployment_container_apps_environment_id, "
-                "and deployment_location must all be configured to deploy a "
+                "deployment_location, azure_foundry_endpoint, and "
+                "azure_foundry_project_name must all be configured to deploy a "
                 "mission's backend service."
             )
         return BackendDeploymentService(
@@ -280,6 +298,8 @@ def create_backend_deployment_service(
             acr_name=settings.deployment_acr_name,  # type: ignore[arg-type]
             container_apps_environment_id=settings.deployment_container_apps_environment_id,  # type: ignore[arg-type]
             location=settings.deployment_location,  # type: ignore[arg-type]
+            foundry_endpoint=settings.azure_foundry_endpoint,  # type: ignore[arg-type]
+            foundry_project_name=settings.azure_foundry_project_name,  # type: ignore[arg-type]
         )
 
     if settings.provider_mode == "production":

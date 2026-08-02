@@ -7,6 +7,7 @@ import pytest
 
 from app.deploy_launch.code_materializer import (
     MaterializedCodeError,
+    generate_agent_config_module,
     generate_backend_service_scaffold,
     materialize_build,
 )
@@ -65,7 +66,9 @@ def test_write_to_directory_creates_expected_files(tmp_path: Path):
 def test_write_to_directory_includes_backend_service_scaffold(tmp_path: Path):
     build = materialize_build(_SAMPLE_OUTPUT)
     scaffold = generate_backend_service_scaffold(
-        mission_title="Acme Mission", orchestrator_agent_name="acme-orchestrator"
+        mission_title="Acme Mission",
+        orchestrator_agent_name="acme-orchestrator",
+        agent_foundry_names={"Requirements Specialist": "acme-requirements-specialist"},
     )
 
     build.write_to_directory(tmp_path, backend_service_scaffold=scaffold)
@@ -73,4 +76,16 @@ def test_write_to_directory_includes_backend_service_scaffold(tmp_path: Path):
     assert (tmp_path / "main.py").exists()
     assert (tmp_path / "Dockerfile").exists()
     assert (tmp_path / "requirements.txt").exists()
+    assert (tmp_path / "agent_config.py").exists()
     assert "acme-orchestrator" in (tmp_path / "main.py").read_text(encoding="utf-8")
+    assert "acme-requirements-specialist" in (tmp_path / "agent_config.py").read_text(encoding="utf-8")
+
+
+def test_generate_agent_config_module_embeds_the_real_agent_foundry_name_mapping():
+    module_source = generate_agent_config_module(
+        {"Requirements Specialist": "acme-requirements-specialist", "orchestrator": "acme-orchestrator"}
+    )
+
+    assert "AGENT_FOUNDRY_NAMES" in module_source
+    assert "'Requirements Specialist': 'acme-requirements-specialist'" in module_source
+    assert "'orchestrator': 'acme-orchestrator'" in module_source

@@ -62,6 +62,7 @@ export function WorkshopPage(): JSX.Element {
   );
   const { data: approvals, refresh: refreshApprovals } = useAsyncResource(approvalsFetcher, [sessionId], {
     enabled: Boolean(sessionId),
+    pollIntervalMs: Number(import.meta.env.VITE_ARCHITECTURE_STUDIO_POLL_MS ?? 0),
   });
   const { events: liveEvents, stepDeltaText } = useWorkflowEventStream(sessionId);
   const lastLiveEvent = liveEvents[liveEvents.length - 1] ?? null;
@@ -123,27 +124,16 @@ export function WorkshopPage(): JSX.Element {
     }
   }, [sessionId, workflowRunId, refreshRun]);
 
-  // The user's own checkbox + click IS the confirmation to proceed - no
-  // separate internal "checkpoint" state should ever be surfaced to them.
-  // The approval record backing this transition is normally already
-  // present by the time the button is shown (build-solution has finished
-  // generating), but a single fallback lookup covers the rare case where
-  // it was created moments after the last `approvals` refresh.
+  // The approval checkpoint is created server-side once build-solution
+  // finishes; approvals are polled the same as `run` above, so
+  // `pendingPeerReviewApproval` is real, already-confirmed state by the
+  // time this runs - no retry/guessing needed here.
   const handleProceedToPeerReview = useCallback(async () => {
-    if (!sessionId || !workflowRunId) return;
+    if (!sessionId || !workflowRunId || !pendingPeerReviewApproval) return;
     setApproving(true);
     setApproveError(null);
     try {
-      const approval =
-        pendingPeerReviewApproval ??
-        (await approvalApi.list(sessionId)).find(
-          (request) => request.status === "pending" && request.subject_id === PEER_REVIEW_CHECKPOINT_SUBJECT_ID,
-        );
-      if (!approval) {
-        setApproveError("Still finishing up the build - please try again in a moment.");
-        return;
-      }
-      await approvalApi.decide(sessionId, approval.id, "approved");
+      await approvalApi.decide(sessionId, pendingPeerReviewApproval.id, "approved");
       const traceId = getTraceId(workflowRunId) ?? undefined;
       // Navigate immediately - the Peer Review page has its own live event
       // stream + polling and shows progress until peer-review's output
@@ -228,16 +218,16 @@ export function WorkshopPage(): JSX.Element {
             label="AI can perform mistake, the user has reviewed and is willing to proceed"
           />
           {reviewed ? (
-            // Always clickable once reviewed is checked - checking the box
-            // and clicking this button is the entire interaction the user
-            // needs to perform; no separate "checkpoint" state is exposed.
+            // Disabled only for the brief moment before the backend's own
+            // approval checkpoint is confirmed present - once enabled, this
+            // click always succeeds (no retry inside the handler).
             <Button
               appearance="primary"
               style={{ marginTop: 8 }}
-              disabled={approving}
+              disabled={approving || !pendingPeerReviewApproval}
               onClick={() => void handleProceedToPeerReview()}
             >
-              {approving ? "Continuing..." : "Proceed to Peer Review"}
+              {approving ? "Continuing..." : pendingPeerReviewApproval ? "Proceed to Peer Review" : "Finishing up..."}
             </Button>
           ) : null}
         </SectionCard>

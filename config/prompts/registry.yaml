@@ -446,13 +446,17 @@ prompts:
       same way this platform's own agents do: construct an
       `agent_framework.foundry.FoundryAgent` against the mission's own
       Azure AI Foundry project client, referencing that agent's own
-      already-provisioned Foundry agent name/version (read from
-      configuration, never hardcoded), and call `.run(...)` on it - never
-      invent a different SDK or a lower-level manual thread/run polling
-      loop. Never combine two agents into one block, and do not invent
-      undocumented SDK APIs. Return each as its own fenced ```python code
-      block whose first line is the comment `# agent: <the exact agent
-      name from the architecture>`.
+      already-provisioned Foundry agent name/version by importing
+      `AGENT_FOUNDRY_NAMES` from the sibling, already-generated
+      `agent_config` module (e.g. `from agent_config import
+      AGENT_FOUNDRY_NAMES` then `AGENT_FOUNDRY_NAMES["<this agent's exact
+      name from the architecture>"]`) - never a hardcoded literal name and
+      never a made-up configuration source - and call `.run(...)` on it -
+      never invent a different SDK or a lower-level manual thread/run
+      polling loop. Never combine two agents into one block, and do not
+      invent undocumented SDK APIs. Return each as its own fenced
+      ```python code block whose first line is the comment `# agent: <the
+      exact agent name from the architecture>`.
 
       (2) Exactly one more agent code block, immediately after all of (1)
       are done, for the Orchestrator Agent itself, also Python 3.12 on the
@@ -461,7 +465,9 @@ prompts:
       tool per specialist agent from (1) (the same call_<agent> tool
       pattern Genie's own genie-orchestrator uses), so it is this
       mission's single entry point that sequences and hands off to every
-      specialist agent by invoking its own `FoundryAgent`. Include a short
+      specialist agent by invoking its own `FoundryAgent`, each looked up
+      the same way via `AGENT_FOUNDRY_NAMES` from the `agent_config`
+      module - never a hardcoded literal name. Include a short
       comment near the top noting that once deployed to Azure AI Foundry,
       this Orchestrator Agent is reachable only through this mission's own
       backend service (the same one the UI calls) - never directly from
@@ -521,7 +527,7 @@ prompts:
       - architecture
       - policies
       - user_message
-    version: "4.3.0"
+    version: "4.4.0"
 
   - id: build-generation-component-v1
     name: Build Generation - Single Component
@@ -558,11 +564,15 @@ prompts:
       the same way this platform's own agents do: construct an
       `agent_framework.foundry.FoundryAgent` against the mission's own
       Azure AI Foundry project client, referencing that agent's own
-      already-provisioned Foundry agent name/version (read from
-      configuration, never hardcoded), and call `.run(...)` on it - never
-      invent a different SDK or a lower-level manual thread/run polling
-      loop. Return it as exactly one fenced ```python code block whose
-      first line is the comment `# agent: {component_name}`.
+      already-provisioned Foundry agent name/version by importing
+      `AGENT_FOUNDRY_NAMES` from the sibling, already-generated
+      `agent_config` module (e.g. `from agent_config import
+      AGENT_FOUNDRY_NAMES` then `AGENT_FOUNDRY_NAMES["{component_name}"]`)
+      - never a hardcoded literal name and never a made-up configuration
+      source - and call `.run(...)` on it - never invent a different SDK
+      or a lower-level manual thread/run polling loop. Return it as
+      exactly one fenced ```python code block whose first line is the
+      comment `# agent: {component_name}`.
 
       If component_kind is "orchestrator": produce exactly one Python
       3.12 module, also on the Microsoft Agent Framework
@@ -572,7 +582,9 @@ prompts:
       section below (the same call_<agent> tool pattern Genie's own
       genie-orchestrator uses), so it is this mission's single entry
       point that sequences and hands off to every specialist agent by
-      invoking its own `FoundryAgent`. Include a short comment near the
+      invoking its own `FoundryAgent`, each looked up the same way via
+      `AGENT_FOUNDRY_NAMES` from the `agent_config` module - never a
+      hardcoded literal name. Include a short comment near the
       top noting that once deployed to Azure AI Foundry, this
       Orchestrator Agent is reachable only through this mission's own
       backend service (the same one the UI calls) - never directly from
@@ -625,7 +637,7 @@ prompts:
       - component_kind
       - component_name
       - user_message
-    version: "1.0.0"
+    version: "1.1.0"
 
   - id: build-component-regeneration-v1
     name: Build Generation - Regenerate Single Component

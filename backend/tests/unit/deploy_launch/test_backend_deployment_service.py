@@ -33,3 +33,37 @@ async def test_null_service_deploy_returns_a_local_placeholder_url(tmp_path):
 def test_production_mode_without_config_raises():
     with pytest.raises(BackendDeploymentError):
         create_backend_deployment_service(settings=_settings(provider_mode="production"))
+
+
+def test_local_mode_with_deployment_config_but_no_foundry_config_returns_null_service():
+    """azure_foundry_endpoint/azure_foundry_project_name are required too - the
+    deployed mission backend's main.py reads them at request time to reach
+    its own already-provisioned Foundry orchestrator agent, so a real
+    service must never be built without them."""
+
+    service = create_backend_deployment_service(
+        settings=_settings(
+            provider_mode="local",
+            azure_subscription_id="sub-1",
+            deployment_resource_group="rg-1",
+            deployment_acr_name="acr1",
+            deployment_container_apps_environment_id="env-1",
+            deployment_location="eastus2",
+        )
+    )
+
+    assert isinstance(service, NullBackendDeploymentService)
+
+
+def test_production_mode_with_deployment_config_but_no_foundry_config_raises():
+    with pytest.raises(BackendDeploymentError):
+        create_backend_deployment_service(
+            settings=_settings(
+                provider_mode="production",
+                azure_subscription_id="sub-1",
+                deployment_resource_group="rg-1",
+                deployment_acr_name="acr1",
+                deployment_container_apps_environment_id="env-1",
+                deployment_location="eastus2",
+            )
+        )

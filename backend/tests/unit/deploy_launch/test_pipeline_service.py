@@ -203,6 +203,17 @@ async def test_full_pipeline_runs_every_step_once_approved(tmp_path: Path):
     assert run.test_summary is not None
     assert run.security_findings_count is not None
 
+    # The full specialist-name -> Foundry-name mapping (not just the
+    # orchestrator's own name) must be materialized as a real agent_config.py
+    # file so the generated orchestrator.py's call_<agent> tools have a real,
+    # non-hardcoded source of truth for each specialist's Foundry agent name.
+    build_root = service.get_build_root(run.id)
+    assert build_root is not None
+    agent_config_source = (build_root / "agent_config.py").read_text(encoding="utf-8")
+    assert "AGENT_FOUNDRY_NAMES" in agent_config_source
+    assert "Requirements Specialist" in agent_config_source
+    assert "local-mission-" in agent_config_source
+
 
 async def test_pipeline_fails_closed_when_generated_tests_fail(tmp_path: Path):
     service, approval_service = _build_service(test_output_text=_FAILING_TEST_OUTPUT, tmp_path=tmp_path)

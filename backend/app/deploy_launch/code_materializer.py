@@ -20,6 +20,7 @@ from typing import Final
 __all__ = [
     "MaterializedBuild",
     "MaterializedCodeError",
+    "generate_agent_config_module",
     "generate_backend_service_scaffold",
     "materialize_build",
 ]
@@ -183,6 +184,21 @@ async def invoke(request: InvokeRequest) -> InvokeResponse:
             return InvokeResponse(output_text=(getattr(response, "text", None) or "").strip())
 '''
 
+_AGENT_CONFIG_PY_TEMPLATE = '''"""Deterministically generated agent-name configuration - never LLM-authored.
+
+Maps this mission's own logical specialist agent names (exactly as named in
+the approved architecture's "## Multi-Agent Workflow" section) to their
+real, already-provisioned Azure AI Foundry agent names, written fresh by
+``app.deploy_launch.code_materializer.generate_agent_config_module`` every
+time this mission is deployed. The generated ``orchestrator.py``'s
+``call_<agent>`` delegation tools import this module and look up each
+specialist's Foundry agent name here - never hardcoding it.
+"""
+from __future__ import annotations
+
+AGENT_FOUNDRY_NAMES: dict[str, str] = {agent_foundry_names!r}
+'''
+
 _REQUIREMENTS_TXT = """fastapi>=0.115,<1.0
 uvicorn>=0.32,<1.0
 azure-ai-projects>=1.0,<2.0
@@ -202,12 +218,23 @@ CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
 """
 
 
+def generate_agent_config_module(agent_foundry_names: dict[str, str]) -> str:
+    """Returns the real, deterministic ``agent_config.py`` module content mapping
+    every one of this mission's own logical agent names (specialists and the
+    orchestrator itself) to their real, already-provisioned Foundry agent
+    names - never LLM-authored, so the generated ``orchestrator.py`` always has
+    a real, non-hardcoded source of truth for which Foundry agent to call."""
+
+    return _AGENT_CONFIG_PY_TEMPLATE.format(agent_foundry_names=agent_foundry_names)
+
+
 def generate_backend_service_scaffold(
-    *, mission_title: str, orchestrator_agent_name: str
+    *, mission_title: str, orchestrator_agent_name: str, agent_foundry_names: dict[str, str]
 ) -> dict[str, str]:
-    """Returns the real, deterministic ``{main.py, requirements.txt, Dockerfile}``
-    scaffold every mission's backend service is built from - never LLM-authored,
-    so every deployed mission's backend proxy is consistent and auditable."""
+    """Returns the real, deterministic ``{main.py, requirements.txt, Dockerfile,
+    agent_config.py}`` scaffold every mission's backend service is built from -
+    never LLM-authored, so every deployed mission's backend proxy is
+    consistent and auditable."""
 
     return {
         "main.py": _MAIN_PY_TEMPLATE.format(
@@ -215,4 +242,5 @@ def generate_backend_service_scaffold(
         ),
         "requirements.txt": _REQUIREMENTS_TXT,
         "Dockerfile": _DOCKERFILE,
+        "agent_config.py": generate_agent_config_module(agent_foundry_names),
     }
