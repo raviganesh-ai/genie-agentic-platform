@@ -123,12 +123,27 @@ export function WorkshopPage(): JSX.Element {
     }
   }, [sessionId, workflowRunId, refreshRun]);
 
+  // The user's own checkbox + click IS the confirmation to proceed - no
+  // separate internal "checkpoint" state should ever be surfaced to them.
+  // The approval record backing this transition is normally already
+  // present by the time the button is shown (build-solution has finished
+  // generating), but a single fallback lookup covers the rare case where
+  // it was created moments after the last `approvals` refresh.
   const handleProceedToPeerReview = useCallback(async () => {
-    if (!sessionId || !workflowRunId || !pendingPeerReviewApproval) return;
+    if (!sessionId || !workflowRunId) return;
     setApproving(true);
     setApproveError(null);
     try {
-      await approvalApi.decide(sessionId, pendingPeerReviewApproval.id, "approved");
+      const approval =
+        pendingPeerReviewApproval ??
+        (await approvalApi.list(sessionId)).find(
+          (request) => request.status === "pending" && request.subject_id === PEER_REVIEW_CHECKPOINT_SUBJECT_ID,
+        );
+      if (!approval) {
+        setApproveError("Still finishing up the build - please try again in a moment.");
+        return;
+      }
+      await approvalApi.decide(sessionId, approval.id, "approved");
       const traceId = getTraceId(workflowRunId) ?? undefined;
       // Navigate immediately - the Peer Review page has its own live event
       // stream + polling and shows progress until peer-review's output
@@ -158,7 +173,7 @@ export function WorkshopPage(): JSX.Element {
     }
   }, [sessionId, workflowRunId, pendingPeerReviewApproval, navigate, governancePolicies]);
 
-  if (!workflowRunId) {
+  if (!workflowRunId || !sessionId) {
     return (
       <div>
         <PageHeader title="Workshop" />
@@ -179,7 +194,11 @@ export function WorkshopPage(): JSX.Element {
 
       <SectionCard title="🛠️ Generated Artifacts">
         {displayedBuildText ? (
-          <GeneratedArtifacts outputText={displayedBuildText} revealImmediately={!buildOutputText} />
+          <GeneratedArtifacts
+            sessionId={sessionId}
+            outputText={displayedBuildText}
+            revealImmediately={!buildOutputText}
+          />
         ) : buildError ? (
           <ErrorState
             error={{ message: retryError ?? buildError }}
@@ -209,17 +228,16 @@ export function WorkshopPage(): JSX.Element {
             label="AI can perform mistake, the user has reviewed and is willing to proceed"
           />
           {reviewed ? (
+            // Always clickable once reviewed is checked - checking the box
+            // and clicking this button is the entire interaction the user
+            // needs to perform; no separate "checkpoint" state is exposed.
             <Button
               appearance="primary"
               style={{ marginTop: 8 }}
-              disabled={!pendingPeerReviewApproval || approving}
+              disabled={approving}
               onClick={() => void handleProceedToPeerReview()}
             >
-              {approving
-                ? "Continuing..."
-                : pendingPeerReviewApproval
-                  ? "Proceed to Peer Review"
-                  : "Preparing peer review checkpoint..."}
+              {approving ? "Continuing..." : "Proceed to Peer Review"}
             </Button>
           ) : null}
         </SectionCard>

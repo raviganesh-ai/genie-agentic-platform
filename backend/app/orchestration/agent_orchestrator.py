@@ -14,6 +14,7 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 from app.agents.gateway import AgentGateway, create_agent_gateway
+from app.agents.models import AgentExecutionRequest, AgentExecutionResult
 from app.agents.registry import AgentRegistry
 from app.agents.tools.orchestration_tools import register_orchestrator_delegation_tools
 from app.agents.tools.registration import build_default_tool_registry
@@ -83,11 +84,13 @@ class AgentOrchestrator:
         workflow_registry: WorkflowRegistry,
         recommendation_lineage_service: RecommendationLineageService,
         workflow_event_bus: WorkflowEventBus,
+        agent_gateway: AgentGateway,
         customer_agent_provisioning_service: (
             CustomerAgentProvisioningService | NullCustomerAgentProvisioningService | None
         ) = None,
     ) -> None:
         self._execution_service = execution_service
+        self.agent_gateway = agent_gateway
         self._customer_agent_provisioning_service = (
             customer_agent_provisioning_service or NullCustomerAgentProvisioningService()
         )
@@ -116,6 +119,34 @@ class AgentOrchestrator:
 
     def list_workflow_runs(self, session_id: str) -> list[WorkflowRunResult]:
         return self._execution_service.list_runs_for_session(session_id)
+
+    async def execute_agent(
+        self,
+        *,
+        agent_id: str,
+        prompt_id: str,
+        variables: dict[str, str],
+        session_id: str | None = None,
+        trace_id: str | None = None,
+    ) -> AgentExecutionResult:
+        """Executes one agent directly against one prompt template, outside of
+        any workflow step/run.
+
+        Used by the Workshop page's per-component "Regenerate" action: that
+        action must revise exactly one already-generated component in
+        isolation, never re-run an entire workflow step (which would
+        regenerate every other component too). Flows through the exact same
+        ``AgentGateway`` (``AzureAgentGateway`` in production) every workflow
+        step already executes through - no separate/duplicate execution path.
+        """
+        request = AgentExecutionRequest(
+            agent_id=agent_id,
+            prompt_id=prompt_id,
+            variables=variables,
+            correlation_id=trace_id or str(uuid4()),
+            session_id=session_id,
+        )
+        return await self.agent_gateway.execute(request)
 
     async def provision_customer_agents(
         self, *, session_id: str, scope_id: str | None = None, trace_id: str | None = None
@@ -359,5 +390,6 @@ def create_agent_orchestrator(
         workflow_registry=workflow_registry,
         recommendation_lineage_service=recommendation_lineage_service,
         workflow_event_bus=resolved_workflow_event_bus,
+        agent_gateway=resolved_agent_gateway,
         customer_agent_provisioning_service=customer_agent_provisioning_service,
     )

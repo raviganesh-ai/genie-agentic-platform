@@ -300,13 +300,18 @@ agents:
         description: >-
           Delegate the peer-review phase to the Peer Review Agent and
           return its real output verbatim. The platform always supplies
-          the real artifact/policies/security_findings/test_plan/
-          user_message for this step automatically - do not repeat their
-          full text here; short placeholders or empty strings are fine.
+          the real artifact/requirements/policies/security_findings/
+          test_plan/user_message for this step automatically - do not
+          repeat their full text here; short placeholders or empty
+          strings are fine.
         parameters:
           - name: artifact
             type: string
             description: The build artifact to review for policy compliance.
+            required: false
+          - name: requirements
+            type: string
+            description: The approved requirements the build must satisfy.
             required: false
           - name: policies
             type: string

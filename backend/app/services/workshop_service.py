@@ -80,6 +80,49 @@ class WorkshopService:
             step_inputs=step_inputs,
         )
 
+    async def regenerate_component(
+        self,
+        *,
+        session_id: str,
+        requesting_user_id: str,
+        component_label: str,
+        existing_code: str,
+        instructions: str,
+        trace_id: str | None = None,
+    ) -> str:
+        """Regenerates exactly one already-generated build component (identified by
+        its own `# agent: <label>` / `// agent: ui` header, see
+        ``textArtifacts.extractAgentLabel`` on the frontend) to apply a
+        customer-requested change - calls the Build Agent directly against the
+        ``build-component-regeneration-v1`` prompt, never resuming the whole
+        `build-solution` workflow step (which would regenerate every other
+        component too).
+        """
+        await self._authorize(session_id, requesting_user_id)
+        component_kind, component_name = self._classify_component(component_label)
+        result = await self._orchestrator.execute_agent(
+            agent_id="build-agent",
+            prompt_id="build-component-regeneration-v1",
+            variables={
+                "component_kind": component_kind,
+                "component_name": component_name,
+                "existing_code": existing_code,
+                "instructions": instructions,
+            },
+            session_id=session_id,
+            trace_id=trace_id,
+        )
+        return result.output_text
+
+    @staticmethod
+    def _classify_component(component_label: str) -> tuple[str, str]:
+        normalized = component_label.strip().lower()
+        if normalized == "ui":
+            return "ui", "ui"
+        if normalized == "orchestrator":
+            return "orchestrator", "orchestrator"
+        return "agent", component_label
+
     async def challenge_recommendation(
         self,
         *,

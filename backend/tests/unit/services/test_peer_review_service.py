@@ -28,6 +28,7 @@ def test_parse_gate_report_all_gates_pass_yields_approved_decision_and_no_findin
     text = (
         "Some narrative review text.\n"
         "SECURITY_REVIEW: Looks fine.\n"
+        "REQUIREMENTS_GATE: PASS\n"
                 "SECURITY_GATE: PASS\n"
         "TEST_COVERAGE_GATE: PASS\n"
         "ARCHITECTURE_GATE: PASS\n"
@@ -40,6 +41,7 @@ def test_parse_gate_report_all_gates_pass_yields_approved_decision_and_no_findin
     report = _parse_gate_report(text, assessed_by_agent_id="peer-review-agent")
 
     assert report.status == "reviewed"
+    assert report.requirements_gate == "pass"
     assert report.security_gate == "pass"
     assert report.test_coverage_gate == "pass"
     assert report.architecture_gate == "pass"
@@ -51,6 +53,7 @@ def test_parse_gate_report_all_gates_pass_yields_approved_decision_and_no_findin
 
 def test_parse_gate_report_extracts_findings_and_blocked_decision():
     text = (
+        "REQUIREMENTS_GATE: PASS\n"
         "SECURITY_GATE: FAIL\n"
         "TEST_COVERAGE_GATE: PASS\n"
         "ARCHITECTURE_GATE: PASS\n"
@@ -64,6 +67,7 @@ def test_parse_gate_report_extracts_findings_and_blocked_decision():
     report = _parse_gate_report(text, assessed_by_agent_id="peer-review-agent")
 
     assert report.status == "reviewed"
+    assert report.requirements_gate == "pass"
     assert report.security_gate == "fail"
     assert report.decision == "blocked"
     assert len(report.findings) == 2

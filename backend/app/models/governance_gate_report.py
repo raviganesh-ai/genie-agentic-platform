@@ -1,10 +1,11 @@
 """Peer Review gate report domain model.
 
-Genie's Peer Review Agent independently reviews every code component the
-Build Agent generated: it consolidates the Security Assessment Agent's and
+Genie's Peer Review Agent acts as an unbiased project-leader-style reviewer:
+it independently confirms the generated build actually satisfies the
+approved requirements, and consolidates the Security Assessment Agent's and
 Test Generation Agent's findings with its own architecture and
-code-quality review into a single verdict across four hard gates
-(security, test coverage, architecture, code quality). This module never
+code-quality review into a single verdict across five hard gates
+(requirements, security, test coverage, architecture, code quality). This module never
 invents or overrides that verdict - it only parses the agent's own
 structured, marker-line output (see
 ``app.services.peer_review_service``), following the exact same
@@ -31,7 +32,7 @@ __all__ = [
 
 GateStatus = Literal["pass", "fail"]
 
-GateName = Literal["security", "test_coverage", "architecture", "code_quality"]
+GateName = Literal["requirements", "security", "test_coverage", "architecture", "code_quality"]
 
 PeerReviewDecision = Literal["approved", "blocked"]
 
@@ -64,6 +65,7 @@ class GovernanceGateReport(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     status: GovernanceGateReportStatus
+    requirements_gate: GateStatus | None = None
     security_gate: GateStatus | None = None
     test_coverage_gate: GateStatus | None = None
     architecture_gate: GateStatus | None = None

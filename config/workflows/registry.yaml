@@ -150,11 +150,13 @@ workflows:
       - id: peer-review
         agent_id: genie-orchestrator
         description: >-
-          Peer Review: review the build for policy compliance, assess its
-          security posture, provision/record the access control needed
-          for it to run safely, and consolidate the Security Assessment
-          Agent's and Test Generation Agent's findings with its own
-          architecture and code-quality review into one gate verdict.
+          Peer Review: acting as an unbiased project leader, confirm the
+          build actually satisfies the approved requirements, review it
+          for policy compliance, assess its security posture,
+          provision/record the access control needed for it to run
+          safely, and consolidate the Security Assessment Agent's and
+          Test Generation Agent's findings with its own requirements,
+          architecture, and code-quality review into one gate verdict.
         depends_on:
           - build-solution
           - security-assessment
@@ -165,9 +167,9 @@ workflows:
         # Peer Review reviews everything produced so far, not just the build
         # artifact: this fails closed unless the requirements and
         # architecture findings are also already present in Shared
-        # Collaboration Memory, even though only `artifact`, `security_findings`,
-        # and `test_plan` are substituted into the peer-review-agent's own
-        # prompt text below.
+        # Collaboration Memory. `artifact`, `requirements`,
+        # `security_findings`, and `test_plan` are substituted into the
+        # peer-review-agent's own prompt text below.
         required_memory_references:
           - analyze-requirements
           - design-architecture
@@ -176,6 +178,7 @@ workflows:
           - test-generation
         variable_sources:
           artifact: step:build-solution
+          requirements: step:analyze-requirements
           security_findings: step:security-assessment
           test_plan: step:test-generation
     enabled: true

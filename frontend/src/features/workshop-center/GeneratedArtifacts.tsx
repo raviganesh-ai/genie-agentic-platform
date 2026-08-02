@@ -7,6 +7,8 @@ import {
   splitIntoNamedSections,
   stripCodeBlocks,
 } from "@/utils/textArtifacts";
+import { workshopApi } from "@/services/workshopApi";
+import { ApiError } from "@/services/httpClient";
 
 interface Artifact {
   key: string;
@@ -238,17 +240,21 @@ function buildArtifacts(outputText: string): Artifact[] {
  * streamed in, so partially-generated blocks are simply not shown yet
  * rather than rendered incomplete.
  *
- * Every code artifact also gets an Edit control (inline textarea, kept
- * only in local state) and a Copy control - there is no regenerate
- * action: each component is generated once, straight from the Build
- * Agent's per-component pass over the approved architecture, so this view
- * is a simple, read-then-copy presentation of that output rather than an
- * editing/regeneration workflow.
+ * Every code artifact gets an Edit control (inline textarea, kept only in
+ * local state), a Copy control, and a Regenerate control - Regenerate lets
+ * the user type a free-text instruction ("make the header sticky", "add
+ * input validation", ...) and asks the Build Agent to revise just that one
+ * component in isolation (`POST .../workshop/regenerate-component`, see
+ * `WorkshopService.regenerate_component`) - it never re-runs the whole
+ * `build-solution` step, so every other component's card is left exactly
+ * as-is.
  */
 export function GeneratedArtifacts({
+  sessionId,
   outputText,
   revealImmediately = false,
 }: {
+  sessionId: string;
   outputText: string;
   /**
    * Skips the staggered reveal-one-at-a-time animation and shows every
@@ -283,6 +289,10 @@ export function GeneratedArtifacts({
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState("");
   const [contentOverrides, setContentOverrides] = useState<Record<string, string>>({});
+  const [regeneratingKey, setRegeneratingKey] = useState<string | null>(null);
+  const [regeneratePrompt, setRegeneratePrompt] = useState("");
+  const [regenerateInFlightKey, setRegenerateInFlightKey] = useState<string | null>(null);
+  const [regenerateErrors, setRegenerateErrors] = useState<Record<string, string>>({});
 
   useEffect(() => {
     if (revealImmediately) {
@@ -299,10 +309,37 @@ export function GeneratedArtifacts({
 
   useEffect(() => {
     // Fresh generated output supersedes any local edit drafts/overrides and
-    // any open edit panel.
+    // any open edit/regenerate panel.
     setContentOverrides({});
     setEditingKey(null);
+    setRegeneratingKey(null);
+    setRegenerateErrors({});
   }, [outputText]);
+
+  const handleRegenerate = async (artifact: Artifact, currentContent: string) => {
+    if (!regeneratePrompt.trim()) return;
+    setRegenerateInFlightKey(artifact.key);
+    setRegenerateErrors((prev) => ({ ...prev, [artifact.key]: "" }));
+    try {
+      const agentLabel = extractAgentLabel(currentContent) ?? artifact.title;
+      const { code } = await workshopApi.regenerateComponent(sessionId, {
+        component_label: agentLabel,
+        existing_code: currentContent,
+        instructions: regeneratePrompt,
+      });
+      const [firstBlock] = extractCodeBlocks(code);
+      setContentOverrides((prev) => ({ ...prev, [artifact.key]: firstBlock?.code ?? code.trim() }));
+      setRegeneratingKey(null);
+      setRegeneratePrompt("");
+    } catch (err) {
+      setRegenerateErrors((prev) => ({
+        ...prev,
+        [artifact.key]: (err as ApiError).message ?? "Failed to regenerate this component.",
+      }));
+    } finally {
+      setRegenerateInFlightKey(null);
+    }
+  };
 
   if (artifacts.length === 0) {
     return (
@@ -316,6 +353,7 @@ export function GeneratedArtifacts({
     <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
       {artifacts.slice(0, revealCount).map((artifact) => {
         const isEditing = editingKey === artifact.key;
+        const isRegenerating = regeneratingKey === artifact.key;
         const displayContent = contentOverrides[artifact.key] ?? artifact.content;
         const accent = VARIANT_ACCENTS[artifact.variant];
         const ordinal = codeOrdinals[artifact.key];
@@ -382,17 +420,40 @@ export function GeneratedArtifacts({
                         Cancel
                       </Button>
                     </>
-                  ) : (
+                  ) : isRegenerating ? (
                     <Button
                       size="small"
                       appearance="subtle"
                       onClick={() => {
-                        setEditDraft(displayContent);
-                        setEditingKey(artifact.key);
+                        setRegeneratingKey(null);
+                        setRegeneratePrompt("");
                       }}
                     >
-                      Edit
+                      Cancel
                     </Button>
+                  ) : (
+                    <>
+                      <Button
+                        size="small"
+                        appearance="subtle"
+                        onClick={() => {
+                          setEditDraft(displayContent);
+                          setEditingKey(artifact.key);
+                        }}
+                      >
+                        Edit
+                      </Button>
+                      <Button
+                        size="small"
+                        appearance="subtle"
+                        onClick={() => {
+                          setRegeneratePrompt("");
+                          setRegeneratingKey(artifact.key);
+                        }}
+                      >
+                        Regenerate
+                      </Button>
+                    </>
                   )}
                   <Button
                     size="small"
@@ -428,23 +489,56 @@ export function GeneratedArtifacts({
                     textarea={{ style: { fontFamily: "monospace", fontSize: 11, minHeight: 220 } }}
                   />
                 ) : (
-                  <pre
-                    style={{
-                      fontSize: 11,
-                      whiteSpace: "pre-wrap",
-                      maxHeight: 260,
-                      overflowY: "auto",
-                      fontFamily: "monospace",
-                      opacity: 0.9,
-                      backgroundColor: "#0b0f14",
-                      border: "1px solid #232a33",
-                      borderRadius: 6,
-                      padding: "8px 10px",
-                      margin: 0,
-                    }}
-                  >
-                    {displayContent}
-                  </pre>
+                  <>
+                    <pre
+                      style={{
+                        fontSize: 11,
+                        whiteSpace: "pre-wrap",
+                        maxHeight: 260,
+                        overflowY: "auto",
+                        fontFamily: "monospace",
+                        opacity: 0.9,
+                        backgroundColor: "#0b0f14",
+                        border: "1px solid #232a33",
+                        borderRadius: 6,
+                        padding: "8px 10px",
+                        margin: 0,
+                      }}
+                    >
+                      {displayContent}
+                    </pre>
+                    {isRegenerating ? (
+                      <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 6 }}>
+                        <Text size={200} weight="semibold">
+                          Describe the change to make to just this component
+                        </Text>
+                        <Textarea
+                          value={regeneratePrompt}
+                          onChange={(_, data) => setRegeneratePrompt(data.value)}
+                          placeholder="e.g. Make the header sticky and add a loading spinner."
+                          style={{ width: "100%" }}
+                          textarea={{ style: { minHeight: 60 } }}
+                        />
+                        {regenerateErrors[artifact.key] ? (
+                          <Text size={200} style={{ color: "#e04b4b" }}>
+                            {regenerateErrors[artifact.key]}
+                          </Text>
+                        ) : null}
+                        <div>
+                          <Button
+                            size="small"
+                            appearance="primary"
+                            disabled={!regeneratePrompt.trim() || regenerateInFlightKey === artifact.key}
+                            onClick={() => void handleRegenerate(artifact, displayContent)}
+                          >
+                            {regenerateInFlightKey === artifact.key
+                              ? "Regenerating..."
+                              : "Regenerate"}
+                          </Button>
+                        </div>
+                      </div>
+                    ) : null}
+                  </>
                 )
               ) : artifact.kind === "generating" ? (
                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>

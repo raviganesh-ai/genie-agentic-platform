@@ -51,6 +51,7 @@ const CATEGORY_META: Record<GovernanceEventCategory, { icon: string; accent: str
 };
 
 const GATE_LABELS: Record<GateName, string> = {
+  requirements: "Requirements",
   security: "Security",
   test_coverage: "Test Coverage",
   architecture: "Architecture",
@@ -199,7 +200,7 @@ function AgentAssessmentSection({
             />
           </div>
           <Button appearance="primary" disabled={applyingFixes || selectedCount === 0} onClick={onApplyFixes}>
-            {applyingFixes ? "Applying selected fixes..." : `Apply Selected Fixes (${selectedCount})`}
+            {applyingFixes ? "Auto-fixing..." : `Auto-Fix Selected Findings (${selectedCount})`}
           </Button>
         </div>
       ) : (
@@ -338,15 +339,21 @@ export function PeerReviewPage(): JSX.Element {
 
   const handleApplySelectedFixes = useCallback(async () => {
     if (!sessionId || !workflowRunId) return;
-    const descriptions = [...allKnownFindings.values()]
+    // Auto-fix: the reviewer's own Recommendation text (not just the
+    // problem description) is sent verbatim, so the user never has to
+    // type out how to resolve a finding themselves - selecting it is the
+    // whole interaction.
+    const instructions = [...allKnownFindings.values()]
       .filter((finding) => selectedFindings.has(finding.id))
-      .map((finding) => finding.description);
-    if (descriptions.length === 0) return;
+      .map((finding) =>
+        finding.recommendation ? `${finding.description} | Recommendation: ${finding.recommendation}` : finding.description,
+      );
+    if (instructions.length === 0) return;
     setApplyingFixes(true);
     setApplyFixesError(null);
     try {
       const traceId = getTraceId(workflowRunId) ?? crypto.randomUUID();
-      await governanceApi.applyFixes(sessionId, workflowRunId, traceId, descriptions);
+      await governanceApi.applyFixes(sessionId, workflowRunId, traceId, instructions);
       setSelectedFindings(new Set());
       refreshGateReport();
       refreshAgentAssessments();
@@ -457,18 +464,20 @@ export function PeerReviewPage(): JSX.Element {
           />
 
           {gateReport && gateReport.status === "reviewed" ? (
-            <SectionCard title="🛡️ Peer Review Gate Verdict — Architecture & Code Quality (Consolidated)">
+            <SectionCard title="🛡️ Peer Review Gate Verdict (Consolidated)">
               <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 12 }}>
-                {(["security", "test_coverage", "architecture", "code_quality"] as GateName[]).map(
+                {(["requirements", "security", "test_coverage", "architecture", "code_quality"] as GateName[]).map(
                   (gate) => {
                     const status =
-                      gate === "security"
-                        ? gateReport.security_gate
-                        : gate === "test_coverage"
-                          ? gateReport.test_coverage_gate
-                          : gate === "architecture"
-                            ? gateReport.architecture_gate
-                            : gateReport.code_quality_gate;
+                      gate === "requirements"
+                        ? gateReport.requirements_gate
+                        : gate === "security"
+                          ? gateReport.security_gate
+                          : gate === "test_coverage"
+                            ? gateReport.test_coverage_gate
+                            : gate === "architecture"
+                              ? gateReport.architecture_gate
+                              : gateReport.code_quality_gate;
                     const color = status === "pass" ? "#3fa66a" : status === "fail" ? "#d1495b" : "#8a8f98";
                     return (
                       <div
@@ -531,8 +540,8 @@ export function PeerReviewPage(): JSX.Element {
                     onClick={() => void handleApplySelectedFixes()}
                   >
                     {applyingFixes
-                      ? "Applying selected fixes..."
-                      : `Apply Selected Fixes (${gateReport.findings.filter((finding) => selectedFindings.has(finding.id)).length})`}
+                      ? "Auto-fixing..."
+                      : `Auto-Fix Selected Findings (${gateReport.findings.filter((finding) => selectedFindings.has(finding.id)).length})`}
                   </Button>
                 </div>
               ) : null}

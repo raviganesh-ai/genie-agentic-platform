@@ -94,6 +94,7 @@ export function buildGovernanceGateReport(
 ): GovernanceGateReport {
   return {
     status: "reviewed",
+    requirements_gate: "pass",
     security_gate: "pass",
     test_coverage_gate: "pass",
     architecture_gate: "pass",

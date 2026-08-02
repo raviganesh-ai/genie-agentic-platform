@@ -41,6 +41,22 @@ class SubmitReanalysisRequest(ReanalysisActionRequest):
     request_type: ReanalysisRequestType
 
 
+class RegenerateComponentRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    component_label: str = Field(min_length=1)
+    existing_code: str = Field(min_length=1)
+    instructions: str = Field(min_length=1)
+    trace_id: str | None = None
+
+
+class RegenerateComponentResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    component_label: str
+    code: str
+
+
 @router.post("/chat")
 async def chat_with_all_agents(
     session_id: str,
@@ -140,3 +156,21 @@ async def update_priorities(
         trace_id=body.trace_id,
         rationale=body.rationale,
     )
+
+
+@router.post("/regenerate-component")
+async def regenerate_component(
+    session_id: str,
+    body: RegenerateComponentRequest,
+    user: AuthenticatedUser = Depends(get_current_user),
+    workshop_service: WorkshopService = Depends(get_workshop_service),
+) -> RegenerateComponentResponse:
+    code = await workshop_service.regenerate_component(
+        session_id=session_id,
+        requesting_user_id=user.user_id,
+        component_label=body.component_label,
+        existing_code=body.existing_code,
+        instructions=body.instructions,
+        trace_id=body.trace_id,
+    )
+    return RegenerateComponentResponse(component_label=body.component_label, code=code)

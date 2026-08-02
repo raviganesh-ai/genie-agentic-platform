@@ -63,7 +63,7 @@ describe("WorkshopPage", () => {
     expect(screen.getByRole("button", { name: /Proceed to Peer Review/i })).toBeInTheDocument();
   });
 
-  it("renders the Build Agent's own live streamed code before build-solution has completed", async () => {
+  it("shows the review checkbox once the Build Agent's live streamed UI code block closes, even before build-solution is marked completed server-side", async () => {
     const deltaEvent = (delta: string) => ({
       event_type: "step_delta",
       session_id: FIXTURE_SESSION_ID,
@@ -103,11 +103,104 @@ describe("WorkshopPage", () => {
     });
 
     await waitFor(() => expect(screen.getByText(/Generated UI Code/i)).toBeInTheDocument());
-    // No completed build-solution result yet, so "Proceed to Peer Review" must
-    // not be offered while the code is only a live, in-progress buffer.
+    // The UI code block (always generated last) has already closed in the
+    // live stream above, so the review checkbox should appear right away -
+    // it must not wait for genie-orchestrator's separate, slower verbatim
+    // echo to finish and populate build-solution's own step result.
+    expect(
+      screen.getByRole("checkbox", { name: /AI can perform mistake/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("does not show the review checkbox while the Build Agent is still streaming and no component has closed yet", async () => {
+    const deltaEvent = (delta: string) => ({
+      event_type: "step_delta",
+      session_id: FIXTURE_SESSION_ID,
+      workflow_run_id: FIXTURE_WORKFLOW_RUN_ID,
+      step_id: "build-solution",
+      agent_id: "build-agent",
+      delta,
+      output_preview: null,
+      error: null,
+      emitted_at: "2026-07-23T10:00:00Z",
+    });
+
+    mockFetchSequence([
+      {
+        match: `/workflows/runs/${FIXTURE_WORKFLOW_RUN_ID}`,
+        response: buildWorkflowRunResult({ step_results: [] }),
+      },
+      {
+        match: "/approvals",
+        response: buildApprovalRequests(),
+      },
+      {
+        match: "/workflow-events/stream",
+        // Still an open, unclosed fence - the component hasn't finished
+        // streaming yet, so no checkbox should be offered.
+        sseChunks: [`data: ${JSON.stringify(deltaEvent("```tsx\n// agent: ui\nexport function App"))}\n\n`],
+      },
+    ]);
+
+    renderWithProviders(<WorkshopPage />, {
+      sessionId: FIXTURE_SESSION_ID,
+      workflowRunId: FIXTURE_WORKFLOW_RUN_ID,
+    });
+
+    await waitFor(() => expect(screen.getByText(/Generating UI Code/i)).toBeInTheDocument());
     expect(
       screen.queryByRole("checkbox", { name: /AI can perform mistake/i }),
     ).not.toBeInTheDocument();
+  });
+
+  it("regenerates only the UI component's code after the user types an instruction and clicks Regenerate", async () => {
+    mockFetchSequence([
+      {
+        match: `/workflows/runs/${FIXTURE_WORKFLOW_RUN_ID}`,
+        response: buildWorkflowRunResult({
+          step_results: [
+            {
+              step_id: "build-solution",
+              agent_id: "orchestrator",
+              status: "completed",
+              output_text: "```tsx\n// agent: ui\nexport function App() { return null; }\n```",
+              error: null,
+              started_at: "2026-07-23T10:00:00Z",
+              completed_at: "2026-07-23T10:01:00Z",
+            },
+          ],
+        }),
+      },
+      {
+        match: "/approvals",
+        response: buildApprovalRequests(),
+      },
+      {
+        match: "/regenerate-component",
+        response: {
+          component_label: "ui",
+          code: "```tsx\n// agent: ui\nexport function App() { return 'updated'; }\n```",
+        },
+      },
+    ]);
+
+    renderWithProviders(<WorkshopPage />, {
+      sessionId: FIXTURE_SESSION_ID,
+      workflowRunId: FIXTURE_WORKFLOW_RUN_ID,
+    });
+
+    await waitFor(() => expect(screen.getByText(/Generated UI Code/i)).toBeInTheDocument());
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Regenerate" }));
+    await user.type(
+      screen.getByPlaceholderText(/Make the header sticky/i),
+      "Make the header sticky.",
+    );
+    await user.click(screen.getByRole("button", { name: "Regenerate" }));
+
+    await waitFor(() => expect(screen.getByText(/return 'updated'/)).toBeInTheDocument());
+    expect(screen.queryByText(/return null/)).not.toBeInTheDocument();
   });
 
   it("forwards the governance policies selected on Architecture Studio to peer-review on proceed", async () => {

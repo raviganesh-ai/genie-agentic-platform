@@ -38,6 +38,7 @@ class PeerReviewGateBlockedError(RuntimeError):
     build and no risk acceptance has been recorded for that workflow run."""
 
 _GATE_PATTERNS: Final[dict[str, re.Pattern[str]]] = {
+    "requirements_gate": re.compile(r"REQUIREMENTS_GATE:\s*(PASS|FAIL)", re.IGNORECASE),
     "security_gate": re.compile(r"SECURITY_GATE:\s*(PASS|FAIL)", re.IGNORECASE),
     "test_coverage_gate": re.compile(r"TEST_COVERAGE_GATE:\s*(PASS|FAIL)", re.IGNORECASE),
     "architecture_gate": re.compile(r"ARCHITECTURE_GATE:\s*(PASS|FAIL)", re.IGNORECASE),
@@ -45,7 +46,7 @@ _GATE_PATTERNS: Final[dict[str, re.Pattern[str]]] = {
 }
 _DECISION_PATTERN: Final = re.compile(r"PEER_REVIEW_DECISION:\s*(APPROVED|BLOCKED)", re.IGNORECASE)
 _FINDING_LINE_PATTERN: Final = re.compile(
-    r"^-\s*\[(security|test_coverage|architecture|code_quality)\|"
+    r"^-\s*\[(requirements|security|test_coverage|architecture|code_quality)\|"
     r"(critical|high|medium|low)\|([^\]]+)\]\s*(.+?)"
     r"(?:\s*\|\s*Recommendation:\s*(.+))?$",
     re.IGNORECASE,
@@ -84,6 +85,7 @@ def _parse_gate_report(output_text: str, *, assessed_by_agent_id: str) -> Govern
 
     return GovernanceGateReport(
         status="reviewed",
+        requirements_gate=gate_values["requirements_gate"],
         security_gate=gate_values["security_gate"],
         test_coverage_gate=gate_values["test_coverage_gate"],
         architecture_gate=gate_values["architecture_gate"],

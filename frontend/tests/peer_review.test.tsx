@@ -117,7 +117,7 @@ describe("PeerReviewPage", () => {
 
     const user = userEvent.setup();
     await user.click(screen.getByRole("checkbox", { name: /SQL injection in the search endpoint/i }));
-    await user.click(screen.getByRole("button", { name: /Apply Selected Fixes/i }));
+    await user.click(screen.getByRole("button", { name: /Auto-Fix Selected Findings/i }));
 
     await waitFor(() => {
       expect(fetchMock.mock.calls.some((call) => String(call[0]).endsWith("/fixes"))).toBe(true);
@@ -238,7 +238,7 @@ describe("PeerReviewPage", () => {
 
     const user = userEvent.setup();
     await user.click(screen.getByRole("checkbox", { name: /SQL injection in the search endpoint/i }));
-    await user.click(screen.getByRole("button", { name: /Apply Selected Fixes/i }));
+    await user.click(screen.getByRole("button", { name: /Auto-Fix Selected Findings/i }));
 
     await waitFor(() => {
       expect(fetchMock.mock.calls.some((call) => String(call[0]).endsWith("/fixes"))).toBe(true);

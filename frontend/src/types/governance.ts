@@ -99,10 +99,11 @@ export type GovernanceComplianceState =
   | "failed";
 
 /** Mirrors backend/app/models/governance_gate_report.py 1:1. The Governance
- * Reviewer's ("Peer Reviewer") consolidated 4-gate verdict for one workflow
- * run: security, test coverage, architecture, and code quality. */
+ * Reviewer's ('Peer Reviewer') consolidated 5-gate verdict for one workflow
+ * run: requirements, security, test coverage, architecture, and code
+ * quality. */
 export type GateStatus = "pass" | "fail";
-export type GateName = "security" | "test_coverage" | "architecture" | "code_quality";
+export type GateName = "requirements" | "security" | "test_coverage" | "architecture" | "code_quality";
 export type PeerReviewDecision = "approved" | "blocked";
 export type GovernanceGateReportStatus = "pending" | "reviewed" | "undetermined";
 
@@ -116,6 +117,7 @@ export interface GovernanceFinding {
 
 export interface GovernanceGateReport {
   status: GovernanceGateReportStatus;
+  requirements_gate: GateStatus | null;
   security_gate: GateStatus | null;
   test_coverage_gate: GateStatus | null;
   architecture_gate: GateStatus | null;

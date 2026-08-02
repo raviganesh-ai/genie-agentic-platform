@@ -135,7 +135,7 @@ _DELEGATIONS: tuple[_Delegation, ...] = (
         tool_name="call_peer_review_agent",
         target_agent_id="peer-review-agent",
         target_prompt_id="peer-review-v1",
-        variable_names=("artifact", "policies", "security_findings", "test_plan", "user_message"),
+        variable_names=("artifact", "requirements", "policies", "security_findings", "test_plan", "user_message"),
         shared_memory_classification="approval",
     ),
 )
