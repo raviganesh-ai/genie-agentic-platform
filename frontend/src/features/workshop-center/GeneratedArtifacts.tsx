@@ -3,6 +3,7 @@ import { Button, Text, Textarea } from "@fluentui/react-components";
 import {
   extractAgentLabel,
   extractCodeBlocks,
+  extractTrailingOpenCodeBlock,
   splitIntoNamedSections,
   stripCodeBlocks,
 } from "@/utils/textArtifacts";
@@ -11,7 +12,7 @@ interface Artifact {
   key: string;
   icon: string;
   title: string;
-  kind: "code" | "narrative";
+  kind: "code" | "narrative" | "generating";
   /** Drives the accent color/heading of each artifact's own bounded
    * section, so the UI block, every specialist agent's block, the
    * Orchestrator Agent block, and any leftover narrative are always
@@ -90,8 +91,15 @@ function normalizeAgentName(name: string): string {
 
 function buildArtifacts(outputText: string): Artifact[] {
   const artifacts: Artifact[] = [];
-  const codeBlocks = extractCodeBlocks(outputText);
-  const remainder = stripCodeBlocks(outputText);
+  // A still-generating component's fence hasn't closed yet - exclude it
+  // from narrative parsing below (it would otherwise be misread as garbled
+  // narrative text, see extractTrailingOpenCodeBlock) and instead surface
+  // it as a clean "generating this component" placeholder appended at the
+  // very end, after every already-CLOSED code block/narrative section.
+  const openBlock = extractTrailingOpenCodeBlock(outputText);
+  const closedText = openBlock ? outputText.slice(0, openBlock.startIndex) : outputText;
+  const codeBlocks = extractCodeBlocks(closedText);
+  const remainder = stripCodeBlocks(closedText);
   const narrativeSections = splitIntoNamedSections(remainder);
   const usedSectionIndices = new Set<number>();
 
@@ -161,6 +169,36 @@ function buildArtifacts(outputText: string): Artifact[] {
       variant: "narrative",
       content: remainder,
     });
+  }
+
+  if (openBlock) {
+    // The model always writes the `# agent: <name>` / `// agent: ui`
+    // label as the very first line of a component's fence (see
+    // build-generation-component-v1), so it's already known as soon as
+    // the fence opens - well before the code finishes streaming in -
+    // letting this placeholder name the exact component in progress
+    // instead of a generic "working..." message.
+    const agentLabel = extractAgentLabel(openBlock.code);
+    if (agentLabel) {
+      const { icon, title, variant } = labelForCodeBlock(openBlock.language, agentLabel);
+      artifacts.push({
+        key: "generating-current",
+        icon,
+        title: title.replace(/^Generated/, "Generating") + "...",
+        kind: "generating",
+        variant,
+        content: "",
+      });
+    } else {
+      artifacts.push({
+        key: "generating-current",
+        icon: "⏳",
+        title: "Generating next component...",
+        kind: "generating",
+        variant: "agent",
+        content: "",
+      });
+    }
   }
 
   return artifacts;
@@ -294,6 +332,13 @@ export function GeneratedArtifacts({
                   >
                     Component {ordinal} of {totalCodeArtifacts}
                   </Text>
+                ) : artifact.kind === "generating" ? (
+                  <Text
+                    size={100}
+                    style={{ textTransform: "uppercase", letterSpacing: 0.6, opacity: 0.65 }}
+                  >
+                    Component {totalCodeArtifacts + 1}
+                  </Text>
                 ) : null}
                 <Text weight="semibold" size={300}>
                   {artifact.icon} {artifact.title}
@@ -381,6 +426,17 @@ export function GeneratedArtifacts({
                     {displayContent}
                   </pre>
                 )
+              ) : artifact.kind === "generating" ? (
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <span className="genie-bounce-dots" aria-hidden="true">
+                    <span className="genie-bounce-dot" />
+                    <span className="genie-bounce-dot" />
+                    <span className="genie-bounce-dot" />
+                  </span>
+                  <Text size={200} style={{ opacity: 0.7 }}>
+                    Writing this component&apos;s code now...
+                  </Text>
+                </div>
               ) : (
                 <Text size={300} style={{ whiteSpace: "pre-wrap", display: "block", opacity: 0.85 }}>
                   {artifact.content || "(no additional detail provided)"}

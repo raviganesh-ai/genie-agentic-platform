@@ -157,6 +157,47 @@ export function extractCodeBlocks(text: string): ParsedCodeBlock[] {
   return blocks;
 }
 
+export interface OpenCodeBlock {
+  language: string;
+  /** The block's content typed so far (no closing fence yet). */
+  code: string;
+  /** Index, within the original text, where this block's opening ``` fence begins. */
+  startIndex: number;
+}
+
+/**
+ * While a component is still being generated, its fenced code block's
+ * closing ``` hasn't streamed in yet - `extractCodeBlocks` correctly
+ * ignores it (nothing to show as finished code yet), but naively treating
+ * the rest of the text as narrative (`stripCodeBlocks` + `splitIntoNamedSections`)
+ * would instead parse the raw, still-typing source code as bogus narrative
+ * sections (e.g. a Python docstring line accidentally matching a header
+ * pattern) - exactly the "noise" a live per-component build view must
+ * avoid. Detects a trailing UNCLOSED fence (an odd number of ``` markers
+ * in `text`) so the caller can exclude it from narrative parsing and show
+ * a clean "generating this component" placeholder instead - see
+ * `extractAgentLabel`, which only needs the block's first line and so
+ * still works on this still-growing partial code.
+ */
+export function extractTrailingOpenCodeBlock(text: string): OpenCodeBlock | null {
+  const fenceRegex = /```([a-zA-Z0-9_-]*)\n?/g;
+  let match: RegExpExecArray | null;
+  let count = 0;
+  let openStart = -1;
+  let openContentStart = -1;
+  let openLanguage = "";
+  while ((match = fenceRegex.exec(text)) !== null) {
+    count += 1;
+    if (count % 2 === 1) {
+      openStart = match.index;
+      openContentStart = match.index + match[0].length;
+      openLanguage = match[1] || "text";
+    }
+  }
+  if (count === 0 || count % 2 === 0) return null;
+  return { language: openLanguage, code: text.slice(openContentStart), startIndex: openStart };
+}
+
 const AGENT_LABEL_COMMENT = /^\s*(?:\/\/|#)\s*agent:\s*(.+?)\s*$/i;
 
 /**
