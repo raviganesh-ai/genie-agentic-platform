@@ -174,7 +174,9 @@ describe("WorkshopPage", () => {
     // between the UI showing generated code and the backend's
     // security-assessment approval checkpoint actually being created.
     let approvalsCallCount = 0;
-    let streamController: ReadableStreamDefaultController<Uint8Array> | null = null;
+    const streamControllerRef: { current: ReadableStreamDefaultController<Uint8Array> | null } = {
+      current: null,
+    };
     const encoder = new TextEncoder();
     const calls: string[] = [];
 
@@ -226,7 +228,7 @@ describe("WorkshopPage", () => {
       if (pathname.endsWith("/workflow-events/stream")) {
         const stream = new ReadableStream<Uint8Array>({
           start(controller) {
-            streamController = controller;
+            streamControllerRef.current = controller;
           },
         });
         return new Response(stream, { status: 200, headers: { "Content-Type": "text/event-stream" } });
@@ -283,7 +285,7 @@ describe("WorkshopPage", () => {
       error: null,
       emitted_at: "2026-07-23T10:02:00Z",
     };
-    streamController?.enqueue(encoder.encode(`data: ${JSON.stringify(stepCompletedEvent)}\n\n`));
+    streamControllerRef.current?.enqueue(encoder.encode(`data: ${JSON.stringify(stepCompletedEvent)}\n\n`));
 
     await waitFor(() => {
       expect(calls.some((url) => url.endsWith("/decide"))).toBe(true);
@@ -292,7 +294,7 @@ describe("WorkshopPage", () => {
       expect(calls.some((url) => url.endsWith("/resume"))).toBe(true);
     });
 
-    streamController?.close();
+    streamControllerRef.current?.close();
   });
 
   it("regenerates only the UI component's code after the user types an instruction and clicks Regenerate", async () => {
