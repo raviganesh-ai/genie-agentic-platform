@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Button, MessageBar, MessageBarBody, MessageBarTitle, Text } from "@fluentui/react-components";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Button, Checkbox, MessageBar, MessageBarBody, MessageBarTitle, Text } from "@fluentui/react-components";
 import { useNavigate } from "react-router-dom";
 import { useSessionContext } from "@/state/SessionContext";
 import { useWorkshop } from "@/hooks/useWorkshop";
@@ -18,11 +18,11 @@ import { GeneratedArtifacts } from "./GeneratedArtifacts";
 
 /** Identifies the server-side approval checkpoint that gates entry into the
  * automated peer review phase (security-assessment, test-generation,
- * peer-review - see config/workflows/registry.yaml). As soon as the Build
- * Agent's generated code finishes and this checkpoint is created, Genie
- * auto-approves it and moves straight on to Deploy & Launch - no manual
- * review step is presented here. Those steps still run server-side and
- * their evidence still feeds Final Output Approval on Deploy & Launch. */
+ * peer-review - see config/workflows/registry.yaml). Once the Build Agent's
+ * generated code finishes and the user has ticked the risk-acknowledgment
+ * checkbox and clicked Proceed, Genie approves this checkpoint and moves on
+ * to Deploy & Launch. Those steps still run server-side and their evidence
+ * still feeds Final Output Approval on Deploy & Launch. */
 const PEER_REVIEW_CHECKPOINT_SUBJECT_ID = "security-assessment";
 
 /** The build-solution step always delegates to this specialist (see the
@@ -41,9 +41,15 @@ export function WorkshopPage(): JSX.Element {
   const [approveError, setApproveError] = useState<string | null>(null);
   const [retrying, setRetrying] = useState(false);
   const [retryError, setRetryError] = useState<string | null>(null);
-  // Guards against re-triggering the auto-proceed effect below on every
-  // poll tick once it has already fired once for this run.
-  const autoProceedTriggeredRef = useRef(false);
+  const [reviewAcknowledged, setReviewAcknowledged] = useState(false);
+  // Set the instant the user clicks "Proceed to Deploy & Launch". The
+  // approval checkpoint (`pendingPeerReviewApproval`) is created server-side
+  // once build-solution completes and is polled independently - it can
+  // briefly lag behind the UI showing the generated code. Rather than
+  // leaving the button disabled with no feedback until that poll catches
+  // up (the original bug), the click is queued here and the effect below
+  // fires the moment the checkpoint becomes available.
+  const [proceedRequested, setProceedRequested] = useState(false);
 
   // The Build Agent's UI + multi-agent workflow design is the
   // build-solution step's own output (same run the Architecture/Peer Review
@@ -129,9 +135,9 @@ export function WorkshopPage(): JSX.Element {
   }, [sessionId, workflowRunId, refreshRun]);
 
   // The approval checkpoint is created server-side once build-solution
-  // finishes; approvals are polled the same as `run` above, so
-  // `pendingPeerReviewApproval` is real, already-confirmed state by the
-  // time this runs - no retry/guessing needed here.
+  // finishes; approvals are polled the same as `run` above, so by the time
+  // this actually runs (queued via `proceedRequested` below),
+  // `pendingPeerReviewApproval` is real, already-confirmed state.
   const handleProceedToDeployLaunch = useCallback(async () => {
     if (!sessionId || !workflowRunId || !pendingPeerReviewApproval) return;
     setApproving(true);
@@ -139,17 +145,14 @@ export function WorkshopPage(): JSX.Element {
     try {
       await approvalApi.decide(sessionId, pendingPeerReviewApproval.id, "approved");
       const traceId = getTraceId(workflowRunId) ?? undefined;
-      // Navigate straight to Deploy & Launch as soon as code generation is
-      // done - no manual review checkpoint is shown to the user; the
-      // security-assessment/test-generation/peer-review steps still run
-      // server-side (this resume call is what reaches peer-review's wave),
-      // their evidence still feeds Final Output Approval on Deploy & Launch,
-      // so nothing about that governance is skipped - only the separate
-      // Peer Review page and the manual gate here are no longer part of the
-      // guided flow. Must re-supply the policies the user selected back on
-      // Architecture Studio - carried forward via SessionContext since that
-      // step never executes in the same call/page that originally captured
-      // them.
+      // Navigate to Deploy & Launch once the user has acknowledged the risk
+      // and clicked Proceed. The security-assessment/test-generation/
+      // peer-review steps still run server-side (this resume call is what
+      // reaches peer-review's wave) and their evidence still feeds Final
+      // Output Approval on Deploy & Launch. Must re-supply the policies the
+      // user selected back on Architecture Studio - carried forward via
+      // SessionContext since that step never executes in the same
+      // call/page that originally captured them.
       navigate("/outputs");
       workflowApi
         .resumeRun(sessionId, workflowRunId, traceId, {
@@ -163,24 +166,22 @@ export function WorkshopPage(): JSX.Element {
         });
     } catch (err) {
       setApproveError((err as ApiError).message ?? "Failed to resume the workflow.");
+      // Allow the user to click Proceed again without needing to re-tick
+      // the (still-checked) acknowledgment checkbox.
+      setProceedRequested(false);
     } finally {
       setApproving(false);
     }
   }, [sessionId, workflowRunId, pendingPeerReviewApproval, navigate, governancePolicies]);
 
-  // Auto-proceed to Deploy & Launch the moment code generation finishes and
-  // the backend's approval checkpoint is ready - no manual click required.
+  // Fires the queued proceed action the instant the backend's approval
+  // checkpoint becomes available, even if it wasn't ready yet at the moment
+  // the user clicked the button.
   useEffect(() => {
-    if (
-      buildGenerationComplete &&
-      !peerReviewAlreadyStarted &&
-      pendingPeerReviewApproval &&
-      !autoProceedTriggeredRef.current
-    ) {
-      autoProceedTriggeredRef.current = true;
+    if (proceedRequested && pendingPeerReviewApproval && !approving) {
       void handleProceedToDeployLaunch();
     }
-  }, [buildGenerationComplete, peerReviewAlreadyStarted, pendingPeerReviewApproval, handleProceedToDeployLaunch]);
+  }, [proceedRequested, pendingPeerReviewApproval, approving, handleProceedToDeployLaunch]);
 
   if (!workflowRunId || !sessionId) {
     return (
@@ -221,24 +222,40 @@ export function WorkshopPage(): JSX.Element {
         )}
       </SectionCard>
 
-      {buildGenerationComplete && !peerReviewAlreadyStarted && approveError ? (
-        <SectionCard title="⚠️ Couldn't proceed to Deploy & Launch">
-          <MessageBar intent="error" style={{ marginBottom: 8 }}>
-            <MessageBarBody>
-              <MessageBarTitle>Failed to resume the workflow</MessageBarTitle>
-              {approveError}
-            </MessageBarBody>
-          </MessageBar>
-          <Button
-            appearance="primary"
-            disabled={approving}
-            onClick={() => {
-              autoProceedTriggeredRef.current = false;
-              setApproveError(null);
-            }}
-          >
-            {approving ? "Retrying..." : "Retry"}
-          </Button>
+      {buildGenerationComplete && !peerReviewAlreadyStarted ? (
+        <SectionCard title="✅ Ready to proceed?">
+          <Checkbox
+            label="AI can perform mistake, the user has reviewed and is willing to proceed"
+            checked={reviewAcknowledged}
+            onChange={(_, data) => setReviewAcknowledged(Boolean(data.checked))}
+          />
+          {reviewAcknowledged ? (
+            <>
+              {approveError ? (
+                <MessageBar intent="error" style={{ marginTop: 8, marginBottom: 8 }}>
+                  <MessageBarBody>
+                    <MessageBarTitle>Failed to resume the workflow</MessageBarTitle>
+                    {approveError}
+                  </MessageBarBody>
+                </MessageBar>
+              ) : null}
+              <Button
+                appearance="primary"
+                style={{ marginTop: 8 }}
+                disabled={approving || (proceedRequested && !pendingPeerReviewApproval)}
+                onClick={() => {
+                  setApproveError(null);
+                  setProceedRequested(true);
+                }}
+              >
+                {approving
+                  ? "Finishing up..."
+                  : proceedRequested && !pendingPeerReviewApproval
+                    ? "Waiting for checkpoint..."
+                    : "Proceed to Deploy & Launch"}
+              </Button>
+            </>
+          ) : null}
         </SectionCard>
       ) : null}
     </div>
