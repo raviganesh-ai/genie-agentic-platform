@@ -19,8 +19,11 @@ import { GeneratedArtifacts } from "./GeneratedArtifacts";
 /** Gates entry into the automated peer review phase (security-assessment,
  * test-generation, peer-review - see config/workflows/registry.yaml)
  * until the user has reviewed the Build Agent's generated code here and
- * explicitly clicked "Proceed to Peer Review" - mirrors the
- * architecture-approval gate on ArchitectureStudioPage. */
+ * explicitly clicked "Proceed to Deploy & Launch" - mirrors the
+ * architecture-approval gate on ArchitectureStudioPage. The Peer Review
+ * page itself is no longer part of the guided flow - those steps still
+ * run server-side and their evidence still feeds Final Output Approval on
+ * Deploy & Launch. */
 const PEER_REVIEW_CHECKPOINT_SUBJECT_ID = "security-assessment";
 
 /** The build-solution step always delegates to this specialist (see the
@@ -128,24 +131,24 @@ export function WorkshopPage(): JSX.Element {
   // finishes; approvals are polled the same as `run` above, so
   // `pendingPeerReviewApproval` is real, already-confirmed state by the
   // time this runs - no retry/guessing needed here.
-  const handleProceedToPeerReview = useCallback(async () => {
+  const handleProceedToDeployLaunch = useCallback(async () => {
     if (!sessionId || !workflowRunId || !pendingPeerReviewApproval) return;
     setApproving(true);
     setApproveError(null);
     try {
       await approvalApi.decide(sessionId, pendingPeerReviewApproval.id, "approved");
       const traceId = getTraceId(workflowRunId) ?? undefined;
-      // Navigate immediately - the Peer Review page has its own live event
-      // stream + polling and shows progress until peer-review's output
-      // arrives, the same pattern ArchitectureStudioPage uses for the
-      // architecture-approval -> build-solution handoff. This resume call
-      // is the one that actually reaches peer-review's wave
-      // (security-assessment/test-generation execute first in the same
-      // call, then peer-review immediately after), so it must re-supply
-      // the policies the user selected back on Architecture Studio -
-      // carried forward via SessionContext since that step never executes
-      // in the same call/page that originally captured them.
-      navigate("/peer-review");
+      // Navigate straight to Deploy & Launch - the human's own review here
+      // (the checkbox above) is the only gate the user needs to see; the
+      // security-assessment/test-generation/peer-review steps still run
+      // server-side (this resume call is what reaches peer-review's wave),
+      // their evidence still feeds Final Output Approval on Deploy & Launch,
+      // so nothing about that governance is skipped - only the separate
+      // Peer Review page is no longer part of the guided flow. Must
+      // re-supply the policies the user selected back on Architecture
+      // Studio - carried forward via SessionContext since that step never
+      // executes in the same call/page that originally captured them.
+      navigate("/outputs");
       workflowApi
         .resumeRun(sessionId, workflowRunId, traceId, {
           "peer-review": {
@@ -225,9 +228,9 @@ export function WorkshopPage(): JSX.Element {
               appearance="primary"
               style={{ marginTop: 8 }}
               disabled={approving || !pendingPeerReviewApproval}
-              onClick={() => void handleProceedToPeerReview()}
+              onClick={() => void handleProceedToDeployLaunch()}
             >
-              {approving ? "Continuing..." : pendingPeerReviewApproval ? "Proceed to Peer Review" : "Finishing up..."}
+              {approving ? "Continuing..." : pendingPeerReviewApproval ? "Proceed to Deploy & Launch" : "Finishing up..."}
             </Button>
           ) : null}
         </SectionCard>

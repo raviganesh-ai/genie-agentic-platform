@@ -6,7 +6,7 @@ import { buildApprovalRequests, buildWorkflowRunResult, FIXTURE_SESSION_ID, FIXT
 import { WorkshopPage } from "@/features/workshop-center/WorkshopPage";
 
 describe("WorkshopPage", () => {
-  it("shows only the generated code, and reveals Proceed to Peer Review once the review checkbox is checked", async () => {
+  it("shows only the generated code, and reveals Proceed to Deploy & Launch once the review checkbox is checked", async () => {
     mockFetchSequence([
       {
         match: `/workflows/runs/${FIXTURE_WORKFLOW_RUN_ID}`,
@@ -50,7 +50,7 @@ describe("WorkshopPage", () => {
     expect(screen.queryByPlaceholderText(/Describe the priority change/i)).not.toBeInTheDocument();
 
     expect(
-      screen.queryByRole("button", { name: /Proceed to Peer Review/i }),
+      screen.queryByRole("button", { name: /Proceed to Deploy & Launch/i }),
     ).not.toBeInTheDocument();
 
     const user = userEvent.setup();
@@ -60,7 +60,7 @@ describe("WorkshopPage", () => {
       }),
     );
 
-    expect(screen.getByRole("button", { name: /Proceed to Peer Review/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Proceed to Deploy & Launch/i })).toBeInTheDocument();
   });
 
   it("shows the review checkbox once the Build Agent's live streamed UI code block closes, even before build-solution is marked completed server-side", async () => {
@@ -249,7 +249,7 @@ describe("WorkshopPage", () => {
         name: /AI can perform mistake, the user has reviewed and is willing to proceed/i,
       }),
     );
-    await user.click(screen.getByRole("button", { name: /Proceed to Peer Review/i }));
+    await user.click(screen.getByRole("button", { name: /Proceed to Deploy & Launch/i }));
 
     await waitFor(() => {
       const resumeCall = fetchMock.mock.calls.find((call) => String(call[0]).endsWith("/resume"));

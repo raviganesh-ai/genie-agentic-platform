@@ -3,7 +3,7 @@
 Exposes the real, nine-step Deploy & Launch pipeline
 (``app.deploy_launch.pipeline_service.DeploymentPipelineService``):
 ``POST .../start`` (executes every step once the ``final-output-approval``
-checkpoint has been granted - see ``PeerReviewPage``/``approvals.py`` for
+checkpoint has been granted - see ``WorkshopPage``/``approvals.py`` for
 how that checkpoint is decided), ``GET .../{pipeline_run_id}`` (poll one
 run's current status), ``GET .../`` (list every run for this session), and
 ``GET .../{pipeline_run_id}/download`` (a zip of the materialized backend

@@ -7,7 +7,6 @@ import { UploadPage } from "@/features/upload/UploadPage";
 import { RequirementDiscoveryPage } from "@/features/requirement-map/RequirementDiscoveryPage";
 import { ArchitectureStudioPage } from "@/features/architecture-studio/ArchitectureStudioPage";
 import { WorkshopPage } from "@/features/workshop-center/WorkshopPage";
-import { PeerReviewPage } from "@/features/peer-review/PeerReviewPage";
 import { ReplayCenterPage } from "@/features/replay-center/ReplayCenterPage";
 import { FinalOutputPage } from "@/features/final-output-center/FinalOutputPage";
 import { DeployLaunchPage } from "@/features/deploy-launch/DeployLaunchPage";
@@ -26,7 +25,6 @@ const router = createBrowserRouter([
       },
       { path: "architecture-studio", element: <ArchitectureStudioPage /> },
       { path: "workshop", element: <WorkshopPage /> },
-      { path: "peer-review", element: <PeerReviewPage /> },
       {
         path: "outputs",
         element: <OutputsHubPage />,
