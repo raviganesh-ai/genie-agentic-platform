@@ -43,23 +43,50 @@ const NAV_ITEMS: NavItemConfig[] = [
 ];
 
 /**
- * Derives each stage's traffic-light status from real mission state only
- * (session id, workflow run id, and the run's own step results) - never
- * from a fixed/hardcoded "which page is next" list. Each stage becomes
- * reachable ("active") only once the previous stage is actually complete,
- * so the sidebar can never show two stages unlocked at once out of order.
+ * Finds which NAV_ITEMS entry the browser is currently sitting on (matching
+ * sub-routes too, e.g. "/outputs/replay" -> the "/outputs" item), or -1 if
+ * the current route isn't part of the guided flow at all.
+ */
+function findCurrentNavIndex(pathname: string): number {
+  let matchIndex = -1;
+  NAV_ITEMS.forEach((item, index) => {
+    if (item.to === "/") {
+      if (pathname === "/") matchIndex = index;
+      return;
+    }
+    if (pathname === item.to || pathname.startsWith(`${item.to}/`)) {
+      matchIndex = index;
+    }
+  });
+  return matchIndex;
+}
+
+/**
+ * Derives each stage's traffic-light status from real mission state
+ * (session id, workflow run id, and the run's own step results), plus the
+ * page the user is actually looking at right now. That last input matters
+ * because several pages `navigate()` to the NEXT stage immediately after an
+ * approval and only resume/execute the underlying workflow step in the
+ * background (see ArchitectureStudioPage/WorkshopPage) - `step_results`
+ * only gains an entry once a step actually FINISHES, so relying on polled
+ * step data alone can show the stage the user is literally viewing as
+ * still "locked" for the several seconds/minutes it takes that step to
+ * complete. The current route is real ground truth that the user has at
+ * least reached that stage - it never hardcodes what the *next* stage
+ * should be, only reconciles a lag in already-reachable state.
  */
 function computeStageStatuses(
   sessionId: string | null,
   workflowRunId: string | null,
   run: WorkflowRunResult | null,
+  currentIndex: number,
 ): StageStatus[] {
   const reachedStepIds = new Set(run?.step_results.map((result) => result.step_id) ?? []);
   const statuses: StageStatus[] = [];
   let previousComplete = true; // Landing is always reachable.
 
   NAV_ITEMS.forEach((item, index) => {
-    const reachable = index === 0 ? true : previousComplete;
+    let reachable = index === 0 ? true : previousComplete;
     let complete: boolean;
     if (item.to === "/") {
       complete = sessionId !== null;
@@ -70,6 +97,14 @@ function computeStageStatuses(
     } else {
       // Deploy & Launch: only truly done once the whole run completes.
       complete = run?.status === "completed";
+    }
+    if (index < currentIndex) {
+      // The user has already navigated past this stage - it's done, no
+      // matter what the (possibly still-catching-up) poll data says.
+      reachable = true;
+      complete = true;
+    } else if (index === currentIndex) {
+      reachable = true;
     }
     statuses.push(!reachable ? "locked" : complete ? "complete" : "active");
     previousComplete = reachable && complete;
@@ -177,7 +212,7 @@ export function AppShell(): JSX.Element {
     enabled: Boolean(sessionId && workflowRunId),
     pollIntervalMs: MISSION_FLOW_POLL_MS,
   });
-  const stageStatuses = computeStageStatuses(sessionId, workflowRunId, run);
+  const stageStatuses = computeStageStatuses(sessionId, workflowRunId, run, findCurrentNavIndex(location.pathname));
 
   return (
     <div style={{ display: "flex", minHeight: "100vh" }}>
