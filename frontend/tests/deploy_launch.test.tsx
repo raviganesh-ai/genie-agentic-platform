@@ -1,8 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithProviders, mockFetchSequence } from "./testUtils";
-import { FIXTURE_SESSION_ID, FIXTURE_WORKFLOW_RUN_ID } from "./fixtures";
+import { FIXTURE_SESSION_ID, FIXTURE_WORKFLOW_RUN_ID, buildApprovalRequests } from "./fixtures";
 import { DeployLaunchPage } from "@/features/deploy-launch/DeployLaunchPage";
 import type { DeploymentPipelineRun } from "@/types/deployLaunch";
 
@@ -117,5 +117,86 @@ describe("DeployLaunchPage", () => {
       ).toBeInTheDocument(),
     );
     expect(screen.getByRole("button", { name: /Download Code & Access Policy/i })).toBeInTheDocument();
+  });
+
+  it("automatically decides a pending Final Output Approval and retries, with no separate approval screen", async () => {
+    // The user already gave their one risk acknowledgment on Workshop
+    // (see workshop_center.test.tsx) - Deploy & Launch must not surface a
+    // second manual approval action for the same checkpoint.
+    let startCallCount = 0;
+    const calls: string[] = [];
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input.toString();
+      calls.push(url);
+      const pathname = new URL(url).pathname;
+
+      if (pathname.endsWith("/deploy-launch/") && !pathname.includes("/start")) {
+        return new Response(JSON.stringify([]), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      if (pathname.endsWith("/deploy-launch/start")) {
+        startCallCount += 1;
+        if (startCallCount === 1) {
+          return new Response(JSON.stringify({ message: "Final Output Approval is pending." }), {
+            status: 409,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        const run: DeploymentPipelineRun = buildPipelineRun({ status: "running" });
+        return new Response(JSON.stringify(run), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      if (pathname.endsWith("/approvals")) {
+        return new Response(
+          JSON.stringify(
+            buildApprovalRequests({
+              id: "approval-final-output",
+              checkpoint_id: "final-output-approval",
+              subject_id: FIXTURE_WORKFLOW_RUN_ID,
+              status: "pending",
+            }),
+          ),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      if (pathname.endsWith("/decide")) {
+        return new Response(JSON.stringify({ id: "decision-1" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      if (pathname.endsWith("/workflow-events/stream")) {
+        return new Response(new ReadableStream<Uint8Array>({ start: () => undefined }), {
+          status: 200,
+          headers: { "Content-Type": "text/event-stream" },
+        });
+      }
+      throw new Error(`Unhandled fetch in test: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderWithProviders(<DeployLaunchPage />, {
+      sessionId: FIXTURE_SESSION_ID,
+      workflowRunId: FIXTURE_WORKFLOW_RUN_ID,
+    });
+
+    const user = userEvent.setup();
+    const startButton = await screen.findByRole("button", { name: /Start Deploy & Launch/i });
+    await user.click(startButton);
+
+    await waitFor(() => {
+      expect(calls.some((url) => url.endsWith("/decide"))).toBe(true);
+    });
+    await waitFor(() => {
+      expect(startCallCount).toBe(2);
+    });
+    expect(screen.queryByRole("button", { name: /Approve Final Output/i })).not.toBeInTheDocument();
+
+    vi.unstubAllGlobals();
   });
 });

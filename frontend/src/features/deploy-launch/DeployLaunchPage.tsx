@@ -74,8 +74,14 @@ function StepRow({ step }: { step: DeploymentStepResult }): JSX.Element {
  * equivalents in local provider mode) - never simulated. Gated on the
  * `final-output-approval` checkpoint: the first `start()` call auto-requests
  * that checkpoint if none exists yet, and the backend returns 409 while it
- * is still pending, so this page surfaces an inline "Approve" action rather
- * than requiring a separate approvals screen.
+ * is still pending. The single risk acknowledgment the user already gave on
+ * Workshop (see WorkshopPage's "Proceed to Deploy & Launch") is what that
+ * checkpoint represents, so clicking "Start Deploy & Launch" here decides it
+ * automatically and retries - there is no separate manual approval screen.
+ * The backend's own peer-review-gate check (see app/api/approvals.py) still
+ * fails closed (403) server-side if Peer Review actually found blocking
+ * issues, surfaced below as a genuine block rather than a checkpoint to
+ * click through.
  */
 export function DeployLaunchPage(): JSX.Element {
   const { sessionId, workflowRunId } = useSessionContext();
@@ -105,23 +111,21 @@ export function DeployLaunchPage(): JSX.Element {
 
   const [starting, setStarting] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
-  const [pendingApprovalId, setPendingApprovalId] = useState<string | null>(null);
-  const [approving, setApproving] = useState(false);
 
   const handleStart = useCallback(async () => {
     if (!sessionId || !workflowRunId) return;
     setStarting(true);
     setStartError(null);
+    const traceId = getTraceId(workflowRunId) ?? undefined;
     try {
-      const traceId = getTraceId(workflowRunId) ?? undefined;
       await deployLaunchApi.start(sessionId, workflowRunId, traceId);
-      setPendingApprovalId(null);
       refresh();
     } catch (err) {
       if (err instanceof ApiError && err.status === 409) {
         // Final Output Approval was just auto-requested (or is still
-        // pending from an earlier attempt) - look it up so we can offer an
-        // inline "Approve" action instead of a dead end.
+        // pending from an earlier attempt) - decide it automatically
+        // (the user already acknowledged the risk on Workshop) and retry
+        // once, rather than surfacing a second manual approval screen.
         try {
           const approvals = await approvalApi.list(sessionId);
           const pending = approvals.find(
@@ -130,14 +134,23 @@ export function DeployLaunchPage(): JSX.Element {
               request.subject_id === workflowRunId &&
               request.status === "pending",
           );
-          setPendingApprovalId(pending?.id ?? null);
-          setStartError(
-            pending
-              ? "Final Output Approval is required before deploying. Approve below to continue."
-              : "Deploy & Launch is waiting on Final Output Approval.",
-          );
-        } catch {
-          setStartError("Deploy & Launch is waiting on Final Output Approval.");
+          if (!pending) {
+            setStartError("Deploy & Launch is waiting on Final Output Approval.");
+            return;
+          }
+          await approvalApi.decide(sessionId, pending.id, "approved", "", workflowRunId);
+          await deployLaunchApi.start(sessionId, workflowRunId, traceId);
+          refresh();
+        } catch (retryErr) {
+          if (retryErr instanceof ApiError && retryErr.status === 403) {
+            setStartError(
+              "Final Output Approval was rejected - Deploy & Launch is blocked because Peer Review found blocking issues.",
+            );
+          } else {
+            setStartError(
+              (retryErr as ApiError).message ?? "Deploy & Launch is waiting on Final Output Approval.",
+            );
+          }
         }
       } else if (err instanceof ApiError && err.status === 403) {
         setStartError("Final Output Approval was rejected or expired - Deploy & Launch is blocked.");
@@ -148,20 +161,6 @@ export function DeployLaunchPage(): JSX.Element {
       setStarting(false);
     }
   }, [sessionId, workflowRunId, refresh]);
-
-  const handleApproveAndStart = useCallback(async () => {
-    if (!sessionId || !workflowRunId || !pendingApprovalId) return;
-    setApproving(true);
-    try {
-      await approvalApi.decide(sessionId, pendingApprovalId, "approved", "", workflowRunId);
-      setPendingApprovalId(null);
-      await handleStart();
-    } catch (err) {
-      setStartError((err as ApiError).message ?? "Failed to approve Final Output Approval.");
-    } finally {
-      setApproving(false);
-    }
-  }, [sessionId, workflowRunId, pendingApprovalId, handleStart]);
 
   const [downloading, setDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
@@ -210,23 +209,15 @@ export function DeployLaunchPage(): JSX.Element {
             {startError ? (
               <MessageBar intent="warning" layout="multiline" style={{ marginBottom: 12 }}>
                 <MessageBarBody>
-                  <MessageBarTitle>
-                    {pendingApprovalId ? "Approval required" : "Deploy & Launch"}
-                  </MessageBarTitle>
+                  <MessageBarTitle>Deploy & Launch</MessageBarTitle>
                   {startError}
                 </MessageBarBody>
               </MessageBar>
             ) : null}
             <div style={{ display: "flex", gap: 8 }}>
-              {pendingApprovalId ? (
-                <Button appearance="primary" disabled={approving} onClick={() => void handleApproveAndStart()}>
-                  {approving ? "Approving..." : "Approve Final Output & Start"}
-                </Button>
-              ) : (
-                <Button appearance="primary" disabled={starting} onClick={() => void handleStart()}>
-                  {starting ? "Starting..." : activeRun?.status === "failed" ? "Retry Deploy & Launch" : "Start Deploy & Launch"}
-                </Button>
-              )}
+              <Button appearance="primary" disabled={starting} onClick={() => void handleStart()}>
+                {starting ? "Starting..." : activeRun?.status === "failed" ? "Retry Deploy & Launch" : "Start Deploy & Launch"}
+              </Button>
             </div>
           </SectionCard>
         ) : null}
