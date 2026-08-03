@@ -6,8 +6,8 @@ import { buildApprovalRequests, buildWorkflowRunResult, FIXTURE_SESSION_ID, FIXT
 import { WorkshopPage } from "@/features/workshop-center/WorkshopPage";
 
 describe("WorkshopPage", () => {
-  it("shows only the generated code, and reveals Proceed to Deploy & Launch once the review checkbox is checked", async () => {
-    mockFetchSequence([
+  it("shows only the generated code, and automatically proceeds to Deploy & Launch once code generation completes - no manual checkpoint", async () => {
+    const fetchMock = mockFetchSequence([
       {
         match: `/workflows/runs/${FIXTURE_WORKFLOW_RUN_ID}`,
         response: buildWorkflowRunResult({
@@ -34,6 +34,8 @@ describe("WorkshopPage", () => {
           status: "pending",
         }),
       },
+      { match: "/decide", response: { id: "decision-1" } },
+      { match: "/resume", response: { status: "running" } },
     ]);
 
     renderWithProviders(<WorkshopPage />, {
@@ -49,21 +51,24 @@ describe("WorkshopPage", () => {
     expect(screen.queryByPlaceholderText(/Ask a question or provide direction/i)).not.toBeInTheDocument();
     expect(screen.queryByPlaceholderText(/Describe the priority change/i)).not.toBeInTheDocument();
 
+    // No manual review checkbox/button gate - Genie auto-approves the
+    // checkpoint and resumes the workflow on its own.
+    expect(
+      screen.queryByRole("checkbox", { name: /AI can perform mistake/i }),
+    ).not.toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: /Proceed to Deploy & Launch/i }),
     ).not.toBeInTheDocument();
 
-    const user = userEvent.setup();
-    await user.click(
-      screen.getByRole("checkbox", {
-        name: /AI can perform mistake, the user has reviewed and is willing to proceed/i,
-      }),
-    );
-
-    expect(screen.getByRole("button", { name: /Proceed to Deploy & Launch/i })).toBeInTheDocument();
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.some((call) => String(call[0]).endsWith("/decide"))).toBe(true);
+    });
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.some((call) => String(call[0]).endsWith("/resume"))).toBe(true);
+    });
   });
 
-  it("shows the review checkbox once the Build Agent's live streamed UI code block closes, even before build-solution is marked completed server-side", async () => {
+  it("automatically proceeds once the Build Agent's live streamed UI code block closes, even before build-solution is marked completed server-side", async () => {
     const deltaEvent = (delta: string) => ({
       event_type: "step_delta",
       session_id: FIXTURE_SESSION_ID,
@@ -76,7 +81,7 @@ describe("WorkshopPage", () => {
       emitted_at: "2026-07-23T10:00:00Z",
     });
 
-    mockFetchSequence([
+    const fetchMock = mockFetchSequence([
       {
         // build-solution hasn't completed yet - no step result for it at all,
         // which is exactly the ~15-minute "nothing shows" window this
@@ -86,7 +91,13 @@ describe("WorkshopPage", () => {
       },
       {
         match: "/approvals",
-        response: buildApprovalRequests(),
+        response: buildApprovalRequests({
+          id: "approval-security-assessment",
+          checkpoint_id: "security-assessment-approval",
+          requested_by_agent_id: "genie-orchestrator",
+          subject_id: "security-assessment",
+          status: "pending",
+        }),
       },
       {
         match: "/workflow-events/stream",
@@ -95,6 +106,8 @@ describe("WorkshopPage", () => {
           `data: ${JSON.stringify(deltaEvent('() { return null; }\n```'))}\n\n`,
         ],
       },
+      { match: "/decide", response: { id: "decision-1" } },
+      { match: "/resume", response: { status: "running" } },
     ]);
 
     renderWithProviders(<WorkshopPage />, {
@@ -104,15 +117,15 @@ describe("WorkshopPage", () => {
 
     await waitFor(() => expect(screen.getByText(/Generated UI Code/i)).toBeInTheDocument());
     // The UI code block (always generated last) has already closed in the
-    // live stream above, so the review checkbox should appear right away -
-    // it must not wait for genie-orchestrator's separate, slower verbatim
-    // echo to finish and populate build-solution's own step result.
-    expect(
-      screen.getByRole("checkbox", { name: /AI can perform mistake/i }),
-    ).toBeInTheDocument();
+    // live stream above, so Genie should auto-proceed right away - it must
+    // not wait for genie-orchestrator's separate, slower verbatim echo to
+    // finish and populate build-solution's own step result.
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.some((call) => String(call[0]).endsWith("/decide"))).toBe(true);
+    });
   });
 
-  it("does not show the review checkbox while the Build Agent is still streaming and no component has closed yet", async () => {
+  it("does not proceed to Deploy & Launch while the Build Agent is still streaming and no component has closed yet", async () => {
     const deltaEvent = (delta: string) => ({
       event_type: "step_delta",
       session_id: FIXTURE_SESSION_ID,
@@ -125,19 +138,25 @@ describe("WorkshopPage", () => {
       emitted_at: "2026-07-23T10:00:00Z",
     });
 
-    mockFetchSequence([
+    const fetchMock = mockFetchSequence([
       {
         match: `/workflows/runs/${FIXTURE_WORKFLOW_RUN_ID}`,
         response: buildWorkflowRunResult({ step_results: [] }),
       },
       {
         match: "/approvals",
-        response: buildApprovalRequests(),
+        response: buildApprovalRequests({
+          id: "approval-security-assessment",
+          checkpoint_id: "security-assessment-approval",
+          requested_by_agent_id: "genie-orchestrator",
+          subject_id: "security-assessment",
+          status: "pending",
+        }),
       },
       {
         match: "/workflow-events/stream",
         // Still an open, unclosed fence - the component hasn't finished
-        // streaming yet, so no checkbox should be offered.
+        // streaming yet, so Genie should not auto-proceed.
         sseChunks: [`data: ${JSON.stringify(deltaEvent("```tsx\n// agent: ui\nexport function App"))}\n\n`],
       },
     ]);
@@ -148,9 +167,7 @@ describe("WorkshopPage", () => {
     });
 
     await waitFor(() => expect(screen.getByText(/Generating UI Code/i)).toBeInTheDocument());
-    expect(
-      screen.queryByRole("checkbox", { name: /AI can perform mistake/i }),
-    ).not.toBeInTheDocument();
+    expect(fetchMock.mock.calls.some((call) => String(call[0]).endsWith("/decide"))).toBe(false);
   });
 
   it("regenerates only the UI component's code after the user types an instruction and clicks Regenerate", async () => {
@@ -242,14 +259,6 @@ describe("WorkshopPage", () => {
     });
 
     await waitFor(() => expect(screen.getByText(/Generated UI Code/i)).toBeInTheDocument());
-
-    const user = userEvent.setup();
-    await user.click(
-      screen.getByRole("checkbox", {
-        name: /AI can perform mistake, the user has reviewed and is willing to proceed/i,
-      }),
-    );
-    await user.click(screen.getByRole("button", { name: /Proceed to Deploy & Launch/i }));
 
     await waitFor(() => {
       const resumeCall = fetchMock.mock.calls.find((call) => String(call[0]).endsWith("/resume"));
