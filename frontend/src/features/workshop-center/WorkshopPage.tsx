@@ -147,13 +147,18 @@ export function WorkshopPage(): JSX.Element {
         title="UI & Agent Design"
         subtitle="Watch Genie call the Orchestrator Agent to generate this mission's React UI code and multi-agent code."
         action={
-          <Button
-            size="small"
-            disabled={rerunningBuild}
-            onClick={() => void handleRerunBuildStage()}
-          >
-            {rerunningBuild ? "Re-running stage..." : "Re-run UI & Agent Design"}
-          </Button>
+          // Only offered once this stage has actually produced its own
+          // generated code at least once - re-running something that is
+          // still in progress (no output yet) doesn't make sense.
+          buildGenerationComplete ? (
+            <Button
+              size="small"
+              disabled={rerunningBuild}
+              onClick={() => void handleRerunBuildStage()}
+            >
+              {rerunningBuild ? "Re-running stage..." : "Re-run UI & Agent Design"}
+            </Button>
+          ) : undefined
         }
       />
       {workshop.error ? <ErrorState error={workshop.error} /> : null}

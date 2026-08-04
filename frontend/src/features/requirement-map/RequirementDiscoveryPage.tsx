@@ -638,20 +638,22 @@ export function RequirementDiscoveryPage(): JSX.Element {
         </div>
       </div>
       <LiveWorkflowPulse connected={liveConnected} events={liveEvents} />
-      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
-        <Button
-          size="small"
-          disabled={rerunningRequirements}
-          onClick={() => void handleRerunRequirementsStage()}
-        >
-          {rerunningRequirements ? "Re-running Requirement Discovery..." : "Re-run Requirement Discovery"}
-        </Button>
-        {rerunRequirementsError ? (
-          <Text size={200} style={{ color: "#d1495b" }}>
-            {rerunRequirementsError}
-          </Text>
-        ) : null}
-      </div>
+      {analyzedRequirementsText ? (
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
+          <Button
+            size="small"
+            disabled={rerunningRequirements}
+            onClick={() => void handleRerunRequirementsStage()}
+          >
+            {rerunningRequirements ? "Re-running Requirement Discovery..." : "Re-run Requirement Discovery"}
+          </Button>
+          {rerunRequirementsError ? (
+            <Text size={200} style={{ color: "#d1495b" }}>
+              {rerunRequirementsError}
+            </Text>
+          ) : null}
+        </div>
+      ) : null}
       {loading && !data ? <LoadingState label="Loading requirements..." /> : null}
       {error ? <ErrorState error={error} onRetry={refresh} /> : null}
 

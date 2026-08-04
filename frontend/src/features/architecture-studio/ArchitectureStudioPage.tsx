@@ -152,6 +152,15 @@ export function ArchitectureStudioPage(): JSX.Element {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lastLiveEvent]);
+  // Latches permanently true the first time this run's architecture
+  // component actually shows up - once that happens, the live "working..."
+  // pulse must never come back for this page view again (e.g. while a
+  // later "Re-run Architecture Studio" call is in flight), even though
+  // `architectureComponent` itself briefly reflects stale/refreshing data.
+  const [hasArchitectureOutput, setHasArchitectureOutput] = useState(false);
+  useEffect(() => {
+    if (architectureComponent) setHasArchitectureOutput(true);
+  }, [architectureComponent]);
   const pendingArchitectureApproval = approvals?.find(
     (request) => request.status === "pending" && request.subject_id === "build-solution",
   );
@@ -339,7 +348,7 @@ export function ArchitectureStudioPage(): JSX.Element {
       {error ? <ErrorState error={error} onRetry={refresh} /> : null}
       {reanalysisError ? <ErrorState error={reanalysisError} /> : null}
 
-      {!architectureComponent ? (
+      {!hasArchitectureOutput ? (
         <LiveWorkflowPulse connected={liveConnected} events={liveEventsForRun} />
       ) : null}
 
@@ -359,19 +368,21 @@ export function ArchitectureStudioPage(): JSX.Element {
         ))}
       </div>
 
-      <SectionCard title="🔁 Re-run This Stage">
-        <Text size={200} style={{ display: "block", marginBottom: 10, opacity: 0.75 }}>
-          Re-execute Architecture Studio for this same workflow run using the current approved requirements.
-        </Text>
-        {rerunDesignError ? <ErrorState error={rerunDesignError} /> : null}
-        <Button
-          size="small"
-          disabled={rerunningDesign}
-          onClick={() => void handleRerunArchitectureStage()}
-        >
-          {rerunningDesign ? "Re-running Architecture Studio..." : "Re-run Architecture Studio"}
-        </Button>
-      </SectionCard>
+      {architectureComponent ? (
+        <SectionCard title="🔁 Re-run This Stage">
+          <Text size={200} style={{ display: "block", marginBottom: 10, opacity: 0.75 }}>
+            Re-execute Architecture Studio for this same workflow run using the current approved requirements.
+          </Text>
+          {rerunDesignError ? <ErrorState error={rerunDesignError} /> : null}
+          <Button
+            size="small"
+            disabled={rerunningDesign}
+            onClick={() => void handleRerunArchitectureStage()}
+          >
+            {rerunningDesign ? "Re-running Architecture Studio..." : "Re-run Architecture Studio"}
+          </Button>
+        </SectionCard>
+      ) : null}
 
       {snapshot ? (
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
