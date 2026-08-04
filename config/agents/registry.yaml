@@ -237,9 +237,9 @@ agents:
         description: >-
           Delegate the build phase to the Build Agent and return its real
           output verbatim. The platform always supplies the real
-          requirements/architecture/policies/user_message for this step
-          automatically - do not repeat their full text here; short
-          placeholders or empty strings are fine.
+          requirements/architecture/policies/excluded_agents/user_message
+          for this step automatically - do not repeat their full text
+          here; short placeholders or empty strings are fine.
         parameters:
           - name: requirements
             type: string
@@ -255,6 +255,15 @@ agents:
               Governance/policy expectations the user selected on the
               Architecture Studio page that the generated code must
               satisfy (semicolon-separated, may be empty).
+            required: false
+          - name: excluded_agents
+            type: string
+            description: >-
+              Names of specialist agents the user deselected on the
+              Architecture Studio page's "Multi-Agent Workflow" list
+              (comma-separated, may be empty) - no code should be
+              generated for these agents, and neither the Orchestrator
+              Agent nor the UI should reference them.
             required: false
           - name: user_message
             type: string

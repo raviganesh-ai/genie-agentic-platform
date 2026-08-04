@@ -57,6 +57,20 @@ def _preview(output_text: str | None) -> str | None:
     return f"{flattened[:_PREVIEW_MAX_LENGTH]}..."
 
 
+def _parse_excluded_agent_names(excluded_agents: str) -> frozenset[str]:
+    """Normalizes the comma-separated ``excluded_agents`` variable (the
+    names the user deselected on Architecture Studio's "Multi-Agent
+    Workflow" checklist - see ``ArchitectureStudioPage.tsx``) into a
+    case/whitespace-insensitive set, so it can be matched against
+    ``ArchitectureBuildPlan.specialist_agent_names`` regardless of minor
+    formatting differences.
+    """
+
+    return frozenset(
+        name.strip().lower() for name in excluded_agents.split(",") if name.strip()
+    )
+
+
 def _split_trace_id(trace_id: str) -> tuple[str | None, str | None]:
     """Recovers the ``(workflow_run_id, step_id)`` a delegated call belongs to.
 
@@ -114,7 +128,7 @@ _DELEGATIONS: tuple[_Delegation, ...] = (
         tool_name="call_build_agent",
         target_agent_id="build-agent",
         target_prompt_id="build-generation-v1",
-        variable_names=("requirements", "architecture", "policies", "user_message"),
+        variable_names=("requirements", "architecture", "policies", "excluded_agents", "user_message"),
         shared_memory_classification="roadmap_artifact",
     ),
     _Delegation(
@@ -279,6 +293,13 @@ async def _generate_build_by_component(
     each component's own real code as soon as it is done - see
     ``build-generation-component-v1`` and ``parse_architecture_build_plan``.
 
+    Any specialist agent named in ``base_variables["excluded_agents"]``
+    (the user's deselections on Architecture Studio's "Multi-Agent
+    Workflow" checklist - see ``ArchitectureStudioPage.tsx``) is skipped
+    entirely here - no component call is ever made for it - and the same
+    value is also forwarded to the Orchestrator/UI component calls below
+    so their own generated code does not reference it either.
+
     Falls back to a single combined ``build-generation-v1`` call (the
     prior behavior) whenever the architecture document's own "##
     Multi-Agent Workflow" section does not parse into a clean agent list -
@@ -307,7 +328,11 @@ async def _generate_build_by_component(
             )
         return await agent_gateway.execute(request)
 
-    components: list[tuple[str, str]] = [("agent", name) for name in plan.specialist_agent_names]
+    components: list[tuple[str, str]] = [
+        ("agent", name)
+        for name in plan.specialist_agent_names
+        if name.strip().lower() not in _parse_excluded_agent_names(base_variables.get("excluded_agents", ""))
+    ]
     components.append(("orchestrator", plan.orchestrator_agent_name))
     components.append(("ui", "ui"))
 

@@ -166,6 +166,19 @@ export function ArchitectureStudioPage(): JSX.Element {
     return parts.join("; ");
   }, [selectedPolicies, otherPolicyChecked, otherPolicyText]);
 
+  // Lets the user deselect specific agents from the "## Multi-Agent
+  // Workflow" section - checked (included) by default. Approving directly
+  // honors whatever is currently deselected here (see excludedAgentsText
+  // below, forwarded to build-solution as its own step_input override):
+  // the Build Agent generates no code at all for a deselected agent, and
+  // neither the Orchestrator Agent nor the UI reference it. Separately,
+  // "Regenerate without N agents" (further below) re-runs
+  // design-architecture itself so the design TEXT/diagram also drops
+  // those agents - the two are independent, not mutually required.
+  const [excludedAgents, setExcludedAgents] = useState<Set<string>>(new Set());
+
+  const excludedAgentsText = useMemo(() => Array.from(excludedAgents).join(", "), [excludedAgents]);
+
   const handleApproveArchitecture = useCallback(async () => {
     if (!sessionId || !workflowRunId || !pendingArchitectureApproval) return;
     setApproving(true);
@@ -193,7 +206,7 @@ export function ArchitectureStudioPage(): JSX.Element {
         .resumeRun(sessionId, workflowRunId, traceId, {
           "build-solution": {
             step_id: "build-solution",
-            variables: { policies: effectiveGovernancePolicies },
+            variables: { policies: effectiveGovernancePolicies, excluded_agents: excludedAgentsText },
           },
         })
         .catch((err) => {
@@ -209,18 +222,18 @@ export function ArchitectureStudioPage(): JSX.Element {
     workflowRunId,
     pendingArchitectureApproval,
     effectiveGovernancePolicies,
+    excludedAgentsText,
     navigate,
     setGovernancePolicies,
   ]);
 
-  // Lets the user deselect specific agents from the "## Multi-Agent
-  // Workflow" section and re-run design-architecture (still the same
-  // workflow step, not a new one) with a user_message asking the
-  // Architecture Designer to exclude exactly those agents - honored by
-  // architecture-recommendation-v1's exclude/deselect instruction. The
-  // step's approval checkpoint was already granted earlier (Requirements
-  // page), so re-executing it does not re-pause the run.
-  const [excludedAgents, setExcludedAgents] = useState<Set<string>>(new Set());
+  // Re-runs design-architecture (still the same workflow step, not a new
+  // one) with a user_message asking the Architecture Designer to exclude
+  // exactly those agents - honored by architecture-recommendation-v1's
+  // exclude/deselect instruction - so the design TEXT/diagram itself also
+  // drops them, not just the generated code. The step's approval
+  // checkpoint was already granted earlier (Requirements page), so
+  // re-executing it does not re-pause the run.
   const [regenerating, setRegenerating] = useState(false);
   const [regenerateError, setRegenerateError] = useState<SafeError | null>(null);
 
@@ -381,9 +394,14 @@ export function ArchitectureStudioPage(): JSX.Element {
                       <Text
                         size={200}
                         weight="semibold"
-                        style={{ display: "block", marginBottom: 8, opacity: 0.75 }}
+                        style={{ display: "block", marginBottom: 4, opacity: 0.75 }}
                       >
                         Limit the design - deselect any agents you don't need
+                      </Text>
+                      <Text size={200} style={{ display: "block", marginBottom: 8, opacity: 0.6 }}>
+                        Deselected agents get no generated code in UI & Agent Design - approve
+                        directly to apply this now, or regenerate below to also update the design
+                        above.
                       </Text>
                       <div style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: 12 }}>
                         {agentItems.map((item) => (

@@ -414,14 +414,15 @@ prompts:
       designates exactly one of them the Orchestrator Agent, and a "## UI
       Design" section that names every screen this mission needs. Every
       screen and every agent you generate code for MUST come directly from
-      that exact list below - never invent, add, rename, merge, or drop a
-      screen or agent, and never fall back to generic/boilerplate
-      code (a stock CRUD form, a generic dashboard, unrelated sample
-      content) that is not concretely about what that specific screen or
-      agent is described as doing. If a piece of code you are about to
-      write does not directly implement one of the exact screens in "##
-      UI Design" or one of the exact agents in "## Multi-Agent Workflow"
-      below, do not write it.
+      that exact list below - never invent, add, rename, or merge a
+      screen or agent, and never drop one except an agent explicitly
+      named as deselected below - and never fall back to
+      generic/boilerplate code (a stock CRUD form, a generic dashboard,
+      unrelated sample content) that is not concretely about what that
+      specific screen or agent is described as doing. If a piece of code
+      you are about to write does not directly implement one of the exact
+      screens in "## UI Design" or one of the exact agents in "##
+      Multi-Agent Workflow" below, do not write it.
 
       Follow this exact structured build order, bottom-up - each
       specialist agent first (the independent building blocks), then the
@@ -433,14 +434,24 @@ prompts:
       any piece once you have written it, and never loop back to an
       earlier piece.
 
+      Agents the user explicitly deselected on the Architecture Studio
+      page (comma-separated; may be empty if none were deselected):
+      {excluded_agents}
+
+      If that list is non-empty, entirely skip every agent named in it -
+      do not generate a code block for it, do not give the Orchestrator
+      Agent a delegation tool for it, and do not mention it anywhere in
+      the UI or in the trailing "## Multi-Agent Workflow" summary below.
+
       (1) Exactly one agent code block per specialist agent literally
-      named in "## Multi-Agent Workflow" below (every agent except the
-      Orchestrator Agent) - the same count and names, no invented extras,
-      no omissions, no combined/merged agents - each its own independent
-      Python 3.12 module, strongly typed, async, with dependencies
-      injected rather than hardcoded, implementing only that one agent's
-      own responsibility exactly as described in the architecture (never
-      a generic/boilerplate agent unrelated to it). Because this agent
+      named in "## Multi-Agent Workflow" below, excluding the
+      Orchestrator Agent and excluding any agent named above as
+      deselected - the same count and names as what remains, no invented
+      extras, no omissions, no combined/merged agents - each its own
+      independent Python 3.12 module, strongly typed, async, with
+      dependencies injected rather than hardcoded, implementing only that
+      one agent's own responsibility exactly as described in the
+      architecture (never a generic/boilerplate agent unrelated to it). Because this agent
       will actually run hosted in Azure AI Foundry, build it on the
       Microsoft Agent Framework (`agent_framework` package) exactly the
       same way this platform's own agents do: construct an
@@ -526,8 +537,9 @@ prompts:
       - requirements
       - architecture
       - policies
+      - excluded_agents
       - user_message
-    version: "4.4.0"
+    version: "4.5.0"
 
   - id: build-generation-component-v1
     name: Build Generation - Single Component
@@ -623,6 +635,15 @@ prompts:
       in this component's own code, with a short inline comment at each
       place a policy is applied noting which policy it satisfies.
 
+      Agents the user explicitly deselected on the Architecture Studio
+      page (comma-separated; may be empty if none were deselected):
+      {excluded_agents}
+
+      If component_kind is "orchestrator" or "ui", never reference,
+      call, or mention any agent named in that deselected list -
+      generate this component exactly as if those agents did not exist
+      in the architecture below.
+
       Approved requirements:
       {requirements}
 
@@ -634,10 +655,11 @@ prompts:
       - requirements
       - architecture
       - policies
+      - excluded_agents
       - component_kind
       - component_name
       - user_message
-    version: "1.1.0"
+    version: "1.2.0"
 
   - id: build-component-regeneration-v1
     name: Build Generation - Regenerate Single Component
@@ -760,11 +782,11 @@ prompts:
       You are the Genie Orchestrator driving the build phase of this
       mission. Call the call_build_agent tool exactly once - the platform
       automatically supplies the real requirements, architecture,
-      policies, and user_message shown below, so you do not need to
-      repeat their full text in the tool call itself (short placeholders
-      or empty strings are fine) - then respond with EXACTLY that tool's
-      returned output text and nothing else - no additional commentary,
-      no summary.
+      policies, excluded_agents, and user_message shown below, so you do
+      not need to repeat their full text in the tool call itself (short
+      placeholders or empty strings are fine) - then respond with EXACTLY
+      that tool's returned output text and nothing else - no additional
+      commentary, no summary.
 
       requirements: {requirements}
 
@@ -772,13 +794,16 @@ prompts:
 
       policies: {policies}
 
+      excluded_agents: {excluded_agents}
+
       user_message: {user_message}
     variables:
       - requirements
       - architecture
       - policies
+      - excluded_agents
       - user_message
-    version: "1.2.0"
+    version: "1.3.0"
 
   - id: orchestrator-security-assessment-phase-v1
     name: Orchestrator Security Assessment Phase
