@@ -25,10 +25,12 @@ const BUILD_AGENT_ID = "build-agent";
 
 export function WorkshopPage(): JSX.Element {
   const navigate = useNavigate();
-  const { sessionId, workflowRunId } = useSessionContext();
+  const { sessionId, workflowRunId, governancePolicies } = useSessionContext();
   const workshop = useWorkshop(sessionId, workflowRunId);
   const [retrying, setRetrying] = useState(false);
   const [retryError, setRetryError] = useState<string | null>(null);
+  const [rerunningBuild, setRerunningBuild] = useState(false);
+  const [rerunBuildError, setRerunBuildError] = useState<string | null>(null);
   const [reviewAcknowledged, setReviewAcknowledged] = useState(false);
 
   // The Build Agent's UI + multi-agent workflow design is the
@@ -99,6 +101,26 @@ export function WorkshopPage(): JSX.Element {
     }
   }, [sessionId, workflowRunId, refreshRun]);
 
+  const handleRerunBuildStage = useCallback(async () => {
+    if (!sessionId || !workflowRunId) return;
+    setRerunningBuild(true);
+    setRerunBuildError(null);
+    try {
+      const traceId = getTraceId(workflowRunId) ?? undefined;
+      await workflowApi.resumeRun(sessionId, workflowRunId, traceId, {
+        "build-solution": {
+          step_id: "build-solution",
+          variables: governancePolicies.trim().length > 0 ? { policies: governancePolicies } : {},
+        },
+      });
+      await refreshRun();
+    } catch (err) {
+      setRerunBuildError((err as ApiError).message ?? "Failed to re-run UI & Agent Design.");
+    } finally {
+      setRerunningBuild(false);
+    }
+  }, [sessionId, workflowRunId, governancePolicies, refreshRun]);
+
   // Once the user has ticked the risk-acknowledgment checkbox and clicks
   // Proceed, go straight to Deploy & Launch - no approval checkpoint to
   // decide and no workflow steps to resume in the background first. Deploy
@@ -124,8 +146,18 @@ export function WorkshopPage(): JSX.Element {
       <PageHeader
         title="UI & Agent Design"
         subtitle="Watch Genie call the Orchestrator Agent to generate this mission's React UI code and multi-agent code."
+        action={
+          <Button
+            size="small"
+            disabled={rerunningBuild}
+            onClick={() => void handleRerunBuildStage()}
+          >
+            {rerunningBuild ? "Re-running stage..." : "Re-run UI & Agent Design"}
+          </Button>
+        }
       />
       {workshop.error ? <ErrorState error={workshop.error} /> : null}
+      {rerunBuildError ? <ErrorState error={{ message: rerunBuildError }} /> : null}
 
       <SectionCard title="🛠️ Generated Artifacts">
         {displayedBuildText ? (

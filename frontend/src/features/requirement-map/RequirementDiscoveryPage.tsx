@@ -192,6 +192,8 @@ export function RequirementDiscoveryPage(): JSX.Element {
   const [showRawText, setShowRawText] = useState(false);
   const [resumeError, setResumeError] = useState<string | null>(null);
   const [resumingRequestId, setResumingRequestId] = useState<string | null>(null);
+  const [rerunningRequirements, setRerunningRequirements] = useState(false);
+  const [rerunRequirementsError, setRerunRequirementsError] = useState<string | null>(null);
   // Defaults to a clean, read-only list so reviewing requirements doesn't
   // look like a wall of form fields - the always-editable boxes/Textareas
   // below are only shown once the user opts into "Edit Requirements".
@@ -462,6 +464,28 @@ export function RequirementDiscoveryPage(): JSX.Element {
     ],
   );
 
+  const handleRerunRequirementsStage = useCallback(async () => {
+    if (!sessionId || !workflowRunId) return;
+    setRerunningRequirements(true);
+    setRerunRequirementsError(null);
+    try {
+      const traceId = getTraceId(workflowRunId) ?? undefined;
+      await workflowApi.resumeRun(sessionId, workflowRunId, traceId, {
+        "analyze-requirements": {
+          step_id: "analyze-requirements",
+          variables: {},
+        },
+      });
+      await Promise.all([refresh(), refreshRun(), refreshApprovals()]);
+    } catch (err) {
+      setRerunRequirementsError(
+        (err as ApiError).message ?? "Failed to re-run Requirement Discovery.",
+      );
+    } finally {
+      setRerunningRequirements(false);
+    }
+  }, [sessionId, workflowRunId, refresh, refreshRun, refreshApprovals]);
+
   if (!workflowRunId) {
     // A mission was just kicked off from Upload, which navigates here
     // immediately (ahead of the workflow run finishing) so the user sees
@@ -614,6 +638,20 @@ export function RequirementDiscoveryPage(): JSX.Element {
         </div>
       </div>
       <LiveWorkflowPulse connected={liveConnected} events={liveEvents} />
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
+        <Button
+          size="small"
+          disabled={rerunningRequirements}
+          onClick={() => void handleRerunRequirementsStage()}
+        >
+          {rerunningRequirements ? "Re-running Requirement Discovery..." : "Re-run Requirement Discovery"}
+        </Button>
+        {rerunRequirementsError ? (
+          <Text size={200} style={{ color: "#d1495b" }}>
+            {rerunRequirementsError}
+          </Text>
+        ) : null}
+      </div>
       {loading && !data ? <LoadingState label="Loading requirements..." /> : null}
       {error ? <ErrorState error={error} onRetry={refresh} /> : null}
 

@@ -137,7 +137,14 @@ export function ArchitectureStudioPage(): JSX.Element {
     { enabled: Boolean(sessionId) },
   );
   const { events: liveEvents, connected: liveConnected } = useWorkflowEventStream(sessionId);
-  const lastLiveEvent = liveEvents[liveEvents.length - 1] ?? null;
+  const liveEventsForRun = useMemo(
+    () =>
+      workflowRunId
+        ? liveEvents.filter((event) => event.workflow_run_id === workflowRunId)
+        : [],
+    [liveEvents, workflowRunId],
+  );
+  const lastLiveEvent = liveEventsForRun[liveEventsForRun.length - 1] ?? null;
   useEffect(() => {
     if (lastLiveEvent?.event_type === "step_completed" || lastLiveEvent?.event_type === "step_failed") {
       void refresh();
@@ -153,6 +160,8 @@ export function ArchitectureStudioPage(): JSX.Element {
   const [otherPolicyText, setOtherPolicyText] = useState("");
   const [approving, setApproving] = useState(false);
   const [approveError, setApproveError] = useState<string | null>(null);
+  const [rerunningDesign, setRerunningDesign] = useState(false);
+  const [rerunDesignError, setRerunDesignError] = useState<SafeError | null>(null);
 
   const togglePolicy = useCallback((option: string, checked: boolean) => {
     setSelectedPolicies((prev) => ({ ...prev, [option]: checked }));
@@ -226,6 +235,34 @@ export function ArchitectureStudioPage(): JSX.Element {
     navigate,
     setGovernancePolicies,
   ]);
+
+  const handleRerunArchitectureStage = useCallback(async () => {
+    if (!sessionId || !workflowRunId) return;
+    setRerunningDesign(true);
+    setRerunDesignError(null);
+    try {
+      const run = await workflowApi.getRun(sessionId, workflowRunId);
+      const priorDesignStep = run.step_results.find((result) => result.step_id === "design-architecture");
+      const approvedRequirements =
+        priorDesignStep?.resolved_variables?.approved_requirements ??
+        run.step_results.find((result) => result.step_id === "analyze-requirements")?.output_text ??
+        "";
+      const traceId = getTraceId(workflowRunId) ?? undefined;
+      await workflowApi.resumeRun(sessionId, workflowRunId, traceId, {
+        "design-architecture": {
+          step_id: "design-architecture",
+          variables: { approved_requirements: approvedRequirements },
+        },
+      });
+      await Promise.all([refresh(), refreshApprovals()]);
+    } catch (err) {
+      setRerunDesignError(
+        err instanceof ApiError ? err : { message: "Failed to re-run Architecture Studio." },
+      );
+    } finally {
+      setRerunningDesign(false);
+    }
+  }, [sessionId, workflowRunId, refresh, refreshApprovals]);
 
   // Re-runs design-architecture (still the same workflow step, not a new
   // one) with a user_message asking the Architecture Designer to exclude
@@ -302,7 +339,9 @@ export function ArchitectureStudioPage(): JSX.Element {
       {error ? <ErrorState error={error} onRetry={refresh} /> : null}
       {reanalysisError ? <ErrorState error={reanalysisError} /> : null}
 
-      <LiveWorkflowPulse connected={liveConnected} events={liveEvents} />
+      {!architectureComponent ? (
+        <LiveWorkflowPulse connected={liveConnected} events={liveEventsForRun} />
+      ) : null}
 
       <Text size={200} weight="semibold" style={{ display: "block", marginBottom: 8, opacity: 0.75 }}>
         Request an alternative design
@@ -320,6 +359,20 @@ export function ArchitectureStudioPage(): JSX.Element {
         ))}
       </div>
 
+      <SectionCard title="🔁 Re-run This Stage">
+        <Text size={200} style={{ display: "block", marginBottom: 10, opacity: 0.75 }}>
+          Re-execute Architecture Studio for this same workflow run using the current approved requirements.
+        </Text>
+        {rerunDesignError ? <ErrorState error={rerunDesignError} /> : null}
+        <Button
+          size="small"
+          disabled={rerunningDesign}
+          onClick={() => void handleRerunArchitectureStage()}
+        >
+          {rerunningDesign ? "Re-running Architecture Studio..." : "Re-run Architecture Studio"}
+        </Button>
+      </SectionCard>
+
       {snapshot ? (
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           {!architectureComponent ? (
@@ -334,7 +387,7 @@ export function ArchitectureStudioPage(): JSX.Element {
             ) : (
               <AgentActivityAnimation
                 label="Genie is working with the Architecture Designer agent on this mission's UI design and multi-agent workflow..."
-                events={liveEvents}
+                events={liveEventsForRun}
               />
             )
           ) : topSections.length > 0 ? (

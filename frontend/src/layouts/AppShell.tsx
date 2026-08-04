@@ -80,6 +80,7 @@ function computeStageStatuses(
   workflowRunId: string | null,
   run: WorkflowRunResult | null,
   currentIndex: number,
+  maxReachedIndex: number,
 ): StageStatus[] {
   const reachedStepIds = new Set(run?.step_results.map((result) => result.step_id) ?? []);
   const statuses: StageStatus[] = [];
@@ -97,6 +98,12 @@ function computeStageStatuses(
     } else {
       // Deploy & Launch: only truly done once the whole run completes.
       complete = run?.status === "completed";
+    }
+    if (index <= maxReachedIndex) {
+      // Once a stage has been reached in this run, keep it reachable even
+      // when the user navigates back to an earlier stage before poll data
+      // catches up (e.g. Architecture <-> Workshop back-and-forth).
+      reachable = true;
     }
     if (index < currentIndex) {
       // The user has already navigated past this stage - it's done, no
@@ -198,6 +205,18 @@ export function AppShell(): JSX.Element {
   const [triageOn, setTriageOn] = useState(true);
   const location = useLocation();
   const { sessionId, workflowRunId } = useSessionContext();
+  const currentIndex = findCurrentNavIndex(location.pathname);
+  const [maxReachedIndex, setMaxReachedIndex] = useState(currentIndex);
+
+  useEffect(() => {
+    setMaxReachedIndex(currentIndex);
+  }, [workflowRunId]);
+
+  useEffect(() => {
+    if (currentIndex > maxReachedIndex) {
+      setMaxReachedIndex(currentIndex);
+    }
+  }, [currentIndex, maxReachedIndex]);
 
   useEffect(() => onAccessTokenChange((token) => setSignedIn(token !== null)), []);
 
@@ -212,7 +231,13 @@ export function AppShell(): JSX.Element {
     enabled: Boolean(sessionId && workflowRunId),
     pollIntervalMs: MISSION_FLOW_POLL_MS,
   });
-  const stageStatuses = computeStageStatuses(sessionId, workflowRunId, run, findCurrentNavIndex(location.pathname));
+  const stageStatuses = computeStageStatuses(
+    sessionId,
+    workflowRunId,
+    run,
+    currentIndex,
+    maxReachedIndex,
+  );
 
   return (
     <div style={{ display: "flex", minHeight: "100vh" }}>
