@@ -60,6 +60,26 @@ def test_plain_text_transcript_is_decoded_as_utf8() -> None:
     assert text == "hello world"
 
 
+def test_markdown_transcript_is_decoded_as_plain_text() -> None:
+    text = extract_text(
+        content=b"# Requirements\n\n- Must support SSO\n- Must log audit events\n",
+        content_type="text/markdown",
+        file_name="requirements.md",
+    )
+    assert text == "# Requirements\n\n- Must support SSO\n- Must log audit events\n"
+
+
+def test_markdown_transcript_with_generic_content_type_is_decoded_as_plain_text() -> None:
+    """Browsers commonly send a generic/empty content type for .md files -
+    extraction must not depend on the browser correctly tagging it."""
+    text = extract_text(
+        content=b"## Call Transcript\n\nCustomer: We need real-time reporting.\n",
+        content_type="application/octet-stream",
+        file_name="call-notes.md",
+    )
+    assert text == "## Call Transcript\n\nCustomer: We need real-time reporting.\n"
+
+
 def test_pdf_detected_by_content_type_is_parsed_for_text() -> None:
     pdf_bytes = _build_pdf_bytes("Hello PDF")
     text = extract_text(content=pdf_bytes, content_type="application/pdf", file_name="doc")

@@ -15,6 +15,16 @@ correctly:
 This module fixes both: PDFs (detected by content type or file extension)
 are parsed page-by-page via ``pypdf``; everything else keeps the original,
 simple UTF-8 decode behavior.
+
+Markdown (``.md``) transcripts/requirements documents are an explicitly
+supported use case: they are plain UTF-8 text, so they fall through to the
+same simple decode path as ``.txt`` - the raw Markdown (headings, lists,
+etc.) is passed straight through as transcript text, which downstream
+agents read just fine. No Markdown-specific parsing/stripping is done or
+needed. Browsers frequently send an empty/generic ``content_type`` for
+``.md`` file parts (no universally recognized ``text/markdown`` MIME type),
+so detection here never depends on ``.md`` being tagged with any specific
+content type - only the PDF path is content-type/extension sensitive.
 """
 from __future__ import annotations
 
