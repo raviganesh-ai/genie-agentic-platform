@@ -23,7 +23,6 @@ import { PageHeader } from "@/layouts/AppShell";
 import { LoadingState } from "@/components/LoadingState";
 import { ErrorState } from "@/components/ErrorState";
 import { SectionCard } from "@/components/SectionCard";
-import { LiveWorkflowPulse } from "@/components/LiveWorkflowPulse";
 import { AgentActivityAnimation } from "@/components/AgentActivityAnimation";
 import { useWorkflowEventStream } from "@/hooks/useWorkflowEventStream";
 import { ArchitectureComponentDiagram } from "./ArchitectureComponentDiagram";
@@ -136,7 +135,7 @@ export function ArchitectureStudioPage(): JSX.Element {
     [sessionId],
     { enabled: Boolean(sessionId) },
   );
-  const { events: liveEvents, connected: liveConnected } = useWorkflowEventStream(sessionId);
+  const { events: liveEvents } = useWorkflowEventStream(sessionId);
   const liveEventsForRun = useMemo(
     () =>
       workflowRunId
@@ -152,15 +151,6 @@ export function ArchitectureStudioPage(): JSX.Element {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lastLiveEvent]);
-  // Latches permanently true the first time this run's architecture
-  // component actually shows up - once that happens, the live "working..."
-  // pulse must never come back for this page view again (e.g. while a
-  // later "Re-run Architecture Studio" call is in flight), even though
-  // `architectureComponent` itself briefly reflects stale/refreshing data.
-  const [hasArchitectureOutput, setHasArchitectureOutput] = useState(false);
-  useEffect(() => {
-    if (architectureComponent) setHasArchitectureOutput(true);
-  }, [architectureComponent]);
   const pendingArchitectureApproval = approvals?.find(
     (request) => request.status === "pending" && request.subject_id === "build-solution",
   );
@@ -347,10 +337,6 @@ export function ArchitectureStudioPage(): JSX.Element {
       {loading && !snapshot ? <LoadingState label="Loading architecture..." /> : null}
       {error ? <ErrorState error={error} onRetry={refresh} /> : null}
       {reanalysisError ? <ErrorState error={reanalysisError} /> : null}
-
-      {!hasArchitectureOutput ? (
-        <LiveWorkflowPulse connected={liveConnected} events={liveEventsForRun} />
-      ) : null}
 
       <Text size={200} weight="semibold" style={{ display: "block", marginBottom: 8, opacity: 0.75 }}>
         Request an alternative design
