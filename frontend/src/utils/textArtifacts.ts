@@ -33,11 +33,19 @@ export function splitIntoNamedSections(text: string): ParsedSection[] {
   };
 
   for (const rawLine of lines) {
+    // An indented line is always a sub-item nested under whatever
+    // top-level bullet/header came before it (e.g. an agent's own
+    // "Fulfills"/"Inputs"/"Outputs"/"Handoffs" detail bullets) - it must
+    // never start a new top-level section itself, even though on its own
+    // it can look exactly like a header/bold-label/numbered-bullet line.
+    // Only lines flush at column 0 are real section boundaries.
+    const isIndented = /^[ \t]+\S/.test(rawLine);
     const line = rawLine.trim();
-    const headerMatch =
-      line.match(/^#{1,4}\s+(.+)$/) ??
-      line.match(/^\*\*(.+?)\*\*:?\s*(.*)$/) ??
-      line.match(/^(?:[-*]|\d+[.)])\s+\*?\*?([^:\n]{2,70}?)\*?\*?:\s*(.*)$/);
+    const headerMatch = isIndented
+      ? null
+      : (line.match(/^#{1,4}\s+(.+)$/) ??
+        line.match(/^\*\*(.+?)\*\*:?\s*(.*)$/) ??
+        line.match(/^(?:[-*]|\d+[.)])\s+\*?\*?([^:\n]{2,70}?)\*?\*?:\s*(.*)$/));
 
     if (headerMatch) {
       flush();
