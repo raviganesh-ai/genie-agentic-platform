@@ -158,14 +158,20 @@ prompts:
       that receives every interaction coming from the UI and is
       responsible for coordinating, sequencing, and handing off to every
       other specialist agent in the list; no other agent in the list may
-      receive input directly from the UI. One bullet per agent you decide
-      is needed, as "**<Agent name>**: <its responsibility, the
-      requirement(s) it fulfills, its inputs, and which other agent(s) in
-      this list it hands off to or receives from>".
+      receive input directly from the UI. Exactly one top-level bullet
+      per agent you decide is needed, as "**<Agent name>**: <its
+      responsibility, the requirement(s) it fulfills, its inputs, and
+      which other agent(s) in this list it hands off to or receives
+      from>" - written as a single flowing sentence on that one bullet
+      line. Never break an agent's responsibility/fulfills/inputs/
+      outputs/handoffs out into separate sub-bullets or indented
+      lines underneath its bullet, and never add any bullet, note, or
+      line that is not itself naming one of the agents - the list must
+      contain nothing but exactly one bullet per agent.
     variables:
       - approved_requirements
       - user_message
-    version: "3.3.0"
+    version: "3.4.0"
 
   - id: security-assessment-v1
     name: Security Assessment

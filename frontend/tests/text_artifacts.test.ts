@@ -46,6 +46,27 @@ describe("splitIntoNamedSections", () => {
     expect(sections[1].body).toBe("does the second thing");
   });
 
+  it("folds detail-field labels (Fulfills/Inputs/Outputs/Handoffs) into the previous agent even when not indented", () => {
+    const text = [
+      "- **Document Processing Orchestrator Agent**: coordinates the pipeline",
+      "- Fulfills: coordinates the end-to-end pipeline",
+      "- Inputs: uploaded document package",
+      "- Outputs: normalized record",
+      "- Handoffs: Ingestion & Packaging Agent",
+      "- **Ingestion & Packaging Agent**: classifies and packages incoming files",
+      "- Fulfills: classifies and packages incoming files",
+    ].join("\n");
+
+    const sections = splitIntoNamedSections(text);
+
+    expect(sections.map((section) => section.title)).toEqual([
+      "Document Processing Orchestrator Agent",
+      "Ingestion & Packaging Agent",
+    ]);
+    expect(sections[0].body).toContain("Fulfills: coordinates the end-to-end pipeline");
+    expect(sections[0].body).toContain("Handoffs: Ingestion & Packaging Agent");
+  });
+
   it("still splits markdown headers as before", () => {
     const text = ["## First", "some body", "## Second", "other body"].join("\n");
 

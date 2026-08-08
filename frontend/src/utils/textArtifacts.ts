@@ -13,6 +13,19 @@ export interface ParsedSection {
 }
 
 /**
+ * Detail-field labels an agent sometimes uses to break a single bulleted
+ * item (most commonly one agent's responsibility in a "Multi-Agent
+ * Workflow" list) out into its own sub-bullets - e.g. "Fulfills:",
+ * "Inputs:", "Outputs:", "Handoffs:" - even when it doesn't actually
+ * indent them under the parent bullet. These must always stay part of
+ * the item they describe rather than becoming their own sibling section,
+ * so they're recognized and folded into the current section's body no
+ * matter how they're indented.
+ */
+const DETAIL_FIELD_LABEL =
+  /^(?:responsibilit(?:y|ies)|fulfills?|inputs?|outputs?|handoffs?|receives?(?: from)?)$/i;
+
+/**
  * Splits free text into named sections using common patterns an LLM uses
  * when asked to describe "each component"/"each item" with rationale:
  * markdown headers (`#`/`##`/`###`), bold labels (`**Name**:`), or a
@@ -46,6 +59,15 @@ export function splitIntoNamedSections(text: string): ParsedSection[] {
       : (line.match(/^#{1,4}\s+(.+)$/) ??
         line.match(/^\*\*(.+?)\*\*:?\s*(.*)$/) ??
         line.match(/^(?:[-*]|\d+[.)])\s+\*?\*?([^:\n]{2,70}?)\*?\*?:\s*(.*)$/));
+
+    // Even an unindented line can still just be a detail field describing
+    // the previous bullet (an agent not indenting "Fulfills:"/"Inputs:"/
+    // etc. under its own name) - treat it the same as an indented one:
+    // fold into the current section instead of starting a new one.
+    if (headerMatch && currentTitle !== null && DETAIL_FIELD_LABEL.test(headerMatch[1].trim())) {
+      currentBody.push(rawLine);
+      continue;
+    }
 
     if (headerMatch) {
       flush();
