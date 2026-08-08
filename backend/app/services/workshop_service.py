@@ -46,7 +46,7 @@ class WorkshopService:
         trace_id: str | None = None,
     ) -> WorkflowRunResult:
         await self._authorize(session_id, requesting_user_id)
-        step_id = self._step_id_for_agent(workflow_run_id, agent_id)
+        step_id = await self._step_id_for_agent(workflow_run_id, agent_id)
         step_inputs = {
             step_id: WorkflowStepInput(step_id=step_id, variables={"user_message": message})
         }
@@ -67,7 +67,7 @@ class WorkshopService:
         trace_id: str | None = None,
     ) -> WorkflowRunResult:
         await self._authorize(session_id, requesting_user_id)
-        run = self._get_run(workflow_run_id)
+        run = await self._get_run(workflow_run_id)
         workflow = self._orchestrator.workflow_registry.get(run.workflow_id)
         step_inputs = {
             step.id: WorkflowStepInput(step_id=step.id, variables={"user_message": message})
@@ -206,14 +206,14 @@ class WorkshopService:
             session_id=session_id, requesting_user_id=requesting_user_id
         )
 
-    def _get_run(self, workflow_run_id: str) -> WorkflowRunResult:
-        run = self._orchestrator.get_workflow_run(workflow_run_id)
+    async def _get_run(self, workflow_run_id: str) -> WorkflowRunResult:
+        run = await self._orchestrator.get_workflow_run(workflow_run_id)
         if run is None:
             raise UnknownWorkflowRunError(f"Unknown workflow run id '{workflow_run_id}'.")
         return run
 
-    def _step_id_for_agent(self, workflow_run_id: str, agent_id: str) -> str:
-        run = self._get_run(workflow_run_id)
+    async def _step_id_for_agent(self, workflow_run_id: str, agent_id: str) -> str:
+        run = await self._get_run(workflow_run_id)
         workflow = self._orchestrator.workflow_registry.get(run.workflow_id)
         for step in workflow.steps:
             if step.agent_id == agent_id:

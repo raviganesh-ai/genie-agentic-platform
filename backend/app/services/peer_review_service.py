@@ -181,7 +181,7 @@ class PeerReviewService:
         await self._session_service.get_session(
             session_id=session_id, requesting_user_id=requesting_user_id
         )
-        run = self._get_run(workflow_run_id)
+        run = await self._get_run(workflow_run_id)
 
         step = next(
             (r for r in run.step_results if r.step_id == self._peer_review_step_id), None
@@ -202,7 +202,7 @@ class PeerReviewService:
         await self._session_service.get_session(
             session_id=session_id, requesting_user_id=requesting_user_id
         )
-        run = self._get_run(workflow_run_id)
+        run = await self._get_run(workflow_run_id)
 
         return AgentAssessmentsReport(
             security_assessment=self._parse_step_assessment(
@@ -262,7 +262,7 @@ class PeerReviewService:
         await self._session_service.get_session(
             session_id=session_id, requesting_user_id=requesting_user_id
         )
-        self._get_run(workflow_run_id)
+        await self._get_run(workflow_run_id)
 
         if selected_findings:
             instruction = (
@@ -287,10 +287,10 @@ class PeerReviewService:
             step_inputs=step_inputs,
         )
 
-    def _get_run(self, workflow_run_id: str) -> WorkflowRunResult:
-        run = self._orchestrator.get_workflow_run(workflow_run_id)
+    async def _get_run(self, workflow_run_id: str) -> WorkflowRunResult:
+        run = await self._orchestrator.get_workflow_run(workflow_run_id)
         if run is None:
-            raise UnknownWorkflowRunError(f"No workflow run '{workflow_run_id}' found.")
+            raise UnknownWorkflowRunError(f"Unknown workflow run id '{workflow_run_id}'.")
         return run
 
 

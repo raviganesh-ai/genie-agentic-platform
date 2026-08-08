@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithProviders, mockFetchSequence } from "./testUtils";
@@ -187,4 +187,81 @@ describe("WorkshopPage", () => {
     await waitFor(() => expect(screen.getByText(/return 'updated'/)).toBeInTheDocument());
     expect(screen.queryByText(/return null/)).not.toBeInTheDocument();
   });
+
+  it("surfaces missionError (set when Architecture Studio's fire-and-forget resume call fails) with a retry that re-kicks off build-solution", async () => {
+    const fetchMock = mockFetchSequence([
+      {
+        match: `/workflows/runs/${FIXTURE_WORKFLOW_RUN_ID}`,
+        response: buildWorkflowRunResult({ step_results: [] }),
+      },
+    ]);
+
+    renderWithProviders(<WorkshopPage />, {
+      sessionId: FIXTURE_SESSION_ID,
+      workflowRunId: FIXTURE_WORKFLOW_RUN_ID,
+      missionError: { message: "Failed to start UI & Agent Design after the architecture approval." },
+    });
+
+    await waitFor(() =>
+      expect(
+        screen.getByText(/Failed to start UI & Agent Design after the architecture approval/i),
+      ).toBeInTheDocument(),
+    );
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Retry" }));
+
+    await waitFor(() => {
+      const resumeCall = fetchMock.mock.calls.find((call) => String(call[0]).endsWith("/resume"));
+      expect(resumeCall).toBeDefined();
+      const [, resumeInit] = resumeCall as unknown as [string, RequestInit];
+      const body = JSON.parse(resumeInit.body as string);
+      expect(body.step_inputs["build-solution"]).toBeDefined();
+    });
+  });
+
+  it(
+    "treats build-solution as stuck (never actually started server-side) after a grace period with no result and no live stream, offering a retry",
+    async () => {
+      // Fake only the setTimeout/clearTimeout pair the 45s stuck-detector
+      // uses - leave setInterval/queueMicrotask/Date alone so the
+      // unrelated live-stream reconnect loop (useWorkflowEventStream,
+      // itself driven by real Promise microtasks) keeps resolving
+      // normally instead of needing to be ticked forward here too.
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      try {
+        const fetchMock = mockFetchSequence([
+          {
+            match: `/workflows/runs/${FIXTURE_WORKFLOW_RUN_ID}`,
+            response: buildWorkflowRunResult({ step_results: [] }),
+          },
+        ]);
+
+        renderWithProviders(<WorkshopPage />, {
+          sessionId: FIXTURE_SESSION_ID,
+          workflowRunId: FIXTURE_WORKFLOW_RUN_ID,
+        });
+
+        expect(screen.queryByText(/hasn't started yet/i)).not.toBeInTheDocument();
+
+        await vi.advanceTimersByTimeAsync(45_000);
+
+        expect(screen.getByText(/UI & Agent Design hasn't started yet/i)).toBeInTheDocument();
+
+        vi.useRealTimers();
+        const user = userEvent.setup();
+        await user.click(screen.getByRole("button", { name: "Retry" }));
+
+        await waitFor(() => {
+          const resumeCall = fetchMock.mock.calls.find((call) =>
+            String(call[0]).endsWith("/resume"),
+          );
+          expect(resumeCall).toBeDefined();
+        });
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+    15_000,
+  );
 });

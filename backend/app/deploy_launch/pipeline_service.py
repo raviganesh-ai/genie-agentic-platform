@@ -183,7 +183,7 @@ class DeploymentPipelineService:
         await self._session_service.get_session(
             session_id=session_id, requesting_user_id=requesting_user_id
         )
-        run = self._get_workflow_run(workflow_run_id)
+        run = await self._get_workflow_run(workflow_run_id)
         resolved_trace_id = trace_id or str(uuid4())
 
         await self._ensure_final_output_approval_granted(
@@ -265,8 +265,8 @@ class DeploymentPipelineService:
             f"was just requested for workflow run '{workflow_run_id}' and is awaiting a decision."
         )
 
-    def _get_workflow_run(self, workflow_run_id: str) -> WorkflowRunResult:
-        run = self._orchestrator.get_workflow_run(workflow_run_id)
+    async def _get_workflow_run(self, workflow_run_id: str) -> WorkflowRunResult:
+        run = await self._orchestrator.get_workflow_run(workflow_run_id)
         if run is None:
             raise UnknownWorkflowRunError(f"No workflow run '{workflow_run_id}' found.")
         return run

@@ -110,7 +110,7 @@ class _FakeOrchestrator:
         self._run = run
         self.resume_calls: list[dict] = []
 
-    def get_workflow_run(self, workflow_run_id: str) -> WorkflowRunResult | None:
+    async def get_workflow_run(self, workflow_run_id: str) -> WorkflowRunResult | None:
         if self._run is None or workflow_run_id != self._run.workflow_run_id:
             return None
         return self._run

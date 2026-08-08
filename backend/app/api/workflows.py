@@ -97,7 +97,7 @@ async def get_workflow_run(
     orchestrator: AgentOrchestrator = Depends(get_agent_orchestrator),
 ) -> WorkflowRunResult:
     await session_service.get_session(session_id=session_id, requesting_user_id=user.user_id)
-    run = orchestrator.get_workflow_run(workflow_run_id)
+    run = await orchestrator.get_workflow_run(workflow_run_id)
     if run is None or run.session_id != session_id:
         raise UnknownWorkflowRunError(f"Unknown workflow run id '{workflow_run_id}'.")
     return run
@@ -111,4 +111,4 @@ async def list_workflow_runs(
     orchestrator: AgentOrchestrator = Depends(get_agent_orchestrator),
 ) -> list[WorkflowRunResult]:
     await session_service.get_session(session_id=session_id, requesting_user_id=user.user_id)
-    return orchestrator.list_workflow_runs(session_id)
+    return await orchestrator.list_workflow_runs(session_id)

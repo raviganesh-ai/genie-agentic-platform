@@ -57,7 +57,7 @@ class _FakeOrchestrator:
         self.agent_registry = agent_registry
         self.decision_graph_service = _FakeDecisionGraphService()
 
-    def get_workflow_run(self, workflow_run_id: str) -> WorkflowRunResult | None:
+    async def get_workflow_run(self, workflow_run_id: str) -> WorkflowRunResult | None:
         return self._run if workflow_run_id == self._run.workflow_run_id else None
 
 

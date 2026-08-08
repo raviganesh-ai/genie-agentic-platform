@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Button, MessageBar, MessageBarBody, MessageBarTitle, Text } from "@fluentui/react-components";
 import { useSessionContext } from "@/state/SessionContext";
 import { useAsyncResource } from "@/hooks/useAsyncResource";
@@ -85,6 +86,7 @@ function StepRow({ step }: { step: DeploymentStepResult }): JSX.Element {
  */
 export function DeployLaunchPage(): JSX.Element {
   const { sessionId, workflowRunId } = useSessionContext();
+  const navigate = useNavigate();
 
   const runsFetcher = useCallback(
     () => (sessionId ? deployLaunchApi.list(sessionId) : Promise.reject(new Error("No active session"))),
@@ -99,6 +101,22 @@ export function DeployLaunchPage(): JSX.Element {
     if (!runs || runs.length === 0) return null;
     return [...runs].sort((a, b) => b.created_at.localeCompare(a.created_at))[0];
   }, [runs]);
+
+  // Deploy & Launch reads an already-run workflow's step outputs (e.g.
+  // build-solution) rather than driving them itself - if an earlier stage's
+  // fire-and-forget kickoff silently never reached the server (see Workshop/
+  // Architecture Studio's own handling of this), the pipeline fails with a
+  // raw "Workflow step '<id>' has not completed" error. Retrying Deploy &
+  // Launch itself can never fix that - the fix has to happen back on
+  // Workshop - so detect it and point the user there instead of only
+  // offering a retry that will just fail again the same way.
+  const incompleteUpstreamStep = useMemo(() => {
+    if (!activeRun || activeRun.status !== "failed") return null;
+    const failed = activeRun.steps.find(
+      (step) => step.status === "failed" && /has not completed for run/i.test(step.error ?? ""),
+    );
+    return failed ?? null;
+  }, [activeRun]);
 
   const { events: liveEvents, connected: liveConnected } = useWorkflowEventStream(sessionId);
   const lastLiveEvent = liveEvents[liveEvents.length - 1] ?? null;
@@ -206,7 +224,16 @@ export function DeployLaunchPage(): JSX.Element {
       <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
         {!activeRun || activeRun.status === "failed" ? (
           <SectionCard title="Start Deploy & Launch">
-            {startError ? (
+            {incompleteUpstreamStep ? (
+              <MessageBar intent="error" layout="multiline" style={{ marginBottom: 12 }}>
+                <MessageBarBody>
+                  <MessageBarTitle>UI & Agent Design didn't finish</MessageBarTitle>
+                  {incompleteUpstreamStep.error} Retrying Deploy & Launch won't fix this by
+                  itself - go back to Workshop and (re)run UI & Agent Design first, then
+                  return here once it completes.
+                </MessageBarBody>
+              </MessageBar>
+            ) : startError ? (
               <MessageBar intent="warning" layout="multiline" style={{ marginBottom: 12 }}>
                 <MessageBarBody>
                   <MessageBarTitle>Deploy & Launch</MessageBarTitle>
@@ -215,9 +242,15 @@ export function DeployLaunchPage(): JSX.Element {
               </MessageBar>
             ) : null}
             <div style={{ display: "flex", gap: 8 }}>
-              <Button appearance="primary" disabled={starting} onClick={() => void handleStart()}>
-                {starting ? "Starting..." : activeRun?.status === "failed" ? "Retry Deploy & Launch" : "Start Deploy & Launch"}
-              </Button>
+              {incompleteUpstreamStep ? (
+                <Button appearance="primary" onClick={() => navigate("/workshop")}>
+                  Go to Workshop
+                </Button>
+              ) : (
+                <Button appearance="primary" disabled={starting} onClick={() => void handleStart()}>
+                  {starting ? "Starting..." : activeRun?.status === "failed" ? "Retry Deploy & Launch" : "Start Deploy & Launch"}
+                </Button>
+              )}
             </div>
           </SectionCard>
         ) : null}

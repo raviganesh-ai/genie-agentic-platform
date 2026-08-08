@@ -5,11 +5,22 @@ started through ``WorkflowRuntime``, and provides the resume-by-id
 convenience used when a run pauses at ``waiting_for_approval``. Contains no
 execution logic of its own - it only records and looks up prior results and
 delegates every actual run/resume to ``WorkflowRuntime``.
+
+Every run/resume call is backed by a ``WorkflowRunRepository`` (in-memory by
+default; a real durable backend in production, per the Architecture
+Principles in ``.github/copilot-instructions.md``) rather than a bare
+in-process dict, and ``WorkflowRuntime.run_workflow``'s ``on_progress`` hook
+persists each wave's result as soon as it lands - not just once the whole
+(potentially multi-minute, multi-wave) call finally returns. This is what
+makes an individual stage recoverable: if the caller that was supposed to
+kick off the next step never reaches the server, or the process restarts
+mid-run, the last durably persisted stage is never lost.
 """
 from __future__ import annotations
 
 from app.models.workflow_models import WorkflowRunResult, WorkflowStepInput
 from app.orchestration.workflow_runtime import WorkflowRuntime
+from app.repositories.workflow_run_repository import WorkflowRunRepository
 
 __all__ = ["UnknownWorkflowRunError", "WorkflowExecutionService"]
 
@@ -21,10 +32,9 @@ class UnknownWorkflowRunError(RuntimeError):
 class WorkflowExecutionService:
     """Starts, resumes, and tracks the history of workflow runs for a session."""
 
-    def __init__(self, *, runtime: WorkflowRuntime) -> None:
+    def __init__(self, *, runtime: WorkflowRuntime, repository: WorkflowRunRepository) -> None:
         self._runtime = runtime
-        self._runs: dict[str, WorkflowRunResult] = {}
-        self._runs_by_session: dict[str, list[str]] = {}
+        self._repository = repository
 
     async def start_workflow(
         self,
@@ -43,8 +53,9 @@ class WorkflowExecutionService:
             step_inputs=step_inputs,
             transcript_text=transcript_text,
             agent_scope_id=agent_scope_id,
+            on_progress=self._repository.put,
         )
-        self._store(result, session_id)
+        await self._repository.put(result)
         return result
 
     async def resume_workflow(
@@ -56,7 +67,7 @@ class WorkflowExecutionService:
         step_inputs: dict[str, WorkflowStepInput] | None = None,
         transcript_text: str = "",
     ) -> WorkflowRunResult:
-        previous = self._runs.get(workflow_run_id)
+        previous = await self._repository.get(workflow_run_id=workflow_run_id)
         if previous is None:
             raise UnknownWorkflowRunError(f"No workflow run '{workflow_run_id}' found to resume.")
 
@@ -67,18 +78,13 @@ class WorkflowExecutionService:
             step_inputs=step_inputs,
             transcript_text=transcript_text,
             resume_from=previous,
+            on_progress=self._repository.put,
         )
-        self._store(result, session_id)
+        await self._repository.put(result)
         return result
 
-    def get_run(self, workflow_run_id: str) -> WorkflowRunResult | None:
-        return self._runs.get(workflow_run_id)
+    async def get_run(self, workflow_run_id: str) -> WorkflowRunResult | None:
+        return await self._repository.get(workflow_run_id=workflow_run_id)
 
-    def list_runs_for_session(self, session_id: str) -> list[WorkflowRunResult]:
-        return [self._runs[run_id] for run_id in self._runs_by_session.get(session_id, [])]
-
-    def _store(self, result: WorkflowRunResult, session_id: str) -> None:
-        self._runs[result.workflow_run_id] = result
-        run_ids = self._runs_by_session.setdefault(session_id, [])
-        if result.workflow_run_id not in run_ids:
-            run_ids.append(result.workflow_run_id)
+    async def list_runs_for_session(self, session_id: str) -> list[WorkflowRunResult]:
+        return await self._repository.list_for_session(session_id=session_id)

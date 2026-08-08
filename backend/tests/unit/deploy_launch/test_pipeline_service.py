@@ -97,7 +97,7 @@ class _FakeOrchestrator:
             ],
         )
 
-    def get_workflow_run(self, workflow_run_id: str) -> WorkflowRunResult | None:
+    async def get_workflow_run(self, workflow_run_id: str) -> WorkflowRunResult | None:
         return self._run if workflow_run_id == "run-1" else None
 
 

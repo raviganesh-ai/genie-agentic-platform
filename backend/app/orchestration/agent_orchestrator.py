@@ -48,6 +48,10 @@ from app.prompts.registry import PromptRegistry
 from app.repositories.recommendation_lineage_repository import (
     InMemoryRecommendationLineageRepository,
 )
+from app.repositories.workflow_run_repository import (
+    InMemoryWorkflowRunRepository,
+    WorkflowRunRepository,
+)
 from app.services.customer_agent_provisioning_service import (
     CustomerAgentProvisioningService,
     NullCustomerAgentProvisioningService,
@@ -114,11 +118,19 @@ class AgentOrchestrator:
         self.recommendation_lineage_service = recommendation_lineage_service
         self.workflow_event_bus = workflow_event_bus
 
-    def get_workflow_run(self, workflow_run_id: str) -> WorkflowRunResult | None:
-        return self._execution_service.get_run(workflow_run_id)
+    async def get_workflow_run(self, workflow_run_id: str) -> WorkflowRunResult | None:
+        """Fetches a workflow run's latest durably persisted result, if any.
 
-    def list_workflow_runs(self, session_id: str) -> list[WorkflowRunResult]:
-        return self._execution_service.list_runs_for_session(session_id)
+        Reflects every wave completed so far - including waves from a call
+        that is still in flight elsewhere or was interrupted before
+        returning - not just the outcome of a call that has fully finished,
+        so a stalled/never-resumed run can always be inspected and resumed
+        from its last known-good stage.
+        """
+        return await self._execution_service.get_run(workflow_run_id)
+
+    async def list_workflow_runs(self, session_id: str) -> list[WorkflowRunResult]:
+        return await self._execution_service.list_runs_for_session(session_id)
 
     async def execute_agent(
         self,
@@ -286,6 +298,7 @@ def create_agent_orchestrator(
     memory_service: MemoryService | None = None,
     approval_service: ApprovalService | None = None,
     workflow_event_bus: WorkflowEventBus | None = None,
+    workflow_run_repository: WorkflowRunRepository | None = None,
 ) -> AgentOrchestrator:
     """Build an ``AgentOrchestrator`` wired to the externally configured registries.
 
@@ -369,7 +382,10 @@ def create_agent_orchestrator(
         checkpoint_service=checkpoint_service,
         approval_service=resolved_approval_service,
     )
-    execution_service = WorkflowExecutionService(runtime=runtime)
+    execution_service = WorkflowExecutionService(
+        runtime=runtime,
+        repository=workflow_run_repository or InMemoryWorkflowRunRepository(),
+    )
     reanalysis_service = ReanalysisService(agent_registry=agent_registry)
     debugging_workflow_service = DebuggingWorkflowService(
         settings=settings, execution_service=execution_service

@@ -104,7 +104,7 @@ class ArchitectureService:
         await self._session_service.get_session(
             session_id=session_id, requesting_user_id=requesting_user_id
         )
-        run = self._orchestrator.get_workflow_run(workflow_run_id)
+        run = await self._orchestrator.get_workflow_run(workflow_run_id)
         if run is None:
             raise UnknownWorkflowRunError(f"Unknown workflow run id '{workflow_run_id}'.")
 

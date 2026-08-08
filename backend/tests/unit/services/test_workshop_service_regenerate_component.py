@@ -24,7 +24,7 @@ class _FakeOrchestrator:
     def __init__(self) -> None:
         self.execute_agent_calls: list[dict] = []
 
-    def get_workflow_run(self, workflow_run_id: str):
+    async def get_workflow_run(self, workflow_run_id: str):
         return None
 
     async def execute_agent(

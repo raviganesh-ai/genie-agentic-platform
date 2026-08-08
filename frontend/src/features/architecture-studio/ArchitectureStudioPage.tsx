@@ -218,7 +218,18 @@ export function ArchitectureStudioPage(): JSX.Element {
           },
         })
         .catch((err) => {
+          // Must not fail silently - the user has already navigated to
+          // Workshop, so a console-only log here would never be seen and
+          // build-solution would simply never start with no explanation.
+          // missionError is shared session state (SessionContext) so
+          // Workshop can surface it even though this component has since
+          // unmounted.
           console.error("Failed to resume the workflow after architecture approval.", err);
+          const safe: SafeError =
+            err instanceof ApiError
+              ? err
+              : { message: "Failed to start UI & Agent Design after the architecture approval." };
+          setMissionError(safe);
         });
     } catch (err) {
       setApproveError((err as ApiError).message ?? "Failed to resume the workflow.");
@@ -233,6 +244,7 @@ export function ArchitectureStudioPage(): JSX.Element {
     excludedAgentsText,
     navigate,
     setGovernancePolicies,
+    setMissionError,
   ]);
 
   const handleRerunArchitectureStage = useCallback(async () => {

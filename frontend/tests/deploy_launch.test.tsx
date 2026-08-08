@@ -199,4 +199,56 @@ describe("DeployLaunchPage", () => {
 
     vi.unstubAllGlobals();
   });
+
+  it("points the user back to Workshop instead of offering a futile retry when an earlier workflow step never completed", async () => {
+    // Mirrors the real incident: build-solution's fire-and-forget kickoff
+    // from Architecture Studio never reached the server, so
+    // provision-foundry-agents fails with this exact backend error
+    // (DeploymentPipelineService._get_step_output/UnknownWorkflowRunError).
+    // Retrying Deploy & Launch here can never fix that - only re-running
+    // the step back on Workshop can.
+    mockFetchSequence([
+      {
+        match: "/deploy-launch/",
+        response: [
+          buildPipelineRun({
+            status: "failed",
+            steps: [
+              {
+                step_id: "generate-access-policy",
+                name: "Generate Access Policy & Least Access",
+                status: "completed",
+                detail: "Generated least-access policy for 8 agent(s).",
+                error: null,
+                started_at: "2026-08-08T19:56:55Z",
+                completed_at: "2026-08-08T19:56:56Z",
+              },
+              {
+                step_id: "provision-foundry-agents",
+                name: "Deploy Agents to Foundry",
+                status: "failed",
+                detail: "",
+                error:
+                  "Workflow step 'build-solution' has not completed for run " +
+                  "'ce1240c7-9908-4ba7-ba19-d81cadd07513'.",
+                started_at: "2026-08-08T19:56:57Z",
+                completed_at: "2026-08-08T19:56:57Z",
+              },
+            ],
+          }),
+        ],
+      },
+    ]);
+
+    renderWithProviders(<DeployLaunchPage />, {
+      sessionId: FIXTURE_SESSION_ID,
+      workflowRunId: FIXTURE_WORKFLOW_RUN_ID,
+    });
+
+    await waitFor(() =>
+      expect(screen.getByText(/UI & Agent Design didn't finish/i)).toBeInTheDocument(),
+    );
+    expect(screen.getByRole("button", { name: /Go to Workshop/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Retry Deploy & Launch/i })).not.toBeInTheDocument();
+  });
 });

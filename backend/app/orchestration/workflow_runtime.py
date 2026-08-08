@@ -12,6 +12,7 @@ delegated to ``WorkflowStepExecutor`` -> ``AgentGateway``
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from uuid import uuid4
 
@@ -89,7 +90,20 @@ class WorkflowRuntime:
         transcript_text: str = "",
         resume_from: WorkflowRunResult | None = None,
         agent_scope_id: str | None = None,
+        on_progress: Callable[[WorkflowRunResult], Awaitable[None]] | None = None,
     ) -> WorkflowRunResult:
+        """Runs every wave of ``workflow_id`` until it completes, pauses for an
+        approval checkpoint, or a step fails.
+
+        ``on_progress``, if supplied, is awaited with a still-``"running"``
+        ``WorkflowRunResult`` snapshot after every wave that finishes
+        successfully (before the next wave starts) - so a caller can
+        durably persist each stage's result as it lands, instead of only
+        learning the final outcome once this whole (potentially
+        multi-minute, multi-wave) call returns. Without this, a backend
+        process restart (or any interruption) mid-run would silently lose
+        every already-completed wave's real output along with it.
+        """
         try:
             workflow = self._workflow_registry.get(workflow_id)
         except KeyError as exc:
@@ -265,6 +279,19 @@ class WorkflowRuntime:
                 wave_index=wave_index,
                 completed_step_ids=sorted(completed_ids),
             )
+
+            if on_progress is not None:
+                await on_progress(
+                    WorkflowRunResult(
+                        workflow_run_id=workflow_run_id,
+                        workflow_id=workflow_id,
+                        session_id=session_id,
+                        status="running",
+                        waves=[[step.id for step in wave] for wave in waves],
+                        step_results=step_results,
+                        agent_scope_id=effective_scope_id,
+                    )
+                )
 
         state_machine.transition("completed")
         return WorkflowRunResult(

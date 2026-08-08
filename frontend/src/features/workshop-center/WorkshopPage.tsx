@@ -25,13 +25,23 @@ const BUILD_AGENT_ID = "build-agent";
 
 export function WorkshopPage(): JSX.Element {
   const navigate = useNavigate();
-  const { sessionId, workflowRunId, governancePolicies } = useSessionContext();
+  const { sessionId, workflowRunId, governancePolicies, missionError, setMissionError } =
+    useSessionContext();
   const workshop = useWorkshop(sessionId, workflowRunId);
   const [retrying, setRetrying] = useState(false);
   const [retryError, setRetryError] = useState<string | null>(null);
   const [rerunningBuild, setRerunningBuild] = useState(false);
   const [rerunBuildError, setRerunBuildError] = useState<string | null>(null);
   const [reviewAcknowledged, setReviewAcknowledged] = useState(false);
+  // Architecture Studio's approval handler kicks off build-solution with a
+  // fire-and-forget resume call (it navigates here immediately rather than
+  // waiting - see handleApproveArchitecture's comment there) so its own
+  // console-only failure is otherwise invisible: this page would just show
+  // the "generating" animation below forever with no error and no way to
+  // recover. If nothing has arrived after a generous grace period, treat it
+  // as stuck and offer a manual way to (re)kick off the step - the exact
+  // same request Architecture Studio was supposed to have already sent.
+  const [buildStartStuck, setBuildStartStuck] = useState(false);
 
   // The Build Agent's UI + multi-agent workflow design is the
   // build-solution step's own output (same run the Architecture/Peer Review
@@ -81,6 +91,22 @@ export function WorkshopPage(): JSX.Element {
   // redundant echo is still being generated.
   const buildGenerationComplete = Boolean(buildOutputText) || isBuildOutputComplete(displayedBuildText);
 
+  // Arms a one-shot timer whenever this run has neither a recorded
+  // build-solution result nor any live streamed text yet - i.e. nothing
+  // proves the step ever actually started server-side. Any real progress
+  // (a live delta, a stored result, or an error) disarms it via the
+  // dependency array/cleanup below, so this only fires for the genuinely
+  // stuck case, not merely a build that's still (correctly) in progress.
+  useEffect(() => {
+    if (buildStepResult || liveBuildText) {
+      setBuildStartStuck(false);
+      return;
+    }
+    setBuildStartStuck(false);
+    const timer = window.setTimeout(() => setBuildStartStuck(true), 45_000);
+    return () => window.clearTimeout(timer);
+  }, [workflowRunId, buildStepResult, liveBuildText]);
+
   // The build-solution step can fail (e.g. a transient Foundry/agent
   // execution error) - the backend now stores that as a retryable "failed"
   // WorkflowRunResult (see workflow_runtime.py) instead of losing all
@@ -105,6 +131,11 @@ export function WorkshopPage(): JSX.Element {
     if (!sessionId || !workflowRunId) return;
     setRerunningBuild(true);
     setRerunBuildError(null);
+    // Retrying always supersedes whatever earlier silent failure (see
+    // ArchitectureStudioPage's handleApproveArchitecture) may have set this -
+    // otherwise the stale banner would keep showing even after this retry
+    // succeeds.
+    setMissionError(null);
     try {
       const traceId = getTraceId(workflowRunId) ?? undefined;
       await workflowApi.resumeRun(sessionId, workflowRunId, traceId, {
@@ -119,7 +150,7 @@ export function WorkshopPage(): JSX.Element {
     } finally {
       setRerunningBuild(false);
     }
-  }, [sessionId, workflowRunId, governancePolicies, refreshRun]);
+  }, [sessionId, workflowRunId, governancePolicies, refreshRun, setMissionError]);
 
   // Once the user has ticked the risk-acknowledgment checkbox and clicks
   // Proceed, go straight to Deploy & Launch - no approval checkpoint to
@@ -163,6 +194,16 @@ export function WorkshopPage(): JSX.Element {
       />
       {workshop.error ? <ErrorState error={workshop.error} /> : null}
       {rerunBuildError ? <ErrorState error={{ message: rerunBuildError }} /> : null}
+      {missionError && !buildStepResult ? (
+        // Set by ArchitectureStudioPage's approval handler if its own
+        // fire-and-forget kickoff of build-solution failed after already
+        // navigating here - must not be left as a console-only log the user
+        // never sees. Cleared as soon as a retry is attempted below.
+        <ErrorState
+          error={missionError}
+          onRetry={rerunningBuild ? undefined : () => void handleRerunBuildStage()}
+        />
+      ) : null}
 
       <SectionCard title="🛠️ Generated Artifacts">
         {displayedBuildText ? (
@@ -175,6 +216,16 @@ export function WorkshopPage(): JSX.Element {
           <ErrorState
             error={{ message: retryError ?? buildError }}
             onRetry={retrying ? undefined : handleRetryBuild}
+          />
+        ) : buildStartStuck ? (
+          <ErrorState
+            error={{
+              message:
+                "UI & Agent Design hasn't started yet. The request to kick it off after " +
+                "the architecture approval may not have reached the server - click retry " +
+                "to send it again.",
+            }}
+            onRetry={rerunningBuild ? undefined : handleRerunBuildStage}
           />
         ) : (
           <AgentActivityAnimation
