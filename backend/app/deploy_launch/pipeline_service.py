@@ -186,6 +186,10 @@ class DeploymentPipelineService:
         run = await self._get_workflow_run(workflow_run_id)
         resolved_trace_id = trace_id or str(uuid4())
 
+        run = await self._ensure_upstream_steps_completed(
+            run=run, session_id=session_id, trace_id=resolved_trace_id
+        )
+
         await self._ensure_final_output_approval_granted(
             session_id=session_id, workflow_run_id=workflow_run_id, trace_id=resolved_trace_id
         )
@@ -270,6 +274,36 @@ class DeploymentPipelineService:
         if run is None:
             raise UnknownWorkflowRunError(f"No workflow run '{workflow_run_id}' found.")
         return run
+
+    def _step_completed(self, run: WorkflowRunResult, step_id: str) -> bool:
+        step = next((r for r in run.step_results if r.step_id == step_id), None)
+        return step is not None and step.status == "completed"
+
+    async def _ensure_upstream_steps_completed(
+        self, *, run: WorkflowRunResult, session_id: str, trace_id: str
+    ) -> WorkflowRunResult:
+        """Self-heals a workflow run that has not yet finished every step
+        Deploy & Launch reads from (``build-solution``/``test-generation``)
+        before asking the user to click Start - e.g. an earlier page's
+        fire-and-forget kickoff silently never reached the server, or the
+        run is merely paused on the ``build-review-approval`` checkpoint
+        that Workshop's "Proceed to Deploy & Launch" action has already
+        decided by the time this runs - by resuming the SAME run here
+        rather than forcing the user to notice a stuck step and manually
+        return to Workshop. Only a genuinely unrecoverable state (an
+        undecided/rejected approval checkpoint, or a real step failure)
+        still surfaces as an error, via ``_get_step_output`` once
+        ``_execute_steps`` actually reads that step's output below.
+        """
+        required_step_ids = (self._build_step_id, self._test_generation_step_id)
+        if all(self._step_completed(run, step_id) for step_id in required_step_ids):
+            return run
+
+        return await self._orchestrator.resume_workflow(
+            workflow_run_id=run.workflow_run_id,
+            session_id=session_id,
+            trace_id=trace_id,
+        )
 
     def _get_step_output(self, run: WorkflowRunResult, step_id: str) -> str:
         step = next((r for r in run.step_results if r.step_id == step_id), None)

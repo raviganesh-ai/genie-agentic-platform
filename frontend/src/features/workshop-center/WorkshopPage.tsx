@@ -5,6 +5,7 @@ import { useSessionContext } from "@/state/SessionContext";
 import { useWorkshop } from "@/hooks/useWorkshop";
 import { useAsyncResource } from "@/hooks/useAsyncResource";
 import { workflowApi } from "@/services/workflowApi";
+import { approvalApi } from "@/services/approvalApi";
 import { getTraceId } from "@/state/traceRegistry";
 import { ApiError } from "@/services/httpClient";
 import { PageHeader } from "@/layouts/AppShell";
@@ -33,6 +34,8 @@ export function WorkshopPage(): JSX.Element {
   const [rerunningBuild, setRerunningBuild] = useState(false);
   const [rerunBuildError, setRerunBuildError] = useState<string | null>(null);
   const [reviewAcknowledged, setReviewAcknowledged] = useState(false);
+  const [proceeding, setProceeding] = useState(false);
+  const [proceedError, setProceedError] = useState<string | null>(null);
   // Architecture Studio's approval handler kicks off build-solution with a
   // fire-and-forget resume call (it navigates here immediately rather than
   // waiting - see handleApproveArchitecture's comment there) so its own
@@ -107,6 +110,21 @@ export function WorkshopPage(): JSX.Element {
     return () => window.clearTimeout(timer);
   }, [workflowRunId, buildStepResult, liveBuildText]);
 
+  // missionError only ever means "the fire-and-forget request that was
+  // supposed to KICK OFF build-solution failed to confirm that" (see
+  // ArchitectureStudioPage's handleApproveArchitecture) - it does NOT mean
+  // build-solution itself failed. A live delta or a stored step result is
+  // direct proof the step actually did start (and is progressing/done)
+  // server-side regardless of whether that confirmation request came back,
+  // so a stale "something went wrong" banner must not keep showing once
+  // either arrives - otherwise the user sees an alarming error over a run
+  // that is actually succeeding.
+  useEffect(() => {
+    if (missionError && (buildStepResult || liveBuildText)) {
+      setMissionError(null);
+    }
+  }, [missionError, buildStepResult, liveBuildText, setMissionError]);
+
   // The build-solution step can fail (e.g. a transient Foundry/agent
   // execution error) - the backend now stores that as a retryable "failed"
   // WorkflowRunResult (see workflow_runtime.py) instead of losing all
@@ -153,13 +171,35 @@ export function WorkshopPage(): JSX.Element {
   }, [sessionId, workflowRunId, governancePolicies, refreshRun, setMissionError]);
 
   // Once the user has ticked the risk-acknowledgment checkbox and clicks
-  // Proceed, go straight to Deploy & Launch - no approval checkpoint to
-  // decide and no workflow steps to resume in the background first. Deploy
-  // & Launch itself is where Genie's orchestrator-driven pipeline actually
-  // runs.
-  const handleProceedToDeployLaunch = useCallback(() => {
-    navigate("/outputs");
-  }, [navigate]);
+  // Proceed, THIS is the human review the `build-review-approval` checkpoint
+  // represents (see config/policies/approval_policy.yaml) - the same
+  // reviewed-generated-code gesture the Workshop page's checkbox copy
+  // already describes. Decide it here (if still pending) so the user is
+  // never asked to approve anything a second time on Deploy & Launch: that
+  // page's own Start action self-heals/resumes the run past this now-
+  // decided gate automatically, with no separate approval screen.
+  const handleProceedToDeployLaunch = useCallback(async () => {
+    if (!sessionId || !workflowRunId) {
+      navigate("/outputs");
+      return;
+    }
+    setProceeding(true);
+    setProceedError(null);
+    try {
+      const approvals = await approvalApi.list(sessionId);
+      const pendingBuildReview = approvals.find(
+        (request) => request.checkpoint_id === "build-review-approval" && request.status === "pending",
+      );
+      if (pendingBuildReview) {
+        await approvalApi.decide(sessionId, pendingBuildReview.id, "approved");
+      }
+      navigate("/outputs");
+    } catch (err) {
+      setProceedError((err as ApiError).message ?? "Failed to proceed to Deploy & Launch.");
+    } finally {
+      setProceeding(false);
+    }
+  }, [sessionId, workflowRunId, navigate]);
 
   if (!workflowRunId || !sessionId) {
     return (
@@ -194,11 +234,13 @@ export function WorkshopPage(): JSX.Element {
       />
       {workshop.error ? <ErrorState error={workshop.error} /> : null}
       {rerunBuildError ? <ErrorState error={{ message: rerunBuildError }} /> : null}
-      {missionError && !buildStepResult ? (
+      {missionError && !buildStepResult && !liveBuildText ? (
         // Set by ArchitectureStudioPage's approval handler if its own
         // fire-and-forget kickoff of build-solution failed after already
         // navigating here - must not be left as a console-only log the user
-        // never sees. Cleared as soon as a retry is attempted below.
+        // never sees. Cleared as soon as a retry is attempted below, or
+        // automatically (see the effect above) the moment a live delta or
+        // stored result proves the step actually did start despite that.
         <ErrorState
           error={missionError}
           onRetry={rerunningBuild ? undefined : () => void handleRerunBuildStage()}
@@ -242,13 +284,15 @@ export function WorkshopPage(): JSX.Element {
             checked={reviewAcknowledged}
             onChange={(_, data) => setReviewAcknowledged(Boolean(data.checked))}
           />
+          {proceedError ? <ErrorState error={{ message: proceedError }} /> : null}
           {reviewAcknowledged ? (
             <Button
               appearance="primary"
               style={{ marginTop: 8 }}
-              onClick={handleProceedToDeployLaunch}
+              disabled={proceeding}
+              onClick={() => void handleProceedToDeployLaunch()}
             >
-              Proceed to Deploy & Launch
+              {proceeding ? "Proceeding..." : "Proceed to Deploy & Launch"}
             </Button>
           ) : null}
         </SectionCard>

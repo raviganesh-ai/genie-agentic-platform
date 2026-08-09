@@ -24,6 +24,7 @@ describe("WorkshopPage", () => {
           ],
         }),
       },
+      { match: "/approvals", response: [] },
     ]);
 
     renderWithProviders(<WorkshopPage />, {
@@ -54,8 +55,14 @@ describe("WorkshopPage", () => {
 
     await user.click(screen.getByRole("button", { name: /Proceed to Deploy & Launch/i }));
 
-    // Proceeding goes straight to Deploy & Launch - no approval checkpoint
-    // is decided and no workflow steps are resumed in the background.
+    // Proceeding checks for (and would decide) a pending build-review-approval
+    // request - the human review this checkbox/click already represents - so
+    // Deploy & Launch never needs a separate/duplicate approval action. No
+    // pending request exists in this fixture, so nothing is decided, and no
+    // workflow steps are resumed from here.
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.some((call) => String(call[0]).endsWith("/approvals"))).toBe(true),
+    );
     expect(fetchMock.mock.calls.some((call) => String(call[0]).endsWith("/decide"))).toBe(false);
     expect(fetchMock.mock.calls.some((call) => String(call[0]).endsWith("/resume"))).toBe(false);
   });

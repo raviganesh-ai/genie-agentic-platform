@@ -1,5 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button, MessageBar, MessageBarBody, MessageBarTitle, Text } from "@fluentui/react-components";
 import { useSessionContext } from "@/state/SessionContext";
 import { useAsyncResource } from "@/hooks/useAsyncResource";
@@ -72,21 +71,22 @@ function StepRow({ step }: { step: DeploymentStepResult }): JSX.Element {
  * The real Deploy & Launch pipeline: nine named, code-driven steps
  * (`DEPLOYMENT_STEP_ORDER`) executed by the backend's
  * `DeploymentPipelineService` against real Azure SDKs (or their Null/local
- * equivalents in local provider mode) - never simulated. Gated on the
+ * equivalents in local provider mode) - never simulated. Starts
+ * automatically as soon as this page loads with no run yet for this
+ * mission - the user's review already happened on Workshop (the checkbox +
+ * "Proceed to Deploy & Launch" action), so no separate manual click or
+ * approval screen is needed here. Gated server-side on the
  * `final-output-approval` checkpoint: the first `start()` call auto-requests
- * that checkpoint if none exists yet, and the backend returns 409 while it
- * is still pending. The single risk acknowledgment the user already gave on
- * Workshop (see WorkshopPage's "Proceed to Deploy & Launch") is what that
- * checkpoint represents, so clicking "Start Deploy & Launch" here decides it
- * automatically and retries - there is no separate manual approval screen.
- * The backend's own peer-review-gate check (see app/api/approvals.py) still
- * fails closed (403) server-side if Peer Review actually found blocking
- * issues, surfaced below as a genuine block rather than a checkpoint to
- * click through.
+ * that checkpoint if none exists yet and returns 409 while it is still
+ * pending - decided automatically below and retried once, transparently.
+ * The backend also self-heals any not-yet-finished upstream workflow step
+ * (e.g. build-solution/test-generation) by resuming the same run before
+ * running the pipeline. The backend's own peer-review-gate check (see
+ * app/api/approvals.py) still fails closed (403) server-side if Peer Review
+ * actually found blocking issues, surfaced below as a genuine block.
  */
 export function DeployLaunchPage(): JSX.Element {
   const { sessionId, workflowRunId } = useSessionContext();
-  const navigate = useNavigate();
 
   const runsFetcher = useCallback(
     () => (sessionId ? deployLaunchApi.list(sessionId) : Promise.reject(new Error("No active session"))),
@@ -101,22 +101,6 @@ export function DeployLaunchPage(): JSX.Element {
     if (!runs || runs.length === 0) return null;
     return [...runs].sort((a, b) => b.created_at.localeCompare(a.created_at))[0];
   }, [runs]);
-
-  // Deploy & Launch reads an already-run workflow's step outputs (e.g.
-  // build-solution) rather than driving them itself - if an earlier stage's
-  // fire-and-forget kickoff silently never reached the server (see Workshop/
-  // Architecture Studio's own handling of this), the pipeline fails with a
-  // raw "Workflow step '<id>' has not completed" error. Retrying Deploy &
-  // Launch itself can never fix that - the fix has to happen back on
-  // Workshop - so detect it and point the user there instead of only
-  // offering a retry that will just fail again the same way.
-  const incompleteUpstreamStep = useMemo(() => {
-    if (!activeRun || activeRun.status !== "failed") return null;
-    const failed = activeRun.steps.find(
-      (step) => step.status === "failed" && /has not completed for run/i.test(step.error ?? ""),
-    );
-    return failed ?? null;
-  }, [activeRun]);
 
   const { events: liveEvents, connected: liveConnected } = useWorkflowEventStream(sessionId);
   const lastLiveEvent = liveEvents[liveEvents.length - 1] ?? null;
@@ -180,6 +164,21 @@ export function DeployLaunchPage(): JSX.Element {
     }
   }, [sessionId, workflowRunId, refresh]);
 
+  // Starts Deploy & Launch automatically the first time this page has no
+  // run yet for the current mission - the user's review already happened
+  // on Workshop, so no separate manual "Start Deploy & Launch" click is
+  // needed for the normal flow. Fires once per mount/run-set; the button
+  // below still exists to manually retry a genuine failure.
+  const autoStartedRef = useRef(false);
+  useEffect(() => {
+    if (!sessionId || !workflowRunId) return;
+    if (!runs) return;
+    if (activeRun) return;
+    if (autoStartedRef.current) return;
+    autoStartedRef.current = true;
+    void handleStart();
+  }, [sessionId, workflowRunId, runs, activeRun, handleStart]);
+
   const [downloading, setDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
   const handleDownload = useCallback(async () => {
@@ -222,18 +221,16 @@ export function DeployLaunchPage(): JSX.Element {
       {error ? <ErrorState error={error} onRetry={refresh} /> : null}
 
       <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-        {!activeRun || activeRun.status === "failed" ? (
-          <SectionCard title="Start Deploy & Launch">
-            {incompleteUpstreamStep ? (
-              <MessageBar intent="error" layout="multiline" style={{ marginBottom: 12 }}>
-                <MessageBarBody>
-                  <MessageBarTitle>UI & Agent Design didn't finish</MessageBarTitle>
-                  {incompleteUpstreamStep.error} Retrying Deploy & Launch won't fix this by
-                  itself - go back to Workshop and (re)run UI & Agent Design first, then
-                  return here once it completes.
-                </MessageBarBody>
-              </MessageBar>
-            ) : startError ? (
+        {/* No manual click/confirmation is shown for the normal path - the
+            auto-start effect above already kicks this off the instant the
+            page loads with no run yet. A visible "Start Deploy & Launch"
+            button only appears when something genuinely needs the user's
+            action: a real start failure (startError) or a run that already
+            failed - never as a routine second confirmation after Workshop's
+            review. */}
+        {startError || activeRun?.status === "failed" ? (
+          <SectionCard title={activeRun?.status === "failed" ? "Deploy & Launch Failed" : "Start Deploy & Launch"}>
+            {startError ? (
               <MessageBar intent="warning" layout="multiline" style={{ marginBottom: 12 }}>
                 <MessageBarBody>
                   <MessageBarTitle>Deploy & Launch</MessageBarTitle>
@@ -242,18 +239,15 @@ export function DeployLaunchPage(): JSX.Element {
               </MessageBar>
             ) : null}
             <div style={{ display: "flex", gap: 8 }}>
-              {incompleteUpstreamStep ? (
-                <Button appearance="primary" onClick={() => navigate("/workshop")}>
-                  Go to Workshop
-                </Button>
-              ) : (
-                <Button appearance="primary" disabled={starting} onClick={() => void handleStart()}>
-                  {starting ? "Starting..." : activeRun?.status === "failed" ? "Retry Deploy & Launch" : "Start Deploy & Launch"}
-                </Button>
-              )}
+              <Button appearance="primary" disabled={starting} onClick={() => void handleStart()}>
+                {starting ? "Starting..." : "Retry Deploy & Launch"}
+              </Button>
             </div>
           </SectionCard>
+        ) : !activeRun ? (
+          <LoadingState label="Starting Deploy & Launch automatically..." />
         ) : null}
+
 
         {activeRun ? (
           <>

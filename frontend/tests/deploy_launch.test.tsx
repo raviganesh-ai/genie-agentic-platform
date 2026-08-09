@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
 import { renderWithProviders, mockFetchSequence } from "./testUtils";
 import { FIXTURE_SESSION_ID, FIXTURE_WORKFLOW_RUN_ID, buildApprovalRequests } from "./fixtures";
 import { DeployLaunchPage } from "@/features/deploy-launch/DeployLaunchPage";
@@ -26,7 +25,7 @@ function buildPipelineRun(overrides: Partial<DeploymentPipelineRun> = {}): Deplo
 }
 
 describe("DeployLaunchPage", () => {
-  it("starts the pipeline for the active workflow run", async () => {
+  it("starts the pipeline automatically as soon as the page loads with no run yet - no manual click needed", async () => {
     const fetchMock = mockFetchSequence([
       { match: "/deploy-launch/", response: [] },
       { match: "/deploy-launch/start", response: buildPipelineRun({ status: "running" }) },
@@ -36,10 +35,6 @@ describe("DeployLaunchPage", () => {
       sessionId: FIXTURE_SESSION_ID,
       workflowRunId: FIXTURE_WORKFLOW_RUN_ID,
     });
-
-    const user = userEvent.setup();
-    const startButton = await screen.findByRole("button", { name: /Start Deploy & Launch/i });
-    await user.click(startButton);
 
     await waitFor(() => {
       const startCall = fetchMock.mock.calls.find((call) => String(call[0]).endsWith("/deploy-launch/start"));
@@ -185,10 +180,6 @@ describe("DeployLaunchPage", () => {
       workflowRunId: FIXTURE_WORKFLOW_RUN_ID,
     });
 
-    const user = userEvent.setup();
-    const startButton = await screen.findByRole("button", { name: /Start Deploy & Launch/i });
-    await user.click(startButton);
-
     await waitFor(() => {
       expect(calls.some((url) => url.endsWith("/decide"))).toBe(true);
     });
@@ -200,13 +191,15 @@ describe("DeployLaunchPage", () => {
     vi.unstubAllGlobals();
   });
 
-  it("points the user back to Workshop instead of offering a futile retry when an earlier workflow step never completed", async () => {
+  it("offers a plain retry (no forced redirect) when an earlier workflow step had not completed - the backend now self-heals by resuming the run", async () => {
     // Mirrors the real incident: build-solution's fire-and-forget kickoff
     // from Architecture Studio never reached the server, so
-    // provision-foundry-agents fails with this exact backend error
+    // provision-foundry-agents failed with this exact backend error
     // (DeploymentPipelineService._get_step_output/UnknownWorkflowRunError).
-    // Retrying Deploy & Launch here can never fix that - only re-running
-    // the step back on Workshop can.
+    // DeploymentPipelineService.start() now self-heals this by resuming the
+    // same workflow run before re-running the pipeline (see
+    // _ensure_upstream_steps_completed), so Deploy & Launch just offers a
+    // normal retry instead of forcing the user back to Workshop.
     mockFetchSequence([
       {
         match: "/deploy-launch/",
@@ -245,10 +238,7 @@ describe("DeployLaunchPage", () => {
       workflowRunId: FIXTURE_WORKFLOW_RUN_ID,
     });
 
-    await waitFor(() =>
-      expect(screen.getByText(/UI & Agent Design didn't finish/i)).toBeInTheDocument(),
-    );
-    expect(screen.getByRole("button", { name: /Go to Workshop/i })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /Retry Deploy & Launch/i })).not.toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /Retry Deploy & Launch/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Go to Workshop/i })).not.toBeInTheDocument();
   });
 });
