@@ -58,6 +58,16 @@ class TestExecutionResult:
     summary: str = ""
     raw_output: str = field(default="", repr=False)
 
+    @property
+    def success(self) -> bool:
+        """A generated test suite only counts as a real pass if it actually
+        ran at least one test with no failures or errors - pytest exits
+        successfully (code 0) even when it collects zero test functions
+        (e.g. a generated module with no ``test_``-prefixed functions), which
+        must never be silently treated as "the tests passed"."""
+
+        return self.ran and self.errors == 0 and self.failed == 0 and self.passed > 0
+
 
 class TestExecutionService:
     """Materializes and actually runs a mission's generated test suite."""
@@ -87,22 +97,26 @@ class TestExecutionService:
         if sys.platform == "win32":
             env["SYSTEMROOT"] = os.environ.get("SYSTEMROOT", "")
 
+        process = await asyncio.create_subprocess_exec(
+            sys.executable,
+            "-m",
+            "pytest",
+            str(tests_dir),
+            "-q",
+            cwd=str(build_root),
+            env=env,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
         try:
-            process = await asyncio.create_subprocess_exec(
-                sys.executable,
-                "-m",
-                "pytest",
-                str(tests_dir),
-                "-q",
-                cwd=str(build_root),
-                env=env,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.STDOUT,
-            )
             stdout, _ = await asyncio.wait_for(
                 process.communicate(), timeout=self._timeout_seconds
             )
         except TimeoutError:
+            # A hanging generated test must never be left running as an
+            # orphaned subprocess after this reports back to the caller.
+            process.kill()
+            await process.wait()
             return TestExecutionResult(
                 ran=True, summary=f"Test execution timed out after {self._timeout_seconds}s."
             )
@@ -115,12 +129,23 @@ class TestExecutionService:
         failed = int(failed_match.group(1)) if failed_match else 0
         errors = int(errors_match.group(1)) if errors_match else 0
 
+        summary = f"{passed} passed, {failed} failed, {errors} errors"
+        if passed == 0 and failed == 0 and errors == 0:
+            # pytest exits 0 ("success") even when it collects zero test
+            # functions - e.g. a generated module containing only helper
+            # functions with no `test_` prefix. That must never read as a
+            # real pass: nothing was actually verified.
+            summary = (
+                "No tests were collected - the generated test suite has no "
+                "runnable test function(s)."
+            )
+
         return TestExecutionResult(
             ran=True,
             exit_code=process.returncode,
             passed=passed,
             failed=failed,
             errors=errors,
-            summary=f"{passed} passed, {failed} failed, {errors} errors",
+            summary=summary,
             raw_output=raw_output,
         )

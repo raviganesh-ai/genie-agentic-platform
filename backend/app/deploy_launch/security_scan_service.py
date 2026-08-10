@@ -80,25 +80,29 @@ class SecurityScanService:
         if sys.platform == "win32":
             env["SYSTEMROOT"] = os.environ.get("SYSTEMROOT", "")
 
+        process = await asyncio.create_subprocess_exec(
+            sys.executable,
+            "-m",
+            "bandit",
+            "-r",
+            str(build_root),
+            "-f",
+            "json",
+            "-q",
+            cwd=str(build_root),
+            env=env,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
         try:
-            process = await asyncio.create_subprocess_exec(
-                sys.executable,
-                "-m",
-                "bandit",
-                "-r",
-                str(build_root),
-                "-f",
-                "json",
-                "-q",
-                cwd=str(build_root),
-                env=env,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.DEVNULL,
-            )
             stdout, _ = await asyncio.wait_for(
                 process.communicate(), timeout=self._timeout_seconds
             )
         except TimeoutError:
+            # A hanging scan must never be left running as an orphaned
+            # subprocess after this reports back to the caller.
+            process.kill()
+            await process.wait()
             return [
                 SecurityFinding(
                     file=str(build_root), severity="medium", description="bandit scan timed out."

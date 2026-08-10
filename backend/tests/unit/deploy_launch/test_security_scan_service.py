@@ -43,3 +43,42 @@ async def test_scan_reports_no_findings_for_clean_code(tmp_path: Path):
 
     assert result.findings == []
     assert result.blocking is False
+
+
+async def test_scan_reports_no_findings_when_build_root_has_no_source_files(tmp_path: Path):
+    service = SecurityScanService()
+
+    result = await service.scan(build_root=tmp_path)
+
+    assert result.ran is True
+    assert result.findings == []
+    assert result.blocking is False
+
+
+async def test_scan_flags_a_non_tls_url_as_non_blocking(tmp_path: Path):
+    """A medium-severity finding (e.g. a plain ``http://`` URL) must be
+    reported but must never block deployment on its own - only
+    critical/high findings do."""
+
+    (tmp_path / "MissionApp.tsx").write_text(
+        "const endpoint = 'http://example.com/api';\nexport function App() { return null; }\n",
+        encoding="utf-8",
+    )
+    service = SecurityScanService()
+
+    result = await service.scan(build_root=tmp_path)
+
+    assert any(f.severity == "medium" for f in result.findings)
+    assert result.blocking is False
+
+
+async def test_scan_flags_eval_usage_in_typescript(tmp_path: Path):
+    (tmp_path / "MissionApp.tsx").write_text(
+        "export function run(code: string) { return eval(code); }\n", encoding="utf-8"
+    )
+    service = SecurityScanService()
+
+    result = await service.scan(build_root=tmp_path)
+
+    assert any(f.severity == "high" and "eval(" in f.description for f in result.findings)
+    assert result.blocking is True

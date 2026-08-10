@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -25,7 +26,6 @@ from app.deploy_launch.mission_agent_provisioning_service import (
 from app.deploy_launch.pipeline_service import (
     DeploymentApprovalPendingError,
     DeploymentPipelineService,
-    DeploymentPipelineStepFailedError,
 )
 from app.deploy_launch.security_scan_service import SecurityScanService
 from app.deploy_launch.test_execution_service import TestExecutionService
@@ -79,8 +79,8 @@ def test_always_fails():
 
 
 class _FakeSessionService:
-    async def get_session(self, *, session_id: str, requesting_user_id: str) -> None:
-        return None
+    async def get_session(self, *, session_id: str, requesting_user_id: str) -> SimpleNamespace:
+        return SimpleNamespace(title="Acme Mission")
 
 
 class _FakeOrchestrator:
@@ -192,7 +192,13 @@ async def test_full_pipeline_runs_every_step_once_approved(tmp_path: Path):
     requests = await approval_service.list_requests_for_session("session-1")
     await approval_service.decide(request_id=requests[0].id, decision="approved", decided_by="reviewer-1")
 
+    # start() returns as soon as the run is created (status "running") - the
+    # nine steps execute in a background task, exactly like Architecture
+    # Studio's build-solution kickoff - so tests must await that background
+    # work to finish rather than expecting the steps to have already run by
+    # the time start() itself returns.
     run = await service.start(session_id="session-1", requesting_user_id="user-1", workflow_run_id="run-1")
+    run = await service.wait_for_run(run.id)
 
     assert run.status == "completed"
     assert all(step.status == "completed" for step in run.steps)
@@ -212,7 +218,9 @@ async def test_full_pipeline_runs_every_step_once_approved(tmp_path: Path):
     agent_config_source = (build_root / "agent_config.py").read_text(encoding="utf-8")
     assert "AGENT_FOUNDRY_NAMES" in agent_config_source
     assert "Requirements Specialist" in agent_config_source
-    assert "local-mission-" in agent_config_source
+    # The mission's own title ("Acme Mission") - not a generic "mission-<uuid>"
+    # string - must be reflected in the provisioned Foundry agent names.
+    assert "local-acme-mission-" in agent_config_source
 
 
 async def test_pipeline_fails_closed_when_generated_tests_fail(tmp_path: Path):
@@ -224,5 +232,14 @@ async def test_pipeline_fails_closed_when_generated_tests_fail(tmp_path: Path):
     requests = await approval_service.list_requests_for_session("session-1")
     await approval_service.decide(request_id=requests[0].id, decision="approved", decided_by="reviewer-1")
 
-    with pytest.raises(DeploymentPipelineStepFailedError):
-        await service.start(session_id="session-1", requesting_user_id="user-1", workflow_run_id="run-1")
+    # The step failure happens in the background task, so it surfaces as a
+    # "failed" run/step status once awaited - never as an exception raised
+    # out of start() itself (there is no synchronous caller left to catch
+    # it once the pipeline is running in the background).
+    run = await service.start(session_id="session-1", requesting_user_id="user-1", workflow_run_id="run-1")
+    run = await service.wait_for_run(run.id)
+
+    assert run.status == "failed"
+    failed_step = next(step for step in run.steps if step.step_id == "execute-test-suite")
+    assert failed_step.status == "failed"
+    assert failed_step.error is not None

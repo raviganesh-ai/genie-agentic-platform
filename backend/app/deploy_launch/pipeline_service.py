@@ -17,9 +17,20 @@ the first time ``start()`` is called for a workflow run with no existing
 can direct a human reviewer to decide it via the existing
 ``POST /sessions/{session_id}/approvals/{request_id}/decide`` endpoint;
 only a request whose decision is ``approved`` allows the pipeline to run.
+
+Once approved, ``start()`` returns as soon as the run is created (status
+``running``) - the nine steps themselves execute in a background asyncio
+task, since real Azure agent/backend/frontend deployments plus a real test
+run and security scan can legitimately take far longer than any single HTTP
+request should block for. Callers (the API layer, the frontend) always
+observe progress by polling ``get_run``/``list_runs_for_session`` (or the
+live ``WorkflowEventBus`` stream) - never by relying on ``start()`` itself
+to have finished the work.
 """
 from __future__ import annotations
 
+import asyncio
+import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -29,23 +40,19 @@ from uuid import uuid4
 from app.config.settings import Settings
 from app.deploy_launch.access_policy_service import AccessPolicyService
 from app.deploy_launch.backend_deployment_service import (
-    BackendDeploymentError,
     BackendDeploymentService,
     NullBackendDeploymentService,
 )
 from app.deploy_launch.code_materializer import (
     MaterializedBuild,
-    MaterializedCodeError,
     generate_backend_service_scaffold,
     materialize_build,
 )
 from app.deploy_launch.frontend_deployment_service import (
-    FrontendDeploymentError,
     FrontendDeploymentService,
     NullFrontendDeploymentService,
 )
 from app.deploy_launch.mission_agent_provisioning_service import (
-    MissionAgentProvisioningError,
     MissionAgentProvisioningService,
     NullMissionAgentProvisioningService,
 )
@@ -75,6 +82,11 @@ __all__ = [
 ]
 
 _PIPELINE_AGENT_ID: Final = "deploy-launch-pipeline"
+
+
+def _slugify(value: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", value.strip().lower()).strip("-")
+    return slug or "mission"
 
 _INDEX_HTML_TEMPLATE = """<!doctype html>
 <html lang="en">
@@ -156,6 +168,7 @@ class DeploymentPipelineService:
         self._workspaces: dict[str, _RunWorkspace] = {}
         self._materialized_builds: dict[str, MaterializedBuild] = {}
         self._agent_foundry_names: dict[str, dict[str, str]] = {}
+        self._background_tasks: dict[str, asyncio.Task[None]] = {}
 
     def get_run(self, pipeline_run_id: str) -> DeploymentPipelineRun | None:
         return self._runs.get(pipeline_run_id)
@@ -175,12 +188,24 @@ class DeploymentPipelineService:
         workflow_run_id: str,
         trace_id: str | None = None,
     ) -> DeploymentPipelineRun:
-        """Runs every Deploy & Launch step in order, once the final-output
-        approval checkpoint has been granted. Raises
+        """Kicks off every Deploy & Launch step in order, once the
+        final-output approval checkpoint has been granted. Raises
         ``DeploymentApprovalPendingError``/``DeploymentApprovalBlockedError``
-        (fail closed) if it has not."""
+        (fail closed) if it has not.
 
-        await self._session_service.get_session(
+        The nine steps themselves (real Azure agent/backend/frontend
+        deployments, a real test run, a real security scan) can legitimately
+        take far longer than a single HTTP request/response should ever
+        block for, so - exactly like Architecture Studio's build-solution
+        kickoff - this returns as soon as the run is created (status
+        ``running``) and executes the steps in a background task. Callers
+        must poll ``get_run``/``list_runs_for_session`` (or the
+        ``WorkflowEventBus``/SSE stream) for live per-step progress, never
+        the return value of this call itself; a client-side network hiccup
+        on this call must never be mistaken for the pipeline itself failing.
+        """
+
+        session = await self._session_service.get_session(
             session_id=session_id, requesting_user_id=requesting_user_id
         )
         run = await self._get_workflow_run(workflow_run_id)
@@ -206,12 +231,47 @@ class DeploymentPipelineService:
         )
         self._runs[pipeline_run.id] = pipeline_run
 
-        mission_slug = f"mission-{pipeline_run.id[:8]}"
+        # A human-readable mission slug rooted in the mission's own title (set once
+        # by the user on Upload/Landing and carried through Workshop/Architecture
+        # Studio) - never a generic "mission-<uuid>" string - so the Foundry agents
+        # this pipeline provisions are recognizable as belonging to this mission.
+        # The short run-id suffix keeps names unique across repeat/retry deploys of
+        # the same mission (Foundry agent names must be unique).
+        mission_slug = f"{_slugify(session.title)}-{pipeline_run.id[:8]}"
         backend_root = self._build_workspace_root / pipeline_run.id / "backend"
         frontend_root = self._build_workspace_root / pipeline_run.id / "frontend"
         self._workspaces[pipeline_run.id] = _RunWorkspace(
             backend_root=backend_root, frontend_root=frontend_root
         )
+
+        task = asyncio.create_task(
+            self._run_and_finalize(
+                pipeline_run=pipeline_run,
+                run=run,
+                mission_slug=mission_slug,
+                backend_root=backend_root,
+                frontend_root=frontend_root,
+            )
+        )
+        self._background_tasks[pipeline_run.id] = task
+        task.add_done_callback(lambda _task, _id=pipeline_run.id: self._background_tasks.pop(_id, None))
+
+        return pipeline_run
+
+    async def _run_and_finalize(
+        self,
+        *,
+        pipeline_run: DeploymentPipelineRun,
+        run: WorkflowRunResult,
+        mission_slug: str,
+        backend_root: Path,
+        frontend_root: Path,
+    ) -> None:
+        """The background task body ``start()`` schedules: runs every step,
+        then always resolves the run to a terminal status (``completed`` or
+        ``failed``) - this task's own exception is never re-raised anywhere
+        (there is no caller left to catch it), so every failure must already
+        have been recorded on the run/step themselves before this returns."""
 
         try:
             await self._execute_steps(
@@ -221,14 +281,26 @@ class DeploymentPipelineService:
                 backend_root=backend_root,
                 frontend_root=frontend_root,
             )
-        except Exception:
+        except Exception:  # noqa: BLE001 - top-level background-task boundary; every
+            # failure must resolve the run's status here since there is no
+            # synchronous caller left to catch/report it (see the docstring above).
             pipeline_run.status = "failed"
             pipeline_run.updated_at = datetime.now(UTC)
-            raise
+            return
 
         pipeline_run.status = "completed"
         pipeline_run.updated_at = datetime.now(UTC)
-        return pipeline_run
+
+    async def wait_for_run(self, pipeline_run_id: str) -> DeploymentPipelineRun:
+        """Awaits a still-in-flight run's background execution to finish and
+        returns its final state. Normal callers (the API/frontend) always
+        poll instead; this exists for callers that genuinely need the
+        finished result in-process (e.g. tests)."""
+
+        task = self._background_tasks.get(pipeline_run_id)
+        if task is not None:
+            await task
+        return self._runs[pipeline_run_id]
 
     async def _ensure_final_output_approval_granted(
         self, *, session_id: str, workflow_run_id: str, trace_id: str
@@ -404,7 +476,10 @@ class DeploymentPipelineService:
                         build_root=backend_root, test_output_text=test_output_text
                     )
                     pipeline_run.test_summary = test_result.summary
-                    if test_result.ran and test_result.failed == 0 and test_result.errors == 0:
+                    # ``success`` fails closed even when pytest itself exits 0
+                    # (e.g. zero test functions were actually collected) - see
+                    # TestExecutionResult.success's docstring.
+                    if test_result.success:
                         detail = test_result.summary
                     else:
                         step_result.status = "failed"
@@ -441,13 +516,15 @@ class DeploymentPipelineService:
 
             except DeploymentPipelineStepFailedError:
                 raise
-            except (
-                MaterializedCodeError,
-                MissionAgentProvisioningError,
-                BackendDeploymentError,
-                FrontendDeploymentError,
-                UnknownWorkflowRunError,
-            ) as exc:
+            except Exception as exc:
+                # Catch every failure here (not just the specific, expected
+                # error types) - a real Azure SDK network/timeout error would
+                # otherwise skip this step's own status update entirely,
+                # leaving it stuck showing "Running..." forever even though
+                # the pipeline as a whole has already been marked "failed"
+                # (see the `except Exception` in `start()` below) - a
+                # confusing, inconsistent UI. Every step must always resolve
+                # to a terminal, detailed status (completed or failed).
                 step_result.status = "failed"
                 step_result.error = str(exc)
                 step_result.completed_at = datetime.now(UTC)

@@ -114,6 +114,18 @@ export function DeployLaunchPage(): JSX.Element {
   const [starting, setStarting] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
 
+  // A client-side network hiccup on the start() call (e.g. a slow/lost
+  // response) does not mean the pipeline itself failed to kick off - the
+  // request may well have reached the server and created the run. Once
+  // polling proves a non-failed run actually exists for this mission, the
+  // stale "couldn't reach the backend" banner must not keep showing over a
+  // run that is actually in progress or has already succeeded.
+  useEffect(() => {
+    if (startError && activeRun && activeRun.status !== "failed") {
+      setStartError(null);
+    }
+  }, [startError, activeRun]);
+
   const handleStart = useCallback(async () => {
     if (!sessionId || !workflowRunId) return;
     setStarting(true);
