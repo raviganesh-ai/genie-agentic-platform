@@ -26,6 +26,7 @@ a single ``genie-orchestrator`` run.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -46,6 +47,21 @@ _ORCHESTRATOR_AGENT_ID = "genie-orchestrator"
 _PREVIEW_MAX_LENGTH = 240
 _BUILD_AGENT_TOOL_NAME = "call_build_agent"
 _BUILD_COMPONENT_PROMPT_ID = "build-generation-component-v1"
+
+# Marks a component's placeholder piece (see _component_failure_piece) as a
+# genuine failure, never reusable code - _extract_reusable_components always
+# excludes a block carrying this marker, so a retry always regenerates it.
+_COMPONENT_FAILURE_MARKER = "GENERATION FAILED"
+
+# Matches one component's whole fenced code block by its own first-line
+# ``# agent: <name>``/``// agent: <name>`` label comment (the same
+# convention build-generation-component-v1 requires every component to
+# follow, and the same one frontend/src/utils/textArtifacts.ts's
+# AGENT_LABEL_COMMENT recognizes) - used to find already-succeeded
+# components inside a prior attempt's full output text.
+_AGENT_LABEL_BLOCK_PATTERN = re.compile(
+    r"```[a-zA-Z0-9_-]*\n(?:#|//)\s*agent:\s*(?P<name>[^\n]+?)\s*\n[\s\S]*?```"
+)
 
 
 def _preview(output_text: str | None) -> str | None:
@@ -128,7 +144,21 @@ _DELEGATIONS: tuple[_Delegation, ...] = (
         tool_name="call_build_agent",
         target_agent_id="build-agent",
         target_prompt_id="build-generation-v1",
-        variable_names=("requirements", "architecture", "policies", "excluded_agents", "user_message"),
+        variable_names=(
+            "requirements",
+            "architecture",
+            "policies",
+            "excluded_agents",
+            "user_message",
+            # Sourced from this same step's own prior attempt output (see
+            # config/workflows/registry.yaml's self-referential
+            # "previous_build_output: step:build-solution") - always present
+            # (as genie-orchestrator's own resolved variable, in
+            # context.variables) on a retried run, empty on a first
+            # attempt. Never surfaced to the model as a tool-call argument
+            # it needs to supply - see _delegate's caller_value precedence.
+            "previous_build_output",
+        ),
         shared_memory_classification="roadmap_artifact",
     ),
     _Delegation(
@@ -277,6 +307,66 @@ async def _stream_and_publish_deltas(
     return result
 
 
+def _extract_reusable_components(previous_build_output: str) -> dict[str, str]:
+    """Maps each component name (lowercased) that fully succeeded on a
+    prior ``build-solution`` attempt to its own previously generated
+    fenced code block.
+
+    Recognizes each block the same way ``build-generation-component-v1``
+    requires every component to identify itself: a fenced code block whose
+    first line is a ``# agent: <name>``/``// agent: <name>`` comment (see
+    ``_AGENT_LABEL_BLOCK_PATTERN``). A block carrying
+    ``_COMPONENT_FAILURE_MARKER`` (see ``_component_failure_piece``) is
+    deliberately excluded - it represents a component that failed last
+    time and must always be regenerated, never mistaken for reusable code.
+
+    Called with ``previous_build_output`` (see the self-referential
+    ``previous_build_output: step:build-solution`` variable source in
+    ``config/workflows/registry.yaml``) so a retried attempt can reuse
+    already-succeeded components verbatim instead of unconditionally
+    regenerating the entire build from scratch - directly addressing the
+    "all or nothing" retry behavior a single component failure used to
+    cause.
+    """
+
+    reusable: dict[str, str] = {}
+    for match in _AGENT_LABEL_BLOCK_PATTERN.finditer(previous_build_output or ""):
+        block_text = match.group(0)
+        if _COMPONENT_FAILURE_MARKER in block_text:
+            continue
+        reusable[match.group("name").strip().lower()] = block_text
+    return reusable
+
+
+def _component_failure_piece(component_name: str, *, is_ui: bool, exc: BaseException) -> str:
+    """Renders one component's generation failure as its own clearly
+    labeled placeholder instead of letting the exception abort the whole
+    ``build-solution`` step and silently lose every OTHER component that
+    would otherwise have succeeded.
+
+    Follows the same ``# agent: <name>``/``// agent: <name>`` first-line
+    convention every successfully generated component uses, so the
+    frontend's generic code-block extraction (``extractCodeBlocks``/
+    ``AGENT_LABEL_COMMENT`` in ``frontend/src/utils/textArtifacts.ts``,
+    which matches any fence language tag) still renders this as its own,
+    clearly attributed artifact card - never buried inside a single
+    generic "Multi-Agent Workflow Design" narrative fallback covering the
+    whole response, which is what happened when the very first component
+    call failed and aborted every later one. Marked with
+    ``_COMPONENT_FAILURE_MARKER`` so a later retry's
+    ``_extract_reusable_components`` always regenerates this component
+    again.
+    """
+
+    comment_prefix = "//" if is_ui else "#"
+    return (
+        f"```text\n"
+        f"{comment_prefix} agent: {component_name}\n"
+        f"{comment_prefix} {_COMPONENT_FAILURE_MARKER}: {exc}\n"
+        f"```"
+    )
+
+
 async def _generate_build_by_component(
     *,
     delegation: _Delegation,
@@ -305,6 +395,16 @@ async def _generate_build_by_component(
     Multi-Agent Workflow" section does not parse into a clean agent list -
     this split is purely a streaming-UX improvement, never a reason to
     fail the whole build over a structural parsing gap.
+
+    Each component's generation is isolated: one component's failure
+    renders as its own placeholder (``_component_failure_piece``) instead
+    of propagating and aborting every other, still-generatable component.
+    Any component that already succeeded on a prior attempt at this same
+    step (``base_variables["previous_build_output"]`` -
+    ``_extract_reusable_components``) is reused verbatim rather than
+    regenerated - so retrying (e.g. "Re-run UI & Agent Design") only ever
+    (re)generates the component(s) that actually still need it, never the
+    whole build from scratch.
     """
 
     plan = parse_architecture_build_plan(base_variables.get("architecture", ""))
@@ -336,8 +436,48 @@ async def _generate_build_by_component(
     components.append(("orchestrator", plan.orchestrator_agent_name))
     components.append(("ui", "ui"))
 
+    reusable_components = _extract_reusable_components(base_variables.get("previous_build_output", ""))
+
+    async def _publish_delta(delta: str) -> None:
+        if event_bus is not None and workflow_run_id is not None and step_id is not None:
+            await event_bus.publish(
+                WorkflowStreamEvent(
+                    event_type="step_delta",
+                    session_id=context.session_id,
+                    workflow_run_id=workflow_run_id,
+                    step_id=step_id,
+                    agent_id=delegation.target_agent_id,
+                    delta=delta,
+                )
+            )
+
     pieces: list[str] = []
     for index, (component_kind, component_name) in enumerate(components):
+        if index > 0:
+            # A blank-line separator between components' own streamed
+            # text, so consecutive fenced code blocks never glue together
+            # with no whitespace between them - matches how the final
+            # concatenation below joins each piece.
+            await _publish_delta("\n\n")
+
+        # build-generation-component-v1 contracts the orchestrator/UI
+        # components to always self-label with the literal "orchestrator"/
+        # "ui" (never the orchestrator's own real display name) - see that
+        # prompt template - so both the reuse lookup below and any failure
+        # placeholder (_component_failure_piece) must use the same literal
+        # label, not component_name, for those two kinds.
+        label_name = component_name if component_kind == "agent" else component_kind
+        reused_piece = reusable_components.get(label_name.strip().lower())
+        if reused_piece is not None:
+            # Already succeeded on a prior attempt at this same step - reuse
+            # its real code verbatim (see _extract_reusable_components)
+            # instead of paying for, and risking another failure on, a
+            # brand new agent call for a component that already has valid
+            # output.
+            await _publish_delta(reused_piece)
+            pieces.append(reused_piece)
+            continue
+
         component_variables = {
             **base_variables,
             "component_kind": component_kind,
@@ -350,33 +490,30 @@ async def _generate_build_by_component(
             correlation_id=context.trace_id,
             session_id=context.session_id,
         )
-        if event_bus is not None and workflow_run_id is not None and step_id is not None:
-            if index > 0:
-                # A blank-line separator between components' own streamed
-                # text, so consecutive fenced code blocks never glue
-                # together with no whitespace between them - matches how
-                # the final concatenation below joins each piece.
-                await event_bus.publish(
-                    WorkflowStreamEvent(
-                        event_type="step_delta",
-                        session_id=context.session_id,
-                        workflow_run_id=workflow_run_id,
-                        step_id=step_id,
-                        agent_id=delegation.target_agent_id,
-                        delta="\n\n",
-                    )
+        try:
+            if event_bus is not None and workflow_run_id is not None and step_id is not None:
+                component_result = await _stream_and_publish_deltas(
+                    agent_gateway,
+                    request,
+                    event_bus,
+                    session_id=context.session_id,
+                    workflow_run_id=workflow_run_id,
+                    step_id=step_id,
+                    agent_id=delegation.target_agent_id,
                 )
-            component_result = await _stream_and_publish_deltas(
-                agent_gateway,
-                request,
-                event_bus,
-                session_id=context.session_id,
-                workflow_run_id=workflow_run_id,
-                step_id=step_id,
-                agent_id=delegation.target_agent_id,
+            else:
+                component_result = await agent_gateway.execute(request)
+        except Exception as exc:  # noqa: BLE001 - isolate this ONE component's
+            # failure (a transient Foundry/tool error, ...) so every OTHER,
+            # still-generatable component is not silently discarded along
+            # with it (the "all or nothing" behavior this replaces) - see
+            # _component_failure_piece and the module docstring.
+            failure_piece = _component_failure_piece(
+                label_name, is_ui=component_kind == "ui", exc=exc
             )
-        else:
-            component_result = await agent_gateway.execute(request)
+            await _publish_delta(failure_piece)
+            pieces.append(failure_piece)
+            continue
         pieces.append(component_result.output_text)
 
     return AgentExecutionResult(

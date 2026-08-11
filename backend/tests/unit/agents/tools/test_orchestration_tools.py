@@ -35,12 +35,24 @@ class _StreamingAgentGateway:
     """Records every request and supports both `execute` and
     `execute_stream`, returning each component's own text based on its
     `component_name` variable (falling back to a shared default text for
-    non-component requests, e.g. the single-combined-call fallback path)."""
+    non-component requests, e.g. the single-combined-call fallback path).
 
-    def __init__(self, *, texts_by_component: dict[str, str] | None = None, default_text: str = "x") -> None:
+    Any component name listed in `failing_components` raises instead of
+    returning - used to prove one component's failure never aborts the
+    others (see `_generate_build_by_component`'s per-component isolation).
+    """
+
+    def __init__(
+        self,
+        *,
+        texts_by_component: dict[str, str] | None = None,
+        default_text: str = "x",
+        failing_components: frozenset[str] = frozenset(),
+    ) -> None:
         self.requests: list[AgentExecutionRequest] = []
         self._texts_by_component = texts_by_component or {}
         self._default_text = default_text
+        self._failing_components = failing_components
 
     def _text_for(self, request: AgentExecutionRequest) -> str:
         component_name = request.variables.get("component_name")
@@ -50,6 +62,9 @@ class _StreamingAgentGateway:
 
     async def execute(self, request: AgentExecutionRequest) -> AgentExecutionResult:
         self.requests.append(request)
+        component_name = request.variables.get("component_name")
+        if component_name in self._failing_components:
+            raise RuntimeError(f"Simulated failure for component '{component_name}'.")
         return AgentExecutionResult(
             agent_id=request.agent_id,
             output_text=self._text_for(request),
@@ -60,6 +75,9 @@ class _StreamingAgentGateway:
         self, request: AgentExecutionRequest
     ) -> AsyncIterator[AgentExecutionStreamChunk]:
         self.requests.append(request)
+        component_name = request.variables.get("component_name")
+        if component_name in self._failing_components:
+            raise RuntimeError(f"Simulated failure for component '{component_name}'.")
         text = self._text_for(request)
         yield AgentExecutionStreamChunk(delta=text)
         yield AgentExecutionStreamChunk(
@@ -529,4 +547,113 @@ async def test_call_build_agent_falls_back_to_a_single_combined_call_when_archit
     [request] = gateway.requests
     assert request.prompt_id == "build-generation-v1"
     assert result == {"output_text": "The whole combined build output."}
+
+
+async def test_call_build_agent_isolates_one_failing_component_instead_of_losing_every_other_one():
+    """A single component's failure (e.g. a transient Foundry error) must
+    not abort the other, still-generatable components - this is the
+    concrete fix for the "all or nothing" behavior where one failure used
+    to lose the entire build-solution output. The failed component renders
+    as its own clearly labeled placeholder instead."""
+
+    registry = AgentToolRegistry()
+    gateway = _StreamingAgentGateway(
+        texts_by_component={
+            "Ticket Classifier Agent": "```python\n# agent: Ticket Classifier Agent\nclassifier code\n```",
+            "Support Triage Orchestrator Agent": "```python\n# agent: orchestrator\norchestrator code\n```",
+            "ui": "```tsx\n// agent: ui\nui code\n```",
+        },
+        failing_components=frozenset({"Resolution Drafter Agent"}),
+    )
+    governance_service = _RecordingGovernanceService()
+    register_orchestrator_delegation_tools(
+        registry, agent_gateway=gateway, governance_service=governance_service
+    )
+    context = ToolCallContext(
+        agent=_orchestrator_agent(),
+        session_id="session-1",
+        trace_id="run-1:build-solution",
+    )
+
+    result = await registry.execute(
+        agent_id="genie-orchestrator",
+        tool_name="call_build_agent",
+        arguments={
+            "requirements": "Approved requirements text.",
+            "architecture": _ARCHITECTURE_WITH_TWO_SPECIALISTS,
+            "policies": "",
+            "user_message": "",
+        },
+        context=context,
+    )
+
+    # Every OTHER component still generated its own real code - only the
+    # one that actually failed is missing/replaced.
+    output_text = result["output_text"]
+    assert "classifier code" in output_text
+    assert "orchestrator code" in output_text
+    assert "ui code" in output_text
+    assert "GENERATION FAILED" in output_text
+    assert "Resolution Drafter Agent" in output_text
+    # All 4 components were still attempted (the failure didn't stop the
+    # loop from reaching the remaining ones).
+    assert len(gateway.requests) == 4
+
+
+async def test_call_build_agent_reuses_previously_succeeded_components_on_retry():
+    """A retried attempt (previous_build_output populated from this same
+    step's own prior, partially-failed output - see the self-referential
+    variable source in config/workflows/registry.yaml) must reuse every
+    component that already succeeded verbatim, never call the agent again
+    for it, and only (re)generate the component that actually still needs
+    it - the concrete fix for "why can't I restart from where it failed"."""
+
+    previous_output = (
+        "```python\n# agent: Ticket Classifier Agent\nclassifier code\n```"
+        "\n\n"
+        "```text\n# agent: Resolution Drafter Agent\n# GENERATION FAILED: boom\n```"
+        "\n\n"
+        "```python\n# agent: orchestrator\norchestrator code\n```"
+        "\n\n"
+        "```tsx\n// agent: ui\nui code\n```"
+    )
+    registry = AgentToolRegistry()
+    gateway = _StreamingAgentGateway(
+        texts_by_component={
+            "Resolution Drafter Agent": "```python\n# agent: Resolution Drafter Agent\ndrafter code (retry)\n```",
+        }
+    )
+    governance_service = _RecordingGovernanceService()
+    register_orchestrator_delegation_tools(
+        registry, agent_gateway=gateway, governance_service=governance_service
+    )
+    context = ToolCallContext(
+        agent=_orchestrator_agent(),
+        session_id="session-1",
+        trace_id="run-1:build-solution",
+    )
+
+    result = await registry.execute(
+        agent_id="genie-orchestrator",
+        tool_name="call_build_agent",
+        arguments={
+            "requirements": "Approved requirements text.",
+            "architecture": _ARCHITECTURE_WITH_TWO_SPECIALISTS,
+            "policies": "",
+            "user_message": "",
+            "previous_build_output": previous_output,
+        },
+        context=context,
+    )
+
+    # Only the previously-failed component was actually (re)generated.
+    assert len(gateway.requests) == 1
+    assert gateway.requests[0].variables["component_name"] == "Resolution Drafter Agent"
+
+    output_text = result["output_text"]
+    assert "classifier code" in output_text
+    assert "orchestrator code" in output_text
+    assert "ui code" in output_text
+    assert "drafter code (retry)" in output_text
+    assert "GENERATION FAILED" not in output_text
 

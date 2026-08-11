@@ -101,6 +101,20 @@ workflows:
         variable_sources:
           requirements: step:analyze-requirements
           architecture: step:design-architecture
+          # Self-referential: on a retried attempt (see
+          # WorkshopPage.tsx's "Re-run UI & Agent Design" ->
+          # workflowApi.resumeRun), this resolves to THIS SAME step's own
+          # prior attempt output (workflow_runtime.run_workflow keeps a
+          # failed step's own WorkflowStepResult in step_results/step_outputs
+          # precisely so a resumed run can read it back here - see
+          # WorkflowStepExecutor._resolve_variables/_read_step_output).
+          # call_build_agent's _generate_build_by_component parses this to
+          # skip regenerating any component that already succeeded last
+          # time, instead of unconditionally regenerating the entire build
+          # from scratch on every retry. Empty on a run's first attempt
+          # (no prior output exists yet), which is exactly the "nothing to
+          # reuse" case that function already handles.
+          previous_build_output: step:build-solution
 
       - id: security-assessment
         agent_id: genie-orchestrator

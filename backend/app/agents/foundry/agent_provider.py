@@ -226,6 +226,21 @@ class FoundryAgentProvider:
             project_client=project_client,
             agent_name=foundry_agent_id,
             agent_version=agent_version,
+            # Without this, agent_framework's own function-tool-calling loop
+            # (``agent_framework._tools.invoke_function_call``) silently
+            # swallows ANY exception a registered ``FunctionTool`` raises
+            # (including our own ``FoundryUnavailableError``/``ToolExecutionError``
+            # re-raises - see ``_build_one_tool`` below) and feeds the model
+            # back only the generic literal string "Error: Function failed."
+            # - never the real cause. The model then often just echoes that
+            # generic text as its own final answer, which gets stored as the
+            # step's whole output (see session notes: this is the exact
+            # origin of the "Error: Function failed." text observed wrapped
+            # in the Workshop page's generic "Multi-Agent Workflow Design"
+            # fallback card). Setting this makes the real exception detail
+            # flow back to the model (and thus into the persisted step
+            # output) instead of a black-box message.
+            function_invocation_configuration={"include_detailed_errors": True},
         )
         return agent, agent_version, tools
 
