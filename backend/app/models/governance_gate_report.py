@@ -1,16 +1,13 @@
-"""Peer Review gate report domain model.
+"""Governance assessment domain model.
 
-Genie's Peer Review Agent acts as an unbiased project-leader-style reviewer:
-it independently confirms the generated build actually satisfies the
-approved requirements, and consolidates the Security Assessment Agent's and
-Test Generation Agent's findings with its own architecture and
-code-quality review into a single verdict across five hard gates
-(requirements, security, test coverage, architecture, code quality). This module never
-invents or overrides that verdict - it only parses the agent's own
-structured, marker-line output (see
-``app.services.peer_review_service``), following the exact same
-"agents return marker lines, never JSON" convention already established by
-``app.models.requirements_qualification``.
+The Security Assessment Agent and Test Generation Agent each report their
+own pass/fail gate verdict (security, test coverage) with findings and
+remediation recommendations, read directly from that agent's own
+structured, marker-line output (see ``app.services.peer_review_service`),
+following the exact same "agents return marker lines, never JSON"
+convention already established by ``app.models.requirements_qualification``.
+This module never invents or overrides those verdicts - it only parses
+what the agent itself stated.
 """
 from __future__ import annotations
 
@@ -25,30 +22,15 @@ __all__ = [
     "GateName",
     "GateStatus",
     "GovernanceFinding",
-    "GovernanceGateReport",
-    "GovernanceGateReportStatus",
-    "PeerReviewDecision",
 ]
 
 GateStatus = Literal["pass", "fail"]
 
 GateName = Literal["requirements", "security", "test_coverage", "architecture", "code_quality"]
 
-PeerReviewDecision = Literal["approved", "blocked"]
-
-GovernanceGateReportStatus = Literal["pending", "reviewed", "undetermined"]
-"""
-- pending: the peer-review step has not completed yet.
-- reviewed: the step completed and its output contained a parseable gate
-  verdict.
-- undetermined: the step completed but its output did not contain a
-  parseable verdict (e.g. a local/dev deterministic stub, or the agent
-  did not follow the prompt's format).
-"""
-
 
 class GovernanceFinding(BaseModel):
-    """A single open finding raised against one of the four Peer Review gates."""
+    """A single open finding raised against one of the governance gates."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -57,28 +39,6 @@ class GovernanceFinding(BaseModel):
     severity: Literal["critical", "high", "medium", "low"]
     description: str = Field(min_length=1)
     recommendation: str = Field(default="")
-
-
-class GovernanceGateReport(BaseModel):
-    """The Peer Review Agent's own consolidated Peer Review verdict."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    status: GovernanceGateReportStatus
-    requirements_gate: GateStatus | None = None
-    security_gate: GateStatus | None = None
-    test_coverage_gate: GateStatus | None = None
-    architecture_gate: GateStatus | None = None
-    code_quality_gate: GateStatus | None = None
-    findings: list[GovernanceFinding] = Field(default_factory=list)
-    decision: PeerReviewDecision | None = Field(
-        default=None,
-        description="The agent's own stated PEER_REVIEW_DECISION, if available.",
-    )
-    assessed_by_agent_id: str | None = Field(
-        default=None,
-        description="The agent id that produced the assessed step output, if the step has run.",
-    )
 
 
 AgentAssessmentStatus = Literal["pending", "reviewed", "undetermined"]
@@ -96,11 +56,9 @@ class AgentAssessment(BaseModel):
     """One specialist agent's own single-gate assessment (Security Assessment
     Agent's security gate, or Test Generation Agent's test-coverage gate),
     read directly from that agent's own step output - available as soon as
-    that step completes, without waiting for the Peer Review Agent's
-    slower consolidated Peer Review verdict (see ``GovernanceGateReport``)
-    to also finish. Never invents a verdict: mirrors the exact same
+    that step completes. Never invents a verdict: mirrors the exact same
     "agents return marker-line text, Genie only reports what the agent
-    itself stated" convention as ``GovernanceGateReport``.
+    itself stated" convention used throughout the platform.
     """
     model_config = ConfigDict(extra="forbid")
 
@@ -120,10 +78,10 @@ class AgentAssessment(BaseModel):
 
 
 class AgentAssessmentsReport(BaseModel):
-    """Combined early-visibility view of the two specialist agents that feed the
-    Peer Review Agent's consolidated Peer Review verdict."""
+    """Combined view of the two specialist agents' own gate assessments."""
 
     model_config = ConfigDict(extra="forbid")
 
     security_assessment: AgentAssessment
     test_generation: AgentAssessment
+

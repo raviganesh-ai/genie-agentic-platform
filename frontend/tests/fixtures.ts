@@ -4,7 +4,6 @@ import type {
   AgentAssessmentsReport,
   ApprovalRequest,
   GovernanceEvent,
-  GovernanceGateReport,
 } from "@/types/governance";
 import type { DecisionGraph } from "@/types/collaboration";
 import type { SessionReplayResponse } from "@/types/replay";
@@ -87,23 +86,6 @@ export function buildGovernanceEvents(): GovernanceEvent[] {
       detail: {},
     },
   ];
-}
-
-export function buildGovernanceGateReport(
-  overrides: Partial<GovernanceGateReport> = {},
-): GovernanceGateReport {
-  return {
-    status: "reviewed",
-    requirements_gate: "pass",
-    security_gate: "pass",
-    test_coverage_gate: "pass",
-    architecture_gate: "pass",
-    code_quality_gate: "pass",
-    findings: [],
-    decision: "approved",
-    assessed_by_agent_id: "peer-review-agent",
-    ...overrides,
-  };
 }
 
 function buildAgentAssessment(overrides: Partial<AgentAssessment> = {}): AgentAssessment {
@@ -209,7 +191,7 @@ export function buildAgentSummaries(): AgentSummary[] {
       name: "Architecture Designer",
       role: "architecture_design",
       description: "Derives a customer-specific multi-agent workflow and UI design from approved requirements.",
-      connected_agent_ids: ["build-agent", "security-assessment-agent", "test-generation-agent", "peer-review-agent"],
+      connected_agent_ids: ["build-agent", "security-assessment-agent", "test-generation-agent"],
       enabled: true,
     },
     {
@@ -217,14 +199,6 @@ export function buildAgentSummaries(): AgentSummary[] {
       name: "Build Agent",
       role: "solution_build",
       description: "Generates the customer-facing UI code and the dedicated multi-agent workflow.",
-      connected_agent_ids: null,
-      enabled: true,
-    },
-    {
-      id: "peer-review-agent",
-      name: "Peer Review Agent",
-      role: "peer_review",
-      description: "Evaluates generated artifacts against governance and security policies.",
       connected_agent_ids: null,
       enabled: true,
     },

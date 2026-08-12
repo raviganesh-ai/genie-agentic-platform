@@ -6,7 +6,7 @@
 # this registry only describes *what* workflows exist.
 #
 # solution-discovery-workflow was trimmed down (post Phase-10A) to the
-# single, dynamic Requirement -> Architecture -> Build -> Peer Review
+# single, dynamic Requirement -> Architecture -> Build -> Deploy & Launch
 # mission: every business/debugging agent that was previously wired in
 # from the now-deleted config/agents/foundry_agents_catalog.yaml has been
 # removed. Each step below now invokes the real, independently
@@ -24,22 +24,22 @@
 # Deploy & Launch is deliberately NOT a workflow step: it is a separate,
 # real (non-LLM-narrative) multi-step Azure provisioning pipeline - see
 # app.deployment.pipeline_service - triggered via its own API once the
-# final-output-approval checkpoint below has been confirmed on the Peer
-# Review page.
+# final-output-approval checkpoint below has been confirmed on the Deploy
+# & Launch page.
 #
 # Every step below has a `variable_sources` mapping so the whole graph can
 # run automatically from nothing but an uploaded call transcript/recording:
 # 'transcript' resolves to the session's combined transcribed text,
 # 'step:<id>' resolves to that already-completed step's output. Variables
 # Variables that should never be auto-derived from a transcript
-# (build-solution's and peer-review's `policies`,
-# failure-diagnosis-v1's `failure_details`) are deliberately left unmapped -
-# they still require an explicit step_inputs override, per
+# (build-solution's `policies`/`excluded_agents`, failure-diagnosis-v1's
+# `failure_details`) are deliberately left unmapped - they still require
+# an explicit step_inputs override, per
 # app.workflows.models.WorkflowStep.variable_sources's fail-closed contract.
 #
 # `requires_approval_checkpoint` gates the Mission Control UI's guided,
 # linear flow (Upload -> Requirements -> Architecture -> UI & Agent Design
-# -> Peer Review -> Deploy & Launch) using the checkpoints already
+# -> Deploy & Launch) using the checkpoints already
 # defined in config/policies/approval_policy.yaml: the run pauses (status
 # `waiting_for_approval`) immediately BEFORE the gated step executes, so a
 # human reviews/edits that step's upstream output before the mission
@@ -47,17 +47,17 @@
 # human reviews/adds/removes discovered requirements before architecture is
 # designed); architecture-approval gates build-solution (the human approves
 # the recommended architecture before UI + agent-flow code is generated);
-# final-output-approval is confirmed directly on the Peer Review page (not
-# tied to any workflow step) and enforced by the Deploy & Launch pipeline's
-# own start endpoint before any real Azure provisioning begins.
+# final-output-approval is confirmed directly on the Deploy & Launch page
+# (not tied to any workflow step) and enforced by the Deploy & Launch
+# pipeline's own start endpoint before any real Azure provisioning begins.
 workflows:
   - id: solution-discovery-workflow
     name: Solution Discovery Workflow
     description: >-
       End-to-end mission from ingested customer input through requirement
-      discovery, architecture recommendation, UI/multi-agent-flow build,
-      and independent peer review, ready for the separate Deploy & Launch
-      pipeline once approved.
+      discovery, architecture recommendation, and UI/multi-agent-flow
+      build, ready for the separate Deploy & Launch pipeline once
+      approved.
     steps:
       - id: analyze-requirements
         agent_id: genie-orchestrator
@@ -121,21 +121,19 @@ workflows:
         description: >-
           Perform a full regression security assessment (OWASP Top 10) of
           the generated build and report a pass/fail security gate
-          verdict with findings for the Peer Review Agent to
-          consolidate.
+          verdict with findings.
         depends_on:
           - build-solution
         prompt_id: orchestrator-security-assessment-phase-v1
         allowed_tool_names:
           - call_security_assessment_agent
-        # Gates entry into the whole automated peer-review phase (this step
-        # and test-generation share the same wave - see _compute_waves in
+        # Gates entry into the security-assessment/test-generation wave (both
+        # share the same wave - see _compute_waves in
         # app/orchestration/workflow_runtime.py - so blocking this one step
-        # on approval blocks test-generation too, until the Workshop page's
-        # "Proceed to Peer Review" action approves it): the user must review
-        # the Build Agent's generated code on the Workshop page first,
-        # rather than security-assessment/test-generation/peer-review
-        # kicking off automatically the instant build-solution finishes.
+        # on approval blocks test-generation too): the user must review the
+        # Build Agent's generated code on the Workshop page first, rather
+        # than security-assessment/test-generation kicking off automatically
+        # the instant build-solution finishes.
         requires_approval_checkpoint: build-review-approval
         required_memory_references:
           - build-solution
@@ -147,8 +145,7 @@ workflows:
         description: >-
           Generate unit, integration, and UI test cases covering the
           generated build and report a pass/fail test-coverage gate
-          verdict for the Peer Review Agent to
-          consolidate.
+          verdict.
         depends_on:
           - build-solution
         prompt_id: orchestrator-test-generation-phase-v1
@@ -161,40 +158,6 @@ workflows:
           artifact: step:build-solution
           requirements: step:analyze-requirements
 
-      - id: peer-review
-        agent_id: genie-orchestrator
-        description: >-
-          Peer Review: acting as an unbiased project leader, confirm the
-          build actually satisfies the approved requirements, review it
-          for policy compliance, assess its security posture,
-          provision/record the access control needed for it to run
-          safely, and consolidate the Security Assessment Agent's and
-          Test Generation Agent's findings with its own requirements,
-          architecture, and code-quality review into one gate verdict.
-        depends_on:
-          - build-solution
-          - security-assessment
-          - test-generation
-        prompt_id: orchestrator-peer-review-phase-v1
-        allowed_tool_names:
-          - call_peer_review_agent
-        # Peer Review reviews everything produced so far, not just the build
-        # artifact: this fails closed unless the requirements and
-        # architecture findings are also already present in Shared
-        # Collaboration Memory. `artifact`, `requirements`,
-        # `security_findings`, and `test_plan` are substituted into the
-        # peer-review-agent's own prompt text below.
-        required_memory_references:
-          - analyze-requirements
-          - design-architecture
-          - build-solution
-          - security-assessment
-          - test-generation
-        variable_sources:
-          artifact: step:build-solution
-          requirements: step:analyze-requirements
-          security_findings: step:security-assessment
-          test_plan: step:test-generation
     enabled: true
 
   - id: debugging-workflow

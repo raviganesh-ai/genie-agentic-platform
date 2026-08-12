@@ -81,9 +81,7 @@ function StepRow({ step }: { step: DeploymentStepResult }): JSX.Element {
  * pending - decided automatically below and retried once, transparently.
  * The backend also self-heals any not-yet-finished upstream workflow step
  * (e.g. build-solution/test-generation) by resuming the same run before
- * running the pipeline. The backend's own peer-review-gate check (see
- * app/api/approvals.py) still fails closed (403) server-side if Peer Review
- * actually found blocking issues, surfaced below as a genuine block.
+ * running the pipeline.
  */
 export function DeployLaunchPage(): JSX.Element {
   const { sessionId, workflowRunId } = useSessionContext();
@@ -152,14 +150,12 @@ export function DeployLaunchPage(): JSX.Element {
             setStartError("Deploy & Launch is waiting on Final Output Approval.");
             return;
           }
-          await approvalApi.decide(sessionId, pending.id, "approved", "", workflowRunId);
+          await approvalApi.decide(sessionId, pending.id, "approved");
           await deployLaunchApi.start(sessionId, workflowRunId, traceId);
           refresh();
         } catch (retryErr) {
           if (retryErr instanceof ApiError && retryErr.status === 403) {
-            setStartError(
-              "Final Output Approval was rejected - Deploy & Launch is blocked because Peer Review found blocking issues.",
-            );
+            setStartError("Final Output Approval was rejected or expired - Deploy & Launch is blocked.");
           } else {
             setStartError(
               (retryErr as ApiError).message ?? "Deploy & Launch is waiting on Final Output Approval.",
@@ -217,7 +213,7 @@ export function DeployLaunchPage(): JSX.Element {
       <div>
         <PageHeader title="Deploy & Launch" subtitle="No active mission yet." />
         <Text size={300} style={{ opacity: 0.7 }}>
-          Complete Peer Review from an active mission run before deploying.
+          Complete the UI & Agent Design workshop from an active mission run before deploying.
         </Text>
       </div>
     );

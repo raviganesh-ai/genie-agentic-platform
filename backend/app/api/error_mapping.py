@@ -37,7 +37,6 @@ from app.memory.memory_models import MemoryAccessDeniedError
 from app.orchestration.reanalysis_service import ReanalysisRoutingError
 from app.orchestration.workflow_execution_service import UnknownWorkflowRunError
 from app.services.customer_agent_provisioning_service import CustomerAgentProvisioningError
-from app.services.peer_review_service import PeerReviewGateBlockedError
 from app.services.session_service import (
     SessionAccessDeniedError,
     SessionNotFoundError,
@@ -73,7 +72,6 @@ _CONFLICT_ERRORS = (
     ApprovalAlreadyDecidedError,
     ApprovalExpiredError,
     MemoryAccessDeniedError,
-    PeerReviewGateBlockedError,
     DeploymentApprovalPendingError,
 )
 

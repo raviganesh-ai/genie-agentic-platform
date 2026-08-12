@@ -114,15 +114,14 @@ def _completed_step(step_id: str, agent_id: str, output_text: str) -> WorkflowSt
 
 
 class _FakeOrchestratorPendingBuild:
-    """Simulates a workflow run whose ``build-solution`` AND ``peer-review``
-    steps have not completed yet - e.g. an earlier page's fire-and-forget
-    kickoff never reached the server. Deploy & Launch's self-heal path
+    """Simulates a workflow run whose ``build-solution`` step has not
+    completed yet - e.g. an earlier page's fire-and-forget kickoff never
+    reached the server. Deploy & Launch's self-heal path
     (``_ensure_upstream_steps_completed``) must call ``resume_workflow``
     with a ``policies``/``excluded_agents`` override for ``build-solution``
-    and a ``policies`` override for ``peer-review`` (none of these are
-    auto-derived by ``variable_sources`` in config/workflows/registry.yaml)
-    so resuming doesn't hard-fail with ``PromptResolutionError: Prompt
-    'orchestrator-build-phase-v1'/'orchestrator-peer-review-phase-v1' is
+    (not auto-derived by ``variable_sources`` in
+    config/workflows/registry.yaml) so resuming doesn't hard-fail with
+    ``PromptResolutionError: Prompt 'orchestrator-build-phase-v1' is
     missing required variable(s): [...]``.
     """
 
@@ -161,7 +160,6 @@ class _FakeOrchestratorPendingBuild:
                 *self._run.step_results,
                 _completed_step("build-solution", "genie-orchestrator", _BUILD_OUTPUT),
                 _completed_step("test-generation", "genie-orchestrator", self._test_output_text),
-                _completed_step("peer-review", "genie-orchestrator", "Peer review verdict: approved."),
             ],
         )
         return self._run
@@ -278,13 +276,13 @@ async def test_full_pipeline_runs_every_step_once_approved(tmp_path: Path):
 
 
 async def test_start_self_heals_incomplete_build_solution_with_safe_policy_defaults(tmp_path: Path):
-    """A run whose build-solution AND peer-review steps never completed
-    (e.g. a lost fire-and-forget kickoff) must self-heal via a
-    resume_workflow call that explicitly overrides both steps' unmapped
-    ``policies``/``excluded_agents`` variables with safe empty defaults -
-    never omit them entirely (that used to hard-fail with a
-    PromptResolutionError on every single "Retry Deploy & Launch" click,
-    forever) and never re-trigger an already-completed step.
+    """A run whose build-solution step never completed (e.g. a lost
+    fire-and-forget kickoff) must self-heal via a resume_workflow call
+    that explicitly overrides its unmapped ``policies``/``excluded_agents``
+    variables with safe empty defaults - never omit them entirely (that
+    used to hard-fail with a PromptResolutionError on every single "Retry
+    Deploy & Launch" click, forever) and never re-trigger an
+    already-completed step.
     """
     orchestrator = _FakeOrchestratorPendingBuild(test_output_text=_PASSING_TEST_OUTPUT)
     approval_service = _approval_service()
@@ -311,13 +309,8 @@ async def test_start_self_heals_incomplete_build_solution_with_safe_policy_defau
     assert len(orchestrator.resume_calls) == 1
     step_inputs = orchestrator.resume_calls[0]
     assert step_inputs is not None
-    # peer-review has no approval checkpoint gating its wave, so the same
-    # resume_workflow call can reach it too (once build-review-approval is
-    # granted) - its own unmapped `policies` variable must ALSO be safely
-    # overridden here, not just build-solution's.
-    assert set(step_inputs) == {"build-solution", "peer-review"}
+    assert set(step_inputs) == {"build-solution"}
     assert step_inputs["build-solution"].variables == {"policies": "", "excluded_agents": ""}
-    assert step_inputs["peer-review"].variables == {"policies": ""}
 
     requests = await approval_service.list_requests_for_session("session-1")
     await approval_service.decide(request_id=requests[0].id, decision="approved", decided_by="reviewer-1")

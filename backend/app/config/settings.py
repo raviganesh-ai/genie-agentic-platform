@@ -118,21 +118,14 @@ class Settings(BaseSettings):
     # settings rather than hardcoding it in application code.
     requirements_qualification_step_id: str = "analyze-requirements"
 
-    # Id of the workflow step whose output_text carries the Peer Review
-    # Agent's structured Peer Review gate verdict (security, test-coverage,
-    # architecture, code-quality gates plus per-component findings - see
-    # app.services.peer_review_service). Mirrors
-    # requirements_qualification_step_id's naming-from-settings pattern.
-    peer_review_step_id: str = "peer-review"
-
     # Ids of the workflow steps that must be re-executed (alongside
-    # build-solution) whenever a customer applies selected Peer Review
-    # fixes, so the security/test/peer-review gates are re-evaluated
-    # against the regenerated build rather than showing stale results.
-    peer_review_gated_step_ids: tuple[str, ...] = (
+    # build-solution) whenever a customer applies selected fixes from the
+    # Security Assessment/Test Generation agents' own findings, so those
+    # gates are re-evaluated against the regenerated build rather than
+    # showing stale results.
+    gated_fix_step_ids: tuple[str, ...] = (
         "security-assessment",
         "test-generation",
-        "peer-review",
     )
 
     # --- CORS -------------------------------------------------------------------

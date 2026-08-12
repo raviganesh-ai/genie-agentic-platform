@@ -11,8 +11,7 @@ export type GovernanceEventCategory =
   | "tool_request"
   | "policy_evaluation"
   | "access_denied"
-  | "human_checkpoint_confirmation"
-  | "risk_accepted";
+  | "human_checkpoint_confirmation";
 
 export interface GovernanceEvent {
   id: string;
@@ -83,13 +82,8 @@ export interface RecommendationLineage {
   timestamp: string;
 }
 
-/** Aggregate governance health, derived client-side from governance events,
- * approvals, and the real GovernanceGateReport verdict (see
- * useGovernanceTrace's deriveComplianceState) - "compliant" is only ever
- * reported once the Governance Reviewer agent has actually returned a
- * "reviewed" gate report with an "approved" decision; before that (or
- * while nothing has happened yet) the state is "pending", never a
- * premature default of "compliant". */
+/** Aggregate governance health, derived client-side from governance events
+ * and approvals (see useGovernanceTrace's deriveComplianceState). */
 export type GovernanceComplianceState =
   | "compliant"
   | "pending"
@@ -98,14 +92,9 @@ export type GovernanceComplianceState =
   | "incomplete"
   | "failed";
 
-/** Mirrors backend/app/models/governance_gate_report.py 1:1. The Governance
- * Reviewer's ('Peer Reviewer') consolidated 5-gate verdict for one workflow
- * run: requirements, security, test coverage, architecture, and code
- * quality. */
+/** Mirrors backend/app/models/governance_gate_report.py 1:1. */
 export type GateStatus = "pass" | "fail";
 export type GateName = "requirements" | "security" | "test_coverage" | "architecture" | "code_quality";
-export type PeerReviewDecision = "approved" | "blocked";
-export type GovernanceGateReportStatus = "pending" | "reviewed" | "undetermined";
 
 export interface GovernanceFinding {
   id: string;
@@ -115,24 +104,11 @@ export interface GovernanceFinding {
   recommendation: string;
 }
 
-export interface GovernanceGateReport {
-  status: GovernanceGateReportStatus;
-  requirements_gate: GateStatus | null;
-  security_gate: GateStatus | null;
-  test_coverage_gate: GateStatus | null;
-  architecture_gate: GateStatus | null;
-  code_quality_gate: GateStatus | null;
-  findings: GovernanceFinding[];
-  decision: PeerReviewDecision | null;
-  assessed_by_agent_id: string | null;
-}
-
 /** Mirrors backend/app/models/governance_gate_report.py's AgentAssessment(s)
  * 1:1. Each specialist agent's own single-gate verdict (Security Assessment
  * Agent's security gate, Test Generation Agent's test-coverage gate), read
  * directly from that agent's own step output - available as soon as that
- * step completes, without waiting for the slower, consolidated
- * GovernanceGateReport verdict above. */
+ * step completes. */
 export type AgentAssessmentStatus = "pending" | "reviewed" | "undetermined";
 
 export interface AgentAssessment {

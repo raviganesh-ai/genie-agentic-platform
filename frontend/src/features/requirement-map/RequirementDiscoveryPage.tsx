@@ -393,8 +393,8 @@ export function RequirementDiscoveryPage(): JSX.Element {
   // resumes the gated workflow run on its own (backend/app/api/
   // approvals.py's decide_approval is intentionally decision-only). Without
   // this, the run permanently freezes at "waiting_for_approval" once
-  // approved. For the peer-review step specifically, its `policies` prompt
-  // variable is deliberately never auto-derived from the transcript
+  // approved. For the build-solution step specifically, its `policies`
+  // prompt variable is deliberately never auto-derived from the transcript
   // (config/workflows/registry.yaml) - a human must supply it explicitly as
   // a step_input, so we collect it here before resuming.
 
@@ -417,8 +417,8 @@ export function RequirementDiscoveryPage(): JSX.Element {
               }
             : subjectId === "build-solution"
               ? {
-                  "peer-review": {
-                    step_id: "peer-review",
+                  "build-solution": {
+                    step_id: "build-solution",
                     variables: { policies: policiesByRequest[requestId] ?? "" },
                   },
                 }

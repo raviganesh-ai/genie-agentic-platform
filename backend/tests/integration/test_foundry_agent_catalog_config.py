@@ -55,14 +55,13 @@ def test_real_config_agent_registry_loads_every_catalog_agent(
         default_llm=real_config_production_settings.default_llm,
     )
 
-    # requirements-analyst, architecture-designer, peer-review-agent,
-    # debugging-agent, build-agent, genie-orchestrator,
-    # security-assessment-agent, test-generation-agent.
-    assert len(registry) == 8
+    # requirements-analyst, architecture-designer, debugging-agent,
+    # build-agent, genie-orchestrator, security-assessment-agent,
+    # test-generation-agent.
+    assert len(registry) == 7
     assert "requirements-analyst" in registry
     assert "genie-orchestrator" in registry
     assert "build-agent" in registry
-    assert "peer-review-agent" in registry
 
 
 def test_real_config_prompt_registry_resolves_every_agent_prompt_ref(

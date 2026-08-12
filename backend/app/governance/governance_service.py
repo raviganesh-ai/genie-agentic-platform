@@ -307,51 +307,6 @@ class GovernanceService:
             detail={"stage_key": stage_key, "stage_label": stage_label, "confirmed_by": confirmed_by},
         )
 
-    async def record_risk_acceptance(
-        self,
-        *,
-        session_id: str,
-        trace_id: str,
-        workflow_run_id: str,
-        justification: str,
-        accepted_finding_ids: list[str],
-        accepted_by: str,
-    ) -> GovernanceEvent:
-        """Record a human's explicit acceptance of residual Peer Review risk.
-
-        Fail-closed deploy gate: when Peer Review has blocked a build (see
-        ``app.services.peer_review_service``), the final-output-approval
-        checkpoint may only be approved if either every gate passes or this
-        event has been recorded for the same ``workflow_run_id`` (see
-        ``has_risk_acceptance`` and ``app.api.approvals``). ``accepted_by``
-        is always the authenticated caller's user id, never a client-
-        supplied value, so every risk acceptance is attributable to a
-        specific person.
-        """
-
-        return await self._record(
-            "risk_accepted",
-            session_id=session_id,
-            trace_id=trace_id,
-            agent_id=None,
-            detail={
-                "workflow_run_id": workflow_run_id,
-                "justification": justification,
-                "accepted_finding_ids": accepted_finding_ids,
-                "accepted_by": accepted_by,
-            },
-        )
-
-    async def has_risk_acceptance(self, *, session_id: str, workflow_run_id: str) -> bool:
-        """Whether a risk acceptance has already been recorded for ``workflow_run_id``."""
-
-        events = await self.events_for_session(session_id)
-        return any(
-            event.category == "risk_accepted" and event.detail.get("workflow_run_id") == workflow_run_id
-            for event in events
-        )
-
-
 def create_governance_service(
     *,
     settings: Settings,

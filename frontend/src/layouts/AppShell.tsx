@@ -38,7 +38,7 @@ const NAV_ITEMS: NavItemConfig[] = [
   { to: "/upload", label: "Upload", icon: "📤" },
   { to: "/requirements", label: "Requirements", icon: "📋", completionStepId: "design-architecture" },
   { to: "/architecture-studio", label: "Architecture", icon: "🏗️", completionStepId: "build-solution" },
-  { to: "/workshop", label: "UI & Agent Design", icon: "🤖", completionStepId: "peer-review" },
+  { to: "/workshop", label: "UI & Agent Design", icon: "🤖", completionStepId: "test-generation" },
   { to: "/outputs", label: "Deploy & Launch", icon: "🚀" },
 ];
 

@@ -1,21 +1,16 @@
-"""Peer Review API routes.
+"""Peer review / governance API routes.
 
-Exposes the Peer Review Agent's independent code review of the Build
-Agent's generated components: ``GET .../gate-report`` (the Peer Review
-Agent's consolidated verdict, see ``app.services.peer_review_service``),
-``GET .../agent-assessments`` (the Security Assessment Agent's and Test
-Generation Agent's own early, per-agent gate verdicts - available before
-the consolidated gate report), ``POST .../fixes`` (regenerate the build to
-resolve selected findings and re-run every gate step - the "regenerate
-code based on feedback" action), and ``POST .../risk-acceptance`` (a
-human's explicit, justified acceptance of residual Peer Review risk before
-deploying anyway). Also exposes the general session audit/approval-gate
-endpoints ``GET /events`` (the full governance/audit trail - agent
-registration, executions, communication, memory reads/writes, tool
+Exposes early, per-agent gate assessments produced during the automated
+build review: ``GET .../agent-assessments`` (the Security Assessment
+Agent's and Test Generation Agent's own gate verdicts, read directly from
+their step output) and ``POST .../fixes`` (regenerate the build to resolve
+selected findings and re-run those gate steps - the "regenerate code
+based on feedback" action). Also exposes the general session audit/
+approval-gate endpoints ``GET /events`` (the full governance/audit trail -
+agent registration, executions, communication, memory reads/writes, tool
 requests, policy evaluations, denied access) and ``POST
 /checkpoints/confirm`` (the Discovery Wizard's Responsible AI
-Accountability "Proceed to Next Step" gate) - unchanged from before, just
-no longer branded as a "Governance" section.
+Accountability "Proceed to Next Step" gate).
 """
 from __future__ import annotations
 
@@ -29,7 +24,7 @@ from app.api.dependencies import (
 )
 from app.governance.governance_service import GovernanceService
 from app.models.governance_event import GovernanceEvent
-from app.models.governance_gate_report import AgentAssessmentsReport, GovernanceGateReport
+from app.models.governance_gate_report import AgentAssessmentsReport
 from app.models.workflow_models import WorkflowRunResult
 from app.security.auth_models import AuthenticatedUser
 from app.security.dependencies import get_current_user
@@ -52,14 +47,6 @@ class ApplyFixesRequest(BaseModel):
 
     trace_id: str | None = Field(default=None)
     selected_findings: list[str] = Field(default_factory=list)
-
-
-class RiskAcceptanceRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    trace_id: str = Field(min_length=1)
-    justification: str = Field(min_length=1)
-    accepted_finding_ids: list[str] = Field(default_factory=list)
 
 
 @router.get("/events")
@@ -91,18 +78,6 @@ async def confirm_checkpoint(
     )
 
 
-@router.get("/{workflow_run_id}/gate-report")
-async def get_gate_report(
-    session_id: str,
-    workflow_run_id: str,
-    user: AuthenticatedUser = Depends(get_current_user),
-    peer_review_service: PeerReviewService = Depends(get_peer_review_service),
-) -> GovernanceGateReport:
-    return await peer_review_service.get_gate_report(
-        session_id=session_id, requesting_user_id=user.user_id, workflow_run_id=workflow_run_id
-    )
-
-
 @router.get("/{workflow_run_id}/agent-assessments")
 async def get_agent_assessments(
     session_id: str,
@@ -110,11 +85,9 @@ async def get_agent_assessments(
     user: AuthenticatedUser = Depends(get_current_user),
     peer_review_service: PeerReviewService = Depends(get_peer_review_service),
 ) -> AgentAssessmentsReport:
-    """Early-visibility per-agent verdicts (Security Assessment Agent's own
-    security gate, Test Generation Agent's own test-coverage gate) - each
-    available as soon as that agent's own step completes, without waiting
-    for the slower, consolidated Peer Review Agent verdict at
-    ``/gate-report``.
+    """Per-agent verdicts (Security Assessment Agent's own security gate,
+    Test Generation Agent's own test-coverage gate) - each available as
+    soon as that agent's own step completes.
     """
     return await peer_review_service.get_agent_assessments(
         session_id=session_id, requesting_user_id=user.user_id, workflow_run_id=workflow_run_id
@@ -137,22 +110,3 @@ async def apply_selected_fixes(
         trace_id=body.trace_id,
     )
 
-
-@router.post("/{workflow_run_id}/risk-acceptance")
-async def accept_risk(
-    session_id: str,
-    workflow_run_id: str,
-    body: RiskAcceptanceRequest,
-    user: AuthenticatedUser = Depends(get_current_user),
-    session_service: SessionService = Depends(get_session_service),
-    governance_service: GovernanceService = Depends(get_governance_service),
-) -> GovernanceEvent:
-    await session_service.get_session(session_id=session_id, requesting_user_id=user.user_id)
-    return await governance_service.record_risk_acceptance(
-        session_id=session_id,
-        trace_id=body.trace_id,
-        workflow_run_id=workflow_run_id,
-        justification=body.justification,
-        accepted_finding_ids=body.accepted_finding_ids,
-        accepted_by=user.user_id,
-    )

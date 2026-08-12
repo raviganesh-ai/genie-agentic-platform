@@ -36,7 +36,7 @@ describe("FinalOutputPage", () => {
     expect(screen.getByRole("button", { name: /Export Markdown/i })).toBeInTheDocument();
   });
 
-  it("shows a Go to Deploy & Launch action once peer-review has completed", async () => {
+  it("shows a Go to Deploy & Launch action once test-generation has completed", async () => {
     mockFetchSequence([
       { match: "/outputs", response: [] },
       {
@@ -54,10 +54,10 @@ describe("FinalOutputPage", () => {
               completed_at: "2026-07-23T10:01:00Z",
             },
             {
-              step_id: "peer-review",
-              agent_id: "peer-review-agent",
+              step_id: "test-generation",
+              agent_id: "test-generation-agent",
               status: "completed",
-              output_text: "GOVERNANCE_DECISION: APPROVED",
+              output_text: "```python\n# tests\ndef test_search():\n    ...\n```",
               error: null,
               started_at: "2026-07-23T10:02:00Z",
               completed_at: "2026-07-23T10:03:00Z",

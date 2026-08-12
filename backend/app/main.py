@@ -237,8 +237,7 @@ def create_app(
         app.state.peer_review_service = create_peer_review_service(
             orchestrator=orchestrator,
             session_service=session_service,
-            peer_review_step_id=resolved_settings.peer_review_step_id,
-            gated_step_ids=resolved_settings.peer_review_gated_step_ids,
+            gated_step_ids=resolved_settings.gated_fix_step_ids,
         )
         app.state.replay_service = ReplayService(
             governance_service=orchestrator.governance_service,

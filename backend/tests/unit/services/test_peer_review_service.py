@@ -1,11 +1,11 @@
 """Unit tests for ``PeerReviewService``.
 
-Covers the pure ``_parse_gate_report`` marker-line parser directly (no real
-LLM available in tests, same convention as
-``tests/unit/services/test_requirements_service.py``), plus
-``get_gate_report``'s pending/undetermined handling and
-``apply_selected_fixes``'s step_inputs construction using a fake
-orchestrator that records the ``resume_workflow`` call it received.
+Covers ``get_agent_assessments``'s per-step pending/reviewed/undetermined
+handling, ``apply_selected_fixes``'s step_inputs construction using a fake
+orchestrator that records the ``resume_workflow`` call it received, and
+the pure ``_parse_agent_assessment``/``_count_code_blocks`` helpers
+directly (no real LLM available in tests, same convention as
+``tests/unit/services/test_requirements_service.py``).
 """
 from __future__ import annotations
 
@@ -18,89 +18,9 @@ from app.services.peer_review_service import (
     PeerReviewService,
     _count_code_blocks,
     _parse_agent_assessment,
-    _parse_gate_report,
 )
 from app.services.session_service import create_session_service
 from app.services.workshop_service import UnknownWorkflowRunError
-
-
-def test_parse_gate_report_all_gates_pass_yields_approved_decision_and_no_findings():
-    text = (
-        "Some narrative review text.\n"
-        "SECURITY_REVIEW: Looks fine.\n"
-        "REQUIREMENTS_GATE: PASS\n"
-                "SECURITY_GATE: PASS\n"
-        "TEST_COVERAGE_GATE: PASS\n"
-        "ARCHITECTURE_GATE: PASS\n"
-        "CODE_QUALITY_GATE: PASS\n"
-        "FINDINGS:\n"
-        "None.\n"
-        "PEER_REVIEW_DECISION: APPROVED\n"
-    )
-
-    report = _parse_gate_report(text, assessed_by_agent_id="peer-review-agent")
-
-    assert report.status == "reviewed"
-    assert report.requirements_gate == "pass"
-    assert report.security_gate == "pass"
-    assert report.test_coverage_gate == "pass"
-    assert report.architecture_gate == "pass"
-    assert report.code_quality_gate == "pass"
-    assert report.decision == "approved"
-    assert report.findings == []
-    assert report.assessed_by_agent_id == "peer-review-agent"
-
-
-def test_parse_gate_report_extracts_findings_and_blocked_decision():
-    text = (
-        "REQUIREMENTS_GATE: PASS\n"
-        "SECURITY_GATE: FAIL\n"
-        "TEST_COVERAGE_GATE: PASS\n"
-        "ARCHITECTURE_GATE: PASS\n"
-        "CODE_QUALITY_GATE: PASS\n"
-        "FINDINGS:\n"
-        "- [security|critical|sec-1] SQL injection in the search endpoint | Recommendation: Use parameterized queries.\n"
-        "- [test_coverage|low|test-1] Missing edge case test for empty input\n"
-        "PEER_REVIEW_DECISION: BLOCKED\n"
-    )
-
-    report = _parse_gate_report(text, assessed_by_agent_id="peer-review-agent")
-
-    assert report.status == "reviewed"
-    assert report.requirements_gate == "pass"
-    assert report.security_gate == "fail"
-    assert report.decision == "blocked"
-    assert len(report.findings) == 2
-    first, second = report.findings
-    assert first.id == "sec-1"
-    assert first.gate == "security"
-    assert first.severity == "critical"
-    assert first.description == "SQL injection in the search endpoint"
-    assert first.recommendation == "Use parameterized queries."
-    assert second.id == "test-1"
-    assert second.gate == "test_coverage"
-    assert second.severity == "low"
-    assert second.recommendation == ""
-
-
-def test_parse_gate_report_is_case_insensitive():
-    text = "security_gate: pass\ntest_coverage_gate: fail\npeer_review_decision: blocked"
-
-    report = _parse_gate_report(text, assessed_by_agent_id="peer-review-agent")
-
-    assert report.security_gate == "pass"
-    assert report.test_coverage_gate == "fail"
-    assert report.decision == "blocked"
-
-
-def test_parse_gate_report_returns_undetermined_when_no_markers_present():
-    text = "[local-agent-gateway] agent='peer-review-agent' resolved_prompt_length=42"
-
-    report = _parse_gate_report(text, assessed_by_agent_id="peer-review-agent")
-
-    assert report.status == "undetermined"
-    assert report.decision is None
-    assert report.findings == []
 
 
 class _FakeOrchestrator:
@@ -154,87 +74,69 @@ def blocked_run() -> WorkflowRunResult:
         workflow_id="solution-discovery-workflow",
         session_id="session-1",
         status="waiting_for_approval",
-        waves=[["build-solution"], ["security-assessment", "test-generation"], ["peer-review"]],
+        waves=[["build-solution"], ["security-assessment", "test-generation"]],
         step_results=[
             _step_result("build-solution", output_text="```tsx\nconst x = 1;\n```"),
             _step_result("security-assessment", output_text="SECURITY_GATE: FAIL\nFINDINGS:\nNone.\n"),
             _step_result("test-generation", output_text="TEST_COVERAGE_GATE: PASS\nFINDINGS:\nNone.\n"),
-            _step_result(
-                "peer-review",
-                output_text=(
-                    "SECURITY_GATE: FAIL\nTEST_COVERAGE_GATE: PASS\nARCHITECTURE_GATE: PASS\n"
-                    "CODE_QUALITY_GATE: PASS\nFINDINGS:\n"
-                    "- [security|critical|sec-1] SQL injection | Recommendation: Parameterize.\n"
-                    "PEER_REVIEW_DECISION: BLOCKED\n"
-                ),
-            ),
         ],
     )
 
 
-async def test_get_gate_report_returns_pending_when_peer_review_step_not_completed(
+def _make_service(orchestrator: _FakeOrchestrator, session_service) -> PeerReviewService:
+    return PeerReviewService(
+        orchestrator=orchestrator,  # type: ignore[arg-type]
+        session_service=session_service,
+        security_assessment_step_id="security-assessment",
+        test_generation_step_id="test-generation",
+        gated_step_ids=("security-assessment", "test-generation"),
+    )
+
+
+async def test_get_agent_assessments_returns_pending_when_steps_not_completed(
     blocked_run: WorkflowRunResult,
 ) -> None:
-    run_without_peer_review = blocked_run.model_copy(
-        update={"step_results": blocked_run.step_results[:2]}
-    )
-    orchestrator = _FakeOrchestrator(run=run_without_peer_review)
+    run_without_gates = blocked_run.model_copy(update={"step_results": blocked_run.step_results[:1]})
+    orchestrator = _FakeOrchestrator(run=run_without_gates)
     session_service = create_session_service(orchestrator=orchestrator)  # type: ignore[arg-type]
     session = await session_service.create_session(owner_user_id="user-1", title="t")
-    service = PeerReviewService(
-        orchestrator=orchestrator,  # type: ignore[arg-type]
-        session_service=session_service,
-        peer_review_step_id="peer-review",
-        security_assessment_step_id="security-assessment",
-        test_generation_step_id="test-generation",
-        gated_step_ids=("security-assessment", "test-generation", "peer-review"),
-    )
+    service = _make_service(orchestrator, session_service)
 
-    report = await service.get_gate_report(
+    report = await service.get_agent_assessments(
         session_id=session.id, requesting_user_id="user-1", workflow_run_id="run-1"
     )
 
-    assert report.status == "pending"
+    assert report.security_assessment.status == "pending"
+    assert report.test_generation.status == "pending"
 
 
-async def test_get_gate_report_returns_reviewed_blocked_report(blocked_run: WorkflowRunResult) -> None:
+async def test_get_agent_assessments_returns_reviewed_assessments_from_each_step(
+    blocked_run: WorkflowRunResult,
+) -> None:
     orchestrator = _FakeOrchestrator(run=blocked_run)
     session_service = create_session_service(orchestrator=orchestrator)  # type: ignore[arg-type]
     session = await session_service.create_session(owner_user_id="user-1", title="t")
-    service = PeerReviewService(
-        orchestrator=orchestrator,  # type: ignore[arg-type]
-        session_service=session_service,
-        peer_review_step_id="peer-review",
-        security_assessment_step_id="security-assessment",
-        test_generation_step_id="test-generation",
-        gated_step_ids=("security-assessment", "test-generation", "peer-review"),
-    )
+    service = _make_service(orchestrator, session_service)
 
-    report = await service.get_gate_report(
+    report = await service.get_agent_assessments(
         session_id=session.id, requesting_user_id="user-1", workflow_run_id="run-1"
     )
 
-    assert report.status == "reviewed"
-    assert report.decision == "blocked"
-    assert report.security_gate == "fail"
-    assert len(report.findings) == 1
+    assert report.security_assessment.status == "reviewed"
+    assert report.security_assessment.gate == "fail"
+    assert report.security_assessment.assessed_by_agent_id == "genie-orchestrator"
+    assert report.test_generation.status == "reviewed"
+    assert report.test_generation.gate == "pass"
 
 
-async def test_get_gate_report_raises_for_unknown_workflow_run(blocked_run: WorkflowRunResult) -> None:
+async def test_get_agent_assessments_raises_for_unknown_workflow_run(blocked_run: WorkflowRunResult) -> None:
     orchestrator = _FakeOrchestrator(run=blocked_run)
     session_service = create_session_service(orchestrator=orchestrator)  # type: ignore[arg-type]
     session = await session_service.create_session(owner_user_id="user-1", title="t")
-    service = PeerReviewService(
-        orchestrator=orchestrator,  # type: ignore[arg-type]
-        session_service=session_service,
-        peer_review_step_id="peer-review",
-        security_assessment_step_id="security-assessment",
-        test_generation_step_id="test-generation",
-        gated_step_ids=("security-assessment", "test-generation", "peer-review"),
-    )
+    service = _make_service(orchestrator, session_service)
 
     with pytest.raises(UnknownWorkflowRunError):
-        await service.get_gate_report(
+        await service.get_agent_assessments(
             session_id=session.id, requesting_user_id="user-1", workflow_run_id="does-not-exist"
         )
 
@@ -245,14 +147,7 @@ async def test_apply_selected_fixes_re_runs_build_and_every_gated_step(
     orchestrator = _FakeOrchestrator(run=blocked_run)
     session_service = create_session_service(orchestrator=orchestrator)  # type: ignore[arg-type]
     session = await session_service.create_session(owner_user_id="user-1", title="t")
-    service = PeerReviewService(
-        orchestrator=orchestrator,  # type: ignore[arg-type]
-        session_service=session_service,
-        peer_review_step_id="peer-review",
-        security_assessment_step_id="security-assessment",
-        test_generation_step_id="test-generation",
-        gated_step_ids=("security-assessment", "test-generation", "peer-review"),
-    )
+    service = _make_service(orchestrator, session_service)
 
     result = await service.apply_selected_fixes(
         session_id=session.id,
@@ -271,11 +166,10 @@ async def test_apply_selected_fixes_re_runs_build_and_every_gated_step(
         "build-solution",
         "security-assessment",
         "test-generation",
-        "peer-review",
     }
     build_input = call["step_inputs"]["build-solution"]
     assert "SQL injection in the search endpoint" in build_input.variables["user_message"]
-    for gated_step_id in ("security-assessment", "test-generation", "peer-review"):
+    for gated_step_id in ("security-assessment", "test-generation"):
         assert call["step_inputs"][gated_step_id].variables == {"user_message": ""}
 
 
@@ -285,14 +179,7 @@ async def test_apply_selected_fixes_with_no_selected_findings_sends_empty_instru
     orchestrator = _FakeOrchestrator(run=blocked_run)
     session_service = create_session_service(orchestrator=orchestrator)  # type: ignore[arg-type]
     session = await session_service.create_session(owner_user_id="user-1", title="t")
-    service = PeerReviewService(
-        orchestrator=orchestrator,  # type: ignore[arg-type]
-        session_service=session_service,
-        peer_review_step_id="peer-review",
-        security_assessment_step_id="security-assessment",
-        test_generation_step_id="test-generation",
-        gated_step_ids=("security-assessment", "test-generation", "peer-review"),
-    )
+    service = _make_service(orchestrator, session_service)
 
     await service.apply_selected_fixes(
         session_id=session.id,
@@ -377,72 +264,3 @@ def test_parse_agent_assessment_returns_undetermined_when_no_gate_marker():
     assert assessment.status == "undetermined"
     assert assessment.gate is None
     assert assessment.summary == text
-
-
-async def test_get_agent_assessments_returns_pending_when_steps_not_completed(
-    blocked_run: WorkflowRunResult,
-) -> None:
-    run_without_gates = blocked_run.model_copy(update={"step_results": blocked_run.step_results[:1]})
-    orchestrator = _FakeOrchestrator(run=run_without_gates)
-    session_service = create_session_service(orchestrator=orchestrator)  # type: ignore[arg-type]
-    session = await session_service.create_session(owner_user_id="user-1", title="t")
-    service = PeerReviewService(
-        orchestrator=orchestrator,  # type: ignore[arg-type]
-        session_service=session_service,
-        peer_review_step_id="peer-review",
-        security_assessment_step_id="security-assessment",
-        test_generation_step_id="test-generation",
-        gated_step_ids=("security-assessment", "test-generation", "peer-review"),
-    )
-
-    report = await service.get_agent_assessments(
-        session_id=session.id, requesting_user_id="user-1", workflow_run_id="run-1"
-    )
-
-    assert report.security_assessment.status == "pending"
-    assert report.test_generation.status == "pending"
-
-
-async def test_get_agent_assessments_returns_reviewed_assessments_from_each_step(
-    blocked_run: WorkflowRunResult,
-) -> None:
-    orchestrator = _FakeOrchestrator(run=blocked_run)
-    session_service = create_session_service(orchestrator=orchestrator)  # type: ignore[arg-type]
-    session = await session_service.create_session(owner_user_id="user-1", title="t")
-    service = PeerReviewService(
-        orchestrator=orchestrator,  # type: ignore[arg-type]
-        session_service=session_service,
-        peer_review_step_id="peer-review",
-        security_assessment_step_id="security-assessment",
-        test_generation_step_id="test-generation",
-        gated_step_ids=("security-assessment", "test-generation", "peer-review"),
-    )
-
-    report = await service.get_agent_assessments(
-        session_id=session.id, requesting_user_id="user-1", workflow_run_id="run-1"
-    )
-
-    assert report.security_assessment.status == "reviewed"
-    assert report.security_assessment.gate == "fail"
-    assert report.security_assessment.assessed_by_agent_id == "genie-orchestrator"
-    assert report.test_generation.status == "reviewed"
-    assert report.test_generation.gate == "pass"
-
-
-async def test_get_agent_assessments_raises_for_unknown_workflow_run(blocked_run: WorkflowRunResult) -> None:
-    orchestrator = _FakeOrchestrator(run=blocked_run)
-    session_service = create_session_service(orchestrator=orchestrator)  # type: ignore[arg-type]
-    session = await session_service.create_session(owner_user_id="user-1", title="t")
-    service = PeerReviewService(
-        orchestrator=orchestrator,  # type: ignore[arg-type]
-        session_service=session_service,
-        peer_review_step_id="peer-review",
-        security_assessment_step_id="security-assessment",
-        test_generation_step_id="test-generation",
-        gated_step_ids=("security-assessment", "test-generation", "peer-review"),
-    )
-
-    with pytest.raises(UnknownWorkflowRunError):
-        await service.get_agent_assessments(
-            session_id=session.id, requesting_user_id="user-1", workflow_run_id="does-not-exist"
-        )

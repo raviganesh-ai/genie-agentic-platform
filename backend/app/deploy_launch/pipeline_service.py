@@ -147,7 +147,6 @@ class DeploymentPipelineService:
         architecture_step_id: str = "design-architecture",
         build_step_id: str = "build-solution",
         test_generation_step_id: str = "test-generation",
-        peer_review_step_id: str = "peer-review",
         final_output_approval_checkpoint_id: str = "final-output-approval",
     ) -> None:
         self._orchestrator = orchestrator
@@ -164,7 +163,6 @@ class DeploymentPipelineService:
         self._architecture_step_id = architecture_step_id
         self._build_step_id = build_step_id
         self._test_generation_step_id = test_generation_step_id
-        self._peer_review_step_id = peer_review_step_id
         self._final_output_approval_checkpoint_id = final_output_approval_checkpoint_id
         self._runs: dict[str, DeploymentPipelineRun] = {}
         self._workspaces: dict[str, _RunWorkspace] = {}
@@ -395,16 +393,6 @@ class DeploymentPipelineService:
         already-finished build must never be re-triggered here with blank
         overrides that could silently discard the user's real governance
         policies.
-
-        ``peer-review``'s prompt (``orchestrator-peer-review-phase-v1``)
-        has the exact same gap for its own ``policies`` variable, and
-        unlike security-assessment/test-generation it has NO approval
-        checkpoint gating its wave - so a single ``resume_workflow`` call
-        triggered here for an incomplete build-solution/test-generation
-        can ALSO reach and execute peer-review in that same call (once
-        ``build-review-approval`` is granted), hitting an identical
-        PromptResolutionError for ``policies`` there instead. Same fix,
-        same safe-empty-string reasoning, same completed-step guard.
         """
         required_step_ids = (self._build_step_id, self._test_generation_step_id)
         if all(self._step_completed(run, step_id) for step_id in required_step_ids):
@@ -415,11 +403,6 @@ class DeploymentPipelineService:
             step_inputs[self._build_step_id] = WorkflowStepInput(
                 step_id=self._build_step_id,
                 variables={"policies": "", "excluded_agents": ""},
-            )
-        if not self._step_completed(run, self._peer_review_step_id):
-            step_inputs[self._peer_review_step_id] = WorkflowStepInput(
-                step_id=self._peer_review_step_id,
-                variables={"policies": ""},
             )
 
         return await self._orchestrator.resume_workflow(

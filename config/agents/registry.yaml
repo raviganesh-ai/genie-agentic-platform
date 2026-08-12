@@ -92,16 +92,14 @@ agents:
     prompt_template_ref: architecture-recommendation-v1
     # The Agentic Workflow this architecture leads into for the approved
     # requirement scope: once the architecture is designed, the Build
-    # Agent generates the UI + dedicated multi-agent workflow, the
-    # Peer Review Agent evaluates it against policy, and the real Deploy
-    # & Launch pipeline provisions/launches it - this mirrors
+    # Agent generates the UI + dedicated multi-agent workflow, and the
+    # real Deploy & Launch pipeline provisions/launches it - this mirrors
     # genie-orchestrator's own connected_agent_ids above, scoped to what
     # this agent's own design sets in motion.
     connected_agent_ids:
       - build-agent
       - security-assessment-agent
       - test-generation-agent
-      - peer-review-agent
     enabled: true
 
   - id: build-agent
@@ -137,7 +135,7 @@ agents:
       generated UI and agent code against the OWASP Top 10 on every
       review (not only what changed since a prior review), and reports a
       pass/fail security gate verdict with findings and remediation
-      recommendations for the Peer Review Agent to consolidate.
+      recommendations.
     capabilities:
       - security_review
       - vulnerability_detection
@@ -157,8 +155,7 @@ agents:
       Generates unit, integration, and UI test cases covering every
       function, endpoint, and interaction the Build Agent generated, and
       reports a pass/fail test-coverage gate verdict based on structural
-      completeness against the approved requirements for the Peer Review
-      Agent to consolidate.
+      completeness against the approved requirements.
     capabilities:
       - test_case_generation
       - coverage_assessment
@@ -199,7 +196,6 @@ agents:
       - build-agent
       - security-assessment-agent
       - test-generation-agent
-      - peer-review-agent
     tool_definitions:
       - name: call_requirements_analyst
         description: >-
@@ -305,67 +301,9 @@ agents:
             type: string
             description: Optional customer chat message for this phase, or empty.
             required: false
-      - name: call_peer_review_agent
-        description: >-
-          Delegate the peer-review phase to the Peer Review Agent and
-          return its real output verbatim. The platform always supplies
-          the real artifact/requirements/policies/security_findings/
-          test_plan/user_message for this step automatically - do not
-          repeat their full text here; short placeholders or empty
-          strings are fine.
-        parameters:
-          - name: artifact
-            type: string
-            description: The build artifact to review for policy compliance.
-            required: false
-          - name: requirements
-            type: string
-            description: The approved requirements the build must satisfy.
-            required: false
-          - name: policies
-            type: string
-            description: The policies to review the artifact against.
-            required: false
-          - name: security_findings
-            type: string
-            description: The Security Assessment Agent's findings to consolidate.
-            required: false
-          - name: test_plan
-            type: string
-            description: The Test Generation Agent's test plan and coverage assessment to consolidate.
-            required: false
-          - name: user_message
-            type: string
-            description: Optional customer chat message for this phase, or empty.
-            required: false
     owner: platform-engineering-team
     governance_policy_id: standard-governance-policy-v1
     prompt_template_ref: orchestrator-mission-v1
-    enabled: true
-
-  - id: peer-review-agent
-    name: Peer Review Agent
-    role: peer_review
-    description: >-
-      Independently reviews every code component the Build Agent
-      generated for policy compliance, records approval decisions and
-      decision lineage, and consolidates the Security Assessment Agent's
-      and Test Generation Agent's findings with its own architecture and
-      code-quality review into a single security / test-coverage /
-      architecture / code-quality gate verdict with per-component
-      feedback. Deployment is blocked unless every gate passes or a human
-      explicitly accepts the residual risk.
-    capabilities:
-      - policy_review
-      - approval_recording
-      - security_test_architecture_quality_gate_review
-    allowed_tools: []
-    memory_access:
-      - shared
-    foundry_agent_id: peer-review-agent
-    owner: governance-team
-    governance_policy_id: standard-governance-policy-v1
-    prompt_template_ref: peer-review-v1
     enabled: true
 
   - id: debugging-agent

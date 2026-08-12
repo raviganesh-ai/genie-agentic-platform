@@ -47,9 +47,9 @@ export function WorkshopPage(): JSX.Element {
   const [buildStartStuck, setBuildStartStuck] = useState(false);
 
   // The Build Agent's UI + multi-agent workflow design is the
-  // build-solution step's own output (same run the Architecture/Peer Review
-  // pages read from) - shown as one-by-one generated artifact cards below
-  // instead of buried in chat.
+  // build-solution step's own output (same run the Architecture Studio and
+  // Workshop pages read from) - shown as one-by-one generated artifact
+  // cards below instead of buried in chat.
   const runFetcher = useCallback(
     () =>
       sessionId && workflowRunId

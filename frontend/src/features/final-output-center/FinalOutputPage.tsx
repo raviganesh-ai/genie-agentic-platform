@@ -73,7 +73,7 @@ export function FinalOutputPage(): JSX.Element {
     [run],
   );
   const reviewComplete = Boolean(
-    run?.step_results.some((result) => result.step_id === "peer-review"),
+    run?.step_results.some((result) => result.step_id === "test-generation"),
   );
 
   if (!workflowRunId) {
@@ -101,7 +101,7 @@ export function FinalOutputPage(): JSX.Element {
 
       {!reviewComplete ? (
         <AgentActivityAnimation
-          label="Genie is working with the Peer Review agent to finish reviewing your solution..."
+          label="Genie is finishing the security assessment and test generation for your solution..."
           events={liveEvents}
         />
       ) : null}
@@ -124,9 +124,9 @@ export function FinalOutputPage(): JSX.Element {
           }
         >
           <Text size={300} style={{ opacity: 0.8 }}>
-            Peer Review has finished. Head to Deploy & Launch to provision access control, deploy
-            the agents and app, run full testing and a security scan, and get the customer-facing
-            launch link.
+            The security assessment and test generation have finished. Head to Deploy & Launch to
+            provision access control, deploy the agents and app, run full testing and a security
+            scan, and get the customer-facing launch link.
           </Text>
         </SectionCard>
       ) : null}

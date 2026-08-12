@@ -73,7 +73,8 @@ const PHASE_ICONS: Record<string, string> = {
   "analyze-requirements": "📋",
   "design-architecture": "🏗️",
   "build-solution": "🤖",
-  "peer-review": "🔐",
+  "security-assessment": "🛡️",
+  "test-generation": "🧪",
 };
 
 type FlowNodeStatus = "complete" | "active" | "pending";
@@ -195,16 +196,17 @@ function ControlFlowMap({ completedStepIds, activeStepId }: { completedStepIds: 
  * `agent_execution`) rather than the batched `WorkflowRunResult`.
  *
  * Why this data source matters: `WorkflowRuntime.run_workflow` can execute
- * several ungated steps (e.g. build-solution -> peer-review) inside
- * one synchronous run/resume HTTP call, and the run's stored result is only
- * updated once that whole call returns - polling the run would make the
- * feed jump in batches, not calls. Each individual agent call, by contrast,
- * is recorded to the governance event repository the instant *that* call
- * completes (`WorkflowStepExecutor.execute_step`), so a concurrent poll
- * here observes every agent call in true orchestrator call order, even
- * while a later step in the same batch is still executing. `output_preview`
- * on each event is a truncated slice of that same agent's real output text
- * - never synthetic content.
+ * several ungated steps (e.g. build-solution -> security-assessment ->
+ * test-generation) inside one synchronous run/resume HTTP call, and the
+ * run's stored result is only updated once that whole call returns -
+ * polling the run would make the feed jump in batches, not calls. Each
+ * individual agent call, by contrast, is recorded to the governance event
+ * repository the instant *that* call completes
+ * (`WorkflowStepExecutor.execute_step`), so a concurrent poll here observes
+ * every agent call in true orchestrator call order, even while a later step
+ * in the same batch is still executing. `output_preview` on each event is a
+ * truncated slice of that same agent's real output text - never synthetic
+ * content.
  *
  * Every mission step is actually executed as: `genie-orchestrator` (the
  * step's own agent) calls exactly one `call_<agent>` delegation tool, which

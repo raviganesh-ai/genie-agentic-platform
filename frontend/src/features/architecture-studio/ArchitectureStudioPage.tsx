@@ -195,20 +195,20 @@ export function ArchitectureStudioPage(): JSX.Element {
       await approvalApi.decide(sessionId, pendingArchitectureApproval.id, "approved");
       const traceId = getTraceId(workflowRunId) ?? undefined;
       // Persisted in SessionContext (not just a local variable here) because
-      // peer-review only actually executes in a LATER, separate resume
-      // call - triggered from the Workshop page's "Proceed to Peer Review"
-      // button - which needs to re-supply the same policies as its own
-      // step_input override at that time.
+      // the security-assessment/test-generation wave only actually executes
+      // in a LATER, separate resume call - triggered from the Workshop
+      // page's "Re-run UI & Agent Design" action - which needs to re-supply
+      // the same policies as its own step_input override at that time.
       setGovernancePolicies(effectiveGovernancePolicies);
       // Move to the UI & Agent Design page immediately - that page has its
       // own live workflow event stream + polling and shows the "Genie is
       // calling the Orchestrator Agent..." animation until build-solution's
       // output arrives, then swaps in the generated artifacts. Resuming the
       // run itself can take a while (it runs build-solution and, once
-      // approved, peer-review server-side), so we kick it off rather
-      // than block navigation on it - any failure surfaces there via the
-      // step's own recorded error instead of on this page the user has
-      // already left.
+      // approved, security-assessment/test-generation server-side), so we
+      // kick it off rather than block navigation on it - any failure
+      // surfaces there via the step's own recorded error instead of on this
+      // page the user has already left.
       navigate("/workshop");
       workflowApi
         .resumeRun(sessionId, workflowRunId, traceId, {

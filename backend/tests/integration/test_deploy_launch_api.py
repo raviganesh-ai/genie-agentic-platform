@@ -20,7 +20,7 @@ generic ``"mission-"`` placeholder - is reflected in the provisioned
 Foundry agent names. The only thing stood in for is the upstream,
 live-Foundry-driven ``solution-discovery-workflow`` run this pipeline
 reads from: completing that workflow for real in local mode would require
-a live agent gateway (see ``tests/unit/api/test_approvals_peer_review_gate.py``'s
+a live agent gateway (see ``tests/unit/deploy_launch/test_pipeline_service.py``'s
 docstring for the same, already-established constraint elsewhere in this
 suite).
 """
