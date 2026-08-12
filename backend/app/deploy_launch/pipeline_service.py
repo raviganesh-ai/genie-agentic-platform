@@ -66,7 +66,7 @@ from app.deploy_launch.models import (
 from app.deploy_launch.security_scan_service import SecurityScanService
 from app.deploy_launch.test_execution_service import TestExecutionService, extract_test_modules
 from app.governance.approval_service import ApprovalService
-from app.models.workflow_models import WorkflowRunResult
+from app.models.workflow_models import WorkflowRunResult, WorkflowStepInput
 from app.models.workflow_stream_models import WorkflowStreamEvent, WorkflowStreamEventType
 from app.orchestration.agent_orchestrator import AgentOrchestrator
 from app.orchestration.workflow_event_bus import WorkflowEventBus
@@ -147,6 +147,7 @@ class DeploymentPipelineService:
         architecture_step_id: str = "design-architecture",
         build_step_id: str = "build-solution",
         test_generation_step_id: str = "test-generation",
+        peer_review_step_id: str = "peer-review",
         final_output_approval_checkpoint_id: str = "final-output-approval",
     ) -> None:
         self._orchestrator = orchestrator
@@ -163,6 +164,7 @@ class DeploymentPipelineService:
         self._architecture_step_id = architecture_step_id
         self._build_step_id = build_step_id
         self._test_generation_step_id = test_generation_step_id
+        self._peer_review_step_id = peer_review_step_id
         self._final_output_approval_checkpoint_id = final_output_approval_checkpoint_id
         self._runs: dict[str, DeploymentPipelineRun] = {}
         self._workspaces: dict[str, _RunWorkspace] = {}
@@ -366,15 +368,65 @@ class DeploymentPipelineService:
         undecided/rejected approval checkpoint, or a real step failure)
         still surfaces as an error, via ``_get_step_output`` once
         ``_execute_steps`` actually reads that step's output below.
+
+        ``build-solution``'s ``policies``/``excluded_agents`` variables are
+        deliberately NOT auto-derived by ``variable_sources`` in
+        config/workflows/registry.yaml (see that file's comment) - every
+        OTHER caller that can (re)start this step supplies them explicitly
+        as a step_input override (Architecture Studio's approval handler,
+        Workshop's "Re-run UI & Agent Design"). This self-heal path is
+        backend-only and has no access to whatever governance-policy text
+        or excluded-agent list the user typed into those frontend pages
+        (never persisted server-side - see SessionContext's
+        ``governancePolicies``), so it cannot reproduce the user's real
+        choices. Omitting the override entirely used to hard-fail with
+        ``PromptResolutionError: Prompt 'orchestrator-build-phase-v1' is
+        missing required variable(s): ['excluded_agents', 'policies']`` -
+        every "Retry Deploy & Launch" click hit the identical failure
+        forever, since nothing about the run's state changes between
+        retries. Supplying safe empty-string defaults here instead lets a
+        stuck build-solution genuinely (re)run - matching the prompt/tool's
+        own contract that an empty policies/excluded_agents string simply
+        means "no extra policy text" / "no excluded agents" (see
+        ``_parse_excluded_agent_names`` in orchestration_tools.py). Only
+        ever attached when build-solution itself has NOT already
+        completed - passing ANY step_input for a step re-executes it even
+        if already completed (see workflow_runtime.resume_workflow), so an
+        already-finished build must never be re-triggered here with blank
+        overrides that could silently discard the user's real governance
+        policies.
+
+        ``peer-review``'s prompt (``orchestrator-peer-review-phase-v1``)
+        has the exact same gap for its own ``policies`` variable, and
+        unlike security-assessment/test-generation it has NO approval
+        checkpoint gating its wave - so a single ``resume_workflow`` call
+        triggered here for an incomplete build-solution/test-generation
+        can ALSO reach and execute peer-review in that same call (once
+        ``build-review-approval`` is granted), hitting an identical
+        PromptResolutionError for ``policies`` there instead. Same fix,
+        same safe-empty-string reasoning, same completed-step guard.
         """
         required_step_ids = (self._build_step_id, self._test_generation_step_id)
         if all(self._step_completed(run, step_id) for step_id in required_step_ids):
             return run
 
+        step_inputs: dict[str, WorkflowStepInput] = {}
+        if not self._step_completed(run, self._build_step_id):
+            step_inputs[self._build_step_id] = WorkflowStepInput(
+                step_id=self._build_step_id,
+                variables={"policies": "", "excluded_agents": ""},
+            )
+        if not self._step_completed(run, self._peer_review_step_id):
+            step_inputs[self._peer_review_step_id] = WorkflowStepInput(
+                step_id=self._peer_review_step_id,
+                variables={"policies": ""},
+            )
+
         return await self._orchestrator.resume_workflow(
             workflow_run_id=run.workflow_run_id,
             session_id=session_id,
             trace_id=trace_id,
+            step_inputs=step_inputs or None,
         )
 
     def _get_step_output(self, run: WorkflowRunResult, step_id: str) -> str:
