@@ -110,6 +110,8 @@ class Settings(BaseSettings):
     key_vault_uri: str | None = None
     entra_tenant_id: str | None = None
     entra_client_id: str | None = None
+    mise_endpoint: str | None = None
+    mise_timeout_seconds: float = 5.0
 
     # Id of the workflow step (config/workflows/*.yaml) whose output_text
     # carries the Requirements Analyst agent's structured agentic-workflow
@@ -185,6 +187,7 @@ class Settings(BaseSettings):
         "azure_foundry_endpoint",
         "azure_speech_endpoint",
         "key_vault_uri",
+        "mise_endpoint",
         "memory_store_endpoint",
         "lineage_store_endpoint",
         "azure_subscription_id",

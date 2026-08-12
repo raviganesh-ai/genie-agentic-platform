@@ -292,6 +292,8 @@ All backend configuration is via environment variables prefixed `GENIE_` (pydant
 | `GENIE_KEY_VAULT_URI` | *(none)* | Required in production |
 | `GENIE_ENTRA_TENANT_ID` | *(none)* | Microsoft Entra ID tenant for token validation + login |
 | `GENIE_ENTRA_CLIENT_ID` | *(none)* | App registration (API) client id |
+| `GENIE_MISE_ENDPOINT` | *(none)* | MISE v2 sidecar base URL; required in production |
+| `GENIE_MISE_TIMEOUT_SECONDS` | `5` | Fail-closed timeout for inbound MISE validation |
 | `GENIE_CORS_ALLOWED_ORIGINS` | *(empty)* | Comma-separated browser origins allowed to call the API (e.g. the deployed frontend's URL) |
 | `GENIE_CONFIG_ROOT` | `config` | Root directory for agents/prompts/workflows/policies |
 | `AZURE_CLIENT_ID` | *(none)* | **Required** when running under a Container App / VM with a **user-assigned** managed identity — tells `DefaultAzureCredential` which identity to use |
@@ -311,7 +313,7 @@ Frontend (`frontend/.env.production` / `.env.development`, Vite `VITE_` prefix):
 
 Genie uses **Microsoft Entra ID** end to end:
 
-- **Backend**: `EntraIdTokenValidator` validates bearer tokens via PyJWT against the tenant's JWKS discovery document. A `LocalDevTokenValidator` fallback only activates when `GENIE_ALLOW_LOCAL_AGENTS=true` (never in production).
+- **Backend**: `MiseTokenValidator` forwards each bearer token and its original request context to the colocated MISE v2 container. Production requires `GENIE_MISE_ENDPOINT` and fails closed with `503` if MISE is unavailable. `LocalDevTokenValidator` activates only when `GENIE_ALLOW_LOCAL_AGENTS=true` and MISE is not configured (never in production).
 - **Frontend**: MSAL (`@azure/msal-browser`) drives an automatic redirect sign-in flow — on load, the app silently acquires a token if a session exists, or redirects to the Microsoft sign-in page if not, then redirects back with no manual steps. Silent token refresh runs on a 5-minute timer via `acquireTokenSilent`, falling back to `acquireTokenRedirect` on `InteractionRequiredAuthError`. If the three `VITE_ENTRA_*` variables aren't set, the app transparently falls back to the pre-existing manual token-entry seam (`setAccessToken()`), so local/backend-only development never requires an Entra app registration.
 - **App registration**: a single Azure AD application acts as both the SPA client and the API it calls (self-referencing `access_as_user` OAuth2 permission scope). Grant admin consent for this scope in **Entra admin center → App registrations → API permissions → Grant admin consent** so users aren't prompted individually; if consent can't be granted centrally, users will see a one-time interactive consent prompt on first sign-in instead.
 
@@ -458,13 +460,29 @@ All three require `GENIE_AZURE_FOUNDRY_ENDPOINT` / `GENIE_AZURE_FOUNDRY_PROJECT_
      --env-vars <see Configuration reference above>
    ```
 
+   For a MISE-enabled backend, update the backend image and sidecar atomically:
+
    ```powershell
-   az containerapp update --name genie-backend --resource-group <rg> `
-     --image <acr-name>.azurecr.io/genie-backend:latest `
-     --set-env-vars GENIE_CORS_ALLOWED_ORIGINS=<frontend-url> ...
+   ./scripts/deploy_mise_sidecar.ps1 `
+     -SubscriptionId <subscription-id> `
+     -ResourceGroup <rg> `
+     -ContainerAppName genie-backend `
+     -AcrName <acr-name> `
+     -TenantId <tenant-id> `
+     -ClientId <api-client-id> `
+     -BackendImage <acr-name>.azurecr.io/genie-backend:<tag>
    ```
 
-   > `az containerapp update --set-env-vars` only adds/overwrites the named variables — it does not clear ones you don't mention. If you're using a **user-assigned** managed identity, you must also set `AZURE_CLIENT_ID=<identity-client-id>` or `DefaultAzureCredential` cannot resolve which identity to use and the container will crash-loop.
+   The script synchronizes the pinned restricted image through an ACR cache rule,
+   configures the exact tenant, ClientId, audience, and bearer-token inbound
+   policy, updates the backend to use `http://localhost:8080`, and waits for a
+   healthy revision. It fails before changing the Container App when the
+   operator lacks access to the restricted MISE image. Do not deploy the new
+   backend image separately: it intentionally refuses to start without MISE.
+
+   > If you're using a **user-assigned** managed identity, retain
+   > `AZURE_CLIENT_ID=<identity-client-id>` or `DefaultAzureCredential` cannot
+   > resolve which identity to use and the container will crash-loop.
 
 3. Verify:
 

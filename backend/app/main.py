@@ -270,8 +270,11 @@ def create_app(
             resolved_settings.provider_mode,
             resolved_settings.environment,
         )
-        yield
-        app.state.ready = False
+        try:
+            yield
+        finally:
+            app.state.ready = False
+            await app.state.token_validator.close()
 
     app = FastAPI(
         title="Genie Agentic Experience Center",
@@ -313,4 +316,3 @@ def create_app(
 
 
 app = create_app()
-

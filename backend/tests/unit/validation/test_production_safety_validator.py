@@ -45,3 +45,9 @@ def test_production_fails_closed_when_key_vault_uri_missing(production_settings)
     broken = production_settings.model_copy(update={"key_vault_uri": None})
     result = ProductionSafetyValidator().validate(broken)
     assert not result.passed
+
+
+def test_production_fails_closed_when_mise_endpoint_missing(production_settings):
+    broken = production_settings.model_copy(update={"mise_endpoint": None})
+    result = ProductionSafetyValidator().validate(broken)
+    assert not result.passed

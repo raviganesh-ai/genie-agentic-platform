@@ -31,6 +31,12 @@ class ProductionSafetyValidator:
             errors.append("azure_foundry_project_name is required in production.")
         if not settings.key_vault_uri:
             errors.append("key_vault_uri is required in production.")
+        if not settings.entra_tenant_id:
+            errors.append("entra_tenant_id is required in production.")
+        if not settings.entra_client_id:
+            errors.append("entra_client_id is required in production.")
+        if not settings.mise_endpoint:
+            errors.append("mise_endpoint is required for MISE token validation in production.")
 
         if errors:
             return ValidationResult.fail(self.name, errors)

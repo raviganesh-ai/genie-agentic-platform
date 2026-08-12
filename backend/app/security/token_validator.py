@@ -1,30 +1,27 @@
 """Bearer token validation: Microsoft Entra ID in production, a local-dev validator otherwise.
 
-Mirrors the ``AgentGateway`` / ``create_agent_gateway`` seam established in
-Phase 3: production must validate every token's signature, issuer, and
-audience against Entra ID; local/dev may use an unverified validator only
-when Entra ID is not configured AND ``Settings.allow_local_agents`` is True
-(the same flag ``ProductionSafetyValidator`` already forces False in
-production, so this seam is automatically fail-closed with no new
-configuration surface). If Entra ID *is* configured, its validator is used
-regardless of ``provider_mode``, so a developer can exercise the real
-integration locally too.
-
-Never invents undocumented Entra ID/Azure AD behavior beyond what PyJWT's
-documented JWKS client and the standard Microsoft identity platform
-discovery/JWKS endpoints provide; anything uncertain is isolated behind the
-``TokenValidator`` protocol so it can be swapped without touching callers.
+Microsoft Identity Service Essentials (MISE) is the only production token
+validator. The backend forwards the original bearer token and request context
+to the colocated MISE v2 container and fails closed if that service is
+unavailable. A deliberately unverified validator remains available only for
+local development and tests when local agents are explicitly enabled.
 """
 from __future__ import annotations
 
+import base64
+import binascii
+import json
 from typing import Protocol
+
+import httpx
 
 from app.config.settings import Settings
 
 __all__ = [
     "AuthenticationError",
-    "EntraIdTokenValidator",
+    "AuthenticationServiceUnavailableError",
     "LocalDevTokenValidator",
+    "MiseTokenValidator",
     "TokenValidator",
     "TokenValidatorError",
     "create_token_validator",
@@ -38,11 +35,34 @@ class TokenValidatorError(RuntimeError):
 class AuthenticationError(RuntimeError):
     """Raised when a bearer token is missing, malformed, expired, or otherwise invalid."""
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: int = 401,
+        www_authenticate: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+        self.www_authenticate = www_authenticate
+
+
+class AuthenticationServiceUnavailableError(RuntimeError):
+    """Raised when MISE cannot validate a request safely."""
+
 
 class TokenValidator(Protocol):
     """Validates a raw bearer token string and returns its verified claims."""
 
-    def validate(self, token: str) -> dict[str, object]: ...
+    async def validate(
+        self,
+        token: str,
+        *,
+        method: str,
+        path: str,
+    ) -> dict[str, object]: ...
+
+    async def close(self) -> None: ...
 
 
 class LocalDevTokenValidator:
@@ -56,7 +76,14 @@ class LocalDevTokenValidator:
     ``Authorization`` header is still rejected.
     """
 
-    def validate(self, token: str) -> dict[str, object]:
+    async def validate(
+        self,
+        token: str,
+        *,
+        method: str,
+        path: str,
+    ) -> dict[str, object]:
+        del method, path
         import jwt
 
         try:
@@ -69,50 +96,104 @@ class LocalDevTokenValidator:
             raise AuthenticationError("Bearer token is missing a 'sub' or 'oid' claim.")
         return claims
 
+    async def close(self) -> None:
+        return None
 
-class EntraIdTokenValidator:
-    """Validates a token's signature, issuer, and audience against Microsoft Entra ID.
 
-    Uses PyJWT's ``PyJWKClient`` against the tenant's documented JWKS
-    endpoint (``https://login.microsoftonline.com/{tenant}/discovery/v2.0/keys``)
-    to verify the RS256 signature, and requires the token's audience to
-    match the configured client id and its issuer to match either the v1
-    or v2 Microsoft identity platform issuer for this tenant.
-    """
+class MiseTokenValidator:
+    """Validates inbound requests through the MISE v2 container."""
 
-    def __init__(self, *, tenant_id: str, client_id: str) -> None:
-        import jwt
+    _subject_claims = ("oid", "sub", "name", "roles")
 
-        self._tenant_id = tenant_id
-        self._client_id = client_id
-        self._jwk_client = jwt.PyJWKClient(
-            f"https://login.microsoftonline.com/{tenant_id}/discovery/v2.0/keys"
+    def __init__(
+        self,
+        *,
+        endpoint: str,
+        timeout_seconds: float,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ) -> None:
+        self._client = httpx.AsyncClient(
+            base_url=endpoint.rstrip("/"),
+            timeout=timeout_seconds,
+            transport=transport,
         )
-        self._valid_issuers = {
-            f"https://login.microsoftonline.com/{tenant_id}/v2.0",
-            f"https://sts.windows.net/{tenant_id}/",
-        }
 
-    def validate(self, token: str) -> dict[str, object]:
-        import jwt
+    async def validate(
+        self,
+        token: str,
+        *,
+        method: str,
+        path: str,
+    ) -> dict[str, object]:
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Original-Method": method,
+            "Original-URI": path,
+        }
+        for claim in self._subject_claims:
+            headers[f"Return-Subject-Token-Claim-{claim}"] = "1"
 
         try:
-            signing_key = self._jwk_client.get_signing_key_from_jwt(token).key
-            claims = jwt.decode(
-                token,
-                signing_key,
-                algorithms=["RS256"],
-                audience=self._client_id,
+            response = await self._client.post(
+                "/ValidateRequest",
+                headers=headers,
             )
-        except jwt.PyJWTError as exc:
-            raise AuthenticationError(f"Bearer token failed validation: {exc}") from exc
+        except httpx.RequestError as exc:
+            raise AuthenticationServiceUnavailableError(
+                "Authentication service is unavailable."
+            ) from exc
 
-        if claims.get("iss") not in self._valid_issuers:
-            raise AuthenticationError(
-                f"Bearer token issuer '{claims.get('iss')}' is not a trusted issuer for "
-                f"tenant '{self._tenant_id}'."
+        if response.status_code >= 500:
+            raise AuthenticationServiceUnavailableError(
+                "Authentication service could not validate the request."
             )
-        return claims
+        if response.status_code != 200:
+            status_code = response.status_code if response.status_code in {401, 403} else 401
+            raise AuthenticationError(
+                "Bearer token failed validation.",
+                status_code=status_code,
+                www_authenticate=response.headers.get("www-authenticate"),
+            )
+
+        verified_claims: dict[str, object] = {}
+        for claim in self._subject_claims:
+            value = self._extract_claim(response.headers, claim)
+            if value:
+                verified_claims[claim] = value
+
+        roles = verified_claims.get("roles")
+        if isinstance(roles, str):
+            try:
+                parsed_roles = json.loads(roles)
+            except json.JSONDecodeError:
+                parsed_roles = [role.strip() for role in roles.split(",") if role.strip()]
+            if isinstance(parsed_roles, list) and all(
+                isinstance(role, str) for role in parsed_roles
+            ):
+                verified_claims["roles"] = parsed_roles
+
+        user_id = verified_claims.get("oid") or verified_claims.get("sub")
+        if not user_id or not str(user_id).strip():
+            raise AuthenticationError("Validated token is missing a subject claim.")
+        return verified_claims
+
+    @staticmethod
+    def _extract_claim(headers: httpx.Headers, claim: str) -> str:
+        plain = headers.get(f"Subject-Token-Claim-{claim}")
+        if plain is not None:
+            return plain
+        encoded = headers.get(f"Subject-Token-Encoded-Claim-{claim}")
+        if encoded is None:
+            return ""
+        try:
+            return base64.b64decode(encoded, validate=True).decode("utf-8")
+        except (binascii.Error, UnicodeDecodeError) as exc:
+            raise AuthenticationServiceUnavailableError(
+                "Authentication service returned an invalid encoded claim."
+            ) from exc
+
+    async def close(self) -> None:
+        await self._client.aclose()
 
 
 def create_token_validator(settings: Settings) -> TokenValidator:
@@ -123,6 +204,7 @@ def create_token_validator(settings: Settings) -> TokenValidator:
     """
 
     entra_configured = bool(settings.entra_tenant_id and settings.entra_client_id)
+    mise_configured = bool(settings.mise_endpoint)
 
     if settings.provider_mode == "production":
         if not entra_configured:
@@ -130,19 +212,28 @@ def create_token_validator(settings: Settings) -> TokenValidator:
                 "entra_tenant_id and entra_client_id must be configured to authenticate "
                 "requests in production."
             )
-        return EntraIdTokenValidator(
-            tenant_id=settings.entra_tenant_id or "", client_id=settings.entra_client_id or ""
+        if not mise_configured:
+            raise TokenValidatorError(
+                "mise_endpoint must be configured for production authentication."
+            )
+        return MiseTokenValidator(
+            endpoint=settings.mise_endpoint or "",
+            timeout_seconds=settings.mise_timeout_seconds,
         )
 
-    if entra_configured:
-        return EntraIdTokenValidator(
-            tenant_id=settings.entra_tenant_id or "", client_id=settings.entra_client_id or ""
+    if mise_configured:
+        if not entra_configured:
+            raise TokenValidatorError(
+                "entra_tenant_id and entra_client_id must accompany mise_endpoint."
+            )
+        return MiseTokenValidator(
+            endpoint=settings.mise_endpoint or "",
+            timeout_seconds=settings.mise_timeout_seconds,
         )
 
     if settings.allow_local_agents:
         return LocalDevTokenValidator()
 
     raise TokenValidatorError(
-        "No usable token validator: allow_local_agents is False and Microsoft Entra ID "
-        "is not configured."
+        "No usable token validator: allow_local_agents is False and MISE is not configured."
     )

@@ -137,5 +137,6 @@ def production_settings(valid_config_root: Path) -> Settings:
         lineage_store_endpoint="https://genie-lineage.example-project.documents.azure.com/",
         entra_tenant_id="00000000-0000-0000-0000-000000000000",
         entra_client_id="11111111-1111-1111-1111-111111111111",
+        mise_endpoint="http://mise-sidecar:8080",
         config_root=valid_config_root,
     )

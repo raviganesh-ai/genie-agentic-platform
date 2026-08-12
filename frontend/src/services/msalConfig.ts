@@ -26,7 +26,6 @@ export const msalConfig: Configuration = {
     authority: `https://login.microsoftonline.com/${tenantId ?? "common"}`,
     redirectUri: "/",
     postLogoutRedirectUri: "/",
-    navigateToLoginRequestUrl: true,
   },
   cache: {
     // sessionStorage (not localStorage) limits token exposure to the current
@@ -34,7 +33,6 @@ export const msalConfig: Configuration = {
     // in the in-memory seam in authProvider.ts, never read out of MSAL's
     // cache directly by application code (OWASP A02/A05).
     cacheLocation: "sessionStorage",
-    storeAuthStateInCookie: false,
   },
   system: {
     loggerOptions: {

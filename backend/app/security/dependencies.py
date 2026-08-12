@@ -13,7 +13,11 @@ from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.security.auth_models import AuthenticatedUser
-from app.security.token_validator import AuthenticationError, TokenValidator
+from app.security.token_validator import (
+    AuthenticationError,
+    AuthenticationServiceUnavailableError,
+    TokenValidator,
+)
 
 __all__ = ["get_current_user"]
 
@@ -33,12 +37,21 @@ async def get_current_user(
 
     token_validator: TokenValidator = request.app.state.token_validator
     try:
-        claims = token_validator.validate(credentials.credentials)
+        claims = await token_validator.validate(
+            credentials.credentials,
+            method=request.method,
+            path=request.url.path,
+        )
+    except AuthenticationServiceUnavailableError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc
     except AuthenticationError as exc:
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
+            status_code=exc.status_code,
             detail=str(exc),
-            headers={"WWW-Authenticate": "Bearer"},
+            headers={"WWW-Authenticate": exc.www_authenticate or "Bearer"},
         ) from exc
 
     user_id = str(claims.get("oid") or claims.get("sub"))
