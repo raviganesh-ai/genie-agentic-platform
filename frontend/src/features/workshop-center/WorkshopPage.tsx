@@ -82,7 +82,21 @@ export function WorkshopPage(): JSX.Element {
   // next poll confirms `buildOutputText` above is the final, authoritative
   // text.
   const liveBuildText = stepDeltaText[workflowStepDeltaKey(BUILD_STEP_ID, BUILD_AGENT_ID)] ?? "";
-  const displayedBuildText = buildOutputText || liveBuildText;
+  // While a "Re-run UI & Agent Design" retry is in flight, prefer the live
+  // streaming buffer over the OLD stored `buildOutputText` - otherwise the
+  // prior (partially-failed) result would just sit frozen on screen for the
+  // whole retry and then silently swap to the new one, giving no visible
+  // sense that anything is actually continuing. `_generate_build_by_component`
+  // republishes every previously-succeeded component's own code as its own
+  // delta too (see the `reused_piece` path in orchestration_tools.py) before
+  // streaming the regenerated component's new code, so watching `liveBuildText`
+  // rebuild during a retry IS the continuation: already-generated components
+  // reappear first, then the one that actually failed regenerates. Falls back
+  // to `buildOutputText` for the brief window before the retry's first delta
+  // (or `step_started` reset) has arrived, so the view never flashes blank.
+  const displayedBuildText = rerunningBuild
+    ? liveBuildText || buildOutputText
+    : buildOutputText || liveBuildText;
   // True as soon as the Build Agent's own real generation (every
   // specialist agent, the Orchestrator Agent, then the UI) has actually
   // finished streaming - well before `buildOutputText` above is populated,
@@ -252,7 +266,13 @@ export function WorkshopPage(): JSX.Element {
           <GeneratedArtifacts
             sessionId={sessionId}
             outputText={displayedBuildText}
-            revealImmediately={!buildOutputText}
+            // Still a growing live buffer - either the very first
+            // generation, or a "Re-run" retry rebuilding from its own
+            // previously-succeeded components (see displayedBuildText above)
+            // - in both cases the staggered from-scratch reveal animation
+            // must be skipped so already-shown artifacts don't flicker away
+            // and re-reveal on every delta.
+            revealImmediately={!buildOutputText || rerunningBuild}
           />
         ) : buildError ? (
           <ErrorState
