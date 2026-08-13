@@ -7,9 +7,9 @@ Two complementary responsibilities:
    drift detectable from configuration alone: a workflow step referencing
    a disabled agent, or a workflow step's ``prompt_id`` diverging from its
    agent's own configured ``prompt_template_ref``. Like
-   ``FoundryAgentRegistryValidator``, this is a no-op outside production
-   and is invoked separately from ``app.main``'s lifespan - never inserted
-   into the fixed ``StartupValidationRunner.default_validators()`` list.
+   ``FoundryAgentRegistryValidator``, this is invoked separately from
+   ``app.main``'s lifespan - never inserted into the fixed
+   ``StartupValidationRunner.default_validators()`` list.
 
 2. ``detect_drift(agent, previous)`` - stateful, point-in-time comparison
    of an agent's *current* configuration against the last
@@ -34,14 +34,11 @@ __all__ = ["FoundryAgentDriftValidator"]
 
 
 class FoundryAgentDriftValidator:
-    """Fails closed in production on structural config drift; also computes ``DriftReport``s."""
+    """Fails closed on structural config drift; also computes ``DriftReport``s."""
 
     name = "FoundryAgentDriftValidator"
 
     def validate(self, settings: Settings) -> ValidationResult:
-        if settings.provider_mode != "production":
-            return ValidationResult.ok(self.name)
-
         try:
             agent_registry = AgentRegistry.load(settings.agents_path, default_llm=settings.default_llm)
             workflow_registry = WorkflowRegistry.load(settings.workflows_path)

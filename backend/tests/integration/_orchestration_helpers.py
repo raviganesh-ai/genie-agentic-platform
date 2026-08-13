@@ -248,7 +248,6 @@ def build_orchestration_settings(config_root: Path) -> Settings:
     write_orchestration_config(config_root)
     return Settings(
         environment="development",
-        provider_mode="local",
         governance_provider="local",
         allow_mock_agents=True,
         allow_local_agents=True,

@@ -13,18 +13,10 @@ def test_runner_passes_for_valid_local_settings(local_settings):
     assert all(result.passed for result in results)
 
 
-def test_runner_passes_for_valid_production_settings(production_settings):
+def test_runner_passes_for_foundry_configured_settings(foundry_configured_settings):
     runner = StartupValidationRunner()
-    results = runner.run_or_raise(production_settings)
+    results = runner.run_or_raise(foundry_configured_settings)
     assert all(result.passed for result in results)
-
-
-def test_runner_fails_closed_for_unsafe_production_settings(production_settings):
-    unsafe = production_settings.model_copy(update={"allow_mock_agents": True})
-    runner = StartupValidationRunner()
-    with pytest.raises(StartupValidationError) as exc_info:
-        runner.run_or_raise(unsafe)
-    assert "ProductionSafetyValidator" in str(exc_info.value)
 
 
 def test_runner_fails_closed_when_config_missing(local_settings, tmp_path):
@@ -35,13 +27,12 @@ def test_runner_fails_closed_when_config_missing(local_settings, tmp_path):
         runner.run_or_raise(broken)
 
 
-def test_runner_reports_every_failing_validator(production_settings):
-    unsafe = production_settings.model_copy(
-        update={"allow_mock_agents": True, "governance_provider": "local"}
-    )
+def test_runner_reports_every_failing_validator(local_settings):
+    unsafe = local_settings.model_copy(update={"governance_provider": "unknown"})
+    (unsafe.policies_path / "memory_policy.yaml").unlink()
     runner = StartupValidationRunner()
     with pytest.raises(StartupValidationError) as exc_info:
         runner.run_or_raise(unsafe)
     message = str(exc_info.value)
-    assert "ProductionSafetyValidator" in message
     assert "GovernanceProviderValidator" in message
+    assert "MemoryPolicyValidator" in message

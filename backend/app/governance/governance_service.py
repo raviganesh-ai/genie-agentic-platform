@@ -9,13 +9,13 @@ tool use, policy evaluations, and denied access are recorded as
 1. persisted to a session-queryable ``GovernanceEventRepository`` (used by
    ``TraceabilityService`` and ``ReplayService`` to reconstruct history),
    and
-2. forwarded to the configured ``GovernanceProvider`` (Agent365 in
-   production, ``LocalGovernanceTraceProvider`` in development/tests) so an
-   external enterprise governance platform can independently observe it.
+2. forwarded to the configured ``GovernanceProvider`` (``LocalGovernanceTraceProvider``
+   by default, or an injected ``Agent365GovernanceProvider`` implementation)
+   so an external enterprise governance platform can independently observe it.
 
-``create_governance_service`` fails closed (raises ``GovernancePolicyError``
-or ``GovernanceProviderError``) rather than silently falling back, per the
-"FAIL CLOSED" requirements for Phase 5.
+``create_governance_service`` fails closed (raises ``GovernancePolicyError``)
+rather than silently falling back, per the "FAIL CLOSED" requirements for
+Phase 5.
 """
 from __future__ import annotations
 
@@ -28,7 +28,6 @@ from app.config.settings import Settings
 from app.governance.governance_events import new_governance_event
 from app.governance.governance_models import (
     GovernanceProvider,
-    GovernanceProviderError,
     LocalGovernanceTraceProvider,
 )
 from app.models.approval_models import ApprovalAuditRecord
@@ -318,29 +317,13 @@ def create_governance_service(
     Raises ``GovernancePolicyError`` (fail closed) if the governance policy
     configuration is missing or invalid.
 
-    Provider resolution mirrors ``create_agent_gateway``'s fail-closed
-    contract: production always requires an explicitly supplied ``provider``
-    implementing ``Agent365GovernanceProvider`` (Genie has no built-in
-    Agent365 SDK integration); ``create_governance_service`` never falls
-    back to ``LocalGovernanceTraceProvider`` in production, raising
-    ``GovernanceProviderError`` if none is supplied. Local/dev defaults to
-    ``LocalGovernanceTraceProvider`` when no provider is supplied.
+    Local/dev defaults to ``LocalGovernanceTraceProvider`` when no provider
+    is supplied.
     """
 
     policy = load_governance_policy(settings.policies_path)
 
-    if settings.provider_mode == "production":
-        if provider is None:
-            raise GovernanceProviderError(
-                "No governance provider was supplied in production mode. Genie "
-                "has no built-in Agent365 SDK integration; a concrete "
-                "Agent365GovernanceProvider implementation must be injected "
-                "via create_governance_service(provider=...). "
-                "LocalGovernanceTraceProvider must never be used in production."
-            )
-        resolved_provider = provider
-    else:
-        resolved_provider = provider or LocalGovernanceTraceProvider()
+    resolved_provider = provider or LocalGovernanceTraceProvider()
 
     resolved_repository = event_repository or InMemoryGovernanceEventRepository()
 

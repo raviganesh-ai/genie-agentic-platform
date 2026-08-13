@@ -8,8 +8,8 @@ def test_passes_when_policy_file_present(local_settings):
     assert MemoryPolicyValidator().validate(local_settings).passed
 
 
-def test_passes_for_fully_configured_production_settings(production_settings):
-    assert MemoryPolicyValidator().validate(production_settings).passed
+def test_passes_for_fully_configured_settings(foundry_configured_settings):
+    assert MemoryPolicyValidator().validate(foundry_configured_settings).passed
 
 
 def test_fails_closed_when_policy_file_missing(local_settings):
@@ -39,17 +39,3 @@ def test_fails_closed_when_enterprise_section_missing(local_settings):
     )
     result = MemoryPolicyValidator().validate(local_settings)
     assert not result.passed
-
-
-def test_fails_closed_when_production_memory_store_is_in_memory(production_settings):
-    settings = production_settings.model_copy(update={"memory_store_backend": "in_memory"})
-    result = MemoryPolicyValidator().validate(settings)
-    assert not result.passed
-    assert any("memory_store_backend" in issue.message for issue in result.issues)
-
-
-def test_fails_closed_when_production_memory_store_endpoint_missing(production_settings):
-    settings = production_settings.model_copy(update={"memory_store_endpoint": None})
-    result = MemoryPolicyValidator().validate(settings)
-    assert not result.passed
-    assert any("memory_store_endpoint" in issue.message for issue in result.issues)

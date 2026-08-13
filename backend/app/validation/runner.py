@@ -10,9 +10,7 @@ from app.validation.configuration_validator import ConfigurationValidator
 from app.validation.governance_provider_validator import GovernanceProviderValidator
 from app.validation.memory_policy_validator import MemoryPolicyValidator
 from app.validation.no_hardcoding_validator import NoHardcodingValidator
-from app.validation.production_safety_validator import ProductionSafetyValidator
 from app.validation.prompt_template_validator import PromptTemplateValidator
-from app.validation.provider_mode_validator import ProviderModeValidator
 from app.validation.runtime_version_validator import RuntimeVersionValidator
 from app.validation.workflow_registry_validator import WorkflowRegistryValidator
 
@@ -29,8 +27,6 @@ def default_validators() -> list[StartupValidator]:
     return [
         RuntimeVersionValidator(),
         ConfigurationValidator(),
-        ProviderModeValidator(),
-        ProductionSafetyValidator(),
         AgentRegistryValidator(),
         WorkflowRegistryValidator(),
         PromptTemplateValidator(),

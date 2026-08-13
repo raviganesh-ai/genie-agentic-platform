@@ -91,16 +91,12 @@ def _uses_azure_agent_gateway(settings: Settings) -> bool:
     """Return True if ``create_agent_gateway`` will resolve to ``AzureAgentGateway``.
 
     Mirrors the resolution logic in ``app.agents.gateway.create_agent_gateway``
-    exactly, without constructing anything: production always uses the Azure
-    gateway; local/dev mode only uses it when local execution is disallowed
-    and Foundry is configured. Used to decide whether
+    exactly, without constructing anything: used to decide whether
     ``FoundryAgentSynchronizationService`` should run at startup - agents
     that will only ever execute through ``LocalAgentGateway`` have no need
     for their (possibly absent or stale) ``foundry_agent_id`` verified.
     """
 
-    if settings.provider_mode == "production":
-        return True
     return bool(
         not settings.allow_local_agents
         and settings.azure_foundry_endpoint
@@ -199,22 +195,7 @@ def create_app(
                 prompt_registry=prompt_registry,
                 inventory_service=app.state.foundry_inventory_service,
             )
-            report = await rich_synchronization_service.synchronize(orchestrator.agent_registry)
-            critical_drift = any(
-                drift_report.has_critical_issues
-                for drift_report in rich_synchronization_service.drift_reports().values()
-            )
-            if resolved_settings.provider_mode == "production" and (
-                report.has_blocking_failures or critical_drift
-            ):
-                logger.critical(
-                    "Foundry agent inventory synchronization reported blocking failures "
-                    "or critical drift; startup aborted."
-                )
-                raise FoundryAgentSynchronizationError(
-                    "Foundry agent inventory synchronization failed or detected critical "
-                    "drift in production."
-                )
+            await rich_synchronization_service.synchronize(orchestrator.agent_registry)
             app.state.foundry_synchronization_service = rich_synchronization_service
 
         session_service = create_session_service(orchestrator=orchestrator)
@@ -265,8 +246,7 @@ def create_app(
 
         app.state.ready = True
         logger.info(
-            "Genie backend started in '%s' provider mode (%s environment).",
-            resolved_settings.provider_mode,
+            "Genie backend started (%s environment).",
             resolved_settings.environment,
         )
         try:

@@ -9,8 +9,8 @@ from __future__ import annotations
 from app.main import _uses_azure_agent_gateway
 
 
-def test_production_always_uses_azure_gateway(production_settings):
-    assert _uses_azure_agent_gateway(production_settings) is True
+def test_uses_azure_gateway_when_foundry_configured_settings_used(foundry_configured_settings):
+    assert _uses_azure_agent_gateway(foundry_configured_settings) is True
 
 
 def test_local_mode_with_local_agents_allowed_does_not_use_azure_gateway(local_settings):

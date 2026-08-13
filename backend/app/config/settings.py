@@ -13,7 +13,6 @@ from typing import Literal
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-ProviderMode = Literal["local", "production"]
 GovernanceProviderName = Literal["local", "agent365"]
 Environment = Literal["development", "test", "production"]
 MemoryStoreBackend = Literal["in_memory", "cosmos_db"]
@@ -37,8 +36,8 @@ class Settings(BaseSettings):
     """Strongly typed application settings.
 
     All values are externally configured via environment variables prefixed
-    with ``GENIE_`` (e.g. ``GENIE_PROVIDER_MODE``). See ``.env.example`` for
-    the full list of supported variables.
+    with ``GENIE_`` (e.g. ``GENIE_ALLOW_LOCAL_AGENTS``). See ``.env.example``
+    for the full list of supported variables.
     """
 
     model_config = SettingsConfigDict(
@@ -53,22 +52,22 @@ class Settings(BaseSettings):
     environment: Environment = "development"
     log_level: str = "INFO"
 
-    # --- Execution mode ---------------------------------------------------------
-    provider_mode: ProviderMode = "local"
+    # --- Execution mode -----------------------------------------------------------
+    # Genie is a personal dev/demo deployment - there is no separate
+    # production tier, so these flags simply choose real Azure services
+    # (Foundry, etc.) when configured, falling back to local/mock stand-ins
+    # otherwise. See app.agents.gateway.create_agent_gateway and its sibling
+    # factories (governance, customer/mission agent provisioning, deploy
+    # pipeline, speech-to-text) for exactly how each one is selected.
     governance_provider: GovernanceProviderName = "local"
-
-    # --- Production safety flags (must be False when provider_mode=production) -
     allow_mock_agents: bool = True
     allow_local_agents: bool = True
     use_synthetic_data: bool = True
-    # Independent of allow_local_agents (which selects LocalAgentGateway vs
-    # AzureAgentGateway for agent *execution*): this only controls whether
-    # create_token_validator() may fall back to LocalDevTokenValidator
-    # (unverified-signature JWT decode) when MISE is not configured. Kept
-    # separate so a deployment can require the real AzureAgentGateway
-    # (allow_local_agents=False) while MISE onboarding is still in progress,
-    # without either crash-looping or silently mocking agent execution.
-    # Must be False when provider_mode=production (enforced below).
+    # Controls whether create_token_validator() may fall back to
+    # LocalDevTokenValidator (unverified-signature JWT decode). Independent
+    # of allow_local_agents (which selects LocalAgentGateway vs
+    # AzureAgentGateway for agent *execution*) so the two concerns can be
+    # configured independently.
     allow_local_token_validation: bool = True
 
     # --- Azure AI Foundry ---------------------------------------------------------
@@ -117,10 +116,6 @@ class Settings(BaseSettings):
 
     # --- Security -------------------------------------------------------------------
     key_vault_uri: str | None = None
-    entra_tenant_id: str | None = None
-    entra_client_id: str | None = None
-    mise_endpoint: str | None = None
-    mise_timeout_seconds: float = 5.0
 
     # Id of the workflow step (config/workflows/*.yaml) whose output_text
     # carries the Requirements Analyst agent's structured agentic-workflow
@@ -196,7 +191,6 @@ class Settings(BaseSettings):
         "azure_foundry_endpoint",
         "azure_speech_endpoint",
         "key_vault_uri",
-        "mise_endpoint",
         "memory_store_endpoint",
         "lineage_store_endpoint",
         "azure_subscription_id",

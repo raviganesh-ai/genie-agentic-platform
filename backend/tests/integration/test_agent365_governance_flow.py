@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.governance.governance_models import Agent365GovernanceProvider, GovernanceProviderError
+from app.governance.governance_models import Agent365GovernanceProvider
 from app.governance.governance_service import create_governance_service
 from app.models.approval_models import ApprovalAuditRecord
 from app.models.governance_event import GovernanceEvent
@@ -44,15 +44,9 @@ async def test_local_mode_defaults_to_local_governance_trace_provider(local_sett
 
 
 @pytest.mark.asyncio
-async def test_production_requires_explicit_provider(production_settings):
-    with pytest.raises(GovernanceProviderError):
-        create_governance_service(settings=production_settings)
-
-
-@pytest.mark.asyncio
-async def test_production_with_explicit_provider_records_events(production_settings):
+async def test_explicit_agent365_provider_records_events(foundry_configured_settings):
     provider = _FakeAgent365Provider()
-    service = create_governance_service(settings=production_settings, provider=provider)
+    service = create_governance_service(settings=foundry_configured_settings, provider=provider)
 
     await service.record_memory_write(
         session_id="session-1", trace_id="trace-1", agent_id="agent-a", detail={"tier": "shared"}

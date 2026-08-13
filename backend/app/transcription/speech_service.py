@@ -1,13 +1,12 @@
 """Azure AI Speech transcription service selection.
 
-Mirrors ``app.agents.gateway`` (``create_agent_gateway``): production must
-execute transcription exclusively through Azure AI Speech
-(``AzureSpeechToTextService``) and fail closed if it is not configured or
-unreachable; local/dev may use a deterministic, non-network stub
-(``LocalSpeechToTextService``) only when ``allow_local_agents`` is True.
-Reuses ``allow_local_agents``/``provider_mode`` rather than introducing a
-parallel flag, so this new capability follows the exact same fail-closed
-gating already established for agent execution.
+Mirrors ``app.agents.gateway`` (``create_agent_gateway``):
+``AzureSpeechToTextService`` is used whenever Azure AI Speech is
+configured; ``LocalSpeechToTextService`` is a deterministic, non-network
+stub for local development, used only when ``allow_local_agents`` is True.
+Reuses ``allow_local_agents`` rather than introducing a parallel flag, so
+this capability follows the exact same gating already established for
+agent execution.
 """
 from __future__ import annotations
 
@@ -46,9 +45,9 @@ class SpeechToTextService(Protocol):
 class LocalSpeechToTextService:
     """Deterministic, non-network transcription stub for local dev/tests only.
 
-    Never used in production - mirrors ``LocalAgentGateway``: proves the
-    upload -> transcription -> workflow-input contract works without real
-    Azure AI Speech credentials. Performs no real speech recognition.
+    Mirrors ``LocalAgentGateway``: proves the upload -> transcription ->
+    workflow-input contract works without real Azure AI Speech credentials.
+    Performs no real speech recognition.
     """
 
     async def transcribe(
@@ -145,13 +144,11 @@ class AzureSpeechToTextService:
 
 
 def create_speech_to_text_service(settings: Settings) -> SpeechToTextService:
-    """Select the transcription backend for the current provider mode.
+    """Select the transcription backend for the current configuration.
 
-    Mirrors ``create_agent_gateway``: production always resolves to
-    ``AzureSpeechToTextService`` (fails closed if Azure AI Speech is not
-    configured); local/dev uses ``LocalSpeechToTextService`` only when
-    ``allow_local_agents`` is True, otherwise also requires real Azure AI
-    Speech configuration.
+    Mirrors ``create_agent_gateway``: ``LocalSpeechToTextService`` when
+    ``allow_local_agents`` is True, otherwise requires real Azure AI Speech
+    configuration (fails closed).
     """
 
     def _build_azure_service() -> SpeechToTextService:
@@ -160,9 +157,6 @@ def create_speech_to_text_service(settings: Settings) -> SpeechToTextService:
                 "azure_speech_endpoint must be configured to use AzureSpeechToTextService."
             )
         return AzureSpeechToTextService(endpoint=settings.azure_speech_endpoint)
-
-    if settings.provider_mode == "production":
-        return _build_azure_service()
 
     if settings.allow_local_agents:
         return LocalSpeechToTextService()

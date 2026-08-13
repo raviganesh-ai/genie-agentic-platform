@@ -27,15 +27,14 @@ def test_azure_speech_service_rejects_blank_endpoint():
         AzureSpeechToTextService(endpoint="   ")
 
 
-def test_create_service_uses_local_stub_in_local_mode_by_default():
-    settings = Settings(provider_mode="local", allow_local_agents=True)
+def test_create_service_uses_local_stub_by_default():
+    settings = Settings(allow_local_agents=True)
     service = create_speech_to_text_service(settings)
     assert isinstance(service, LocalSpeechToTextService)
 
 
 def test_create_service_uses_azure_when_local_agents_disallowed_and_configured():
     settings = Settings(
-        provider_mode="local",
         allow_local_agents=False,
         azure_speech_endpoint="https://genie-speech.example.cognitiveservices.azure.com",
     )
@@ -44,22 +43,6 @@ def test_create_service_uses_azure_when_local_agents_disallowed_and_configured()
 
 
 def test_create_service_fails_closed_when_no_backend_usable():
-    settings = Settings(provider_mode="local", allow_local_agents=False, azure_speech_endpoint=None)
+    settings = Settings(allow_local_agents=False, azure_speech_endpoint=None)
     with pytest.raises(SpeechServiceUnavailableError):
         create_speech_to_text_service(settings)
-
-
-def test_create_service_fails_closed_in_production_without_endpoint():
-    settings = Settings(provider_mode="production", allow_local_agents=False)
-    with pytest.raises(SpeechServiceUnavailableError):
-        create_speech_to_text_service(settings)
-
-
-def test_create_service_uses_azure_in_production_when_configured():
-    settings = Settings(
-        provider_mode="production",
-        allow_local_agents=False,
-        azure_speech_endpoint="https://genie-speech.example.cognitiveservices.azure.com",
-    )
-    service = create_speech_to_text_service(settings)
-    assert isinstance(service, AzureSpeechToTextService)

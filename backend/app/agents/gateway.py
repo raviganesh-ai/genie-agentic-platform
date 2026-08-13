@@ -1,9 +1,10 @@
 """Agent execution gateway selection.
 
-See "Production Agent Rules" in ``.github/copilot-instructions.md``:
-production must execute exclusively through Azure AI Foundry via
-``AzureAgentGateway``, never fall back to local or mock execution, and must
-fail closed if Foundry is unavailable or misconfigured.
+Genie is a personal dev/demo deployment with no separate production tier.
+``AzureAgentGateway`` executes real Azure AI Foundry agents whenever
+Foundry is configured; ``LocalAgentGateway`` is a deterministic,
+no-network stand-in for local development. See ``create_agent_gateway``
+below for the exact selection rule.
 
 This module (and ``azure_agent_gateway.py``) contain no agent reasoning of
 any kind. Every Genie business agent is an independently deployed Azure AI
@@ -145,12 +146,11 @@ def resolve_prompt_text(prompt_registry: PromptRegistry, request: AgentExecution
 class LocalAgentGateway:
     """Deterministic, non-network agent execution for local development only.
 
-    Never used in production: ``ProductionSafetyValidator`` fails closed if
-    ``allow_local_agents`` is True while ``provider_mode`` is production, and
-    ``create_agent_gateway`` below never returns this gateway in production.
-    It performs no reasoning of any kind - it only proves that agent/prompt
-    resolution succeeded, so developers can exercise the request/response
-    contract without needing real Azure AI Foundry credentials.
+    ``create_agent_gateway`` below only returns this gateway when
+    ``allow_local_agents`` is True. It performs no reasoning of any kind -
+    it only proves that agent/prompt resolution succeeded, so developers
+    can exercise the request/response contract without needing real Azure
+    AI Foundry credentials.
     """
 
     def __init__(self, agent_registry: AgentRegistry, prompt_registry: PromptRegistry) -> None:
@@ -195,15 +195,11 @@ def create_agent_gateway(
     session_agent_resolver: SessionAgentResolver | None = None,
     tool_registry: AgentToolRegistry | None = None,
 ) -> AgentGateway:
-    """Select the single execution gateway for the current provider mode.
+    """Select the single execution gateway for the current configuration.
 
-    Production: always ``AzureAgentGateway``. Never falls back to
-    ``LocalAgentGateway``; raises ``AgentGatewayError`` (fail closed) if
-    Foundry is not configured.
-
-    Local/dev: ``LocalAgentGateway`` when ``allow_local_agents`` is True,
-    otherwise ``AzureAgentGateway`` if Foundry is configured, otherwise
-    raises.
+    ``LocalAgentGateway`` when ``allow_local_agents`` is True, otherwise
+    ``AzureAgentGateway`` if Foundry is configured, otherwise raises
+    (fail closed).
 
     ``session_agent_resolver``, when supplied, lets ``AzureAgentGateway``
     route a given session's executions to that session's own dedicated
@@ -243,11 +239,6 @@ def create_agent_gateway(
             governance_recorder=recorder,
             session_agent_resolver=session_agent_resolver,
         )
-
-    if settings.provider_mode == "production":
-        # Fail closed: production must never fall back to local execution,
-        # so this always resolves to AzureAgentGateway or raises.
-        return _build_azure_gateway()
 
     if settings.allow_local_agents:
         return LocalAgentGateway(agent_registry, prompt_registry)

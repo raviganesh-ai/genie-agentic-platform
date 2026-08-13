@@ -78,7 +78,7 @@ flowchart TB
 - Only `app/agents/foundry/project_service.py` (and, for deployment tooling, `app/deployment/provider_status_source.py`) may import `azure-ai-projects` / `azure-identity`. A standing test (`tests/unit/test_architecture_boundary.py`) greps the whole backend source tree to guarantee this.
 - Every Genie business/debugging **agent is an independently deployed Azure AI Foundry agent resource** (created via the Foundry portal, CLI, or the provisioning scripts in this repo) — Genie never implements agent reasoning as ad hoc Python classes, and never calls `create_agent()` at request time.
 - The frontend **never** calls Azure AI Foundry directly — a static scan test (`no_foundry_direct_access.test.tsx`) fails the build if any non-`httpClient.ts` file performs a raw `fetch()` call or imports a Foundry SDK / hostname.
-- Production execution always goes through `AzureAgentGateway`. Local/mock agents, static demo data, and fallback execution are only permitted when `GENIE_PROVIDER_MODE=local` **and** `GENIE_ALLOW_LOCAL_AGENTS=true` — production mode fails closed instead of ever silently falling back.
+- Execution goes through `AzureAgentGateway` whenever Azure AI Foundry is configured. Local/mock agents, static demo data, and fallback execution are only permitted when `GENIE_ALLOW_LOCAL_AGENTS=true` (and no Foundry endpoint is configured) — otherwise the gateway fails closed instead of ever silently falling back.
 
 ### Three-tier memory architecture
 
@@ -248,7 +248,7 @@ python -m venv .venv
 
 > **Windows on ARM64 note:** do not install `uvicorn[standard]` — `httptools` has no `win_arm64` wheel. Use plain `uvicorn`. If `azure-identity`'s dependency resolver pulls a `cryptography` version with no `win_arm64` wheel, run `pip install cryptography --only-binary=:all:` first.
 
-Copy `.env.example` (if present) or set the environment variables listed in [Configuration reference](#configuration-reference). With `GENIE_PROVIDER_MODE=local` and `GENIE_ALLOW_LOCAL_AGENTS=true`, the backend runs entirely against in-memory stores and `LocalAgentGateway` (no Azure required).
+Copy `.env.example` (if present) or set the environment variables listed in [Configuration reference](#configuration-reference). With `GENIE_ALLOW_LOCAL_AGENTS=true` and no Foundry endpoint configured, the backend runs entirely against in-memory stores and `LocalAgentGateway` (no Azure required).
 
 ### Frontend
 
@@ -275,7 +275,6 @@ All backend configuration is via environment variables prefixed `GENIE_` (pydant
 | `GENIE_SERVICE_NAME` | `genie-backend` | Service identity for logs/telemetry |
 | `GENIE_ENVIRONMENT` | `development` | `development` \| `test` \| `production` |
 | `GENIE_LOG_LEVEL` | `INFO` | Log verbosity |
-| `GENIE_PROVIDER_MODE` | `local` | `local` \| `production` — production forbids all local/mock fallback |
 | `GENIE_GOVERNANCE_PROVIDER` | `local` | `local` \| `agent365` — production requires a real provider |
 | `GENIE_ALLOW_MOCK_AGENTS` | `true` | Must be `false` in production |
 | `GENIE_ALLOW_LOCAL_AGENTS` | `true` | Must be `false` in production |

@@ -152,7 +152,7 @@ class TestCreateAgentGateway:
     def test_local_mode_with_allow_local_agents_returns_local_gateway(
         self, agent_registry: AgentRegistry, prompt_registry: PromptRegistry
     ):
-        settings = Settings(provider_mode="local", allow_local_agents=True)
+        settings = Settings(allow_local_agents=True)
         gateway = create_agent_gateway(
             settings=settings, agent_registry=agent_registry, prompt_registry=prompt_registry
         )
@@ -162,7 +162,6 @@ class TestCreateAgentGateway:
         self, agent_registry: AgentRegistry, prompt_registry: PromptRegistry
     ):
         settings = Settings(
-            provider_mode="local",
             allow_local_agents=False,
             azure_foundry_endpoint="https://genie-foundry.example-project.azure.com",
             azure_foundry_project_name="genie-project",
@@ -175,17 +174,16 @@ class TestCreateAgentGateway:
     def test_local_mode_without_local_agents_or_foundry_raises(
         self, agent_registry: AgentRegistry, prompt_registry: PromptRegistry
     ):
-        settings = Settings(provider_mode="local", allow_local_agents=False)
+        settings = Settings(allow_local_agents=False)
         with pytest.raises(AgentGatewayError, match="No usable agent execution gateway"):
             create_agent_gateway(
                 settings=settings, agent_registry=agent_registry, prompt_registry=prompt_registry
             )
 
-    def test_production_mode_returns_azure_gateway_when_configured(
+    def test_azure_gateway_used_when_local_agents_disallowed_and_foundry_configured(
         self, agent_registry: AgentRegistry, prompt_registry: PromptRegistry
     ):
         settings = Settings(
-            provider_mode="production",
             allow_mock_agents=False,
             allow_local_agents=False,
             use_synthetic_data=False,
@@ -196,17 +194,3 @@ class TestCreateAgentGateway:
             settings=settings, agent_registry=agent_registry, prompt_registry=prompt_registry
         )
         assert isinstance(gateway, AzureAgentGateway)
-
-    def test_production_mode_never_falls_back_to_local(
-        self, agent_registry: AgentRegistry, prompt_registry: PromptRegistry
-    ):
-        settings = Settings(
-            provider_mode="production",
-            allow_mock_agents=False,
-            allow_local_agents=True,  # even if True, production must not use it
-            use_synthetic_data=False,
-        )
-        with pytest.raises(AgentGatewayError, match="azure_foundry_endpoint"):
-            create_agent_gateway(
-                settings=settings, agent_registry=agent_registry, prompt_registry=prompt_registry
-            )

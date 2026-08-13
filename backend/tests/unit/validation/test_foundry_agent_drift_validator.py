@@ -43,24 +43,24 @@ def _record(**overrides: object) -> FoundryAgentInventoryRecord:
     return FoundryAgentInventoryRecord.model_validate(defaults)
 
 
-def test_no_op_outside_production(local_settings: Settings):
+def test_validate_passes_for_config_with_no_workflow_agent_references(local_settings: Settings):
     result = FoundryAgentDriftValidator().validate(local_settings)
 
     assert result.passed
 
 
-def test_validate_passes_for_real_repo_config(production_settings: Settings):
-    # production_settings points at a hermetic tmp_path config tree with no
-    # workflows referencing agents at all, so there is nothing to flag.
-    result = FoundryAgentDriftValidator().validate(production_settings)
+def test_validate_passes_for_real_repo_config(foundry_configured_settings: Settings):
+    # foundry_configured_settings points at a hermetic tmp_path config tree
+    # with no workflows referencing agents at all, so there is nothing to flag.
+    result = FoundryAgentDriftValidator().validate(foundry_configured_settings)
 
     assert result.passed, result.issues
 
 
 def test_validate_flags_workflow_step_referencing_disabled_agent(
-    production_settings: Settings, tmp_path: Path
+    foundry_configured_settings: Settings, tmp_path: Path
 ):
-    agents_dir = production_settings.config_root / "agents"
+    agents_dir = foundry_configured_settings.config_root / "agents"
     (agents_dir / "registry.yaml").write_text(
         "agents:\n"
         "  - id: test-agent\n"
@@ -71,7 +71,7 @@ def test_validate_flags_workflow_step_referencing_disabled_agent(
         encoding="utf-8",
     )
 
-    result = FoundryAgentDriftValidator().validate(production_settings)
+    result = FoundryAgentDriftValidator().validate(foundry_configured_settings)
 
     assert not result.passed
     assert any("Lifecycle drift" in issue.message for issue in result.issues)

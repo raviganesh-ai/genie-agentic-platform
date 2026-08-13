@@ -108,7 +108,6 @@ def local_settings(valid_config_root: Path) -> Settings:
 
     return Settings(
         environment="development",
-        provider_mode="local",
         governance_provider="local",
         allow_mock_agents=True,
         allow_local_agents=True,
@@ -118,12 +117,18 @@ def local_settings(valid_config_root: Path) -> Settings:
 
 
 @pytest.fixture
-def production_settings(valid_config_root: Path) -> Settings:
-    """Settings representing a safe, fully configured production deployment."""
+def foundry_configured_settings(valid_config_root: Path) -> Settings:
+    """Settings representing a fully configured real-Azure deployment.
+
+    Genie is a personal dev/demo deployment with no separate production
+    tier - this fixture exists for tests that need every optional Azure
+    integration (Foundry, Key Vault, Cosmos DB-backed memory/lineage
+    stores) configured, as opposed to ``local_settings``'s local/mock
+    defaults.
+    """
 
     return Settings(
         environment="production",
-        provider_mode="production",
         governance_provider="agent365",
         allow_mock_agents=False,
         allow_local_agents=False,
@@ -136,8 +141,5 @@ def production_settings(valid_config_root: Path) -> Settings:
         memory_store_endpoint="https://genie-memory.example-project.documents.azure.com/",
         lineage_store_backend="cosmos_db",
         lineage_store_endpoint="https://genie-lineage.example-project.documents.azure.com/",
-        entra_tenant_id="00000000-0000-0000-0000-000000000000",
-        entra_client_id="11111111-1111-1111-1111-111111111111",
-        mise_endpoint="http://mise-sidecar:8080",
         config_root=valid_config_root,
     )

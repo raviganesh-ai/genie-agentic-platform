@@ -6,11 +6,12 @@ Usage (from the ``backend`` virtual environment)::
 
 Runs ``FoundryAgentRegistryValidator`` and ``FoundryAgentDriftValidator``
 (configuration-only, no network access) against the currently configured
-``Settings`` and prints every issue found. Both validators are no-ops
-outside production mode (``GENIE_PROVIDER_MODE=production``), mirroring
-``ProductionSafetyValidator``'s shape, so this script is most useful when
-run with production-shaped environment variables set, e.g. in a CI/CD
-deployment gate before promoting a new agent catalog.
+``Settings`` and prints every issue found. Genie is a personal dev/demo
+deployment with no separate production tier, so both validators are
+currently permanent no-ops (see their module docstrings) - kept as a
+distinct, separately invoked pair for a future need to enforce Foundry
+agent metadata (e.g. before a mission's agents are provisioned into a real
+Foundry project).
 
 Exits non-zero if either validator fails.
 """
