@@ -3,26 +3,25 @@
 Exercises auth/session-ownership through the real ASGI app (confirms
 ``app.main.create_app`` wires ``DeploymentPipelineService`` onto
 ``app.state`` correctly) - same minimal pattern as
-``test_workflow_events_stream_api.py``. Approval-gating/step-execution
-logic against real collaborators (real ``ApprovalService``, real sandboxed
-``TestExecutionService``/``SecurityScanService`` runs) is covered by
+``test_workflow_events_stream_api.py``. Step-execution logic against real
+collaborators (real sandboxed ``TestExecutionService``/
+``SecurityScanService`` runs) is covered by
 ``tests/unit/deploy_launch/test_pipeline_service.py``.
 
 ``test_full_pipeline_runs_through_the_real_http_api`` below additionally
 drives the whole Deploy & Launch user journey through the real HTTP
-routes end to end - real session creation, real approval gating, the real
-fire-and-forget background execution, real polling, and a real zip
-download - to prove, at the API boundary (not just the service layer),
-that: (1) ``POST .../start`` returns before the pipeline finishes (never
-blocks the request for the whole multi-step run), (2) every step always
-reaches a terminal status, and (3) the mission's own title - not a
-generic ``"mission-"`` placeholder - is reflected in the provisioned
-Foundry agent names. The only thing stood in for is the upstream,
-live-Foundry-driven ``solution-discovery-workflow`` run this pipeline
-reads from: completing that workflow for real in local mode would require
-a live agent gateway (see ``tests/unit/deploy_launch/test_pipeline_service.py``'s
-docstring for the same, already-established constraint elsewhere in this
-suite).
+routes end to end - real session creation, the real fire-and-forget
+background execution, real polling, and a real zip download - to prove,
+at the API boundary (not just the service layer), that: (1)
+``POST .../start`` returns before the pipeline finishes (never blocks the
+request for the whole multi-step run), (2) every step always reaches a
+terminal status, and (3) the mission's own title - not a generic
+``"mission-"`` placeholder - is reflected in the provisioned Foundry agent
+names. The only thing stood in for is the upstream, live-Foundry-driven
+``solution-discovery-workflow`` run this pipeline reads from: completing
+that workflow for real in local mode would require a live agent gateway
+(see ``tests/unit/deploy_launch/test_pipeline_service.py``'s docstring for
+the same, already-established constraint elsewhere in this suite).
 """
 from __future__ import annotations
 
@@ -94,9 +93,8 @@ def _bearer_token(user_id: str) -> str:
 @pytest.fixture
 def real_config_local_settings() -> Settings:
     """Local/dev settings against the real ``config/`` tree (not the minimal
-    ``local_settings`` fixture's hermetic stub policy) - needed because the
-    real ``final-output-approval`` checkpoint this test exercises only
-    exists in the actual ``config/policies/approval_policy.yaml``."""
+    ``local_settings`` fixture's hermetic stub policy) - needed because this
+    test exercises the real, production-wired ``DeploymentPipelineService``."""
 
     return Settings(
         environment="development",
@@ -209,7 +207,6 @@ async def test_full_pipeline_runs_through_the_real_http_api(
         app.state.deployment_pipeline_service = DeploymentPipelineService(
             orchestrator=_StubUpstreamWorkflowOrchestrator(run=stub_run),  # type: ignore[arg-type]
             session_service=app.state.session_service,
-            approval_service=orchestrator.approval_service,
             event_bus=orchestrator.workflow_event_bus,
             access_policy_service=AccessPolicyService(agent_registry=orchestrator.agent_registry),
             mission_agent_provisioning_service=NullMissionAgentProvisioningService(),
@@ -226,25 +223,9 @@ async def test_full_pipeline_runs_through_the_real_http_api(
             assert session_resp.status_code == 201
             session_id = session_resp.json()["id"]
 
-            # First start() call: no approval decision exists yet for this
-            # workflow run, so it must fail closed (409) and create the
-            # approval request as a side effect - real ApprovalService,
-            # never mocked away.
-            pending_resp = await client.post(
-                f"/sessions/{session_id}/deploy-launch/start",
-                json={"workflow_run_id": "run-1"},
-                headers=headers,
-            )
-            assert pending_resp.status_code == 409
-
-            requests = await orchestrator.approval_service.list_requests_for_session(session_id)
-            final_output_request = next(
-                r for r in requests if r.checkpoint_id == "final-output-approval"
-            )
-            await orchestrator.approval_service.decide(
-                request_id=final_output_request.id, decision="approved", decided_by="reviewer-1"
-            )
-
+            # Deploy & Launch has exactly one gate - the human clicking
+            # Start - so this single call kicks off the real pipeline
+            # immediately, no approval round-trip needed.
             start_resp = await client.post(
                 f"/sessions/{session_id}/deploy-launch/start",
                 json={"workflow_run_id": "run-1"},

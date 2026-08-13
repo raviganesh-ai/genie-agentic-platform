@@ -36,12 +36,14 @@ prompts:
       it: "Goals:", "Functional Requirements:", "Non-Functional
       Requirements:", "Risks:", "Assumptions:", "Constraints:".
 
-      Also make sure the Non-Functional Requirements group explicitly
-      covers application security (authentication/authorization, data
-      protection, secret handling) and reliability (error handling,
-      resilience, availability) as their own items - add them yourself if
-      the transcript does not already call them out, since every solution
-      Genie builds must be secure and reliable by default.
+      Only include a Non-Functional Requirement (including security or
+      reliability items) if the transcript or customer message actually
+      calls it out or clearly implies it - do not fabricate or add
+      security, compliance, or reliability requirements that were never
+      mentioned. Stay strictly scoped to what was actually discussed: this
+      is an MVP/prototype, not a production hardening exercise, so keep
+      the requirement list as small and focused as the real conversation
+      warrants.
 
       Immediately after the category groups, add a "Critical path:"
       section. This defines the scope of the initial prototype: the
@@ -71,7 +73,7 @@ prompts:
     variables:
       - transcript_excerpt
       - user_message
-    version: "1.3.0"
+    version: "1.4.0"
 
 
   - id: architecture-recommendation-v1
@@ -116,6 +118,14 @@ prompts:
       goal among the remaining agents (dropping anything no longer
       achievable without that agent rather than inventing a replacement),
       and do not rename an excluded agent to sneak it back in.
+
+      Keep the agent lineup as lean as the approved requirements allow -
+      this is an MVP prototype, not a production system. Do not add a
+      dedicated security/compliance-review agent, exception/error-review
+      agent, monitoring agent, or any other "best practice" agent unless
+      the approved requirements above explicitly call for that
+      responsibility. Every agent you propose must trace directly back to
+      something the requirements actually ask for.
 
       Respond with exactly these two top-level sections, in this order,
       each as a markdown "## " header followed by a one-sentence summary
@@ -171,7 +181,7 @@ prompts:
     variables:
       - approved_requirements
       - user_message
-    version: "3.4.0"
+    version: "3.5.0"
 
   - id: security-assessment-v1
     name: Security Assessment

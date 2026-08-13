@@ -5,7 +5,6 @@ import { useSessionContext } from "@/state/SessionContext";
 import { useWorkshop } from "@/hooks/useWorkshop";
 import { useAsyncResource } from "@/hooks/useAsyncResource";
 import { workflowApi } from "@/services/workflowApi";
-import { approvalApi } from "@/services/approvalApi";
 import { getTraceId } from "@/state/traceRegistry";
 import { ApiError } from "@/services/httpClient";
 import { PageHeader } from "@/layouts/AppShell";
@@ -34,8 +33,6 @@ export function WorkshopPage(): JSX.Element {
   const [rerunningBuild, setRerunningBuild] = useState(false);
   const [rerunBuildError, setRerunBuildError] = useState<string | null>(null);
   const [reviewAcknowledged, setReviewAcknowledged] = useState(false);
-  const [proceeding, setProceeding] = useState(false);
-  const [proceedError, setProceedError] = useState<string | null>(null);
   // Architecture Studio's approval handler kicks off build-solution with a
   // fire-and-forget resume call (it navigates here immediately rather than
   // waiting - see handleApproveArchitecture's comment there) so its own
@@ -108,21 +105,36 @@ export function WorkshopPage(): JSX.Element {
   // redundant echo is still being generated.
   const buildGenerationComplete = Boolean(buildOutputText) || isBuildOutputComplete(displayedBuildText);
 
+  // Any live event at all for build-solution (not just its own delta text)
+  // is direct proof the step has already started server-side - a
+  // `step_started` event fires before the first content chunk, and
+  // switching tabs away and back remounts this page (a fresh SSE
+  // connection with no replay of earlier events), so relying on
+  // `liveBuildText` alone would forget that proof and could false-positive
+  // "hasn't started" on a run that is genuinely still generating.
+  const hasBuildStepLiveEvent = useMemo(
+    () => liveEvents.some((event) => event.step_id === BUILD_STEP_ID),
+    [liveEvents],
+  );
+
   // Arms a one-shot timer whenever this run has neither a recorded
-  // build-solution result nor any live streamed text yet - i.e. nothing
-  // proves the step ever actually started server-side. Any real progress
-  // (a live delta, a stored result, or an error) disarms it via the
-  // dependency array/cleanup below, so this only fires for the genuinely
-  // stuck case, not merely a build that's still (correctly) in progress.
+  // build-solution result nor any live signal (event or streamed text) yet
+  // - i.e. nothing proves the step ever actually started server-side. Any
+  // real progress (a live event, a stored result, or an error) disarms it
+  // via the dependency array/cleanup below, so this only fires for the
+  // genuinely stuck case, not merely a build that's still (correctly) in
+  // progress - generating a full UI plus every specialist agent's code can
+  // legitimately take a while between visible chunks, especially right
+  // after switching tabs away and back.
   useEffect(() => {
-    if (buildStepResult || liveBuildText) {
+    if (buildStepResult || liveBuildText || hasBuildStepLiveEvent) {
       setBuildStartStuck(false);
       return;
     }
     setBuildStartStuck(false);
-    const timer = window.setTimeout(() => setBuildStartStuck(true), 45_000);
+    const timer = window.setTimeout(() => setBuildStartStuck(true), 90_000);
     return () => window.clearTimeout(timer);
-  }, [workflowRunId, buildStepResult, liveBuildText]);
+  }, [workflowRunId, buildStepResult, liveBuildText, hasBuildStepLiveEvent]);
 
   // missionError only ever means "the fire-and-forget request that was
   // supposed to KICK OFF build-solution failed to confirm that" (see
@@ -185,35 +197,13 @@ export function WorkshopPage(): JSX.Element {
   }, [sessionId, workflowRunId, governancePolicies, refreshRun, setMissionError]);
 
   // Once the user has ticked the risk-acknowledgment checkbox and clicks
-  // Proceed, THIS is the human review the `build-review-approval` checkpoint
-  // represents (see config/policies/approval_policy.yaml) - the same
-  // reviewed-generated-code gesture the Workshop page's checkbox copy
-  // already describes. Decide it here (if still pending) so the user is
-  // never asked to approve anything a second time on Deploy & Launch: that
-  // page's own Start action self-heals/resumes the run past this now-
-  // decided gate automatically, with no separate approval screen.
-  const handleProceedToDeployLaunch = useCallback(async () => {
-    if (!sessionId || !workflowRunId) {
-      navigate("/outputs");
-      return;
-    }
-    setProceeding(true);
-    setProceedError(null);
-    try {
-      const approvals = await approvalApi.list(sessionId);
-      const pendingBuildReview = approvals.find(
-        (request) => request.checkpoint_id === "build-review-approval" && request.status === "pending",
-      );
-      if (pendingBuildReview) {
-        await approvalApi.decide(sessionId, pendingBuildReview.id, "approved");
-      }
-      navigate("/outputs");
-    } catch (err) {
-      setProceedError((err as ApiError).message ?? "Failed to proceed to Deploy & Launch.");
-    } finally {
-      setProceeding(false);
-    }
-  }, [sessionId, workflowRunId, navigate]);
+  // Proceed, THIS is the human review this app's single gate represents -
+  // the reviewed-generated-code gesture the Workshop page's checkbox copy
+  // already describes. Deploy & Launch has no separate approval screen of
+  // its own; it just starts running the moment the user gets there.
+  const handleProceedToDeployLaunch = useCallback(() => {
+    navigate("/outputs");
+  }, [navigate]);
 
   if (!workflowRunId || !sessionId) {
     return (
@@ -304,15 +294,13 @@ export function WorkshopPage(): JSX.Element {
             checked={reviewAcknowledged}
             onChange={(_, data) => setReviewAcknowledged(Boolean(data.checked))}
           />
-          {proceedError ? <ErrorState error={{ message: proceedError }} /> : null}
           {reviewAcknowledged ? (
             <Button
               appearance="primary"
               style={{ marginTop: 8 }}
-              disabled={proceeding}
-              onClick={() => void handleProceedToDeployLaunch()}
+              onClick={handleProceedToDeployLaunch}
             >
-              {proceeding ? "Proceeding..." : "Proceed to Deploy & Launch"}
+              Proceed to Deploy & Launch
             </Button>
           ) : null}
         </SectionCard>

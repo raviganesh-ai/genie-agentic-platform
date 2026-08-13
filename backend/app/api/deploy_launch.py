@@ -2,11 +2,10 @@
 
 Exposes the real, nine-step Deploy & Launch pipeline
 (``app.deploy_launch.pipeline_service.DeploymentPipelineService``):
-``POST .../start`` (executes every step once the ``final-output-approval``
-checkpoint has been granted - see ``WorkshopPage``/``approvals.py`` for
-how that checkpoint is decided), ``GET .../{pipeline_run_id}`` (poll one
-run's current status), ``GET .../`` (list every run for this session), and
-``GET .../{pipeline_run_id}/download`` (a zip of the materialized backend
+``POST .../start`` (executes every step as soon as the human clicks
+Start - the one gate this stage has), ``GET .../{pipeline_run_id}`` (poll
+one run's current status), ``GET .../`` (list every run for this
+session), and ``GET .../{pipeline_run_id}/download`` (a zip of the materialized backend
 build plus the generated least-access policy document). Live per-step
 progress is available via the existing
 ``GET /sessions/{session_id}/workflow-events/stream`` SSE route - this

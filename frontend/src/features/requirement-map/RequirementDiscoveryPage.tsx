@@ -12,7 +12,6 @@ import {
 import { useSessionContext } from "@/state/SessionContext";
 import { useRequirements, useRequirementsQualification } from "@/hooks/useRequirements";
 import { useAsyncResource } from "@/hooks/useAsyncResource";
-import { approvalApi } from "@/services/approvalApi";
 import { workflowApi } from "@/services/workflowApi";
 import { getTraceId } from "@/state/traceRegistry";
 import type { WorkflowStepInput } from "@/types/workflow";
@@ -168,30 +167,17 @@ function serializeGroupedRequirements(parsed: ParsedRequirements): string {
   return lines.join("\n").trim();
 }
 
-const APPROVAL_STATUS_META: Record<string, { icon: string; accent: string }> = {
-  approved: { icon: "✅", accent: "#3fa66a" },
-  pending: { icon: "⏳", accent: "#d99a2b" },
-  rejected: { icon: "⛔", accent: "#d1495b" },
-  challenged: { icon: "⚠️", accent: "#d99a2b" },
-};
-const DEFAULT_APPROVAL_META = { icon: "•", accent: "#5c6572" };
-
-function approvalStatusMeta(status: string): { icon: string; accent: string } {
-  return APPROVAL_STATUS_META[status] ?? DEFAULT_APPROVAL_META;
-}
-
 export function RequirementDiscoveryPage(): JSX.Element {
   const { sessionId, workflowRunId, missionStartedAt, missionError, setMissionError } = useSessionContext();
 
   const navigate = useNavigate();
   const { data, loading, error, refresh } = useRequirements(sessionId, workflowRunId, POLL_MS);
   const { data: qualification } = useRequirementsQualification(sessionId, workflowRunId, POLL_MS);
-  const [policiesByRequest, setPoliciesByRequest] = useState<Record<string, string>>({});
   const [requirementOverrides, setRequirementOverrides] = useState<ParsedRequirements | null>(null);
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
   const [showRawText, setShowRawText] = useState(false);
   const [resumeError, setResumeError] = useState<string | null>(null);
-  const [resumingRequestId, setResumingRequestId] = useState<string | null>(null);
+  const [proceeding, setProceeding] = useState(false);
   const [rerunningRequirements, setRerunningRequirements] = useState(false);
   const [rerunRequirementsError, setRerunRequirementsError] = useState<string | null>(null);
   // Defaults to a clean, read-only list so reviewing requirements doesn't
@@ -223,7 +209,6 @@ export function RequirementDiscoveryPage(): JSX.Element {
     if (lastLiveEvent?.event_type === "step_completed" || lastLiveEvent?.event_type === "step_failed") {
       void refresh();
       void refreshRun();
-      void refreshApprovals();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lastLiveEvent]);
@@ -364,105 +349,40 @@ export function RequirementDiscoveryPage(): JSX.Element {
   }, []);
 
 
-  // Real ApprovalRequest entries for this session (subject_type is
-  // currently always "workflow_step" per backend/app/orchestration/
-  // workflow_runtime.py - there is no per-requirement approval subject yet,
-  // so approve/reject is shown as its own section rather than invented
-  // per-requirement buttons that would call a nonexistent request id.
-  const approvalsFetcher = useCallback(
-    () => (sessionId ? approvalApi.list(sessionId) : Promise.reject(new Error("No session"))),
-    [sessionId],
-  );
-  const {
-    data: approvals,
-    loading: approvalsLoading,
-    error: approvalsError,
-    refresh: refreshApprovals,
-  } = useAsyncResource(approvalsFetcher, [sessionId], { enabled: Boolean(sessionId) });
-
-  // Drives whether the Pending Approvals card below docks to the bottom of
-  // the viewport - only worth pinning when there's actually a decision
-  // waiting on the user, otherwise it should scroll normally like every
-  // other section.
-  const hasPendingApproval = useMemo(
-    () => (approvals ?? []).some((request) => request.status === "pending"),
-    [approvals],
-  );
-
-  // Approving an ApprovalRequest only records the decision - it never
-  // resumes the gated workflow run on its own (backend/app/api/
-  // approvals.py's decide_approval is intentionally decision-only). Without
-  // this, the run permanently freezes at "waiting_for_approval" once
-  // approved. For the build-solution step specifically, its `policies`
-  // prompt variable is deliberately never auto-derived from the transcript
-  // (config/workflows/registry.yaml) - a human must supply it explicitly as
-  // a step_input, so we collect it here before resuming.
-
-  const approveAndResume = useCallback(
-    async (requestId: string, subjectId: string) => {
-      if (!sessionId || !workflowRunId) return;
-      setResumeError(null);
-      setResumingRequestId(requestId);
-      try {
-        await approvalApi.decide(sessionId, requestId, "approved");
-        await refreshApprovals();
-        const traceId = getTraceId(workflowRunId) ?? undefined;
-        const stepInputs: Record<string, WorkflowStepInput> | undefined =
-          subjectId === "design-architecture"
-            ? {
-                "design-architecture": {
-                  step_id: "design-architecture",
-                  variables: { approved_requirements: effectiveRequirementsDraft },
-                },
-              }
-            : subjectId === "build-solution"
-              ? {
-                  "build-solution": {
-                    step_id: "build-solution",
-                    variables: { policies: policiesByRequest[requestId] ?? "" },
-                  },
-                }
-              : undefined;
-
-        if (subjectId === "design-architecture") {
-          // Approving this checkpoint kicks off design-architecture (a real
-          // Architecture Designer agent call, which can take a while) in the
-          // resume call below - jump straight to Architecture Studio so its
-          // agent-activity animation is visible right away, instead of
-          // awaiting the whole step here first and arriving with the work
-          // already done (and the animation never getting a chance to show).
-          setMissionError(null);
-          navigate("/architecture-studio");
-          workflowApi.resumeRun(sessionId, workflowRunId, traceId, stepInputs).catch((err) => {
-            const safe: SafeError =
-              err instanceof ApiError ? err : { message: "Failed to resume the workflow." };
-            setMissionError(safe);
-          });
-          return;
-        }
-
-        await workflowApi.resumeRun(sessionId, workflowRunId, traceId, stepInputs);
-        // Resuming can complete further steps that raise their own new
-        // approval requests (e.g. final-output-approval) - refetch so any
-        // newly pending request appears without requiring a manual reload.
-        await Promise.all([refresh(), refreshApprovals()]);
-      } catch (err) {
-        setResumeError((err as ApiError).message ?? "Failed to resume the workflow.");
-      } finally {
-        setResumingRequestId(null);
-      }
-    },
-    [
-      sessionId,
-      workflowRunId,
-      policiesByRequest,
-      effectiveRequirementsDraft,
-      refresh,
-      refreshApprovals,
-      navigate,
-      setMissionError,
-    ],
-  );
+  // Once analyze-requirements has produced its output, design-architecture
+  // is this workflow's next `requires_human_proceed` step (config/workflows/
+  // registry.yaml) - it only runs once a resume call's own step_inputs
+  // explicitly names it, which is exactly what clicking Proceed below does.
+  // There is no separate ApprovalRequest to create/decide here.
+  const proceedToArchitecture = useCallback(async () => {
+    if (!sessionId || !workflowRunId) return;
+    setResumeError(null);
+    setProceeding(true);
+    try {
+      const traceId = getTraceId(workflowRunId) ?? undefined;
+      const stepInputs: Record<string, WorkflowStepInput> = {
+        "design-architecture": {
+          step_id: "design-architecture",
+          variables: { approved_requirements: effectiveRequirementsDraft },
+        },
+      };
+      // Kicks off design-architecture (a real Architecture Designer agent
+      // call, which can take a while) in the resume call below - jump
+      // straight to Architecture Studio so its agent-activity animation is
+      // visible right away, instead of awaiting the whole step here first
+      // and arriving with the work already done (and the animation never
+      // getting a chance to show).
+      setMissionError(null);
+      navigate("/architecture-studio");
+      workflowApi.resumeRun(sessionId, workflowRunId, traceId, stepInputs).catch((err) => {
+        const safe: SafeError =
+          err instanceof ApiError ? err : { message: "Failed to resume the workflow." };
+        setMissionError(safe);
+      });
+    } finally {
+      setProceeding(false);
+    }
+  }, [sessionId, workflowRunId, effectiveRequirementsDraft, navigate, setMissionError]);
 
   const handleRerunRequirementsStage = useCallback(async () => {
     if (!sessionId || !workflowRunId) return;
@@ -476,7 +396,7 @@ export function RequirementDiscoveryPage(): JSX.Element {
           variables: {},
         },
       });
-      await Promise.all([refresh(), refreshRun(), refreshApprovals()]);
+      await Promise.all([refresh(), refreshRun()]);
     } catch (err) {
       setRerunRequirementsError(
         (err as ApiError).message ?? "Failed to re-run Requirement Discovery.",
@@ -484,7 +404,7 @@ export function RequirementDiscoveryPage(): JSX.Element {
     } finally {
       setRerunningRequirements(false);
     }
-  }, [sessionId, workflowRunId, refresh, refreshRun, refreshApprovals]);
+  }, [sessionId, workflowRunId, refresh, refreshRun]);
 
   if (!workflowRunId) {
     // A mission was just kicked off from Upload, which navigates here
@@ -959,10 +879,8 @@ export function RequirementDiscoveryPage(): JSX.Element {
         );
       })}
 
-      <div style={hasPendingApproval ? { position: "sticky", bottom: 12, zIndex: 5 } : undefined}>
-      <SectionCard title="🔑 Pending Approvals">
-        {approvalsLoading && !approvals ? <LoadingState label="Loading approvals..." /> : null}
-        {approvalsError ? <ErrorState error={approvalsError} onRetry={refreshApprovals} /> : null}
+      <div style={analyzedRequirementsText ? { position: "sticky", bottom: 12, zIndex: 5 } : undefined}>
+      <SectionCard title="✅ Ready to proceed?">
         {resumeError ? (
           <MessageBar intent="error" layout="multiline" style={{ marginBottom: 12 }}>
             <MessageBarBody>
@@ -971,89 +889,28 @@ export function RequirementDiscoveryPage(): JSX.Element {
             </MessageBarBody>
           </MessageBar>
         ) : null}
-        {approvals && approvals.length === 0 ? (
+        {analyzedRequirementsText ? (
+          <>
+            <Text size={300} style={{ display: "block", marginBottom: 8, opacity: 0.8 }}>
+              Review/edit the discovered requirements above, then proceed to have the
+              Architecture Designer propose this mission's UI + multi-agent design.
+            </Text>
+            <Button
+              appearance="primary"
+              disabled={proceeding}
+              onClick={() => void proceedToArchitecture()}
+            >
+              {proceeding ? "Proceeding..." : "Proceed to Architecture"}
+            </Button>
+          </>
+        ) : (
           <Text size={300} style={{ opacity: 0.7 }}>
-            No pending approvals.
+            Waiting for requirement discovery to finish...
           </Text>
-        ) : null}
-        {approvals?.map((request) => {
-          const statusMeta = approvalStatusMeta(request.status);
-          return (
-          <div
-            key={request.id}
-            className="genie-fade-in"
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              gap: 12,
-              borderRadius: 8,
-              border: "1px solid #232a33",
-              borderLeft: `3px solid ${statusMeta.accent}`,
-              backgroundColor: "#161c24",
-              padding: "10px 12px",
-              marginBottom: 8,
-            }}
-          >
-            <div>
-              <Text size={300} weight="semibold" style={{ display: "block" }}>
-                🗂️ {request.subject_type.replace(/_/g, " ")} · {request.subject_id}
-              </Text>
-              <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4 }}>
-                <Text size={200} style={{ opacity: 0.7 }}>
-                  Requested by {request.requested_by_agent_id}
-                </Text>
-                <Badge
-                  shape="rounded"
-                  style={{ backgroundColor: `${statusMeta.accent}22`, color: statusMeta.accent }}
-                >
-                  {statusMeta.icon} {request.status}
-                </Badge>
-              </div>
-            </div>
-            {request.status === "pending" && sessionId ? (
-              <div style={{ display: "flex", flexDirection: "column", gap: 8, alignItems: "flex-end" }}>
-                {request.subject_id === "build-solution" ? (
-                  <Textarea
-                    placeholder="Policies to review against (required to resume this step)"
-                    value={policiesByRequest[request.id] ?? ""}
-                    onChange={(_, dataEv) =>
-                      setPoliciesByRequest((prev) => ({ ...prev, [request.id]: dataEv.value }))
-                    }
-                    style={{ width: "100%" }}
-                  />
-                ) : null}
-                <div style={{ display: "flex", gap: 8 }}>
-                  <Button
-                    size="small"
-                    appearance="primary"
-                    disabled={
-                      resumingRequestId === request.id ||
-                      (request.subject_id === "build-solution" &&
-                        !policiesByRequest[request.id]?.trim())
-                    }
-                    onClick={() => void approveAndResume(request.id, request.subject_id)}
-                  >
-                    {resumingRequestId === request.id ? "Approving..." : "Approve"}
-                  </Button>
-                  <Button
-                    size="small"
-                    onClick={() =>
-                      void approvalApi
-                        .decide(sessionId, request.id, "rejected")
-                        .then(refreshApprovals)
-                    }
-                  >
-                    Reject
-                  </Button>
-                </div>
-              </div>
-            ) : null}
-          </div>
-          );
-        })}
+        )}
       </SectionCard>
       </div>
     </div>
   );
 }
+

@@ -254,7 +254,6 @@ def create_app(
             settings=resolved_settings,
             orchestrator=orchestrator,
             session_service=session_service,
-            approval_service=orchestrator.approval_service,
             event_bus=orchestrator.workflow_event_bus,
             access_policy_service=AccessPolicyService(agent_registry=orchestrator.agent_registry),
             mission_agent_provisioning_service=create_mission_agent_provisioning_service(

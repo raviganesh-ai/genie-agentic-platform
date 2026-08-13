@@ -164,6 +164,28 @@ workflows:
         variable_sources:
           y: "step:step-transcript"
     enabled: true
+
+  - id: human-proceed-workflow
+    name: Human Proceed Workflow
+    description: >-
+      A structural, non-approval pause (requires_human_proceed) between two
+      dependent steps - exercises the plain "wait for the human to click
+      Proceed" gate, distinct from parallel-workflow's ApprovalService-backed
+      requires_approval_checkpoint gate.
+    steps:
+      - id: step-p
+        agent_id: agent-a
+        description: First step; no gate.
+        depends_on: []
+        prompt_id: prompt-a
+      - id: step-q
+        agent_id: agent-b
+        description: Depends on step-p; only runs once explicitly targeted.
+        depends_on:
+          - step-p
+        prompt_id: prompt-b
+        requires_human_proceed: true
+    enabled: true
 """
 
 _MEMORY_POLICY_YAML = """

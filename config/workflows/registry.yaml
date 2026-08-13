@@ -17,15 +17,14 @@
 # app.agents.tools.orchestration_tools) to execute that phase's real
 # specialist, then returns that specialist's output verbatim as the
 # step's own output_text. The wave engine below still owns dependency
-# ordering, parallelism, and the approval checkpoints exactly as before -
-# only *which agent is invoked per step* changed, from the specialist
-# directly to genie-orchestrator delegating to that same specialist.
+# ordering and parallelism - only *which agent is invoked per step*
+# changed, from the specialist directly to genie-orchestrator delegating
+# to that same specialist.
 #
 # Deploy & Launch is deliberately NOT a workflow step: it is a separate,
 # real (non-LLM-narrative) multi-step Azure provisioning pipeline - see
-# app.deployment.pipeline_service - triggered via its own API once the
-# final-output-approval checkpoint below has been confirmed on the Deploy
-# & Launch page.
+# app.deployment.pipeline_service - started directly from the Deploy &
+# Launch page once the human clicks Start.
 #
 # Every step below has a `variable_sources` mapping so the whole graph can
 # run automatically from nothing but an uploaded call transcript/recording:
@@ -37,19 +36,19 @@
 # an explicit step_inputs override, per
 # app.workflows.models.WorkflowStep.variable_sources's fail-closed contract.
 #
-# `requires_approval_checkpoint` gates the Mission Control UI's guided,
-# linear flow (Upload -> Requirements -> Architecture -> UI & Agent Design
-# -> Deploy & Launch) using the checkpoints already
-# defined in config/policies/approval_policy.yaml: the run pauses (status
-# `waiting_for_approval`) immediately BEFORE the gated step executes, so a
-# human reviews/edits that step's upstream output before the mission
-# continues. requirement-discovery-approval gates design-architecture (the
-# human reviews/adds/removes discovered requirements before architecture is
-# designed); architecture-approval gates build-solution (the human approves
-# the recommended architecture before UI + agent-flow code is generated);
-# final-output-approval is confirmed directly on the Deploy & Launch page
-# (not tied to any workflow step) and enforced by the Deploy & Launch
-# pipeline's own start endpoint before any real Azure provisioning begins.
+# Genie's own Mission Control flow is deliberately just four independent,
+# human-paced stages: Requirements -> Architecture -> Code -> Deploy &
+# Launch. Each stage's result is persisted as soon as it completes; moving
+# to the next stage happens only when the human clicks Proceed. This is a
+# plain structural pause (`requires_human_proceed` on
+# `app.workflows.models.WorkflowStep`) - the run simply stops with status
+# `waiting_for_proceed` until a resume call explicitly targets that next
+# step's id in its `step_inputs`; there is no separate ApprovalRequest to
+# create/decide/reject (see `requires_approval_checkpoint`, which stays
+# supported by the runtime for other workflows/governance use cases but is
+# unused here). Revisiting/editing an earlier, already-persisted stage
+# never cascades into automatically re-running a downstream stage - the
+# human decides when to re-run anything.
 workflows:
   - id: solution-discovery-workflow
     name: Solution Discovery Workflow
@@ -75,9 +74,9 @@ workflows:
         depends_on:
           - analyze-requirements
         prompt_id: orchestrator-architecture-phase-v1
+        requires_human_proceed: true
         allowed_tool_names:
           - call_architecture_designer
-        requires_approval_checkpoint: requirement-discovery-approval
         required_memory_references:
           - analyze-requirements
         variable_sources:
@@ -92,9 +91,9 @@ workflows:
         depends_on:
           - design-architecture
         prompt_id: orchestrator-build-phase-v1
+        requires_human_proceed: true
         allowed_tool_names:
           - call_build_agent
-        requires_approval_checkpoint: architecture-approval
         required_memory_references:
           - analyze-requirements
           - design-architecture
@@ -115,30 +114,6 @@ workflows:
           # (no prior output exists yet), which is exactly the "nothing to
           # reuse" case that function already handles.
           previous_build_output: step:build-solution
-
-      - id: security-assessment
-        agent_id: genie-orchestrator
-        description: >-
-          Perform a full regression security assessment (OWASP Top 10) of
-          the generated build and report a pass/fail security gate
-          verdict with findings.
-        depends_on:
-          - build-solution
-        prompt_id: orchestrator-security-assessment-phase-v1
-        allowed_tool_names:
-          - call_security_assessment_agent
-        # Gates entry into the security-assessment/test-generation wave (both
-        # share the same wave - see _compute_waves in
-        # app/orchestration/workflow_runtime.py - so blocking this one step
-        # on approval blocks test-generation too): the user must review the
-        # Build Agent's generated code on the Workshop page first, rather
-        # than security-assessment/test-generation kicking off automatically
-        # the instant build-solution finishes.
-        requires_approval_checkpoint: build-review-approval
-        required_memory_references:
-          - build-solution
-        variable_sources:
-          artifact: step:build-solution
 
       - id: test-generation
         agent_id: genie-orchestrator

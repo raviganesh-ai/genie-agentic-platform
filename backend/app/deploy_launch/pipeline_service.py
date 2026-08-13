@@ -10,15 +10,13 @@ only after the ``solution-discovery-workflow`` has already produced an
 approved architecture (``design-architecture``), generated build
 (``build-solution``), and generated test suite (``test-generation``).
 
-Approval gating mirrors ``WorkflowRuntime._enforce_approval_gate`` exactly:
-the first time ``start()`` is called for a workflow run with no existing
-``final-output-approval`` request, one is auto-created (status
-``pending``) and ``DeploymentApprovalPendingError`` is raised so the caller
-can direct a human reviewer to decide it via the existing
-``POST /sessions/{session_id}/approvals/{request_id}/decide`` endpoint;
-only a request whose decision is ``approved`` allows the pipeline to run.
+Genie's Deploy & Launch stage has exactly one gate: the human clicking
+Start. There is no separate approval-checkpoint request/decide dance -
+``start()`` runs the upstream self-heal (see
+``_ensure_upstream_steps_completed``) and then immediately kicks off the
+pipeline.
 
-Once approved, ``start()`` returns as soon as the run is created (status
+``start()`` returns as soon as the run is created (status
 ``running``) - the nine steps themselves execute in a background asyncio
 task, since real Azure agent/backend/frontend deployments plus a real test
 run and security scan can legitimately take far longer than any single HTTP
@@ -65,7 +63,6 @@ from app.deploy_launch.models import (
 )
 from app.deploy_launch.security_scan_service import SecurityScanService
 from app.deploy_launch.test_execution_service import TestExecutionService, extract_test_modules
-from app.governance.approval_service import ApprovalService
 from app.models.workflow_models import WorkflowRunResult, WorkflowStepInput
 from app.models.workflow_stream_models import WorkflowStreamEvent, WorkflowStreamEventType
 from app.orchestration.agent_orchestrator import AgentOrchestrator
@@ -74,8 +71,6 @@ from app.services.session_service import SessionService
 from app.services.workshop_service import UnknownWorkflowRunError
 
 __all__ = [
-    "DeploymentApprovalBlockedError",
-    "DeploymentApprovalPendingError",
     "DeploymentPipelineService",
     "DeploymentPipelineStepFailedError",
     "create_deployment_pipeline_service",
@@ -106,14 +101,6 @@ _INDEX_HTML_TEMPLATE = """<!doctype html>
 """
 
 
-class DeploymentApprovalPendingError(RuntimeError):
-    """Raised when the ``final-output-approval`` checkpoint has not yet been decided."""
-
-
-class DeploymentApprovalBlockedError(RuntimeError):
-    """Raised when the ``final-output-approval`` checkpoint was explicitly rejected/expired."""
-
-
 class DeploymentPipelineStepFailedError(RuntimeError):
     """Raised when a pipeline step's own real result (test run, security scan) fails."""
 
@@ -134,7 +121,6 @@ class DeploymentPipelineService:
         *,
         orchestrator: AgentOrchestrator,
         session_service: SessionService,
-        approval_service: ApprovalService,
         event_bus: WorkflowEventBus,
         access_policy_service: AccessPolicyService,
         mission_agent_provisioning_service: MissionAgentProvisioningService
@@ -147,11 +133,9 @@ class DeploymentPipelineService:
         architecture_step_id: str = "design-architecture",
         build_step_id: str = "build-solution",
         test_generation_step_id: str = "test-generation",
-        final_output_approval_checkpoint_id: str = "final-output-approval",
     ) -> None:
         self._orchestrator = orchestrator
         self._session_service = session_service
-        self._approval_service = approval_service
         self._event_bus = event_bus
         self._access_policy_service = access_policy_service
         self._mission_agent_provisioning_service = mission_agent_provisioning_service
@@ -163,7 +147,6 @@ class DeploymentPipelineService:
         self._architecture_step_id = architecture_step_id
         self._build_step_id = build_step_id
         self._test_generation_step_id = test_generation_step_id
-        self._final_output_approval_checkpoint_id = final_output_approval_checkpoint_id
         self._runs: dict[str, DeploymentPipelineRun] = {}
         self._workspaces: dict[str, _RunWorkspace] = {}
         self._materialized_builds: dict[str, MaterializedBuild] = {}
@@ -188,10 +171,8 @@ class DeploymentPipelineService:
         workflow_run_id: str,
         trace_id: str | None = None,
     ) -> DeploymentPipelineRun:
-        """Kicks off every Deploy & Launch step in order, once the
-        final-output approval checkpoint has been granted. Raises
-        ``DeploymentApprovalPendingError``/``DeploymentApprovalBlockedError``
-        (fail closed) if it has not.
+        """Kicks off every Deploy & Launch step in order as soon as the human
+        clicks Start - there is no separate approval checkpoint to decide.
 
         The nine steps themselves (real Azure agent/backend/frontend
         deployments, a real test run, a real security scan) can legitimately
@@ -213,10 +194,6 @@ class DeploymentPipelineService:
 
         run = await self._ensure_upstream_steps_completed(
             run=run, session_id=session_id, trace_id=resolved_trace_id
-        )
-
-        await self._ensure_final_output_approval_granted(
-            session_id=session_id, workflow_run_id=workflow_run_id, trace_id=resolved_trace_id
         )
 
         pipeline_run = DeploymentPipelineRun(
@@ -301,45 +278,6 @@ class DeploymentPipelineService:
         if task is not None:
             await task
         return self._runs[pipeline_run_id]
-
-    async def _ensure_final_output_approval_granted(
-        self, *, session_id: str, workflow_run_id: str, trace_id: str
-    ) -> None:
-        requests = await self._approval_service.list_requests_for_session(session_id)
-        matching = [
-            request
-            for request in requests
-            if request.checkpoint_id == self._final_output_approval_checkpoint_id
-            and request.subject_id == workflow_run_id
-        ]
-
-        if any(request.status == "approved" for request in matching):
-            return
-
-        if any(request.status == "pending" for request in matching):
-            raise DeploymentApprovalPendingError(
-                f"Deploy & Launch checkpoint '{self._final_output_approval_checkpoint_id}' "
-                f"is still awaiting a decision for workflow run '{workflow_run_id}'."
-            )
-
-        if matching:
-            raise DeploymentApprovalBlockedError(
-                f"Deploy & Launch checkpoint '{self._final_output_approval_checkpoint_id}' "
-                f"was not granted for workflow run '{workflow_run_id}'."
-            )
-
-        await self._approval_service.request_approval(
-            checkpoint_id=self._final_output_approval_checkpoint_id,
-            session_id=session_id,
-            trace_id=trace_id,
-            requested_by_agent_id=_PIPELINE_AGENT_ID,
-            subject_type="workflow_run",
-            subject_id=workflow_run_id,
-        )
-        raise DeploymentApprovalPendingError(
-            f"Deploy & Launch checkpoint '{self._final_output_approval_checkpoint_id}' "
-            f"was just requested for workflow run '{workflow_run_id}' and is awaiting a decision."
-        )
 
     async def _get_workflow_run(self, workflow_run_id: str) -> WorkflowRunResult:
         run = await self._orchestrator.get_workflow_run(workflow_run_id)
@@ -603,7 +541,6 @@ def create_deployment_pipeline_service(
     settings: Settings,
     orchestrator: AgentOrchestrator,
     session_service: SessionService,
-    approval_service: ApprovalService,
     event_bus: WorkflowEventBus,
     access_policy_service: AccessPolicyService,
     mission_agent_provisioning_service: MissionAgentProvisioningService
@@ -622,7 +559,6 @@ def create_deployment_pipeline_service(
     return DeploymentPipelineService(
         orchestrator=orchestrator,
         session_service=session_service,
-        approval_service=approval_service,
         event_bus=event_bus,
         access_policy_service=access_policy_service,
         mission_agent_provisioning_service=mission_agent_provisioning_service,

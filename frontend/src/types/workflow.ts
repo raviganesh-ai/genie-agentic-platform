@@ -5,6 +5,7 @@ export type WorkflowStatus =
   | "running"
   | "waiting_for_agent"
   | "waiting_for_approval"
+  | "waiting_for_proceed"
   | "blocked"
   | "failed"
   | "completed";

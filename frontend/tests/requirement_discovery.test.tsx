@@ -12,12 +12,28 @@ import {
 import { RequirementDiscoveryPage } from "@/features/requirement-map/RequirementDiscoveryPage";
 
 describe("RequirementDiscoveryPage", () => {
-  it("renders pending approvals when the workflow run qualifies for an agentic workflow", async () => {
+  it("shows the Proceed to Architecture action once requirements have been analyzed", async () => {
     mockFetchSequence([
       { match: "/approvals", response: buildApprovalRequests() },
       {
         match: `/requirements/${FIXTURE_WORKFLOW_RUN_ID}/qualification`,
         response: buildRequirementsQualification({ status: "qualified" }),
+      },
+      {
+        match: `/workflows/runs/${FIXTURE_WORKFLOW_RUN_ID}`,
+        response: buildWorkflowRunResult({
+          step_results: [
+            {
+              step_id: "analyze-requirements",
+              agent_id: "requirements-analyst",
+              status: "completed",
+              output_text: "1. Support SSO login\n2. Export reports as PDF",
+              error: null,
+              started_at: "2026-07-23T10:00:00Z",
+              completed_at: "2026-07-23T10:01:00Z",
+            },
+          ],
+        }),
       },
     ]);
 
@@ -27,7 +43,7 @@ describe("RequirementDiscoveryPage", () => {
     });
 
     await waitFor(() =>
-      expect(screen.getByText(/workflow step · design-architecture/i)).toBeInTheDocument(),
+      expect(screen.getByRole("button", { name: /Proceed to Architecture/i })).toBeInTheDocument(),
     );
     expect(
       screen.queryByText(/doesn't currently qualify for an agentic AI workflow/i),
@@ -103,8 +119,7 @@ describe("RequirementDiscoveryPage", () => {
           ],
         }),
       },
-      { match: "/decide", response: { id: "decision-1" } },
-      { match: "/resume", response: buildWorkflowRunResult({ status: "waiting_for_approval" }) },
+      { match: "/resume", response: buildWorkflowRunResult({ status: "waiting_for_proceed" }) },
     ]);
 
     renderWithProviders(<RequirementDiscoveryPage />, {
@@ -119,7 +134,7 @@ describe("RequirementDiscoveryPage", () => {
     const textbox = await screen.findByDisplayValue(/Support SSO login/i);
     await user.type(textbox, "\n3. Add audit logging");
 
-    const approveButton = await screen.findByRole("button", { name: /^Approve$/i });
+    const approveButton = await screen.findByRole("button", { name: /Proceed to Architecture/i });
     await user.click(approveButton);
 
     await waitFor(() => {

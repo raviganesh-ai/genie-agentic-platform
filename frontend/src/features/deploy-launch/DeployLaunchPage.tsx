@@ -3,7 +3,6 @@ import { Button, MessageBar, MessageBarBody, MessageBarTitle, Text } from "@flue
 import { useSessionContext } from "@/state/SessionContext";
 import { useAsyncResource } from "@/hooks/useAsyncResource";
 import { deployLaunchApi } from "@/services/deployLaunchApi";
-import { approvalApi } from "@/services/approvalApi";
 import { getTraceId } from "@/state/traceRegistry";
 import { ApiError } from "@/services/httpClient";
 import { PageHeader } from "@/layouts/AppShell";
@@ -75,13 +74,11 @@ function StepRow({ step }: { step: DeploymentStepResult }): JSX.Element {
  * automatically as soon as this page loads with no run yet for this
  * mission - the user's review already happened on Workshop (the checkbox +
  * "Proceed to Deploy & Launch" action), so no separate manual click or
- * approval screen is needed here. Gated server-side on the
- * `final-output-approval` checkpoint: the first `start()` call auto-requests
- * that checkpoint if none exists yet and returns 409 while it is still
- * pending - decided automatically below and retried once, transparently.
- * The backend also self-heals any not-yet-finished upstream workflow step
- * (e.g. build-solution/test-generation) by resuming the same run before
- * running the pipeline.
+ * approval screen is needed here. This stage has exactly one gate - the
+ * human already having clicked through to get here - so `start()` runs the
+ * pipeline immediately. The backend also self-heals any not-yet-finished
+ * upstream workflow step (e.g. build-solution/test-generation) by resuming
+ * the same run before running the pipeline.
  */
 export function DeployLaunchPage(): JSX.Element {
   const { sessionId, workflowRunId } = useSessionContext();
@@ -133,40 +130,7 @@ export function DeployLaunchPage(): JSX.Element {
       await deployLaunchApi.start(sessionId, workflowRunId, traceId);
       refresh();
     } catch (err) {
-      if (err instanceof ApiError && err.status === 409) {
-        // Final Output Approval was just auto-requested (or is still
-        // pending from an earlier attempt) - decide it automatically
-        // (the user already acknowledged the risk on Workshop) and retry
-        // once, rather than surfacing a second manual approval screen.
-        try {
-          const approvals = await approvalApi.list(sessionId);
-          const pending = approvals.find(
-            (request) =>
-              request.checkpoint_id === "final-output-approval" &&
-              request.subject_id === workflowRunId &&
-              request.status === "pending",
-          );
-          if (!pending) {
-            setStartError("Deploy & Launch is waiting on Final Output Approval.");
-            return;
-          }
-          await approvalApi.decide(sessionId, pending.id, "approved");
-          await deployLaunchApi.start(sessionId, workflowRunId, traceId);
-          refresh();
-        } catch (retryErr) {
-          if (retryErr instanceof ApiError && retryErr.status === 403) {
-            setStartError("Final Output Approval was rejected or expired - Deploy & Launch is blocked.");
-          } else {
-            setStartError(
-              (retryErr as ApiError).message ?? "Deploy & Launch is waiting on Final Output Approval.",
-            );
-          }
-        }
-      } else if (err instanceof ApiError && err.status === 403) {
-        setStartError("Final Output Approval was rejected or expired - Deploy & Launch is blocked.");
-      } else {
-        setStartError((err as ApiError).message ?? "Failed to start Deploy & Launch.");
-      }
+      setStartError((err as ApiError).message ?? "Failed to start Deploy & Launch.");
     } finally {
       setStarting(false);
     }

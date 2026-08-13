@@ -4,10 +4,15 @@ Implements "PARALLEL EXECUTION" and drives the "WORKFLOW STATE MACHINE"
 for Phase 6. Computes sequential/parallel execution waves from each
 ``WorkflowStep.depends_on``, executes every wave (steps within a wave run
 concurrently) via ``WorkflowStepExecutor``, records synchronization
-checkpoints, handoffs, and collaboration events, and enforces approval
-checkpoints. Contains no agent reasoning: every step's actual execution is
-delegated to ``WorkflowStepExecutor`` -> ``AgentGateway``
-(``AzureAgentGateway`` in production).
+checkpoints, handoffs, and collaboration events, and enforces two
+independent, optional per-step gates: ``requires_approval_checkpoint``
+(a governance ApprovalRequest must be approved - see
+``_enforce_approval_gate``) and ``requires_human_proceed`` (a plain
+structural pause with no ApprovalService involved at all - see
+``_enforce_human_proceed_gate``, used by Genie's own Requirements ->
+Architecture -> Code mission stages). Contains no agent reasoning: every
+step's actual execution is delegated to ``WorkflowStepExecutor`` ->
+``AgentGateway`` (``AzureAgentGateway`` in production).
 """
 from __future__ import annotations
 
@@ -147,6 +152,20 @@ class WorkflowRuntime:
             ]
             if not pending_steps:
                 continue
+
+            proceed_gate_result = self._enforce_human_proceed_gate(
+                pending_steps,
+                workflow_run_id=workflow_run_id,
+                workflow_id=workflow_id,
+                session_id=session_id,
+                waves=waves,
+                step_results=step_results,
+                state_machine=state_machine,
+                inputs_by_id=inputs_by_id,
+                agent_scope_id=effective_scope_id,
+            )
+            if proceed_gate_result is not None:
+                return proceed_gate_result
 
             gate_result = await self._enforce_approval_gate(
                 pending_steps,
@@ -303,6 +322,50 @@ class WorkflowRuntime:
             step_results=step_results,
             agent_scope_id=effective_scope_id,
         )
+
+    def _enforce_human_proceed_gate(
+        self,
+        pending_steps: list[WorkflowStep],
+        *,
+        workflow_run_id: str,
+        workflow_id: str,
+        session_id: str,
+        waves: list[list[WorkflowStep]],
+        step_results: list[WorkflowStepResult],
+        state_machine: WorkflowStateMachine,
+        inputs_by_id: dict[str, WorkflowStepInput],
+        agent_scope_id: str | None = None,
+    ) -> WorkflowRunResult | None:
+        """Pauses before any step flagged ``requires_human_proceed`` until the
+        caller's own ``step_inputs`` explicitly names that step - i.e. the
+        human clicked a 'Proceed to <next stage>' action naming this exact
+        step. Unlike ``_enforce_approval_gate``, this never touches
+        ApprovalService: it is a plain structural pause, not a governance
+        approval decision, so there is nothing to request/decide/reject -
+        the very next call that explicitly targets this step's id is what
+        clears it.
+        """
+
+        for step in pending_steps:
+            if not step.requires_human_proceed or step.id in inputs_by_id:
+                continue
+
+            state_machine.transition(
+                "waiting_for_proceed",
+                detail=f"Waiting for the human to proceed to step '{step.id}'.",
+            )
+            return WorkflowRunResult(
+                workflow_run_id=workflow_run_id,
+                workflow_id=workflow_id,
+                session_id=session_id,
+                status="waiting_for_proceed",
+                waves=[[s.id for s in wave] for wave in waves],
+                step_results=step_results,
+                detail=f"Waiting for the human to proceed to step '{step.id}'.",
+                agent_scope_id=agent_scope_id,
+            )
+
+        return None
 
     async def _enforce_approval_gate(
         self,

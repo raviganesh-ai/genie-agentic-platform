@@ -13,8 +13,8 @@ from pydantic import BaseModel, ConfigDict, Field
 class WorkflowStep(BaseModel):
     """A single step within a workflow, executed by one agent.
 
-    ``prompt_id``, ``requires_approval_checkpoint``, and
-    ``required_memory_references`` are optional, additive fields consumed
+    ``prompt_id``, ``requires_approval_checkpoint``, ``requires_human_proceed``,
+    and ``required_memory_references`` are optional, additive fields consumed
     by the Phase 6 orchestration runtime (``app.orchestration``); a step
     with none of them set behaves exactly as it did in Phase 2/registry
     validation contexts.
@@ -35,6 +35,19 @@ class WorkflowStep(BaseModel):
         description=(
             "Id of an approval_policy.yaml checkpoint that must have an "
             "approved decision before this step may execute."
+        ),
+    )
+    requires_human_proceed: bool = Field(
+        default=False,
+        description=(
+            "When true, this step's wave is skipped (the run pauses with "
+            "status 'waiting_for_proceed') unless the caller's step_inputs "
+            "explicitly targets this step's id - i.e. the human clicked a "
+            "'Proceed' action naming this exact next stage. Unlike "
+            "requires_approval_checkpoint, this never creates or consults an "
+            "ApprovalRequest: it is a plain structural pause for Genie's own "
+            "human-paced Requirements -> Architecture -> Code stages, not a "
+            "governance approval decision."
         ),
     )
     required_memory_references: list[str] = Field(

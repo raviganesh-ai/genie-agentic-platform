@@ -18,10 +18,19 @@ __all__ = ["InvalidWorkflowTransitionError", "WorkflowStateMachine"]
 _ALLOWED_TRANSITIONS: dict[WorkflowStatus, frozenset[WorkflowStatus]] = {
     "pending": frozenset({"running", "failed"}),
     "running": frozenset(
-        {"waiting_for_agent", "waiting_for_approval", "blocked", "failed", "completed", "running"}
+        {
+            "waiting_for_agent",
+            "waiting_for_approval",
+            "waiting_for_proceed",
+            "blocked",
+            "failed",
+            "completed",
+            "running",
+        }
     ),
     "waiting_for_agent": frozenset({"running", "failed", "blocked"}),
     "waiting_for_approval": frozenset({"running", "blocked", "failed"}),
+    "waiting_for_proceed": frozenset({"running", "failed"}),
     "blocked": frozenset({"running", "failed"}),
     "failed": frozenset(),
     "completed": frozenset(),

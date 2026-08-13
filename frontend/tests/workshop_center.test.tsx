@@ -53,16 +53,13 @@ describe("WorkshopPage", () => {
 
     expect(screen.getByRole("button", { name: /Proceed to Deploy & Launch/i })).toBeInTheDocument();
 
+    const callsBeforeProceed = fetchMock.mock.calls.length;
     await user.click(screen.getByRole("button", { name: /Proceed to Deploy & Launch/i }));
 
-    // Proceeding checks for (and would decide) a pending build-review-approval
-    // request - the human review this checkbox/click already represents - so
-    // Deploy & Launch never needs a separate/duplicate approval action. No
-    // pending request exists in this fixture, so nothing is decided, and no
-    // workflow steps are resumed from here.
-    await waitFor(() =>
-      expect(fetchMock.mock.calls.some((call) => String(call[0]).endsWith("/approvals"))).toBe(true),
-    );
+    // Proceeding is a plain client-side navigation to Deploy & Launch - the
+    // review checkbox/click above is the human checkpoint, so clicking
+    // Proceed doesn't need to call any approval/resume endpoint.
+    expect(fetchMock.mock.calls.length).toBe(callsBeforeProceed);
     expect(fetchMock.mock.calls.some((call) => String(call[0]).endsWith("/decide"))).toBe(false);
     expect(fetchMock.mock.calls.some((call) => String(call[0]).endsWith("/resume"))).toBe(false);
   });
@@ -230,7 +227,7 @@ describe("WorkshopPage", () => {
   it(
     "treats build-solution as stuck (never actually started server-side) after a grace period with no result and no live stream, offering a retry",
     async () => {
-      // Fake only the setTimeout/clearTimeout pair the 45s stuck-detector
+      // Fake only the setTimeout/clearTimeout pair the 90s stuck-detector
       // uses - leave setInterval/queueMicrotask/Date alone so the
       // unrelated live-stream reconnect loop (useWorkflowEventStream,
       // itself driven by real Promise microtasks) keeps resolving
@@ -251,7 +248,7 @@ describe("WorkshopPage", () => {
 
         expect(screen.queryByText(/hasn't started yet/i)).not.toBeInTheDocument();
 
-        await vi.advanceTimersByTimeAsync(45_000);
+        await vi.advanceTimersByTimeAsync(90_000);
 
         expect(screen.getByText(/UI & Agent Design hasn't started yet/i)).toBeInTheDocument();
 
@@ -265,6 +262,60 @@ describe("WorkshopPage", () => {
           );
           expect(resumeCall).toBeDefined();
         });
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+    15_000,
+  );
+
+  it(
+    "does not treat build-solution as stuck once a step_started live event has arrived, even with no delta text yet",
+    async () => {
+      // A `step_started` event alone (no content chunk yet) is already
+      // direct proof the step began server-side - e.g. right after
+      // switching tabs away and back, a fresh SSE connection may not see
+      // another delta for a while even though generation is genuinely
+      // still in progress. This must not show the "hasn't started" banner.
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      try {
+        const startedEvent = {
+          event_type: "step_started",
+          session_id: FIXTURE_SESSION_ID,
+          workflow_run_id: FIXTURE_WORKFLOW_RUN_ID,
+          step_id: "build-solution",
+          agent_id: "build-agent",
+          delta: null,
+          output_preview: null,
+          error: null,
+          emitted_at: "2026-07-23T10:00:00Z",
+        };
+
+        mockFetchSequence([
+          {
+            match: `/workflows/runs/${FIXTURE_WORKFLOW_RUN_ID}`,
+            response: buildWorkflowRunResult({ step_results: [] }),
+          },
+          {
+            match: "/workflow-events/stream",
+            sseChunks: [`data: ${JSON.stringify(startedEvent)}\n\n`],
+          },
+        ]);
+
+        renderWithProviders(<WorkshopPage />, {
+          sessionId: FIXTURE_SESSION_ID,
+          workflowRunId: FIXTURE_WORKFLOW_RUN_ID,
+        });
+
+        await vi.waitFor(() =>
+          expect(
+            screen.getByText(/Genie is calling the Orchestrator Agent/i),
+          ).toBeInTheDocument(),
+        );
+
+        await vi.advanceTimersByTimeAsync(90_000);
+
+        expect(screen.queryByText(/hasn't started yet/i)).not.toBeInTheDocument();
       } finally {
         vi.useRealTimers();
       }

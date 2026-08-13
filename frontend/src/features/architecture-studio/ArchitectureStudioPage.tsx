@@ -15,8 +15,6 @@ import {
   useArchitectureStudio,
   type RedesignGoal,
 } from "@/hooks/useArchitectureStudio";
-import { useAsyncResource } from "@/hooks/useAsyncResource";
-import { approvalApi } from "@/services/approvalApi";
 import { workflowApi } from "@/services/workflowApi";
 import { getTraceId } from "@/state/traceRegistry";
 import { PageHeader } from "@/layouts/AppShell";
@@ -126,15 +124,6 @@ export function ArchitectureStudioPage(): JSX.Element {
     [architectureComponent],
   );
 
-  const approvalsFetcher = useCallback(
-    () => (sessionId ? approvalApi.list(sessionId) : Promise.reject(new Error("No session"))),
-    [sessionId],
-  );
-  const { data: approvals, refresh: refreshApprovals } = useAsyncResource(
-    approvalsFetcher,
-    [sessionId],
-    { enabled: Boolean(sessionId) },
-  );
   const { events: liveEvents } = useWorkflowEventStream(sessionId);
   const liveEventsForRun = useMemo(
     () =>
@@ -147,13 +136,9 @@ export function ArchitectureStudioPage(): JSX.Element {
   useEffect(() => {
     if (lastLiveEvent?.event_type === "step_completed" || lastLiveEvent?.event_type === "step_failed") {
       void refresh();
-      void refreshApprovals();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lastLiveEvent]);
-  const pendingArchitectureApproval = approvals?.find(
-    (request) => request.status === "pending" && request.subject_id === "build-solution",
-  );
   const [selectedPolicies, setSelectedPolicies] = useState<Record<string, boolean>>({});
   const [otherPolicyChecked, setOtherPolicyChecked] = useState(false);
   const [otherPolicyText, setOtherPolicyText] = useState("");
@@ -188,11 +173,10 @@ export function ArchitectureStudioPage(): JSX.Element {
   const excludedAgentsText = useMemo(() => Array.from(excludedAgents).join(", "), [excludedAgents]);
 
   const handleApproveArchitecture = useCallback(async () => {
-    if (!sessionId || !workflowRunId || !pendingArchitectureApproval) return;
+    if (!sessionId || !workflowRunId || !architectureComponent) return;
     setApproving(true);
     setApproveError(null);
     try {
-      await approvalApi.decide(sessionId, pendingArchitectureApproval.id, "approved");
       const traceId = getTraceId(workflowRunId) ?? undefined;
       // Persisted in SessionContext (not just a local variable here) because
       // the security-assessment/test-generation wave only actually executes
@@ -239,7 +223,7 @@ export function ArchitectureStudioPage(): JSX.Element {
   }, [
     sessionId,
     workflowRunId,
-    pendingArchitectureApproval,
+    architectureComponent,
     effectiveGovernancePolicies,
     excludedAgentsText,
     navigate,
@@ -265,7 +249,7 @@ export function ArchitectureStudioPage(): JSX.Element {
           variables: { approved_requirements: approvedRequirements },
         },
       });
-      await Promise.all([refresh(), refreshApprovals()]);
+      await refresh();
     } catch (err) {
       setRerunDesignError(
         err instanceof ApiError ? err : { message: "Failed to re-run Architecture Studio." },
@@ -273,7 +257,7 @@ export function ArchitectureStudioPage(): JSX.Element {
     } finally {
       setRerunningDesign(false);
     }
-  }, [sessionId, workflowRunId, refresh, refreshApprovals]);
+  }, [sessionId, workflowRunId, refresh]);
 
   // Re-runs design-architecture (still the same workflow step, not a new
   // one) with a user_message asking the Architecture Designer to exclude
@@ -515,7 +499,7 @@ export function ArchitectureStudioPage(): JSX.Element {
         </div>
       ) : null}
 
-      {pendingArchitectureApproval ? (
+      {architectureComponent ? (
         <SectionCard title="Approve Architecture">
           {approveError ? (
             <MessageBar intent="error" layout="multiline" style={{ marginBottom: 12 }}>
