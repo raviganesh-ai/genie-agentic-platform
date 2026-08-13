@@ -98,7 +98,6 @@ def real_config_local_settings() -> Settings:
 
     return Settings(
         environment="development",
-        provider_mode="local",
         governance_provider="local",
         allow_mock_agents=True,
         allow_local_agents=True,

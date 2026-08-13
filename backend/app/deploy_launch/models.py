@@ -4,8 +4,8 @@ Deploy & Launch is deliberately NOT an LLM-driven workflow step (see
 ``config/workflows/registry.yaml``'s top-of-file comment): it is a real,
 deterministic, code-driven Azure provisioning pipeline - ``PipelineService``
 (``app.deploy_launch.pipeline_service``) executes each named step in this
-exact order against real Azure SDKs (or their Null/local equivalents
-selected by ``Settings.provider_mode``, mirroring ``AzureAgentGateway`` /
+exact order against real Azure SDKs (or their Null/local equivalents when
+the required settings are not configured, mirroring ``AzureAgentGateway`` /
 ``LocalAgentGateway``), never fabricating a result for a step it did not
 actually perform.
 
@@ -32,6 +32,7 @@ __all__ = [
     "DeploymentStepId",
     "DeploymentStepResult",
     "DeploymentStepStatus",
+    "ProvisionedAgentStatus",
 ]
 
 DeploymentStepId = Literal[
@@ -120,6 +121,22 @@ class DeploymentStepResult(BaseModel):
     completed_at: datetime | None = None
 
 
+class ProvisionedAgentStatus(BaseModel):
+    """One mission agent's real, observed Foundry provisioning outcome.
+
+    Populated during the ``provision-foundry-agents`` step - never a
+    fabricated placeholder - so the UI can show per-agent progress (not
+    just a single aggregate step status) as each agent's own
+    ``foundry_agent_name`` becomes known.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    agent_name: str = Field(min_length=1)
+    status: DeploymentStepStatus = "pending"
+    foundry_agent_name: str | None = None
+
+
 class DeploymentPipelineRun(BaseModel):
     """The full, real state of one mission's Deploy & Launch pipeline run."""
 
@@ -131,6 +148,7 @@ class DeploymentPipelineRun(BaseModel):
     status: DeploymentPipelineStatus = "pending"
     steps: list[DeploymentStepResult] = Field(default_factory=list)
     access_policy: AccessPolicyDocument | None = None
+    provisioned_agents: list[ProvisionedAgentStatus] = Field(default_factory=list)
     backend_url: str | None = None
     frontend_url: str | None = None
     launch_url: str | None = None

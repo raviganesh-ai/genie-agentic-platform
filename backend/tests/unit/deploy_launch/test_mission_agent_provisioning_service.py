@@ -1,11 +1,11 @@
 """Unit tests for MissionAgentProvisioningService (factory + Null + extraction)."""
 from __future__ import annotations
 
-import pytest
+from dataclasses import dataclass, field
 
 from app.config.settings import Settings
 from app.deploy_launch.mission_agent_provisioning_service import (
-    MissionAgentProvisioningError,
+    MissionAgentProvisioningService,
     NullMissionAgentProvisioningService,
     _extract_agent_instructions,
     create_mission_agent_provisioning_service,
@@ -31,7 +31,7 @@ def _settings(**overrides: object) -> Settings:
 
 
 def test_local_mode_without_config_returns_null_service():
-    service = create_mission_agent_provisioning_service(settings=_settings(provider_mode="local"))
+    service = create_mission_agent_provisioning_service(settings=_settings())
 
     assert isinstance(service, NullMissionAgentProvisioningService)
 
@@ -50,11 +50,6 @@ async def test_null_service_provision_returns_placeholder_names():
     assert names["orchestrator"] == "local-acme-mission-orchestrator"
 
 
-def test_production_mode_without_config_raises():
-    with pytest.raises(MissionAgentProvisioningError):
-        create_mission_agent_provisioning_service(settings=_settings(provider_mode="production"))
-
-
 def test_extract_agent_instructions_finds_matching_paragraph():
     instructions = _extract_agent_instructions(_ARCHITECTURE_DOCUMENT, "requirements-specialist")
 
@@ -65,3 +60,48 @@ def test_extract_agent_instructions_falls_back_when_not_found():
     instructions = _extract_agent_instructions(_ARCHITECTURE_DOCUMENT, "totally-unknown-agent")
 
     assert "totally-unknown-agent" in instructions
+
+
+@dataclass
+class _FakeAgentApiClient:
+    created: list[dict[str, str | None]] = field(default_factory=list)
+
+    def create_agent(
+        self, *, name: str, model: str, instructions: str, description: str | None = None
+    ) -> str:
+        self.created.append(
+            {"name": name, "model": model, "instructions": instructions, "description": description}
+        )
+        return f"foundry-{name}"
+
+    def delete_agent(self, agent_id: str) -> None:  # pragma: no cover - not exercised here
+        pass
+
+
+@dataclass
+class _FakeProjectService:
+    api_client: _FakeAgentApiClient
+
+    def get_api_client(self) -> _FakeAgentApiClient:
+        return self.api_client
+
+
+async def test_provision_forwards_the_exact_agent_name_as_description():
+    api_client = _FakeAgentApiClient()
+    service = MissionAgentProvisioningService(
+        project_service=_FakeProjectService(api_client=api_client), model_deployment_ref="gpt-4o"
+    )
+
+    await service.provision(
+        mission_slug="acme-mission",
+        agent_names=["Requirements Specialist", "Orchestrator"],
+        architecture_document=_ARCHITECTURE_DOCUMENT,
+    )
+
+    # The exact, unslugified individual agent name must be forwarded as
+    # `description` so it is visible in the Foundry portal even though the
+    # resource `name` itself is a mission-slug-prefixed, slugified id.
+    assert {created["description"] for created in api_client.created} == {
+        "Requirements Specialist",
+        "Orchestrator",
+    }

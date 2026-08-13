@@ -174,9 +174,6 @@ def create_frontend_deployment_service(
             storage_account_name=settings.deployment_storage_account_name,  # type: ignore[arg-type]
         )
 
-    if settings.provider_mode == "production":
-        return _build_real()
-
     if all(required):
         return _build_real()
 

@@ -3,7 +3,7 @@
 ``DeploymentPipelineService`` is the real, deterministic, code-driven glue
 that executes every step in ``DEPLOYMENT_STEP_ORDER`` (see
 ``app.deploy_launch.models``) against real Azure SDKs - or their Null/local
-equivalents selected by ``Settings.provider_mode``, mirroring
+equivalents when the required settings are not configured, mirroring
 ``AzureAgentGateway``/``LocalAgentGateway`` - never fabricating a step's
 result. This is explicitly NOT an LLM-driven workflow step: it is invoked
 only after the ``solution-discovery-workflow`` has already produced an
@@ -60,6 +60,7 @@ from app.deploy_launch.models import (
     DeploymentPipelineRun,
     DeploymentStepId,
     DeploymentStepResult,
+    ProvisionedAgentStatus,
 )
 from app.deploy_launch.security_scan_service import SecurityScanService
 from app.deploy_launch.test_execution_service import TestExecutionService, extract_test_modules
@@ -389,11 +390,34 @@ class DeploymentPipelineService:
                     agent_names = list(materialized.agent_modules.keys())
                     if materialized.orchestrator_module is not None:
                         agent_names.append("orchestrator")
+
+                    # Mark every agent "running" before the (single, atomic)
+                    # provisioning call so the UI can show a real per-agent
+                    # in-progress list while it is in flight, not just the
+                    # step's own aggregate status.
+                    pipeline_run.provisioned_agents = [
+                        ProvisionedAgentStatus(agent_name=name, status="running")
+                        for name in agent_names
+                    ]
+
                     provisioned = await self._mission_agent_provisioning_service.provision(
                         mission_slug=mission_slug,
                         agent_names=agent_names,
                         architecture_document=architecture_document,
                     )
+                    provisioned_by_name = {record.agent_name: record for record in provisioned}
+                    pipeline_run.provisioned_agents = [
+                        ProvisionedAgentStatus(
+                            agent_name=name,
+                            status="completed" if name in provisioned_by_name else "failed",
+                            foundry_agent_name=(
+                                provisioned_by_name[name].foundry_agent_name
+                                if name in provisioned_by_name
+                                else None
+                            ),
+                        )
+                        for name in agent_names
+                    ]
                     orchestrator_record = next(
                         (r for r in provisioned if r.agent_name == "orchestrator"), None
                     )
@@ -417,7 +441,10 @@ class DeploymentPipelineService:
                         mission_slug=mission_slug, build_root=backend_root
                     )
                     pipeline_run.backend_url = backend_result.backend_url
-                    detail = f"Backend deployed at {backend_result.backend_url}."
+                    detail = (
+                        f"Backend deployed at {backend_result.backend_url}, integrated with "
+                        f"orchestrator agent '{orchestrator_foundry_name}'."
+                    )
 
                 elif step_id == "sync-frontend-integration":
                     materialized = self._materialized_builds[pipeline_run.id]
@@ -498,6 +525,16 @@ class DeploymentPipelineService:
                 # (see the `except Exception` in `start()` below) - a
                 # confusing, inconsistent UI. Every step must always resolve
                 # to a terminal, detailed status (completed or failed).
+                if step_id == "provision-foundry-agents":
+                    # Provisioning is atomic (all-or-nothing, see
+                    # MissionAgentProvisioningService.provision) - any agent
+                    # still "running" here never actually finished.
+                    pipeline_run.provisioned_agents = [
+                        agent.model_copy(update={"status": "failed"})
+                        if agent.status == "running"
+                        else agent
+                        for agent in pipeline_run.provisioned_agents
+                    ]
                 step_result.status = "failed"
                 step_result.error = str(exc)
                 step_result.completed_at = datetime.now(UTC)

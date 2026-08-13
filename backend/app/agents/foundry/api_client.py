@@ -77,11 +77,19 @@ class AgentApiClient(Protocol):
         """
         ...
 
-    def create_agent(self, *, name: str, model: str, instructions: str) -> str:
+    def create_agent(
+        self, *, name: str, model: str, instructions: str, description: str | None = None
+    ) -> str:
         """Create a new Foundry Prompt Agent version and return its agent_name.
 
-        Used exclusively by ``CustomerAgentProvisioningService`` to clone a
-        dedicated, per-customer copy of an already-approved catalog agent.
+        Used exclusively by ``CustomerAgentProvisioningService`` (and
+        ``MissionAgentProvisioningService``) to clone a dedicated,
+        per-customer/per-mission copy of an already-approved agent.
+        ``description``, when given, is the exact human-readable agent name
+        (e.g. ``"Requirements Specialist"``) - the ``name`` resource
+        identifier itself is slugified and may combine a customer/mission
+        prefix, so ``description`` is what makes the individual agent
+        recognizable inside the Azure AI Foundry portal itself.
         """
         ...
 
@@ -115,9 +123,13 @@ class AzureAIProjectsApiClient:
         details = self._sdk_client.agents.get(agent_id)
         return details.versions.latest.version
 
-    def create_agent(self, *, name: str, model: str, instructions: str) -> str:
+    def create_agent(
+        self, *, name: str, model: str, instructions: str, description: str | None = None
+    ) -> str:
         definition = PromptAgentDefinition(kind="prompt", model=model, instructions=instructions)
-        version_details = self._sdk_client.agents.create_version(name, definition=definition)
+        version_details = self._sdk_client.agents.create_version(
+            name, definition=definition, description=description
+        )
         return version_details.name
 
     def delete_agent(self, agent_id: str) -> None:

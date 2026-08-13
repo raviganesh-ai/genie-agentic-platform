@@ -132,6 +132,7 @@ class CustomerAgentProvisioningService:
                     name=f"{agent.id}-cx-{key[:8]}",
                     model=agent.model_deployment_ref or "",
                     instructions=agent.description,
+                    description=agent.name,
                 )
                 records[agent.id] = ProvisionedAgentRecord(
                     agent_id=agent.id,
@@ -229,11 +230,10 @@ def create_customer_agent_provisioning_service(
 ) -> CustomerAgentProvisioningService | NullCustomerAgentProvisioningService:
     """Fail-closed factory mirroring ``create_agent_gateway``.
 
-    Production always requires Azure AI Foundry to be configured and never
-    falls back to the null implementation. Local/dev uses the null
-    implementation unless Foundry happens to be configured, in which case
-    the real service is used (so local development can still exercise the
-    real provisioning path against a real dev Foundry project).
+    Uses the null implementation unless Azure AI Foundry happens to be
+    configured, in which case the real service is used (so local
+    development can still exercise the real provisioning path against a
+    real dev Foundry project).
     """
 
     def _build_real() -> CustomerAgentProvisioningService:
@@ -251,9 +251,6 @@ def create_customer_agent_provisioning_service(
             project_service=project_service,
             governance_service=governance_service,
         )
-
-    if settings.provider_mode == "production":
-        return _build_real()
 
     if settings.azure_foundry_endpoint and settings.azure_foundry_project_name:
         return _build_real()

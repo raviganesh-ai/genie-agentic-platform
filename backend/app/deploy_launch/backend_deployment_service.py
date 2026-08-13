@@ -1,8 +1,7 @@
 """Real backend deployment: remote ACR build (no local Docker) + Container Apps deploy.
 
-Production path (selected by ``Settings.provider_mode`` exactly like
-``AzureAgentGateway``/``CustomerAgentProvisioningService`` - see
-``create_backend_deployment_service`` below):
+Real path (used automatically once all required settings below are
+configured - see ``create_backend_deployment_service``):
 
 1. Packages the materialized backend build directory (see
    ``app.deploy_launch.code_materializer``) into a gzipped tarball and
@@ -271,7 +270,9 @@ class NullBackendDeploymentService:
 def create_backend_deployment_service(
     *, settings: Settings
 ) -> BackendDeploymentService | NullBackendDeploymentService:
-    """Fail-closed factory mirroring ``create_customer_agent_provisioning_service``."""
+    """Fail-closed factory: uses the real service once all required settings
+    are configured, otherwise a no-op stand-in.
+    """
 
     required = (
         settings.azure_subscription_id,
@@ -301,9 +302,6 @@ def create_backend_deployment_service(
             foundry_endpoint=settings.azure_foundry_endpoint,  # type: ignore[arg-type]
             foundry_project_name=settings.azure_foundry_project_name,  # type: ignore[arg-type]
         )
-
-    if settings.provider_mode == "production":
-        return _build_real()
 
     if all(required):
         return _build_real()

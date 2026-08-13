@@ -30,7 +30,9 @@ class _FakeApiClient:
     def agent_exists(self, agent_id: str) -> bool:  # pragma: no cover - unused here
         return True
 
-    def create_agent(self, *, name: str, model: str, instructions: str) -> str:  # pragma: no cover
+    def create_agent(
+        self, *, name: str, model: str, instructions: str, description: str | None = None
+    ) -> str:  # pragma: no cover
         return name
 
     def delete_agent(self, agent_id: str) -> None:  # pragma: no cover - unused here

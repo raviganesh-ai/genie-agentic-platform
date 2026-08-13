@@ -33,6 +33,16 @@ COPY --from=builder /usr/local/bin /usr/local/bin
 COPY backend/app ./app
 COPY config ./config
 
+# Deploy & Launch's DeploymentPipelineService materializes each mission's
+# generated build under a relative workspace root (Settings.
+# deployment_build_workspace_root, default "var/deploy-launch-builds",
+# resolved against the process cwd = WORKDIR /app) before it can be
+# packaged/deployed - that directory must exist and be writable by the
+# non-root "genie" user this image runs as (/app itself is root-owned from
+# the COPY steps above), or every Deploy & Launch run fails closed with
+# "[Errno 13] Permission denied: 'var'" on its very first write.
+RUN mkdir -p /app/var/deploy-launch-builds && chown -R genie:genie /app/var
+
 USER genie
 
 EXPOSE 8000

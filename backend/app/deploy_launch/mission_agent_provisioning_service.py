@@ -101,6 +101,7 @@ class MissionAgentProvisioningService:
                     name=f"{mission_slug}-{_slugify(agent_name)}",
                     model=self._model_deployment_ref,
                     instructions=_extract_agent_instructions(architecture_document, agent_name),
+                    description=agent_name,
                 )
                 provisioned.append(
                     ProvisionedMissionAgent(
@@ -146,21 +147,13 @@ def create_mission_agent_provisioning_service(
 ) -> MissionAgentProvisioningService | NullMissionAgentProvisioningService:
     """Factory choosing the real or Null mission agent provisioning service.
 
-    Mirrors ``create_customer_agent_provisioning_service``'s fail-closed
-    pattern: production mode always requires real Azure AI Foundry
-    configuration; local mode uses the Null implementation unless that
-    configuration happens to be fully set.
+    Uses the real ``MissionAgentProvisioningService`` when Azure AI Foundry
+    is configured, otherwise the Null implementation.
     """
 
     has_config = bool(settings.azure_foundry_endpoint and settings.azure_foundry_project_name)
 
-    if settings.provider_mode == "production":
-        if not has_config:
-            raise MissionAgentProvisioningError(
-                "Production mode requires azure_foundry_endpoint and "
-                "azure_foundry_project_name to provision mission agents."
-            )
-    elif not has_config:
+    if not has_config:
         return NullMissionAgentProvisioningService()
 
     project_service = FoundryProjectService(

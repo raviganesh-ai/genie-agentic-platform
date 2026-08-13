@@ -46,8 +46,12 @@ class _FakeAgentsOperations:
             )
         )
 
-    def create_version(self, agent_name: str, *, definition: object) -> _FakeVersionDetails:
-        self.created.append({"agent_name": agent_name, "definition": definition})
+    def create_version(
+        self, agent_name: str, *, definition: object, description: str | None = None
+    ) -> _FakeVersionDetails:
+        self.created.append(
+            {"agent_name": agent_name, "definition": definition, "description": description}
+        )
         return _FakeVersionDetails(name=agent_name)
 
     def delete(self, agent_name: str) -> None:
@@ -108,8 +112,23 @@ def test_create_agent_creates_a_version_and_returns_its_name():
         {
             "agent_name": "requirements-analyst-cx-abc123",
             "definition": sdk_client.agents.created[0]["definition"],
+            "description": None,
         }
     ]
+
+
+def test_create_agent_forwards_description_as_the_human_readable_agent_name():
+    sdk_client = _FakeSdkClient(known_agents={})
+    client = AzureAIProjectsApiClient(sdk_client)
+
+    client.create_agent(
+        name="acme-mission-a1b2c3d4-requirements-specialist",
+        model="gpt-4o",
+        instructions="Be helpful.",
+        description="Requirements Specialist",
+    )
+
+    assert sdk_client.agents.created[0]["description"] == "Requirements Specialist"
 
 
 def test_delete_agent_deletes_by_name():

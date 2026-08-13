@@ -209,6 +209,16 @@ async def test_full_pipeline_runs_every_step(tmp_path: Path):
     assert run.test_summary is not None
     assert run.security_findings_count is not None
 
+    # Per-agent Foundry provisioning progress must be reported on the run
+    # itself (not just an aggregate step status), each landing "completed"
+    # with its own real foundry_agent_name once the pipeline finishes.
+    assert {agent.agent_name for agent in run.provisioned_agents} == {
+        "Requirements Specialist",
+        "orchestrator",
+    }
+    assert all(agent.status == "completed" for agent in run.provisioned_agents)
+    assert all(agent.foundry_agent_name for agent in run.provisioned_agents)
+
     # The full specialist-name -> Foundry-name mapping (not just the
     # orchestrator's own name) must be materialized as a real agent_config.py
     # file so the generated orchestrator.py's call_<agent> tools have a real,

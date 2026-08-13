@@ -17,7 +17,6 @@ from app.agents.foundry.errors import FoundryUnavailableError
 from app.agents.models import AgentDefinition
 from app.agents.registry import AgentRegistry
 from app.config.settings import Settings
-from app.governance.governance_models import LocalGovernanceTraceProvider
 from app.governance.governance_service import create_governance_service
 from app.services.customer_agent_provisioning_service import (
     CustomerAgentProvisioningError,
@@ -55,13 +54,21 @@ class _FakeAgentApiClient:
     deleted: list[str] = field(default_factory=list)
     _next_id: int = 0
 
-    def create_agent(self, *, name: str, model: str, instructions: str) -> str:
+    def create_agent(
+        self, *, name: str, model: str, instructions: str, description: str | None = None
+    ) -> str:
         if self.fail_on_create_name is not None and name == self.fail_on_create_name:
             raise RuntimeError(f"simulated failure creating '{name}'")
         self._next_id += 1
         dedicated_id = f"dedicated-{self._next_id}"
         self.created.append(
-            {"name": name, "model": model, "instructions": instructions, "id": dedicated_id}
+            {
+                "name": name,
+                "model": model,
+                "instructions": instructions,
+                "id": dedicated_id,
+                "description": description or "",
+            }
         )
         return dedicated_id
 
@@ -109,6 +116,11 @@ async def test_provision_creates_one_dedicated_agent_per_enabled_catalog_agent(
     assert len(api_client.created) == 2
     assert service.is_provisioned("session-1")
     assert service.resolve(session_id="session-1", agent_id="agent-a") is not None
+    # The exact human-readable agent name (AgentDefinition.name) must be
+    # forwarded as `description` so it stays visible in the Foundry portal
+    # even though the resource `name` itself is slugified with a per-session suffix.
+    assert {created["description"] for created in api_client.created} == {"agent-a", "agent-b"}
+
 
 
 async def test_provision_skips_disabled_and_local_only_agents(local_settings: Settings):
@@ -170,11 +182,13 @@ async def test_provision_rolls_back_already_created_agents_on_failure(local_sett
     original_create = api_client.create_agent
     call_count = {"n": 0}
 
-    def _flaky_create(*, name: str, model: str, instructions: str) -> str:
+    def _flaky_create(
+        *, name: str, model: str, instructions: str, description: str | None = None
+    ) -> str:
         call_count["n"] += 1
         if call_count["n"] == 2:
             raise RuntimeError("simulated failure on second agent")
-        return original_create(name=name, model=model, instructions=instructions)
+        return original_create(name=name, model=model, instructions=instructions, description=description)
 
     api_client.create_agent = _flaky_create  # type: ignore[method-assign]
 
@@ -327,20 +341,3 @@ def test_factory_returns_null_service_in_local_mode_without_foundry_configured(
     )
 
     assert isinstance(service, NullCustomerAgentProvisioningService)
-
-
-def test_factory_raises_in_production_without_foundry_configured(production_settings: Settings):
-    unconfigured_settings = production_settings.model_copy(
-        update={"azure_foundry_endpoint": None, "azure_foundry_project_name": None}
-    )
-    registry = _registry(_agent(agent_id="agent-a"))
-    governance_service = create_governance_service(
-        settings=unconfigured_settings, provider=LocalGovernanceTraceProvider()
-    )
-
-    with pytest.raises(CustomerAgentProvisioningError):
-        create_customer_agent_provisioning_service(
-            settings=unconfigured_settings,
-            agent_registry=registry,
-            governance_service=governance_service,
-        )
