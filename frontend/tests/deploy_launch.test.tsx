@@ -3,6 +3,7 @@ import { screen, waitFor } from "@testing-library/react";
 import { renderWithProviders, mockFetchSequence } from "./testUtils";
 import { FIXTURE_SESSION_ID, FIXTURE_WORKFLOW_RUN_ID } from "./fixtures";
 import { DeployLaunchPage } from "@/features/deploy-launch/DeployLaunchPage";
+import { DEPLOYMENT_STEP_NAMES } from "@/types/deployLaunch";
 import type { DeploymentPipelineRun } from "@/types/deployLaunch";
 
 function buildPipelineRun(overrides: Partial<DeploymentPipelineRun> = {}): DeploymentPipelineRun {
@@ -13,6 +14,7 @@ function buildPipelineRun(overrides: Partial<DeploymentPipelineRun> = {}): Deplo
     status: "pending",
     steps: [],
     access_policy: null,
+    provisioned_agents: [],
     backend_url: null,
     frontend_url: null,
     launch_url: null,
@@ -45,6 +47,28 @@ describe("DeployLaunchPage", () => {
     });
   });
 
+  it("shows the full step roster up front, all Not Started, before any run exists yet", async () => {
+    mockFetchSequence([
+      { match: "/deploy-launch/", response: [] },
+      { match: "/deploy-launch/start", response: buildPipelineRun({ status: "running" }) },
+    ]);
+
+    renderWithProviders(<DeployLaunchPage />, {
+      sessionId: FIXTURE_SESSION_ID,
+      workflowRunId: FIXTURE_WORKFLOW_RUN_ID,
+    });
+
+    // The whole plan is visible immediately - no generic "Starting..."
+    // spinner - every step name shows up front with a "Not Started" status.
+    await waitFor(() => {
+      for (const name of Object.values(DEPLOYMENT_STEP_NAMES)) {
+        expect(screen.getByText(name)).toBeInTheDocument();
+      }
+    });
+    expect(screen.getAllByText("Not Started").length).toBeGreaterThan(0);
+    expect(screen.queryByText("Starting Deploy & Launch automatically...")).not.toBeInTheDocument();
+  });
+
   it("shows step progress for an in-flight pipeline run", async () => {
     mockFetchSequence([
       {
@@ -75,6 +99,48 @@ describe("DeployLaunchPage", () => {
 
     await waitFor(() => expect(screen.getByText(/Generate Access Policy & Least Access/i)).toBeInTheDocument());
     expect(screen.getByText(/^Launch$/i)).toBeInTheDocument();
+  });
+
+  it("shows a per-agent breakdown with its Foundry agent name for the Deploy Agents step", async () => {
+    mockFetchSequence([
+      {
+        match: "/deploy-launch/",
+        response: [
+          buildPipelineRun({
+            status: "running",
+            steps: [
+              {
+                step_id: "provision-foundry-agents",
+                name: "Deploy Agents to Foundry",
+                status: "running",
+                detail: "",
+                error: null,
+                started_at: "2026-07-23T12:00:00Z",
+                completed_at: null,
+              },
+            ],
+            provisioned_agents: [
+              {
+                agent_name: "Requirements Specialist",
+                status: "completed",
+                foundry_agent_name: "local-acme-mission-requirements-specialist",
+              },
+              { agent_name: "orchestrator", status: "running", foundry_agent_name: null },
+            ],
+          }),
+        ],
+      },
+    ]);
+
+    renderWithProviders(<DeployLaunchPage />, {
+      sessionId: FIXTURE_SESSION_ID,
+      workflowRunId: FIXTURE_WORKFLOW_RUN_ID,
+    });
+
+    await waitFor(() => expect(screen.getByText("Requirements Specialist")).toBeInTheDocument());
+    expect(screen.getByText("local-acme-mission-requirements-specialist")).toBeInTheDocument();
+    expect(screen.getByText("orchestrator")).toBeInTheDocument();
+    expect(screen.getByText(/Deploying…/i)).toBeInTheDocument();
   });
 
   it("shows the launch link and download action once the pipeline completes", async () => {

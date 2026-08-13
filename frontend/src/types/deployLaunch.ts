@@ -61,6 +61,12 @@ export interface DeploymentStepResult {
   completed_at: string | null;
 }
 
+export interface ProvisionedAgentStatus {
+  agent_name: string;
+  status: DeploymentStepStatus;
+  foundry_agent_name: string | null;
+}
+
 export interface DeploymentPipelineRun {
   id: string;
   session_id: string;
@@ -68,6 +74,7 @@ export interface DeploymentPipelineRun {
   status: DeploymentPipelineStatus;
   steps: DeploymentStepResult[];
   access_policy: AccessPolicyDocument | null;
+  provisioned_agents: ProvisionedAgentStatus[];
   backend_url: string | null;
   frontend_url: string | null;
   launch_url: string | null;

@@ -11,7 +11,7 @@ import { ErrorState } from "@/components/ErrorState";
 import { SectionCard } from "@/components/SectionCard";
 import { useWorkflowEventStream } from "@/hooks/useWorkflowEventStream";
 import { DEPLOYMENT_STEP_ORDER, DEPLOYMENT_STEP_NAMES } from "@/types/deployLaunch";
-import type { DeploymentStepResult } from "@/types/deployLaunch";
+import type { DeploymentStepResult, ProvisionedAgentStatus } from "@/types/deployLaunch";
 
 const POLL_MS = 4000;
 
@@ -23,15 +23,64 @@ const STEP_STATUS_COLORS: Record<DeploymentStepResult["status"], string> = {
   skipped: "#8a8f98",
 };
 
+// The user-facing status vocabulary is deliberately "Started → In Progress →
+// Deployed" for every phase (and per-agent row) rather than generic
+// pending/running/completed test jargon.
 const STEP_STATUS_LABELS: Record<DeploymentStepResult["status"], string> = {
-  pending: "Pending",
-  running: "Running…",
-  completed: "✅ Completed",
+  pending: "Not Started",
+  running: "In Progress…",
+  completed: "✅ Deployed",
   failed: "❌ Failed",
   skipped: "Skipped",
 };
 
-function StepRow({ step }: { step: DeploymentStepResult }): JSX.Element {
+const AGENT_STATUS_LABELS: Record<ProvisionedAgentStatus["status"], string> = {
+  pending: "Queued",
+  running: "Deploying…",
+  completed: "✅ Deployed",
+  failed: "❌ Failed",
+  skipped: "Skipped",
+};
+
+function AgentRow({ agent }: { agent: ProvisionedAgentStatus }): JSX.Element {
+  const color = STEP_STATUS_COLORS[agent.status];
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: 12,
+        borderLeft: `3px solid ${color}`,
+        padding: "6px 10px",
+        background: "rgba(255,255,255,0.03)",
+        borderRadius: 4,
+      }}
+    >
+      <Text size={200} weight="semibold">
+        {agent.agent_name}
+      </Text>
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        {agent.foundry_agent_name ? (
+          <Text size={200} style={{ opacity: 0.75, fontFamily: "monospace" }}>
+            {agent.foundry_agent_name}
+          </Text>
+        ) : null}
+        <Text size={200} style={{ color }}>
+          {AGENT_STATUS_LABELS[agent.status]}
+        </Text>
+      </div>
+    </div>
+  );
+}
+
+function StepRow({
+  step,
+  agents,
+}: {
+  step: DeploymentStepResult;
+  agents?: ProvisionedAgentStatus[];
+}): JSX.Element {
   const color = STEP_STATUS_COLORS[step.status];
   return (
     <div
@@ -61,6 +110,13 @@ function StepRow({ step }: { step: DeploymentStepResult }): JSX.Element {
         <Text size={200} style={{ color: "#d1495b" }}>
           {step.error}
         </Text>
+      ) : null}
+      {agents && agents.length > 0 ? (
+        <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 4 }}>
+          {agents.map((agent) => (
+            <AgentRow key={agent.agent_name} agent={agent} />
+          ))}
+        </div>
       ) : null}
     </div>
   );
@@ -151,6 +207,27 @@ export function DeployLaunchPage(): JSX.Element {
     void handleStart();
   }, [sessionId, workflowRunId, runs, activeRun, handleStart]);
 
+  // The full step roster, shown to the user immediately - even before a run
+  // has actually started - so they see the whole plan up front ("Not
+  // Started" for every step) rather than a generic spinner, then watch each
+  // step's status update in place as the pipeline actually executes.
+  const steps: DeploymentStepResult[] = useMemo(
+    () =>
+      DEPLOYMENT_STEP_ORDER.map(
+        (stepId) =>
+          activeRun?.steps.find((candidate) => candidate.step_id === stepId) ?? {
+            step_id: stepId,
+            name: DEPLOYMENT_STEP_NAMES[stepId],
+            status: "pending" as const,
+            detail: "",
+            error: null,
+            started_at: null,
+            completed_at: null,
+          },
+      ),
+    [activeRun],
+  );
+
   const [downloading, setDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
   const handleDownload = useCallback(async () => {
@@ -216,30 +293,20 @@ export function DeployLaunchPage(): JSX.Element {
               </Button>
             </div>
           </SectionCard>
-        ) : !activeRun ? (
-          <LoadingState label="Starting Deploy & Launch automatically..." />
         ) : null}
 
+        <SectionCard title="Pipeline Progress">
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {steps.map((step) => {
+              const agents =
+                step.step_id === "provision-foundry-agents" ? activeRun?.provisioned_agents ?? [] : undefined;
+              return <StepRow key={step.step_id} step={step} agents={agents} />;
+            })}
+          </div>
+        </SectionCard>
 
         {activeRun ? (
           <>
-            <SectionCard title="Pipeline Progress">
-              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                {DEPLOYMENT_STEP_ORDER.map((stepId) => {
-                  const step = activeRun.steps.find((candidate) => candidate.step_id === stepId) ?? {
-                    step_id: stepId,
-                    name: DEPLOYMENT_STEP_NAMES[stepId],
-                    status: "pending" as const,
-                    detail: "",
-                    error: null,
-                    started_at: null,
-                    completed_at: null,
-                  };
-                  return <StepRow key={stepId} step={step} />;
-                })}
-              </div>
-            </SectionCard>
-
             {activeRun.access_policy ? (
               <SectionCard title="🔐 Least-Access Policy">
                 <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
