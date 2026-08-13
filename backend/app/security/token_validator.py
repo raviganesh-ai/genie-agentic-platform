@@ -231,9 +231,10 @@ def create_token_validator(settings: Settings) -> TokenValidator:
             timeout_seconds=settings.mise_timeout_seconds,
         )
 
-    if settings.allow_local_agents:
+    if settings.allow_local_token_validation:
         return LocalDevTokenValidator()
 
     raise TokenValidatorError(
-        "No usable token validator: allow_local_agents is False and MISE is not configured."
+        "No usable token validator: allow_local_token_validation is False and MISE is not "
+        "configured."
     )

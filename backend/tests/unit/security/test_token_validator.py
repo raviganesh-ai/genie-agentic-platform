@@ -7,6 +7,7 @@ from app.config.settings import Settings
 from app.security.token_validator import (
     AuthenticationError,
     AuthenticationServiceUnavailableError,
+    LocalDevTokenValidator,
     MiseTokenValidator,
     TokenValidatorError,
     create_token_validator,
@@ -135,3 +136,38 @@ async def test_factory_uses_mise_when_configured() -> None:
 
     assert isinstance(validator, MiseTokenValidator)
     await validator.close()
+
+
+def test_local_mode_uses_local_dev_validator_independent_of_agent_gateway_choice() -> None:
+    """allow_local_token_validation is independent of allow_local_agents.
+
+    A deployment may require the real AzureAgentGateway (allow_local_agents=
+    False) while MISE onboarding is still in progress - it should still get
+    a usable (local, unverified-signature) token validator rather than
+    crash-looping, as long as allow_local_token_validation is True.
+    """
+
+    settings = Settings(
+        provider_mode="local",
+        allow_local_agents=False,
+        allow_local_token_validation=True,
+        entra_tenant_id="tenant-id",
+        entra_client_id="client-id",
+    )
+
+    validator = create_token_validator(settings)
+
+    assert isinstance(validator, LocalDevTokenValidator)
+
+
+def test_local_mode_fails_closed_when_local_token_validation_disallowed_and_no_mise() -> None:
+    settings = Settings(
+        provider_mode="local",
+        allow_local_agents=False,
+        allow_local_token_validation=False,
+        entra_tenant_id="tenant-id",
+        entra_client_id="client-id",
+    )
+
+    with pytest.raises(TokenValidatorError, match="allow_local_token_validation"):
+        create_token_validator(settings)

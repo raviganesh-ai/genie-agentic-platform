@@ -61,6 +61,15 @@ class Settings(BaseSettings):
     allow_mock_agents: bool = True
     allow_local_agents: bool = True
     use_synthetic_data: bool = True
+    # Independent of allow_local_agents (which selects LocalAgentGateway vs
+    # AzureAgentGateway for agent *execution*): this only controls whether
+    # create_token_validator() may fall back to LocalDevTokenValidator
+    # (unverified-signature JWT decode) when MISE is not configured. Kept
+    # separate so a deployment can require the real AzureAgentGateway
+    # (allow_local_agents=False) while MISE onboarding is still in progress,
+    # without either crash-looping or silently mocking agent execution.
+    # Must be False when provider_mode=production (enforced below).
+    allow_local_token_validation: bool = True
 
     # --- Azure AI Foundry ---------------------------------------------------------
     azure_foundry_endpoint: str | None = None

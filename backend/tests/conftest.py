@@ -127,6 +127,7 @@ def production_settings(valid_config_root: Path) -> Settings:
         governance_provider="agent365",
         allow_mock_agents=False,
         allow_local_agents=False,
+        allow_local_token_validation=False,
         use_synthetic_data=False,
         azure_foundry_endpoint="https://genie-foundry.example-project.azure.com",
         azure_foundry_project_name="genie-prod-project",

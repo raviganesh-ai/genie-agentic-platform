@@ -29,6 +29,12 @@ def test_production_fails_closed_when_local_agents_allowed(production_settings):
     assert not result.passed
 
 
+def test_production_fails_closed_when_local_token_validation_allowed(production_settings):
+    broken = production_settings.model_copy(update={"allow_local_token_validation": True})
+    result = ProductionSafetyValidator().validate(broken)
+    assert not result.passed
+
+
 def test_production_fails_closed_when_synthetic_data_enabled(production_settings):
     broken = production_settings.model_copy(update={"use_synthetic_data": True})
     result = ProductionSafetyValidator().validate(broken)

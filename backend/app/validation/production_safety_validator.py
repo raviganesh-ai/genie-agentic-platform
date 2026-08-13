@@ -23,6 +23,8 @@ class ProductionSafetyValidator:
             errors.append("allow_mock_agents must be False in production.")
         if settings.allow_local_agents:
             errors.append("allow_local_agents must be False in production.")
+        if settings.allow_local_token_validation:
+            errors.append("allow_local_token_validation must be False in production.")
         if settings.use_synthetic_data:
             errors.append("use_synthetic_data must be False in production.")
         if not settings.azure_foundry_endpoint:
