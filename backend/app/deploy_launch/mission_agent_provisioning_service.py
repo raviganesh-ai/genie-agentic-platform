@@ -19,12 +19,20 @@ surface as ``CustomerAgentProvisioningService`` (see
 from __future__ import annotations
 
 import re
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from app.agents.foundry.errors import FoundryUnavailableError
 from app.agents.foundry.project_service import FoundryProjectService
 from app.config.settings import Settings
+
+# Invoked immediately after each individual agent finishes provisioning (agents
+# are provisioned strictly one at a time - see the loop in ``provision()``
+# below) - lets callers (``DeploymentPipelineService``) surface real, live
+# per-agent progress instead of only learning about every agent at once when
+# the whole batch finishes.
+AgentProvisionedCallback = Callable[["ProvisionedMissionAgent"], Awaitable[None]]
 
 __all__ = [
     "MissionAgentProvisioningError",
@@ -83,9 +91,20 @@ class MissionAgentProvisioningService:
         self._model_deployment_ref = model_deployment_ref
 
     async def provision(
-        self, *, mission_slug: str, agent_names: list[str], architecture_document: str
+        self,
+        *,
+        mission_slug: str,
+        agent_names: list[str],
+        architecture_document: str,
+        on_agent_provisioned: AgentProvisionedCallback | None = None,
     ) -> list[ProvisionedMissionAgent]:
-        """Provisions every named mission agent, rolling back all of them on any failure."""
+        """Provisions every named mission agent, rolling back all of them on any failure.
+
+        When given, ``on_agent_provisioned`` is awaited right after each
+        individual agent is created (in order) - callers can use this to
+        reflect real, live per-agent progress rather than waiting for the
+        whole batch to finish.
+        """
 
         try:
             client = self._project_service.get_api_client()
@@ -103,13 +122,14 @@ class MissionAgentProvisioningService:
                     instructions=_extract_agent_instructions(architecture_document, agent_name),
                     description=agent_name,
                 )
-                provisioned.append(
-                    ProvisionedMissionAgent(
-                        agent_name=agent_name,
-                        foundry_agent_name=foundry_agent_name,
-                        provisioned_at=datetime.now(UTC),
-                    )
+                record = ProvisionedMissionAgent(
+                    agent_name=agent_name,
+                    foundry_agent_name=foundry_agent_name,
+                    provisioned_at=datetime.now(UTC),
                 )
+                provisioned.append(record)
+                if on_agent_provisioned is not None:
+                    await on_agent_provisioned(record)
         except Exception as exc:
             for record in provisioned:
                 self._safe_delete(record.foundry_agent_name)
@@ -130,16 +150,24 @@ class NullMissionAgentProvisioningService:
     """Local-mode stand-in: returns fake agent names, makes no Azure calls."""
 
     async def provision(
-        self, *, mission_slug: str, agent_names: list[str], architecture_document: str
+        self,
+        *,
+        mission_slug: str,
+        agent_names: list[str],
+        architecture_document: str,
+        on_agent_provisioned: AgentProvisionedCallback | None = None,
     ) -> list[ProvisionedMissionAgent]:
-        return [
-            ProvisionedMissionAgent(
+        provisioned: list[ProvisionedMissionAgent] = []
+        for agent_name in agent_names:
+            record = ProvisionedMissionAgent(
                 agent_name=agent_name,
                 foundry_agent_name=f"local-{mission_slug}-{_slugify(agent_name)}",
                 provisioned_at=datetime.now(UTC),
             )
-            for agent_name in agent_names
-        ]
+            provisioned.append(record)
+            if on_agent_provisioned is not None:
+                await on_agent_provisioned(record)
+        return provisioned
 
 
 def create_mission_agent_provisioning_service(

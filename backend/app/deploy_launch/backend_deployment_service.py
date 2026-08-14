@@ -36,11 +36,19 @@ from __future__ import annotations
 
 import io
 import tarfile
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from app.config.settings import Settings
+
+# Invoked with a short human-readable message right before each real,
+# potentially slow sub-phase of ``deploy()`` (source upload, remote ACR
+# build, credential lookup, Container App create/update) - lets callers
+# (``DeploymentPipelineService``) surface live "what's happening right now"
+# detail instead of a single static message for the whole step.
+DeploymentProgressCallback = Callable[[str], Awaitable[None]]
 
 __all__ = [
     "BackendDeploymentError",
@@ -144,9 +152,25 @@ class BackendDeploymentService:
         except Exception as exc:
             raise BackendDeploymentError(f"Failed to construct Container Apps client: {exc}") from exc
 
-    async def deploy(self, *, mission_slug: str, build_root: Path) -> BackendDeploymentResult:
+    async def deploy(
+        self,
+        *,
+        mission_slug: str,
+        build_root: Path,
+        on_progress: DeploymentProgressCallback | None = None,
+    ) -> BackendDeploymentResult:
         """Builds ``build_root`` (must contain its own ``Dockerfile``) in ACR and
-        deploys the resulting image as a Container App named after ``mission_slug``."""
+        deploys the resulting image as a Container App named after ``mission_slug``.
+
+        When given, ``on_progress`` is awaited with a short status message
+        before each real sub-phase begins (upload, remote ACR build,
+        credential lookup, Container App create/update) - callers can use
+        this to reflect true, live progress within this single step.
+        """
+
+        async def _report(message: str) -> None:
+            if on_progress is not None:
+                await on_progress(message)
 
         dockerfile = build_root / "Dockerfile"
         if not dockerfile.exists():
@@ -160,6 +184,7 @@ class BackendDeploymentService:
         try:
             from azure.storage.blob import BlobClient
 
+            await _report("Packaging backend build and uploading source to Azure Container Registry...")
             upload_source = acr_client.registries.get_build_source_upload_url(
                 self._resource_group, self._acr_name
             )
@@ -180,6 +205,7 @@ class BackendDeploymentService:
                 is_push_enabled=True,
                 no_cache=False,
             )
+            await _report("Building container image in Azure Container Registry (this can take a minute or two)...")
             poller = acr_client.registries.begin_schedule_run(
                 self._resource_group, self._acr_name, build_request
             )
@@ -190,6 +216,7 @@ class BackendDeploymentService:
             raise BackendDeploymentError(f"Failed to build backend image in ACR: {exc}") from exc
 
         try:
+            await _report("Reading Azure Container Registry credentials...")
             credentials_client = self._acr_credentials_client()
             credentials = credentials_client.registries.list_credentials(
                 self._resource_group, self._acr_name
@@ -244,6 +271,7 @@ class BackendDeploymentService:
                     ]
                 ),
             )
+            await _report("Creating/updating the Azure Container App revision...")
             poller = container_apps_client.container_apps.begin_create_or_update(
                 self._resource_group, app_name, envelope
             )
@@ -259,8 +287,16 @@ class BackendDeploymentService:
 class NullBackendDeploymentService:
     """Local/test double: real behavior end-to-end minus any actual Azure calls."""
 
-    async def deploy(self, *, mission_slug: str, build_root: Path) -> BackendDeploymentResult:
+    async def deploy(
+        self,
+        *,
+        mission_slug: str,
+        build_root: Path,
+        on_progress: DeploymentProgressCallback | None = None,
+    ) -> BackendDeploymentResult:
         del build_root
+        if on_progress is not None:
+            await on_progress("Deploying backend service (local mode, no real Azure calls)...")
         return BackendDeploymentResult(
             image_tag=f"local/{mission_slug}:dev",
             backend_url=f"http://localhost/missions/{mission_slug}/backend",

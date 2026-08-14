@@ -61,6 +61,7 @@ from app.deploy_launch.frontend_deployment_service import (
 from app.deploy_launch.mission_agent_provisioning_service import (
     MissionAgentProvisioningService,
     NullMissionAgentProvisioningService,
+    ProvisionedMissionAgent,
 )
 from app.deploy_launch.models import (
     DEPLOYMENT_STEP_NAMES,
@@ -525,19 +526,48 @@ class DeploymentPipelineService:
                     if materialized.orchestrator_module is not None:
                         agent_names.append("orchestrator")
 
-                    # Mark every agent "running" before the (single, atomic)
-                    # provisioning call so the UI can show a real per-agent
-                    # in-progress list while it is in flight, not just the
-                    # step's own aggregate status.
+                    # Mark every agent "running" before provisioning starts so
+                    # the UI can show a real per-agent in-progress list while
+                    # it is in flight, not just the step's own aggregate
+                    # status. Agents are provisioned strictly one at a time
+                    # (see MissionAgentProvisioningService.provision) - the
+                    # callback below flips each one to "completed" the
+                    # instant its own Foundry agent is created, so the list
+                    # fills in live rather than jumping straight from "all
+                    # running" to "all completed" at the very end.
                     pipeline_run.provisioned_agents = [
                         ProvisionedAgentStatus(agent_name=name, status="running")
                         for name in agent_names
                     ]
+                    step_result.detail = f"Deploying agent 1 of {len(agent_names)} to Azure AI Foundry..."
+
+                    async def _on_agent_provisioned(
+                        record: ProvisionedMissionAgent,
+                        *,
+                        _step_result: DeploymentStepResult = step_result,
+                        _agent_names: list[str] = agent_names,
+                    ) -> None:
+                        completed_so_far = 0
+                        for index, agent in enumerate(pipeline_run.provisioned_agents):
+                            if agent.agent_name == record.agent_name:
+                                pipeline_run.provisioned_agents[index] = ProvisionedAgentStatus(
+                                    agent_name=agent.agent_name,
+                                    status="completed",
+                                    foundry_agent_name=record.foundry_agent_name,
+                                )
+                            if pipeline_run.provisioned_agents[index].status == "completed":
+                                completed_so_far += 1
+                        if completed_so_far < len(_agent_names):
+                            _step_result.detail = (
+                                f"Deploying agent {completed_so_far + 1} of {len(_agent_names)} "
+                                "to Azure AI Foundry..."
+                            )
 
                     provisioned = await self._mission_agent_provisioning_service.provision(
                         mission_slug=mission_slug,
                         agent_names=agent_names,
                         architecture_document=architecture_document,
+                        on_agent_provisioned=_on_agent_provisioned,
                     )
                     provisioned_by_name = {record.agent_name: record for record in provisioned}
                     pipeline_run.provisioned_agents = [
@@ -571,8 +601,14 @@ class DeploymentPipelineService:
                         agent_foundry_names=self._agent_foundry_names[pipeline_run.id],
                     )
                     materialized.write_to_directory(backend_root, backend_service_scaffold=scaffold)
+
+                    async def _on_backend_progress(
+                        message: str, *, _step_result: DeploymentStepResult = step_result
+                    ) -> None:
+                        _step_result.detail = message
+
                     backend_result = await self._backend_deployment_service.deploy(
-                        mission_slug=mission_slug, build_root=backend_root
+                        mission_slug=mission_slug, build_root=backend_root, on_progress=_on_backend_progress
                     )
                     pipeline_run.backend_url = backend_result.backend_url
                     detail = (
@@ -594,8 +630,14 @@ class DeploymentPipelineService:
                     detail = f"Frontend wired to real backend URL {pipeline_run.backend_url}."
 
                 elif step_id == "deploy-frontend-app":
+
+                    async def _on_frontend_progress(
+                        message: str, *, _step_result: DeploymentStepResult = step_result
+                    ) -> None:
+                        _step_result.detail = message
+
                     frontend_result = await self._frontend_deployment_service.deploy(
-                        ui_root=frontend_root
+                        ui_root=frontend_root, on_progress=_on_frontend_progress
                     )
                     pipeline_run.frontend_url = frontend_result.frontend_url
                     detail = f"Frontend deployed at {frontend_result.frontend_url}."
@@ -631,6 +673,11 @@ class DeploymentPipelineService:
                     detail = f"Generated {len(modules)} test module(s) against the deployed build."
 
                 elif step_id == "execute-test-suite":
+                    modules = extract_test_modules(test_output_text)
+                    step_result.detail = (
+                        f"Running {len(modules)} generated test module(s) with pytest against the "
+                        "deployed backend build (up to 2 minutes)..."
+                    )
                     test_result = await self._test_execution_service.run_tests(
                         build_root=backend_root, test_output_text=test_output_text
                     )
@@ -652,6 +699,7 @@ class DeploymentPipelineService:
                         )
 
                 elif step_id == "run-security-scan":
+                    step_result.detail = "Scanning the deployed backend build's dependencies and code for vulnerabilities..."
                     scan_result = await self._security_scan_service.scan(build_root=backend_root)
                     pipeline_run.security_findings_count = len(scan_result.findings)
                     if scan_result.blocking:

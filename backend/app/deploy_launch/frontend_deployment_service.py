@@ -20,11 +20,17 @@ not something invented here.
 """
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from app.config.settings import Settings
+
+# Invoked with a short human-readable message right before each real
+# sub-phase of ``deploy()`` (enabling static website hosting, uploading the
+# build) - mirrors ``backend_deployment_service.DeploymentProgressCallback``.
+DeploymentProgressCallback = Callable[[str], Awaitable[None]]
 
 __all__ = [
     "FrontendDeploymentError",
@@ -95,8 +101,18 @@ class FrontendDeploymentService:
         except Exception as exc:
             raise FrontendDeploymentError(f"Failed to construct Storage management client: {exc}") from exc
 
-    async def deploy(self, *, ui_root: Path) -> FrontendDeploymentResult:
-        """Enables static website hosting and uploads every file under ``ui_root``."""
+    async def deploy(
+        self, *, ui_root: Path, on_progress: DeploymentProgressCallback | None = None
+    ) -> FrontendDeploymentResult:
+        """Enables static website hosting and uploads every file under ``ui_root``.
+
+        When given, ``on_progress`` is awaited with a short status message
+        before each real sub-phase begins.
+        """
+
+        async def _report(message: str) -> None:
+            if on_progress is not None:
+                await on_progress(message)
 
         if not ui_root.exists() or not any(ui_root.iterdir()):
             raise FrontendDeploymentError(f"No materialized UI build found at '{ui_root}'.")
@@ -104,6 +120,7 @@ class FrontendDeploymentService:
         try:
             from azure.storage.blob import ContentSettings, StaticWebsite
 
+            await _report("Enabling static website hosting on Azure Storage...")
             blob_service_client = self._blob_service_client()
             blob_service_client.set_service_properties(
                 static_website=StaticWebsite(
@@ -114,9 +131,9 @@ class FrontendDeploymentService:
             )
 
             container_client = blob_service_client.get_container_client(_WEB_CONTAINER)
-            for file_path in sorted(ui_root.rglob("*")):
-                if not file_path.is_file():
-                    continue
+            build_files = [path for path in sorted(ui_root.rglob("*")) if path.is_file()]
+            await _report(f"Uploading {len(build_files)} frontend file(s) to Azure Storage...")
+            for file_path in build_files:
                 blob_name = file_path.relative_to(ui_root).as_posix()
                 with file_path.open("rb") as handle:
                     container_client.upload_blob(
@@ -131,6 +148,7 @@ class FrontendDeploymentService:
             raise FrontendDeploymentError(f"Failed to upload frontend build: {exc}") from exc
 
         try:
+            await _report("Reading the static website endpoint...")
             storage_client = self._storage_mgmt_client()
             account = storage_client.storage_accounts.get_properties(
                 self._resource_group, self._storage_account_name
@@ -145,8 +163,12 @@ class FrontendDeploymentService:
 class NullFrontendDeploymentService:
     """Local/test double: real behavior end-to-end minus any actual Azure calls."""
 
-    async def deploy(self, *, ui_root: Path) -> FrontendDeploymentResult:
+    async def deploy(
+        self, *, ui_root: Path, on_progress: DeploymentProgressCallback | None = None
+    ) -> FrontendDeploymentResult:
         del ui_root
+        if on_progress is not None:
+            await on_progress("Deploying frontend (local mode, no real Azure calls)...")
         return FrontendDeploymentResult(frontend_url="http://localhost/missions/frontend")
 
 
