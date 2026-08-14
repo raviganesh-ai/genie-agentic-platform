@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { renderWithProviders, mockFetchSequence } from "./testUtils";
 import { FIXTURE_SESSION_ID, FIXTURE_WORKFLOW_RUN_ID } from "./fixtures";
 import { DeployLaunchPage } from "@/features/deploy-launch/DeployLaunchPage";
@@ -213,6 +214,47 @@ describe("DeployLaunchPage", () => {
       ).toBeInTheDocument(),
     );
     expect(screen.getByRole("button", { name: /Download Code & Access Policy/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Launch$/i })).toBeInTheDocument();
+  });
+
+  it("opens the real launch URL in a new browser tab when the Launch button is clicked", async () => {
+    const launchUrl = "https://genie-i4opvs55x5qu4-swa.azurestaticapps.net/";
+    mockFetchSequence([
+      {
+        match: "/deploy-launch/",
+        response: [
+          buildPipelineRun({
+            status: "completed",
+            launch_url: launchUrl,
+            steps: [
+              {
+                step_id: "generate-access-policy",
+                name: "Generate Access Policy & Least Access",
+                status: "completed",
+                detail: "Generated.",
+                error: null,
+                started_at: "2026-07-23T12:00:00Z",
+                completed_at: "2026-07-23T12:00:01Z",
+              },
+            ],
+          }),
+        ],
+      },
+    ]);
+
+    const windowOpenSpy = vi.spyOn(window, "open").mockImplementation(() => null);
+
+    renderWithProviders(<DeployLaunchPage />, {
+      sessionId: FIXTURE_SESSION_ID,
+      workflowRunId: FIXTURE_WORKFLOW_RUN_ID,
+    });
+
+    const launchButton = await screen.findByRole("button", { name: /^Launch$/i });
+    await userEvent.click(launchButton);
+
+    expect(windowOpenSpy).toHaveBeenCalledWith(launchUrl, "_blank", "noopener,noreferrer");
+
+    windowOpenSpy.mockRestore();
   });
 
   it("shows a plain error banner (no auto-retry or approval dance) when starting the pipeline fails", async () => {

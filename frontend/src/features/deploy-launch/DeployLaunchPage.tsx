@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Button, MessageBar, MessageBarBody, MessageBarTitle, Text } from "@fluentui/react-components";
+import { Badge, Button, MessageBar, MessageBarBody, MessageBarTitle, Text } from "@fluentui/react-components";
 import { useSessionContext } from "@/state/SessionContext";
 import { useAsyncResource } from "@/hooks/useAsyncResource";
 import { deployLaunchApi } from "@/services/deployLaunchApi";
@@ -62,6 +62,154 @@ const STEP_WORKING_LABELS: Record<DeploymentStepId, string> = {
 const STARTING_LABEL =
   "Genie is working with the Orchestrator to get your deployment started - this can take a minute...";
 
+// A distinct emoji per pipeline step - purely decorative/visual variety for
+// the mission flow map and step rows below, mirrors the same convention as
+// Triage's `PHASE_ICONS`. Never affects step identity/ordering, which is
+// still driven entirely by `DEPLOYMENT_STEP_ORDER`/`DEPLOYMENT_STEP_NAMES`.
+const STEP_ICONS: Record<DeploymentStepId, string> = {
+  "generate-access-policy": "🔐",
+  "provision-foundry-agents": "🤖",
+  "deploy-backend-service": "⚙️",
+  "sync-frontend-integration": "🔗",
+  "deploy-frontend-app": "🌐",
+  "generate-test-suite": "🧪",
+  "execute-test-suite": "✅",
+  "run-security-scan": "🛡️",
+  "launch-mission": "🚀",
+};
+
+/** A short "12s"/"1m 4s" duration readout between a step's real started_at
+ * and completed_at timestamps - omitted entirely when either is missing so
+ * no fabricated timing is ever shown. */
+function formatDuration(startedAt: string | null, completedAt: string | null): string | null {
+  if (!startedAt || !completedAt) return null;
+  const deltaMs = Date.parse(completedAt) - Date.parse(startedAt);
+  if (!Number.isFinite(deltaMs) || deltaMs < 0) return null;
+  const totalSeconds = Math.round(deltaMs / 1000);
+  if (totalSeconds < 60) return `${totalSeconds}s`;
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}m ${seconds}s`;
+}
+
+type FlowNodeState = "complete" | "active" | "failed" | "locked";
+
+/** One glowing status node in the mission flow map - reuses the exact same
+ * node/connector visual language (`genie-stage-node-*`, `genie-stage-line-active`)
+ * as the AppShell sidebar and Triage panel's control-flow map, so the "skill
+ * tree" motif reads identically everywhere it appears in Genie. */
+function FlowMapNode({ icon, label, state }: { icon: string; label: string; state: FlowNodeState }): JSX.Element {
+  const nodeClass =
+    state === "complete"
+      ? "genie-stage-node-complete"
+      : state === "active"
+        ? "genie-stage-node-active"
+        : state === "failed"
+          ? undefined
+          : "genie-stage-node-locked";
+  const borderColor =
+    state === "complete" ? "#3fa66a" : state === "active" ? "#d99a2b" : state === "failed" ? "#d1495b" : "#2a323d";
+  const backgroundColor =
+    state === "complete"
+      ? "rgba(63, 166, 106, 0.15)"
+      : state === "active"
+        ? "rgba(217, 154, 43, 0.15)"
+        : state === "failed"
+          ? "rgba(209, 73, 91, 0.15)"
+          : "#161c24";
+  return (
+    <div
+      className={nodeClass}
+      title={label}
+      aria-label={label}
+      style={{
+        position: "relative",
+        flexShrink: 0,
+        width: 36,
+        height: 36,
+        borderRadius: "50%",
+        border: `2px solid ${borderColor}`,
+        backgroundColor,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        fontSize: 16,
+      }}
+    >
+      {icon}
+      {state === "complete" ? (
+        <span
+          style={{
+            position: "absolute",
+            bottom: -3,
+            right: -3,
+            width: 15,
+            height: 15,
+            borderRadius: "50%",
+            backgroundColor: "#3fa66a",
+            color: "#0b0f14",
+            fontSize: 9,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          ✓
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+/** Connector segment between two flow map nodes; animates a traveling
+ * stripe while the mission is actively flowing into the next node. */
+function FlowMapConnector({ state }: { state: FlowNodeState }): JSX.Element {
+  return (
+    <div
+      className={state === "active" ? "genie-stage-line-active" : undefined}
+      style={{
+        flex: 1,
+        height: 3,
+        minWidth: 10,
+        margin: "0 2px",
+        borderRadius: 2,
+        backgroundColor:
+          state === "complete" ? "#3fa66a" : state === "failed" ? "#d1495b" : state === "locked" ? "#232a33" : undefined,
+        opacity: state === "locked" ? 0.6 : 1,
+      }}
+    />
+  );
+}
+
+/** Horizontal "skill tree" style overview of all nine Deploy & Launch
+ * phases - a compact, game-like map of the whole mission at a glance,
+ * complementing (not replacing) the detailed per-step list below it. */
+function MissionFlowMap({ steps }: { steps: DeploymentStepResult[] }): JSX.Element {
+  return (
+    <div style={{ display: "flex", alignItems: "center", width: "100%", padding: "4px 2px" }}>
+      {steps.map((step, index) => {
+        const state: FlowNodeState =
+          step.status === "completed"
+            ? "complete"
+            : step.status === "failed"
+              ? "failed"
+              : step.status === "running"
+                ? "active"
+                : "locked";
+        const isLast = index === steps.length - 1;
+        const nextState: FlowNodeState =
+          step.status === "completed" && steps[index + 1]?.status === "running" ? "active" : state;
+        return (
+          <div key={step.step_id} style={{ display: "flex", alignItems: "center", flex: isLast ? "0 0 auto" : 1 }}>
+            <FlowMapNode icon={STEP_ICONS[step.step_id]} label={DEPLOYMENT_STEP_NAMES[step.step_id]} state={state} />
+            {!isLast ? <FlowMapConnector state={nextState} /> : null}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function AgentRow({ agent }: { agent: ProvisionedAgentStatus }): JSX.Element {
   const color = STEP_STATUS_COLORS[agent.status];
   return (
@@ -102,8 +250,11 @@ function StepRow({
   agents?: ProvisionedAgentStatus[];
 }): JSX.Element {
   const color = STEP_STATUS_COLORS[step.status];
+  const duration = formatDuration(step.started_at, step.completed_at);
+  const isRunning = step.status === "running";
   return (
     <div
+      className={isRunning ? "genie-agent-activity" : undefined}
       style={{
         display: "flex",
         flexDirection: "column",
@@ -111,15 +262,27 @@ function StepRow({
         border: `1px solid ${color}`,
         borderRadius: 6,
         padding: "8px 12px",
+        boxShadow: isRunning ? "0 0 0 1px rgba(217, 154, 43, 0.25), 0 0 14px 1px rgba(217, 154, 43, 0.18)" : "none",
+        transition: "box-shadow 200ms ease, border-color 200ms ease",
       }}
     >
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <Text size={300} weight="semibold">
+          <span aria-hidden="true" style={{ marginRight: 8 }}>
+            {STEP_ICONS[step.step_id]}
+          </span>
           {DEPLOYMENT_STEP_NAMES[step.step_id]}
         </Text>
-        <Text size={200} style={{ color }}>
-          {STEP_STATUS_LABELS[step.status]}
-        </Text>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {duration ? (
+            <Text size={100} style={{ opacity: 0.55, fontFamily: "monospace" }}>
+              {duration}
+            </Text>
+          ) : null}
+          <Text size={200} style={{ color }}>
+            {STEP_STATUS_LABELS[step.status]}
+          </Text>
+        </div>
       </div>
       {step.detail ? (
         <Text size={200} style={{ opacity: 0.8, whiteSpace: "pre-wrap" }}>
@@ -248,6 +411,12 @@ export function DeployLaunchPage(): JSX.Element {
     [activeRun],
   );
 
+  // Overall mission progress - drives the "skill tree" flow map and the
+  // progress bar/badge above the detailed step list. Purely derived from
+  // the real step statuses above, never a separate/fabricated counter.
+  const completedStepCount = useMemo(() => steps.filter((step) => step.status === "completed").length, [steps]);
+  const progressPct = Math.round((completedStepCount / steps.length) * 100);
+
   // Drives the gamified "Genie is working with..." activity banner: while
   // the pipeline is genuinely in motion (either the start() request is
   // still in flight, or a run exists and is running) but no error/failure
@@ -259,6 +428,15 @@ export function DeployLaunchPage(): JSX.Element {
   const isPipelineActive =
     !startError && activeRun?.status !== "failed" && (starting || activeRun?.status === "running");
   const activityLabel = runningStep ? STEP_WORKING_LABELS[runningStep.step_id] : STARTING_LABEL;
+
+  // Opens the mission's real, deployed launch URL in a brand-new browser
+  // tab/window - never navigates the Genie platform itself away from this
+  // page. `noopener,noreferrer` prevents the newly opened page from getting
+  // a handle back to this window (standard tab-nabbing protection).
+  const handleLaunch = useCallback(() => {
+    if (!activeRun?.launch_url) return;
+    window.open(activeRun.launch_url, "_blank", "noopener,noreferrer");
+  }, [activeRun]);
 
   const [downloading, setDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
@@ -331,7 +509,37 @@ export function DeployLaunchPage(): JSX.Element {
           <AgentActivityAnimation label={activityLabel} events={liveEvents} />
         ) : null}
 
-        <SectionCard title="Pipeline Progress">
+        <SectionCard
+          title="🎮 Mission Progress"
+          action={
+            <Badge
+              shape="rounded"
+              style={{ backgroundColor: progressPct === 100 ? "#3fa66a" : "#2f83e0", color: "#0b0f14" }}
+            >
+              {completedStepCount}/{steps.length} Phases Complete
+            </Badge>
+          }
+        >
+          <MissionFlowMap steps={steps} />
+          <div
+            style={{
+              height: 8,
+              borderRadius: 4,
+              backgroundColor: "#232a33",
+              overflow: "hidden",
+              marginTop: 12,
+              marginBottom: 16,
+            }}
+          >
+            <div
+              className="genie-xp-bar"
+              style={{
+                height: "100%",
+                width: `${progressPct}%`,
+                backgroundColor: progressPct === 100 ? "#3fa66a" : "#2f83e0",
+              }}
+            />
+          </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {steps.map((step) => {
               const agents =
@@ -357,7 +565,30 @@ export function DeployLaunchPage(): JSX.Element {
             ) : null}
 
             {activeRun.test_summary || activeRun.security_findings_count !== null ? (
-              <SectionCard title="🧪 Testing & Security">
+              <SectionCard
+                title="🧪 Testing & Security"
+                action={
+                  <div style={{ display: "flex", gap: 6 }}>
+                    {activeRun.test_summary ? (
+                      <Badge shape="rounded" style={{ backgroundColor: "#3fa66a", color: "#0b0f14" }}>
+                        ✅ Tests Passed
+                      </Badge>
+                    ) : null}
+                    {activeRun.security_findings_count !== null ? (
+                      <Badge
+                        shape="rounded"
+                        style={{
+                          backgroundColor: activeRun.security_findings_count === 0 ? "#3fa66a" : "#d99a2b",
+                          color: "#0b0f14",
+                        }}
+                      >
+                        🛡️ {activeRun.security_findings_count} Finding
+                        {activeRun.security_findings_count === 1 ? "" : "s"}
+                      </Badge>
+                    ) : null}
+                  </div>
+                }
+              >
                 {activeRun.test_summary ? (
                   <Text size={300} style={{ whiteSpace: "pre-wrap", display: "block", marginBottom: 8 }}>
                     {activeRun.test_summary}
@@ -370,7 +601,18 @@ export function DeployLaunchPage(): JSX.Element {
             ) : null}
 
             {activeRun.status === "completed" && activeRun.launch_url ? (
-              <SectionCard title="🚀 Launch">
+              <SectionCard title="🎉 Mission Launched!" highlight>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+                  <span className="genie-sparkle" aria-hidden="true" style={{ fontSize: 22 }}>
+                    🧞
+                  </span>
+                  <Badge shape="rounded" style={{ backgroundColor: "#3fa66a", color: "#0b0f14" }}>
+                    ✅ Deployment Complete
+                  </Badge>
+                  <span className="genie-sparkle" aria-hidden="true" style={{ fontSize: 18 }}>
+                    ✨
+                  </span>
+                </div>
                 <Text size={300} style={{ display: "block", marginBottom: 12 }}>
                   Your solution is live at:{" "}
                   <a href={activeRun.launch_url} target="_blank" rel="noreferrer">
@@ -378,9 +620,14 @@ export function DeployLaunchPage(): JSX.Element {
                   </a>
                 </Text>
                 {downloadError ? <ErrorState error={{ message: downloadError }} /> : null}
-                <Button appearance="primary" disabled={downloading} onClick={() => void handleDownload()}>
-                  {downloading ? "Preparing download..." : "Download Code & Access Policy"}
-                </Button>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <Button appearance="primary" onClick={handleLaunch}>
+                    Launch
+                  </Button>
+                  <Button disabled={downloading} onClick={() => void handleDownload()}>
+                    {downloading ? "Preparing download..." : "Download Code & Access Policy"}
+                  </Button>
+                </div>
               </SectionCard>
             ) : null}
           </>
