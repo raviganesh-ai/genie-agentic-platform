@@ -238,11 +238,35 @@ prompts:
       requirements, generate a full test suite: unit tests for each
       agent's core logic, integration tests for each agent-to-agent and
       UI-to-orchestrator interaction, and UI tests for each screen -
-      covering every requirement's critical path. Write out the actual
-      test code (using idiomatic frameworks for each artifact's own
-      language, e.g. pytest for Python, Vitest/React Testing Library for
-      TypeScript/React), each as its own fenced code block whose first
-      line is a comment naming what it tests.
+      covering every requirement's critical path.
+
+      Write the Python tests (unit tests and integration tests for the
+      agent/orchestrator code) as one or more fenced ```python code
+      blocks. These are the only tests actually executed by the pipeline,
+      so they must be real, pytest-discoverable tests, not examples or
+      illustrations:
+      - every test MUST be a plain function named exactly `test_<something>`
+        (snake_case, `test_` prefix) at module level, or a method named
+        `test_<something>` on a class named `Test<Something>`
+      - every such function MUST contain at least one real `assert`
+        statement that actually exercises the artifact's code (import and
+        call it directly) - never a placeholder, a `pass`, or an assertion
+        of a literal like `assert True`
+      - never wrap test code in `if __name__ == "__main__":` - pytest
+        never executes that block, so any test only reachable through it
+        would silently never run
+      - do not use `unittest.TestCase` unless the class name starts with
+        `Test` and every test method starts with `test_`
+      - each ```python block must contain at least one such test function
+
+      Separately, write the UI tests (Vitest/React Testing Library for the
+      TypeScript/React screen) as their own fenced ```tsx code block. UI
+      tests are for human/CI review and are not executed by this
+      pipeline's automated gate, so they must still be real and complete,
+      but never substitute them for the required Python tests above.
+
+      Give each fenced code block its own first line as a comment naming
+      what it tests.
 
       After the test code, assess structural completeness: does at least
       one test exist for every function, endpoint, and UI interaction the
@@ -275,7 +299,7 @@ prompts:
       - artifact
       - requirements
       - user_message
-    version: "1.1.0"
+    version: "1.2.0"
 
   - id: failure-diagnosis-v1
     name: Failure Diagnosis

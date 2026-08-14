@@ -33,3 +33,52 @@ def test_fails_closed_for_blank_default_llm(local_settings):
     broken = local_settings.model_copy(update={"default_llm": "   "})
     result = ConfigurationValidator().validate(broken)
     assert not result.passed
+
+
+def test_passes_for_production_settings_with_deployment_config(foundry_configured_settings):
+    result = ConfigurationValidator().validate(foundry_configured_settings)
+    assert result.passed
+
+
+def test_fails_closed_in_production_when_deployment_resource_group_missing(
+    foundry_configured_settings,
+):
+    broken = foundry_configured_settings.model_copy(update={"deployment_resource_group": None})
+    result = ConfigurationValidator().validate(broken)
+    assert not result.passed
+
+
+def test_fails_closed_in_production_when_deployment_acr_name_missing(foundry_configured_settings):
+    broken = foundry_configured_settings.model_copy(update={"deployment_acr_name": None})
+    result = ConfigurationValidator().validate(broken)
+    assert not result.passed
+
+
+def test_fails_closed_in_production_when_deployment_container_apps_environment_id_missing(
+    foundry_configured_settings,
+):
+    broken = foundry_configured_settings.model_copy(
+        update={"deployment_container_apps_environment_id": None}
+    )
+    result = ConfigurationValidator().validate(broken)
+    assert not result.passed
+
+
+def test_fails_closed_in_production_when_deployment_storage_account_name_missing(
+    foundry_configured_settings,
+):
+    broken = foundry_configured_settings.model_copy(update={"deployment_storage_account_name": None})
+    result = ConfigurationValidator().validate(broken)
+    assert not result.passed
+
+
+def test_fails_closed_in_production_when_deployment_location_missing(foundry_configured_settings):
+    broken = foundry_configured_settings.model_copy(update={"deployment_location": None})
+    result = ConfigurationValidator().validate(broken)
+    assert not result.passed
+
+
+def test_missing_deployment_config_does_not_fail_in_development(local_settings):
+    assert local_settings.deployment_resource_group is None
+    result = ConfigurationValidator().validate(local_settings)
+    assert result.passed

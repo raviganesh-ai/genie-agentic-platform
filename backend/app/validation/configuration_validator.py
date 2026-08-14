@@ -31,6 +31,26 @@ class ConfigurationValidator:
         if not settings.default_llm.strip():
             errors.append("default_llm must not be empty.")
 
+        if settings.environment == "production":
+            # Deploy & Launch's backend/frontend deployment factories silently
+            # fall back to Null*DeploymentService stand-ins (fake "localhost"
+            # URLs, no real Azure resources touched) whenever these are unset -
+            # a real production deployment must never allow that; see
+            # app.deploy_launch.backend_deployment_service and
+            # frontend_deployment_service's create_*_deployment_service factories.
+            if not settings.deployment_resource_group:
+                errors.append("deployment_resource_group is required in production.")
+            if not settings.deployment_acr_name:
+                errors.append("deployment_acr_name is required in production.")
+            if not settings.deployment_container_apps_environment_id:
+                errors.append(
+                    "deployment_container_apps_environment_id is required in production."
+                )
+            if not settings.deployment_storage_account_name:
+                errors.append("deployment_storage_account_name is required in production.")
+            if not settings.deployment_location:
+                errors.append("deployment_location is required in production.")
+
         if errors:
             return ValidationResult.fail(self.name, errors)
         return ValidationResult.ok(self.name)
