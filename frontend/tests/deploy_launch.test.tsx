@@ -101,6 +101,41 @@ describe("DeployLaunchPage", () => {
     expect(screen.getByText(/^Launch$/i)).toBeInTheDocument();
   });
 
+  it("shows a gamified 'Genie is working with...' activity banner for the currently running step", async () => {
+    mockFetchSequence([
+      {
+        match: "/deploy-launch/",
+        response: [
+          buildPipelineRun({
+            status: "running",
+            steps: [
+              {
+                step_id: "generate-access-policy",
+                name: "Generate Access Policy & Least Access",
+                status: "running",
+                detail: "",
+                error: null,
+                started_at: "2026-07-23T12:00:00Z",
+                completed_at: null,
+              },
+            ],
+          }),
+        ],
+      },
+    ]);
+
+    renderWithProviders(<DeployLaunchPage />, {
+      sessionId: FIXTURE_SESSION_ID,
+      workflowRunId: FIXTURE_WORKFLOW_RUN_ID,
+    });
+
+    await waitFor(() =>
+      expect(
+        screen.getByText(/Genie is working with the Orchestrator to generate your least-access policy/i),
+      ).toBeInTheDocument(),
+    );
+  });
+
   it("shows a per-agent breakdown with its Foundry agent name for the Deploy Agents step", async () => {
     mockFetchSequence([
       {

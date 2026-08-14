@@ -293,3 +293,38 @@ async def test_pipeline_fails_closed_when_generated_tests_fail(tmp_path: Path):
     failed_step = next(step for step in run.steps if step.step_id == "execute-test-suite")
     assert failed_step.status == "failed"
     assert failed_step.error is not None
+
+
+async def test_start_returns_a_visible_running_run_before_any_slow_lookup_happens(tmp_path: Path):
+    """start() must create and store the run (status "running", every step
+    "pending") BEFORE resolving the session/workflow run - so a poller
+    calling list_runs_for_session immediately after start() returns always
+    sees a real run, never an empty list while slow prep work is still
+    silently happening in the background."""
+    service = _build_service(test_output_text=_PASSING_TEST_OUTPUT, tmp_path=tmp_path)
+
+    run = await service.start(session_id="session-1", requesting_user_id="user-1", workflow_run_id="run-1")
+
+    assert run.status == "running"
+    assert all(step.status == "pending" for step in run.steps)
+    assert service.list_runs_for_session("session-1") == [run]
+
+    await service.wait_for_run(run.id)
+
+
+async def test_start_fails_the_run_visibly_when_the_workflow_run_is_unknown(tmp_path: Path):
+    """An unknown workflow_run_id must never raise synchronously out of
+    start() (there would be no caller left to catch it once steps are
+    running in the background) - it must resolve the already-visible run to
+    "failed" with the error attributed to the first step, so the failure
+    shows up in the same per-step list the user is already watching."""
+    service = _build_service(test_output_text=_PASSING_TEST_OUTPUT, tmp_path=tmp_path)
+
+    run = await service.start(
+        session_id="session-1", requesting_user_id="user-1", workflow_run_id="does-not-exist"
+    )
+    run = await service.wait_for_run(run.id)
+
+    assert run.status == "failed"
+    assert run.steps[0].status == "failed"
+    assert run.steps[0].error is not None

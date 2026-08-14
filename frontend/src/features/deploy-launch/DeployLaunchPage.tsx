@@ -9,9 +9,10 @@ import { PageHeader } from "@/layouts/AppShell";
 import { LoadingState } from "@/components/LoadingState";
 import { ErrorState } from "@/components/ErrorState";
 import { SectionCard } from "@/components/SectionCard";
+import { AgentActivityAnimation } from "@/components/AgentActivityAnimation";
 import { useWorkflowEventStream } from "@/hooks/useWorkflowEventStream";
 import { DEPLOYMENT_STEP_ORDER, DEPLOYMENT_STEP_NAMES } from "@/types/deployLaunch";
-import type { DeploymentStepResult, ProvisionedAgentStatus } from "@/types/deployLaunch";
+import type { DeploymentStepId, DeploymentStepResult, ProvisionedAgentStatus } from "@/types/deployLaunch";
 
 const POLL_MS = 4000;
 
@@ -41,6 +42,25 @@ const AGENT_STATUS_LABELS: Record<ProvisionedAgentStatus["status"], string> = {
   failed: "❌ Failed",
   skipped: "Skipped",
 };
+
+// Narrative, "gamified" copy for the `AgentActivityAnimation` banner shown
+// while a step is actively running (or while the pipeline is still getting
+// started) - so the user always sees a concrete "Genie is working with..."
+// message rather than a silent, static "Not Started" list. Mirrors the same
+// convention used on Requirement Discovery/Workshop.
+const STEP_WORKING_LABELS: Record<DeploymentStepId, string> = {
+  "generate-access-policy": "Genie is working with the Orchestrator to generate your least-access policy...",
+  "provision-foundry-agents": "Genie is working with Azure AI Foundry to deploy your mission agents...",
+  "deploy-backend-service": "Genie is working with the Orchestrator to deploy your backend service...",
+  "sync-frontend-integration": "Genie is wiring your frontend to the newly deployed backend...",
+  "deploy-frontend-app": "Genie is publishing your frontend application...",
+  "generate-test-suite": "Genie is working with the Orchestrator to write functional & regression tests...",
+  "execute-test-suite": "Genie is running your full functional & regression test suite...",
+  "run-security-scan": "Genie is scanning your backend and frontend for security issues...",
+  "launch-mission": "Genie is minting your customer-facing launch link...",
+};
+const STARTING_LABEL =
+  "Genie is working with the Orchestrator to get your deployment started - this can take a minute...";
 
 function AgentRow({ agent }: { agent: ProvisionedAgentStatus }): JSX.Element {
   const color = STEP_STATUS_COLORS[agent.status];
@@ -228,6 +248,18 @@ export function DeployLaunchPage(): JSX.Element {
     [activeRun],
   );
 
+  // Drives the gamified "Genie is working with..." activity banner: while
+  // the pipeline is genuinely in motion (either the start() request is
+  // still in flight, or a run exists and is running) but no error/failure
+  // is showing, surface the currently-running step's narrative label (or a
+  // generic "getting started" label before the first step has flipped to
+  // running) so the user always sees concrete evidence of progress instead
+  // of a silent, static "Not Started" list.
+  const runningStep = useMemo(() => steps.find((step) => step.status === "running") ?? null, [steps]);
+  const isPipelineActive =
+    !startError && activeRun?.status !== "failed" && (starting || activeRun?.status === "running");
+  const activityLabel = runningStep ? STEP_WORKING_LABELS[runningStep.step_id] : STARTING_LABEL;
+
   const [downloading, setDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
   const handleDownload = useCallback(async () => {
@@ -293,6 +325,10 @@ export function DeployLaunchPage(): JSX.Element {
               </Button>
             </div>
           </SectionCard>
+        ) : null}
+
+        {isPipelineActive ? (
+          <AgentActivityAnimation label={activityLabel} events={liveEvents} />
         ) : null}
 
         <SectionCard title="Pipeline Progress">

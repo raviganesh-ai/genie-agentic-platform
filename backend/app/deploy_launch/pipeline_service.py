@@ -175,27 +175,22 @@ class DeploymentPipelineService:
         """Kicks off every Deploy & Launch step in order as soon as the human
         clicks Start - there is no separate approval checkpoint to decide.
 
-        The nine steps themselves (real Azure agent/backend/frontend
-        deployments, a real test run, a real security scan) can legitimately
-        take far longer than a single HTTP request/response should ever
-        block for, so - exactly like Architecture Studio's build-solution
-        kickoff - this returns as soon as the run is created (status
-        ``running``) and executes the steps in a background task. Callers
-        must poll ``get_run``/``list_runs_for_session`` (or the
-        ``WorkflowEventBus``/SSE stream) for live per-step progress, never
-        the return value of this call itself; a client-side network hiccup
-        on this call must never be mistaken for the pipeline itself failing.
+        The pipeline run is created (status ``running``, every step
+        ``pending``) and stored - and therefore immediately visible to
+        ``get_run``/``list_runs_for_session`` pollers - before ANY
+        potentially slow work happens. Resolving the session/workflow run
+        and self-healing a not-yet-finished upstream step (see
+        ``_ensure_upstream_steps_completed``) can legitimately take a while
+        (a real upstream agent resume), so that work - like the nine
+        pipeline steps themselves - runs in the background task, never as
+        an invisible delay before the user sees anything. Callers must poll
+        (or the ``WorkflowEventBus``/SSE stream) for live per-step
+        progress, never the return value of this call itself; a
+        client-side network hiccup on this call must never be mistaken for
+        the pipeline itself failing.
         """
 
-        session = await self._session_service.get_session(
-            session_id=session_id, requesting_user_id=requesting_user_id
-        )
-        run = await self._get_workflow_run(workflow_run_id)
         resolved_trace_id = trace_id or str(uuid4())
-
-        run = await self._ensure_upstream_steps_completed(
-            run=run, session_id=session_id, trace_id=resolved_trace_id
-        )
 
         pipeline_run = DeploymentPipelineRun(
             id=str(uuid4()),
@@ -209,13 +204,6 @@ class DeploymentPipelineService:
         )
         self._runs[pipeline_run.id] = pipeline_run
 
-        # A human-readable mission slug rooted in the mission's own title (set once
-        # by the user on Upload/Landing and carried through Workshop/Architecture
-        # Studio) - never a generic "mission-<uuid>" string - so the Foundry agents
-        # this pipeline provisions are recognizable as belonging to this mission.
-        # The short run-id suffix keeps names unique across repeat/retry deploys of
-        # the same mission (Foundry agent names must be unique).
-        mission_slug = f"{_slugify(session.title)}-{pipeline_run.id[:8]}"
         backend_root = self._build_workspace_root / pipeline_run.id / "backend"
         frontend_root = self._build_workspace_root / pipeline_run.id / "frontend"
         self._workspaces[pipeline_run.id] = _RunWorkspace(
@@ -223,10 +211,10 @@ class DeploymentPipelineService:
         )
 
         task = asyncio.create_task(
-            self._run_and_finalize(
+            self._prepare_and_run(
                 pipeline_run=pipeline_run,
-                run=run,
-                mission_slug=mission_slug,
+                requesting_user_id=requesting_user_id,
+                trace_id=resolved_trace_id,
                 backend_root=backend_root,
                 frontend_root=frontend_root,
             )
@@ -236,20 +224,56 @@ class DeploymentPipelineService:
 
         return pipeline_run
 
-    async def _run_and_finalize(
+    def _fail_run(self, pipeline_run: DeploymentPipelineRun, *, error: str) -> None:
+        """Resolves a run to ``failed`` for a failure that happened before any
+        pipeline step began executing (session/workflow-run lookup, upstream
+        self-heal) - attributed to the first step so it is still visible in
+        the same per-step list the user is already watching, rather than a
+        silent, unexplained stall."""
+        pipeline_run.status = "failed"
+        pipeline_run.updated_at = datetime.now(UTC)
+        if pipeline_run.steps:
+            first_step = pipeline_run.steps[0]
+            first_step.status = "failed"
+            first_step.error = error
+            first_step.completed_at = datetime.now(UTC)
+
+    async def _prepare_and_run(
         self,
         *,
         pipeline_run: DeploymentPipelineRun,
-        run: WorkflowRunResult,
-        mission_slug: str,
+        requesting_user_id: str,
+        trace_id: str,
         backend_root: Path,
         frontend_root: Path,
     ) -> None:
-        """The background task body ``start()`` schedules: runs every step,
-        then always resolves the run to a terminal status (``completed`` or
-        ``failed``) - this task's own exception is never re-raised anywhere
-        (there is no caller left to catch it), so every failure must already
-        have been recorded on the run/step themselves before this returns."""
+        """The background task body ``start()`` schedules: resolves the
+        session/workflow run, self-heals any not-yet-finished upstream step,
+        then runs every pipeline step - always resolving the run to a
+        terminal status (``completed`` or ``failed``). This task's own
+        exception is never re-raised anywhere (there is no caller left to
+        catch it), so every failure must already have been recorded on the
+        run/step themselves before this returns."""
+
+        try:
+            session = await self._session_service.get_session(
+                session_id=pipeline_run.session_id, requesting_user_id=requesting_user_id
+            )
+            run = await self._get_workflow_run(pipeline_run.workflow_run_id)
+            run = await self._ensure_upstream_steps_completed(
+                run=run, session_id=pipeline_run.session_id, trace_id=trace_id
+            )
+        except Exception as exc:  # noqa: BLE001 - top-level background-task boundary; see docstring above.
+            self._fail_run(pipeline_run, error=str(exc))
+            return
+
+        # A human-readable mission slug rooted in the mission's own title (set once
+        # by the user on Upload/Landing and carried through Workshop/Architecture
+        # Studio) - never a generic "mission-<uuid>" string - so the Foundry agents
+        # this pipeline provisions are recognizable as belonging to this mission.
+        # The short run-id suffix keeps names unique across repeat/retry deploys of
+        # the same mission (Foundry agent names must be unique).
+        mission_slug = f"{_slugify(session.title)}-{pipeline_run.id[:8]}"
 
         try:
             await self._execute_steps(
