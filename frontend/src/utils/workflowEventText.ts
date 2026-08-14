@@ -7,13 +7,36 @@ const EVENT_LABELS: Record<WorkflowStreamEvent["event_type"], string> = {
   step_failed: "failed",
 };
 
+/** Longest preview snippet ever shown inline - keeps the live activity
+ * banners a short, readable status line instead of a wall of text. */
+const MAX_PREVIEW_LENGTH = 90;
+
+/** Collapses a raw event preview (which for code-generation steps like
+ * build-solution can be a multi-line, mid-token chunk of raw source code)
+ * into a single short, human-readable snippet - never a code dump. Strips
+ * markdown code-fence markers and agent-comment noise, flattens all
+ * whitespace/newlines to single spaces, and hard-truncates with an
+ * ellipsis. */
+function sanitizePreview(preview: string): string {
+  const flattened = preview
+    .replace(/```[a-zA-Z0-9]*/g, " ")
+    .replace(/\/\/\s*agent:\s*\S+/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!flattened) return "";
+  return flattened.length > MAX_PREVIEW_LENGTH
+    ? `${flattened.slice(0, MAX_PREVIEW_LENGTH).trimEnd()}...`
+    : flattened;
+}
+
 /** Human-readable one-liner for a single SSE workflow-events entry, shared
  * by `LiveWorkflowPulse` (persistent thin status line) and
  * `AgentActivityAnimation` (prominent waiting-state banner) so both surfaces
  * describe live agent activity identically. */
 export function describeEvent(event: WorkflowStreamEvent): string {
   const label = EVENT_LABELS[event.event_type];
-  const preview = event.delta ?? event.output_preview ?? event.error ?? "";
+  const rawPreview = event.delta ?? event.output_preview ?? event.error ?? "";
+  const preview = sanitizePreview(rawPreview);
   const stepLabel = event.step_id.replace(/-/g, " ");
   return preview
     ? `${event.agent_id} (${stepLabel}) ${label}: ${preview}`

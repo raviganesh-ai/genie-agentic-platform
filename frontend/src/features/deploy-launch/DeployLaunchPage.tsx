@@ -183,7 +183,12 @@ function FlowMapConnector({ state }: { state: FlowNodeState }): JSX.Element {
 
 /** Horizontal "skill tree" style overview of all nine Deploy & Launch
  * phases - a compact, game-like map of the whole mission at a glance,
- * complementing (not replacing) the detailed per-step list below it. */
+ * complementing (not replacing) the detailed per-step list below it.
+ * Callers pass already-adjusted `steps` (see `displaySteps` in
+ * `DeployLaunchPage`, which optimistically reports the single next
+ * not-yet-started step as "running" while the mission is active) so this
+ * map and the detailed step-row list below always agree on which step is
+ * currently "live". */
 function MissionFlowMap({ steps }: { steps: DeploymentStepResult[] }): JSX.Element {
   return (
     <div style={{ display: "flex", alignItems: "center", width: "100%", padding: "4px 2px" }}>
@@ -417,6 +422,27 @@ export function DeployLaunchPage(): JSX.Element {
   const completedStepCount = useMemo(() => steps.filter((step) => step.status === "completed").length, [steps]);
   const progressPct = Math.round((completedStepCount / steps.length) * 100);
 
+  const isPipelineActive =
+    !startError && activeRun?.status !== "failed" && (starting || activeRun?.status === "running");
+
+  // What the user actually sees rendered (flow map + step-row list): while
+  // the mission is genuinely in motion, the single next not-yet-started step
+  // is optimistically shown as "In Progress" rather than "Not Started" -
+  // Genie really is working on it server-side the moment the prior step
+  // completes (or from the very start for step 1), the backend's own status
+  // field for it just hasn't flipped to "running" yet (that requires its
+  // first `step_started` event/poll to land). Never overrides a real
+  // completed/failed/running status - purely fills the "about to start"
+  // gap so the whole page never looks frozen on a wall of "Not Started".
+  const displaySteps = useMemo(() => {
+    if (!isPipelineActive) return steps;
+    const nextIndex = steps.findIndex(
+      (step) => step.status !== "completed" && step.status !== "failed" && step.status !== "running",
+    );
+    if (nextIndex === -1) return steps;
+    return steps.map((step, index) => (index === nextIndex ? { ...step, status: "running" as const } : step));
+  }, [steps, isPipelineActive]);
+
   // Drives the gamified "Genie is working with..." activity banner: while
   // the pipeline is genuinely in motion (either the start() request is
   // still in flight, or a run exists and is running) but no error/failure
@@ -424,9 +450,7 @@ export function DeployLaunchPage(): JSX.Element {
   // generic "getting started" label before the first step has flipped to
   // running) so the user always sees concrete evidence of progress instead
   // of a silent, static "Not Started" list.
-  const runningStep = useMemo(() => steps.find((step) => step.status === "running") ?? null, [steps]);
-  const isPipelineActive =
-    !startError && activeRun?.status !== "failed" && (starting || activeRun?.status === "running");
+  const runningStep = useMemo(() => displaySteps.find((step) => step.status === "running") ?? null, [displaySteps]);
   const activityLabel = runningStep ? STEP_WORKING_LABELS[runningStep.step_id] : STARTING_LABEL;
 
   // Opens the mission's real, deployed launch URL in a brand-new browser
@@ -520,7 +544,7 @@ export function DeployLaunchPage(): JSX.Element {
             </Badge>
           }
         >
-          <MissionFlowMap steps={steps} />
+          <MissionFlowMap steps={displaySteps} />
           <div
             style={{
               height: 8,
@@ -541,7 +565,7 @@ export function DeployLaunchPage(): JSX.Element {
             />
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {steps.map((step) => {
+            {displaySteps.map((step) => {
               const agents =
                 step.step_id === "provision-foundry-agents" ? activeRun?.provisioned_agents ?? [] : undefined;
               return <StepRow key={step.step_id} step={step} agents={agents} />;
