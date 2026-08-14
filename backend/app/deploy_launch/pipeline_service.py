@@ -368,12 +368,35 @@ class DeploymentPipelineService:
                 variables={"policies": "", "excluded_agents": ""},
             )
 
-        return await self._orchestrator.resume_workflow(
+        resumed = await self._orchestrator.resume_workflow(
             workflow_run_id=run.workflow_run_id,
             session_id=session_id,
             trace_id=trace_id,
             step_inputs=step_inputs or None,
         )
+
+        # `resume_workflow` can legitimately return WITHOUT raising even when
+        # a required step still isn't done - e.g. the run paused again on an
+        # EARLIER stage's own `requires_human_proceed` gate (design-architecture
+        # comes before build-solution; this self-heal only ever targets
+        # build-solution, so it cannot clear a still-pending architecture
+        # proceed) or on a governance approval checkpoint. Blindly trusting
+        # this resume "worked" let `_execute_steps` reach a much later,
+        # unrelated step (e.g. provision-foundry-agents) before failing with a
+        # confusing "Workflow step 'build-solution' has not completed"
+        # error - fail closed HERE instead, immediately and clearly, so the
+        # very first pipeline step records an actionable message pointing at
+        # the real blocker (the resumed run's own `status`/`detail`).
+        if not all(self._step_completed(resumed, step_id) for step_id in required_step_ids):
+            raise UnknownWorkflowRunError(
+                "Deploy & Launch cannot start: the mission workflow is not fully "
+                f"complete yet (status='{resumed.status}'"
+                + (f", {resumed.detail}" if resumed.detail else "")
+                + "). Go back to Workshop and proceed through any pending step "
+                "before starting Deploy & Launch again."
+            )
+
+        return resumed
 
     def _get_step_output(self, run: WorkflowRunResult, step_id: str) -> str:
         step = next((r for r in run.step_results if r.step_id == step_id), None)

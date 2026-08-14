@@ -158,6 +158,44 @@ class _FakeOrchestratorPendingBuild:
         return self._run
 
 
+class _FakeOrchestratorStuckOnEarlierGate:
+    """Simulates a run that is paused on an EARLIER stage's own
+    ``requires_human_proceed`` gate (e.g. ``design-architecture``, which
+    comes before ``build-solution``) - self-heal only ever targets
+    build-solution, so resuming here legitimately cannot clear this
+    earlier pause. ``resume_workflow`` returns normally (no exception),
+    but build-solution/test-generation are still not completed - the
+    pipeline must fail closed immediately with a clear message rather than
+    silently proceeding into a much later, unrelated step.
+    """
+
+    def __init__(self) -> None:
+        self.resume_calls: list[dict | None] = []
+        self._run = WorkflowRunResult(
+            workflow_run_id="run-1",
+            workflow_id="solution-discovery-workflow",
+            session_id="session-1",
+            status="waiting_for_proceed",
+            detail="Waiting for the human to proceed to step 'design-architecture'.",
+            step_results=[],
+        )
+
+    async def get_workflow_run(self, workflow_run_id: str) -> WorkflowRunResult | None:
+        return self._run if workflow_run_id == "run-1" else None
+
+    async def resume_workflow(
+        self,
+        *,
+        workflow_run_id: str,
+        session_id: str,
+        trace_id: str | None = None,
+        step_inputs: dict | None = None,
+        transcript_text: str = "",
+    ) -> WorkflowRunResult:
+        self.resume_calls.append(step_inputs)
+        return self._run
+
+
 def _access_policy_service() -> AccessPolicyService:
     agent = AgentDefinition(
         id="requirements-analyst",
@@ -277,6 +315,44 @@ async def test_start_self_heals_incomplete_build_solution_with_safe_policy_defau
 
     assert run2.status == "completed"
     assert len(orchestrator.resume_calls) == 1
+
+
+async def test_start_fails_closed_with_actionable_error_when_stuck_on_earlier_gate(tmp_path: Path):
+    """If the self-heal resume returns without clearing build-solution/
+    test-generation (e.g. the run is genuinely paused on an EARLIER stage's
+    own proceed gate), the pipeline must fail immediately with a clear,
+    actionable message attributed to the first step - never silently
+    proceed into `_execute_steps` and blow up on a much later, unrelated
+    step with a confusing "Workflow step 'build-solution' has not
+    completed" error.
+    """
+    orchestrator = _FakeOrchestratorStuckOnEarlierGate()
+    service = DeploymentPipelineService(
+        orchestrator=orchestrator,  # type: ignore[arg-type]
+        session_service=_FakeSessionService(),  # type: ignore[arg-type]
+        event_bus=WorkflowEventBus(),
+        access_policy_service=_access_policy_service(),
+        mission_agent_provisioning_service=NullMissionAgentProvisioningService(),
+        backend_deployment_service=NullBackendDeploymentService(),
+        frontend_deployment_service=NullFrontendDeploymentService(),
+        test_execution_service=TestExecutionService(timeout_seconds=60),
+        security_scan_service=SecurityScanService(timeout_seconds=60),
+        build_workspace_root=tmp_path,
+    )
+
+    run = await service.start(session_id="session-1", requesting_user_id="user-1", workflow_run_id="run-1")
+    run = await service.wait_for_run(run.id)
+
+    assert len(orchestrator.resume_calls) == 1
+    assert run.status == "failed"
+    first_step = run.steps[0]
+    assert first_step.status == "failed"
+    assert first_step.error is not None
+    assert "not fully complete" in first_step.error
+    assert "design-architecture" in first_step.error
+    # Every OTHER step must never have been touched - the failure must be
+    # attributed to the very first step, not a later, unrelated one.
+    assert all(step.status == "pending" for step in run.steps[1:])
 
 
 async def test_pipeline_fails_closed_when_generated_tests_fail(tmp_path: Path):
