@@ -12,21 +12,24 @@ const EVENT_LABELS: Record<WorkflowStreamEvent["event_type"], string> = {
 const MAX_PREVIEW_LENGTH = 90;
 
 /** Collapses a raw event preview (which for code-generation steps like
- * build-solution can be a multi-line, mid-token chunk of raw source code)
- * into a single short, human-readable snippet - never a code dump. Strips
- * markdown code-fence markers and agent-comment noise, flattens all
+ * build-solution can be a multi-line, mid-token chunk of raw source code -
+ * already whitespace-flattened to one line by the backend's own `_preview`
+ * helper, so no closed fence remains to parse structurally) into a single
+ * short, human-readable snippet - never a code dump. Strips markdown
+ * code-fence markers and agent-comment noise, flattens all
  * whitespace/newlines to single spaces, and hard-truncates with an
- * ellipsis. */
-function sanitizePreview(preview: string): string {
+ * ellipsis. `maxLength` defaults to the short inline-banner length; pass a
+ * larger value (e.g. from the Triage panel's mission trace, which has more
+ * room for a real output summary) for a longer snippet. */
+export function sanitizePreview(preview: string, maxLength: number = MAX_PREVIEW_LENGTH): string {
   const flattened = preview
     .replace(/```[a-zA-Z0-9]*/g, " ")
     .replace(/\/\/\s*agent:\s*\S+/gi, " ")
+    .replace(/#\s*agent:\s*\S+/gi, " ")
     .replace(/\s+/g, " ")
     .trim();
   if (!flattened) return "";
-  return flattened.length > MAX_PREVIEW_LENGTH
-    ? `${flattened.slice(0, MAX_PREVIEW_LENGTH).trimEnd()}...`
-    : flattened;
+  return flattened.length > maxLength ? `${flattened.slice(0, maxLength).trimEnd()}...` : flattened;
 }
 
 /** Human-readable one-liner for a single SSE workflow-events entry, shared

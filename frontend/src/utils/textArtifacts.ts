@@ -283,3 +283,39 @@ export function stripCodeBlocks(text: string): string {
     .replace(/\n{3,}/g, "\n\n")
     .trim();
 }
+
+const MAX_OUTPUT_SUMMARY_LENGTH = 260;
+
+/**
+ * Produces a short, human-readable summary of an agent's real output text
+ * for trace/timeline UIs (e.g. the Triage panel's mission trace) - never
+ * dumps raw fenced code. A trailing still-open fence (an in-progress
+ * step's partial output) is excluded first, same as `isBuildOutputComplete`.
+ * When the (now-closed-only) text contains fenced code blocks - e.g.
+ * build-solution's generated components - collapses them into a
+ * "Generated N code artifact(s): <agent labels>" line, appended after any
+ * narrative text that preceded them; otherwise returns the narrative text
+ * itself, hard-truncated. Never fabricates content - only re-shapes what
+ * the agent actually returned.
+ */
+export function summarizeAgentOutput(text: string): string {
+  const openBlock = extractTrailingOpenCodeBlock(text);
+  const closedText = openBlock ? text.slice(0, openBlock.startIndex) : text;
+  const narrative = stripCodeBlocks(closedText);
+  const codeBlocks = extractCodeBlocks(closedText);
+
+  const truncate = (value: string, max: number): string =>
+    value.length > max ? `${value.slice(0, max).trimEnd()}...` : value;
+
+  if (codeBlocks.length === 0) {
+    return narrative.length > 0 ? truncate(narrative, MAX_OUTPUT_SUMMARY_LENGTH) : "(no textual output)";
+  }
+
+  const labels = Array.from(
+    new Set(codeBlocks.map((block) => extractAgentLabel(block.code) ?? block.language)),
+  );
+  const codeSummary = `Generated ${codeBlocks.length} code artifact${codeBlocks.length === 1 ? "" : "s"}${
+    labels.length > 0 ? `: ${labels.join(", ")}` : ""
+  }`;
+  return narrative.length > 0 ? `${truncate(narrative, 160)} — ${codeSummary}` : codeSummary;
+}

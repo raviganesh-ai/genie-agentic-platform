@@ -1,26 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Badge, Text } from "@fluentui/react-components";
+import { MessageBar, Spinner, Text } from "@fluentui/react-components";
 import { useSessionContext } from "@/state/SessionContext";
 import { useAsyncResource } from "@/hooks/useAsyncResource";
+import { useWorkflowEventStream, workflowStepDeltaKey } from "@/hooks/useWorkflowEventStream";
 import { governanceApi } from "@/services/governanceApi";
-import { MISSION_PHASES } from "@/config/discoveryWorkflow";
+import { MISSION_PHASES, type MissionPhase } from "@/config/discoveryWorkflow";
+import { summarizeAgentOutput } from "@/utils/textArtifacts";
+import { sanitizePreview } from "@/utils/workflowEventText";
 import type { GovernanceEvent } from "@/types/governance";
-
-/**
- * Deterministic emoji chosen per `agent_id` (via a simple string hash) so
- * every agent gets a stable, distinct icon in the feed without the UI
- * hardcoding any specific agent id from the registry - keeps this panel
- * safe against future agent/workflow reconfiguration.
- */
-const AGENT_ICONS = ["🤖", "🛰️", "🧭", "🛠️", "🔎", "🧩", "📡", "🧠"];
-
-function iconForAgent(agentId: string): string {
-  let hash = 0;
-  for (let i = 0; i < agentId.length; i += 1) {
-    hash = (hash * 31 + agentId.charCodeAt(i)) % AGENT_ICONS.length;
-  }
-  return AGENT_ICONS[Math.abs(hash) % AGENT_ICONS.length];
-}
+import type { WorkflowStreamEvent } from "@/types/workflowEvents";
 
 function relativeTime(timestamp: string): string {
   const deltaMs = Date.now() - Date.parse(timestamp);
@@ -30,72 +18,137 @@ function relativeTime(timestamp: string): string {
   return `${Math.round(deltaMs / 60_000)}m ago`;
 }
 
-/** Real agent output preview recorded by the backend the instant that call completed. */
-function summarize(detail: Record<string, unknown>): string {
-  const preview = detail.output_preview;
-  return typeof preview === "string" && preview.length > 0
-    ? preview
-    : "(agent call completed - no output preview recorded)";
-}
-
 function stepId(detail: Record<string, unknown>): string | null {
   return typeof detail.step_id === "string" ? detail.step_id : null;
 }
 
-function stepLabel(id: string | null): string | null {
-  if (!id) return null;
-  return MISSION_PHASES.find((phase) => phase.stepId === id)?.label ?? id;
-}
-
-function delegatedBy(detail: Record<string, unknown>): string | null {
-  return typeof detail.delegated_by === "string" ? detail.delegated_by : null;
-}
-
-const MAX_FEED_ITEMS = 30;
-const XP_PER_CALL = 10;
-const XP_PER_LEVEL = 50;
-
-interface TriageStats {
-  xp: number;
-  level: number;
-  levelProgressPct: number;
-  callCount: number;
-}
-
-function computeStats(callCount: number): TriageStats {
-  const xp = callCount * XP_PER_CALL;
-  const level = Math.floor(xp / XP_PER_LEVEL) + 1;
-  const levelProgressPct = ((xp % XP_PER_LEVEL) / XP_PER_LEVEL) * 100;
-  return { xp, level, levelProgressPct, callCount };
+/** Real agent output preview recorded by the backend the instant that call completed. */
+function governanceOutputPreview(detail: Record<string, unknown>): string | null {
+  return typeof detail.output_preview === "string" ? detail.output_preview : null;
 }
 
 const PHASE_ICONS: Record<string, string> = {
   "analyze-requirements": "📋",
   "design-architecture": "🏗️",
   "build-solution": "🤖",
-  "security-assessment": "🛡️",
   "test-generation": "🧪",
 };
 
-type FlowNodeStatus = "complete" | "active" | "pending";
+type PhaseStatus = "pending" | "awaiting-proceed" | "running" | "completed" | "failed";
+
+interface PhaseTrace {
+  status: PhaseStatus;
+  /** Real agent id to display - the live/persisted specialist id once
+   * known, else this phase's configured default (see MissionPhase). */
+  specialistId: string;
+  /** How many `step_started` attempts this phase has made THIS session
+   * (automatic retries - see backend WorkflowRuntime._MAX_STEP_RETRIES -
+   * each produce their own step_started/step_failed or step_completed
+   * pair, so a step failing then succeeding shows as attempt 2, 3, ...). */
+  attempt: number;
+  outputSummary: string | null;
+  errorText: string | null;
+  timestamp: string | null;
+}
 
 /**
- * One glowing status node in the mission control flow - reuses the exact
- * same node/connector visual language (`genie-stage-node-*`,
- * `genie-stage-line-active`) as the AppShell sidebar's mission-flow, so the
- * control flow reads identically everywhere it appears instead of being its
- * own disconnected mini-widget.
+ * Resolves each mission phase's current status/summary from two combined
+ * sources: the session's persisted governance `agent_execution` events
+ * (survive a page reload - only ever recorded on SUCCESS) and this
+ * session's live SSE workflow-events stream (real-time `step_started`/
+ * `step_completed`/`step_failed`, including genuine failures governance
+ * never records). The SSE stream always wins once it has seen ANY event
+ * for a phase this session, since it is strictly more current/detailed.
  */
+function computePhaseTraces(
+  phases: MissionPhase[],
+  sseEvents: WorkflowStreamEvent[],
+  stepDeltaText: Record<string, string>,
+  governanceCompletedStepIds: Set<string>,
+  governanceOutputByStep: Map<string, string>,
+  governanceAgentByStep: Map<string, string>,
+): PhaseTrace[] {
+  const traces: PhaseTrace[] = [];
+  let previousCompleted = true; // the first phase is free to start the instant the mission begins
+
+  for (const phase of phases) {
+    const stepEvents = sseEvents.filter((event) => event.step_id === phase.stepId);
+    const latest = stepEvents.length > 0 ? stepEvents[stepEvents.length - 1] : null;
+    const attempt = stepEvents.filter((event) => event.event_type === "step_started").length;
+    const governanceCompleted = governanceCompletedStepIds.has(phase.stepId);
+
+    let status: PhaseStatus;
+    let outputSummary: string | null = null;
+    let errorText: string | null = null;
+    let specialistId = governanceAgentByStep.get(phase.stepId) ?? phase.specialistAgentId;
+    let timestamp: string | null = null;
+
+    const fullText = latest ? stepDeltaText[workflowStepDeltaKey(latest.step_id, latest.agent_id)] : undefined;
+
+    if (latest?.event_type === "step_failed") {
+      status = "failed";
+      errorText = latest.error ?? "This step failed for an unknown reason.";
+      specialistId = latest.agent_id;
+      timestamp = latest.emitted_at;
+    } else if (latest?.event_type === "step_completed" || (governanceCompleted && !latest)) {
+      status = "completed";
+      const previewText = latest?.output_preview ?? governanceOutputByStep.get(phase.stepId) ?? null;
+      outputSummary =
+        fullText && fullText.trim().length > 0
+          ? summarizeAgentOutput(fullText)
+          : previewText
+            ? sanitizePreview(previewText, 260)
+            : null;
+      if (latest) {
+        specialistId = latest.agent_id;
+        timestamp = latest.emitted_at;
+      }
+    } else if (latest?.event_type === "step_started" || latest?.event_type === "step_delta") {
+      status = "running";
+      specialistId = latest.agent_id;
+      timestamp = latest.emitted_at;
+    } else if (!previousCompleted) {
+      status = "pending";
+    } else if (phase.requiresProceed) {
+      status = "awaiting-proceed";
+    } else {
+      status = "pending";
+    }
+
+    traces.push({ status, specialistId, attempt, outputSummary, errorText, timestamp });
+    previousCompleted = status === "completed";
+  }
+
+  return traces;
+}
+
+type FlowNodeStatus = "complete" | "active" | "pending" | "failed";
+
+function toFlowNodeStatus(status: PhaseStatus): FlowNodeStatus {
+  if (status === "failed") return "failed";
+  if (status === "completed") return "complete";
+  if (status === "running" || status === "awaiting-proceed") return "active";
+  return "pending";
+}
+
+const FLOW_NODE_STYLE: Record<FlowNodeStatus, { border: string; background: string }> = {
+  complete: { border: "#3fa66a", background: "rgba(63, 166, 106, 0.15)" },
+  active: { border: "#d99a2b", background: "rgba(217, 154, 43, 0.15)" },
+  pending: { border: "#2a323d", background: "#161c24" },
+  failed: { border: "#d13438", background: "rgba(209, 52, 56, 0.18)" },
+};
+
+/** One glowing status node in the compact mission-phase overview strip. */
 function FlowNode({ icon, status, label }: { icon: string; status: FlowNodeStatus; label: string }): JSX.Element {
   const nodeClass =
     status === "complete"
       ? "genie-stage-node-complete"
       : status === "active"
         ? "genie-stage-node-active"
-        : "genie-stage-node-locked";
-  const borderColor = status === "complete" ? "#3fa66a" : status === "active" ? "#d99a2b" : "#2a323d";
-  const backgroundColor =
-    status === "complete" ? "rgba(63, 166, 106, 0.15)" : status === "active" ? "rgba(217, 154, 43, 0.15)" : "#161c24";
+        : status === "pending"
+          ? "genie-stage-node-locked"
+          : undefined;
+  const { border, background } = FLOW_NODE_STYLE[status];
   return (
     <div
       className={nodeClass}
@@ -106,8 +159,8 @@ function FlowNode({ icon, status, label }: { icon: string; status: FlowNodeStatu
         width: 32,
         height: 32,
         borderRadius: "50%",
-        border: `2px solid ${borderColor}`,
-        backgroundColor,
+        border: `2px solid ${border}`,
+        backgroundColor: background,
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
@@ -115,7 +168,7 @@ function FlowNode({ icon, status, label }: { icon: string; status: FlowNodeStatu
       }}
     >
       {icon}
-      {status === "complete" ? (
+      {status === "complete" || status === "failed" ? (
         <span
           style={{
             position: "absolute",
@@ -124,7 +177,7 @@ function FlowNode({ icon, status, label }: { icon: string; status: FlowNodeStatu
             width: 14,
             height: 14,
             borderRadius: "50%",
-            backgroundColor: "#3fa66a",
+            backgroundColor: status === "complete" ? "#3fa66a" : "#d13438",
             color: "#0b0f14",
             fontSize: 9,
             display: "flex",
@@ -132,7 +185,7 @@ function FlowNode({ icon, status, label }: { icon: string; status: FlowNodeStatu
             justifyContent: "center",
           }}
         >
-          ✓
+          {status === "complete" ? "✓" : "!"}
         </span>
       ) : null}
     </div>
@@ -150,34 +203,24 @@ function FlowConnector({ state }: { state: FlowNodeStatus }): JSX.Element {
         minWidth: 12,
         margin: "0 2px",
         borderRadius: 2,
-        backgroundColor: state === "complete" ? "#3fa66a" : state === "pending" ? "#232a33" : undefined,
+        backgroundColor:
+          state === "complete" ? "#3fa66a" : state === "failed" ? "#d13438" : state === "pending" ? "#232a33" : undefined,
         opacity: state === "pending" ? 0.6 : 1,
       }}
     />
   );
 }
 
-/**
- * Horizontal map of the mission's control flow - which stage has finished,
- * which is running right now, and which is still ahead - so the live feed
- * below reads as "here's what's happening within this stage" instead of
- * being the only place showing stage sequence at all.
- */
-function ControlFlowMap({ completedStepIds, activeStepId }: { completedStepIds: Set<string>; activeStepId: string | null }): JSX.Element {
+/** Horizontal map of the mission's phases - which has finished, which is running/blocked/failed, which is still ahead. */
+function ControlFlowMap({ traces }: { traces: PhaseTrace[] }): JSX.Element {
   return (
     <div style={{ display: "flex", alignItems: "center", width: "100%" }}>
       {MISSION_PHASES.map((phase, index) => {
-        const status: FlowNodeStatus = completedStepIds.has(phase.stepId)
-          ? "complete"
-          : phase.stepId === activeStepId
-            ? "active"
-            : "pending";
+        const status = toFlowNodeStatus(traces[index].status);
         const isLast = index === MISSION_PHASES.length - 1;
-        const connectorState: FlowNodeStatus = completedStepIds.has(phase.stepId)
-          ? MISSION_PHASES[index + 1]?.stepId === activeStepId
-            ? "active"
-            : "complete"
-          : "pending";
+        const nextStatus = !isLast ? toFlowNodeStatus(traces[index + 1].status) : null;
+        const connectorState: FlowNodeStatus =
+          status === "complete" ? (nextStatus === "active" || nextStatus === "failed" ? nextStatus : "complete") : "pending";
         return (
           <div key={phase.stepId} style={{ display: "flex", alignItems: "center", flex: isLast ? "0 0 auto" : 1 }}>
             <FlowNode icon={PHASE_ICONS[phase.stepId] ?? "🔹"} status={status} label={phase.label} />
@@ -189,34 +232,96 @@ function ControlFlowMap({ completedStepIds, activeStepId }: { completedStepIds: 
   );
 }
 
+/** One small line in the vertical mission trace (a trigger/gate/handoff marker, not a full phase card). */
+function TraceLine({ icon, text, muted = false }: { icon: string; text: string; muted?: boolean }): JSX.Element {
+  return (
+    <div style={{ display: "flex", gap: 8, alignItems: "flex-start", padding: "3px 0", opacity: muted ? 0.55 : 1 }}>
+      <span style={{ fontSize: 13, lineHeight: "18px" }} aria-hidden="true">
+        {icon}
+      </span>
+      <Text size={200}>{text}</Text>
+    </div>
+  );
+}
+
+const STATUS_BADGE: Record<PhaseStatus, { icon: string; label: string; color: string }> = {
+  pending: { icon: "⏸️", label: "Not started", color: "#8a93a0" },
+  "awaiting-proceed": { icon: "⏳", label: "Awaiting your proceed", color: "#d99a2b" },
+  running: { icon: "▶️", label: "Running", color: "#2f83e0" },
+  completed: { icon: "✅", label: "Completed", color: "#3fa66a" },
+  failed: { icon: "❌", label: "Failed", color: "#d13438" },
+};
+
 /**
- * Floating "triage mode" overlay: a concise, gamified live feed of real
- * agent calls made by the orchestrator, driven by the session's governance
- * event trail (`GET /sessions/{id}/peer-review/events`, category
- * `agent_execution`) rather than the batched `WorkflowRunResult`.
+ * One phase's own trace card - its running/completed/failed status, the
+ * real specialist agent handling it, and (once available) a clean output
+ * summary or, on failure, the real error text. This is the "Requirement
+ * (running) --> Output Summary" part of the requested UI --> Orchestrator
+ * --> Phase --> Output Summary trace.
+ */
+function PhaseCard({ phase, trace }: { phase: MissionPhase; trace: PhaseTrace }): JSX.Element {
+  const badge = STATUS_BADGE[trace.status];
+  const borderColor = trace.status === "failed" ? "#d13438" : "#232a33";
+  return (
+    <div
+      className="genie-fade-in"
+      style={{
+        border: `1px solid ${borderColor}`,
+        borderRadius: 8,
+        padding: "8px 10px",
+        margin: "4px 0 8px 21px",
+        backgroundColor: trace.status === "failed" ? "rgba(209, 52, 56, 0.08)" : "#161c24",
+      }}
+    >
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+        <Text size={200} weight="semibold">
+          {PHASE_ICONS[phase.stepId] ?? "🔹"} {phase.label}
+        </Text>
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          {trace.status === "running" ? <Spinner size="tiny" /> : null}
+          <Text size={100} style={{ color: badge.color, whiteSpace: "nowrap" }}>
+            {trace.status === "running" ? "Running" : `${badge.icon} ${badge.label}`}
+          </Text>
+        </div>
+      </div>
+      {trace.attempt > 1 ? (
+        <Text size={100} style={{ opacity: 0.65, display: "block", marginTop: 2 }}>
+          🔁 Attempt {trace.attempt} (automatic retry)
+        </Text>
+      ) : null}
+      {trace.status === "failed" ? (
+        <MessageBar intent="error" layout="multiline" style={{ marginTop: 6 }}>
+          {trace.errorText}
+        </MessageBar>
+      ) : trace.outputSummary ? (
+        <Text size={200} style={{ opacity: 0.85, display: "block", marginTop: 4, whiteSpace: "pre-wrap" }}>
+          {trace.outputSummary}
+        </Text>
+      ) : null}
+      {trace.timestamp ? (
+        <Text size={100} style={{ opacity: 0.5, display: "block", marginTop: 4 }}>
+          {relativeTime(trace.timestamp)}
+        </Text>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * Floating "Mission Trace" overlay: a real, ordered UI -> Orchestrator ->
+ * Phase (running/completed/failed) -> Output Summary trace, gated by
+ * "Human: proceed" markers exactly where `WorkflowStep.requires_human_proceed`
+ * pauses the run - so success AND errors are visible as they actually
+ * happen, not just a raw feed of truncated code previews.
  *
- * Why this data source matters: `WorkflowRuntime.run_workflow` can execute
- * several ungated steps (e.g. build-solution -> security-assessment ->
- * test-generation) inside one synchronous run/resume HTTP call, and the
- * run's stored result is only updated once that whole call returns -
- * polling the run would make the feed jump in batches, not calls. Each
- * individual agent call, by contrast, is recorded to the governance event
- * repository the instant *that* call completes
- * (`WorkflowStepExecutor.execute_step`), so a concurrent poll here observes
- * every agent call in true orchestrator call order, even while a later step
- * in the same batch is still executing. `output_preview` on each event is a
- * truncated slice of that same agent's real output text - never synthetic
- * content.
- *
- * Every mission step is actually executed as: `genie-orchestrator` (the
- * step's own agent) calls exactly one `call_<agent>` delegation tool, which
- * runs the real specialist agent for that phase
- * (`app.agents.tools.orchestration_tools`). Both calls are recorded as
- * their own governance events with the same `step_id`, so this panel skips
- * the orchestrator's own top-level event (its output is always identical
- * to the specialist's - it just relays it verbatim) and shows only the
- * specialist call, labeled with which stage it belongs to and which agent
- * delegated it - that's the actual control flow of the mission.
+ * Combines two data sources:
+ * - The session's persisted governance `agent_execution` events (`GET
+ *   /sessions/{id}/peer-review/events`) - survive a page reload, but are
+ *   only ever recorded on SUCCESS.
+ * - The live `GET /sessions/{id}/workflow-events/stream` SSE feed
+ *   (`useWorkflowEventStream`) - real-time `step_started`/`step_completed`/
+ *   `step_failed`, including genuine failures governance never records at
+ *   all (see `WorkflowStepExecutor._run_agent`).
  */
 export function TriagePanel({ enabled }: { enabled: boolean }): JSX.Element | null {
   const { sessionId, missionStartedAt } = useSessionContext();
@@ -231,34 +336,61 @@ export function TriagePanel({ enabled }: { enabled: boolean }): JSX.Element | nu
     pollIntervalMs: 2000,
   });
 
-  const allCalls = useMemo(
+  const { events: sseEvents, stepDeltaText, connected } = useWorkflowEventStream(enabled ? sessionId : null);
+
+  const specialistCalls = useMemo(
     () =>
-      [...(events ?? [])]
-        .filter((event): event is GovernanceEvent => event.category === "agent_execution")
-        .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp)),
+      [...(events ?? [])].filter(
+        (event): event is GovernanceEvent => event.category === "agent_execution" && event.detail.workflow_step !== true,
+      ),
     [events],
   );
 
-  // The orchestrator's own top-level call for a step is dropped from the
-  // visible feed (see doc comment above) - it never carries information the
-  // delegated specialist's own event doesn't already have.
-  const agentCalls = useMemo(
-    () => allCalls.filter((event) => event.detail.workflow_step !== true),
-    [allCalls],
-  );
-
-  const completedStepIds = useMemo(() => {
+  const governanceCompletedStepIds = useMemo(() => {
     const ids = new Set<string>();
-    for (const event of allCalls) {
+    for (const event of specialistCalls) {
       const id = stepId(event.detail);
       if (id) ids.add(id);
     }
     return ids;
-  }, [allCalls]);
-  const activeStepId = MISSION_PHASES.find((phase) => !completedStepIds.has(phase.stepId))?.stepId ?? null;
-  const missionComplete = completedStepIds.size >= MISSION_PHASES.length;
+  }, [specialistCalls]);
 
-  // Live "Xs elapsed" readout for the mission console below, ticking from
+  const governanceOutputByStep = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const event of specialistCalls) {
+      const id = stepId(event.detail);
+      const preview = governanceOutputPreview(event.detail);
+      if (id && preview) map.set(id, preview);
+    }
+    return map;
+  }, [specialistCalls]);
+
+  const governanceAgentByStep = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const event of specialistCalls) {
+      const id = stepId(event.detail);
+      if (id && event.agent_id) map.set(id, event.agent_id);
+    }
+    return map;
+  }, [specialistCalls]);
+
+  const traces = useMemo(
+    () =>
+      computePhaseTraces(
+        MISSION_PHASES,
+        sseEvents,
+        stepDeltaText,
+        governanceCompletedStepIds,
+        governanceOutputByStep,
+        governanceAgentByStep,
+      ),
+    [sseEvents, stepDeltaText, governanceCompletedStepIds, governanceOutputByStep, governanceAgentByStep],
+  );
+
+  const missionComplete = traces.length > 0 && traces.every((trace) => trace.status === "completed");
+  const missionFailed = traces.some((trace) => trace.status === "failed");
+
+  // Live "Xs elapsed" readout for the mission console header, ticking from
   // the moment the Upload page's "Start Prototyping" button was clicked
   // (shared via SessionContext) until every phase has completed.
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
@@ -270,23 +402,19 @@ export function TriagePanel({ enabled }: { enabled: boolean }): JSX.Element | nu
     return () => window.clearInterval(intervalId);
   }, [missionStartedAt, missionComplete]);
 
-  const stats = useMemo(() => computeStats(agentCalls.length), [agentCalls]);
-  const isLive =
-    agentCalls.length > 0 && Date.now() - Date.parse(agentCalls[0].timestamp) < 10_000;
-
   if (!enabled) return null;
 
   return (
     <div
       className="genie-fade-in"
       role="complementary"
-      aria-label="Agent triage traceability"
+      aria-label="Agent mission traceability"
       style={{
         position: "fixed",
         top: 0,
         right: 0,
         bottom: 0,
-        width: 340,
+        width: 360,
         height: "100vh",
         display: "flex",
         flexDirection: "column",
@@ -300,17 +428,16 @@ export function TriagePanel({ enabled }: { enabled: boolean }): JSX.Element | nu
       <div style={{ padding: "12px 16px", borderBottom: "1px solid #232a33" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
           <Text weight="bold" size={400}>
-            🕹️ Agent Triage
+            🧭 Mission Trace
           </Text>
-          {isLive ? <span className="genie-live-dot" aria-label="Live" title="Live" /> : null}
+          {connected ? <span className="genie-live-dot" aria-label="Live" title="Live" /> : null}
         </div>
         <Text size={200} style={{ opacity: 0.7, display: "block" }}>
-          Live feed of every real agent call, in orchestrator call order
+          UI → Orchestrator → each phase, in real order, with success and errors as they happen
         </Text>
       </div>
 
       <div
-        className="genie-fade-in"
         style={{
           padding: "14px 16px",
           borderBottom: "1px solid #232a33",
@@ -327,102 +454,50 @@ export function TriagePanel({ enabled }: { enabled: boolean }): JSX.Element | nu
             </Text>
           ) : null}
         </div>
-        {missionStartedAt ? (
-          <div style={{ marginBottom: 10 }}>
-            <Text size={200} style={{ display: "block", padding: "2px 0" }}>
-              🖱️ Start Prototyping clicked
-            </Text>
-            <Text size={200} style={{ display: "block", padding: "2px 0" }}>
-              🧭 genie-orchestrator engaged - coordinating the mission
-            </Text>
-          </div>
-        ) : null}
-        <ControlFlowMap completedStepIds={completedStepIds} activeStepId={activeStepId} />
+        <ControlFlowMap traces={traces} />
         <Text size={200} style={{ display: "block", marginTop: 10, opacity: 0.85 }}>
-          {activeStepId
-            ? `⏳ Now: ${stepLabel(activeStepId)}`
+          {missionFailed
+            ? "❌ A phase failed - see details below"
             : missionComplete
               ? "✅ Mission complete"
-              : "Awaiting mission start"}
+              : missionStartedAt
+                ? "⏳ Mission in progress"
+                : "Awaiting mission start"}
         </Text>
-        {missionStartedAt ? (
-          <Text size={100} style={{ opacity: 0.5, display: "block", marginTop: 4 }}>
-            {agentCalls.length > 0
-              ? `${agentCalls.length} real agent event${agentCalls.length === 1 ? "" : "s"} recorded`
-              : "Waiting for the first agent event..."}
-          </Text>
-        ) : null}
       </div>
 
-      <div style={{ padding: "12px 16px", borderBottom: "1px solid #232a33" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
-          <Text size={300} weight="semibold">
-            Level {stats.level}
-          </Text>
-          <Text size={300} style={{ opacity: 0.8 }}>
-            {stats.xp} XP
-          </Text>
-        </div>
-        <div style={{ height: 6, borderRadius: 4, backgroundColor: "#232a33", overflow: "hidden" }}>
-          <div
-            className="genie-xp-bar"
-            style={{ height: "100%", width: `${stats.levelProgressPct}%`, backgroundColor: "#2f83e0" }}
-          />
-        </div>
-        <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
-          <Badge shape="rounded" style={{ backgroundColor: "#3fa66a", color: "#0b0f14" }}>
-            ✅ {stats.callCount} agent calls
-          </Badge>
-        </div>
-      </div>
-
-      <div style={{ overflowY: "auto", padding: "4px 12px 8px", flex: 1, minHeight: 0 }}>
-        {agentCalls.length === 0 ? (
+      <div style={{ overflowY: "auto", padding: "8px 16px 16px", flex: 1, minHeight: 0 }}>
+        {!missionStartedAt ? (
           <Text size={200} style={{ opacity: 0.7, padding: 8, display: "block" }}>
-            No agent activity yet - start a workflow run to see live traceability.
+            No mission activity yet - start a workflow run to see live traceability.
           </Text>
         ) : (
-          agentCalls.slice(0, MAX_FEED_ITEMS).map((event) => (
-            <div
-              key={event.id}
-              className="genie-fade-in"
-              style={{ display: "flex", gap: 8, padding: "8px 4px", borderBottom: "1px solid #1a2028" }}
-            >
-              <span style={{ fontSize: 18 }} aria-hidden="true">
-                {iconForAgent(event.agent_id ?? "unknown-agent")}
-              </span>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", gap: 6 }}>
-                  <Text
-                    size={200}
-                    weight="semibold"
-                    style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
-                  >
-                    {event.agent_id ?? "unknown-agent"}
-                  </Text>
-                  <Text size={200} style={{ color: "#3fa66a", whiteSpace: "nowrap" }}>
-                    +{XP_PER_CALL} XP
-                  </Text>
+          <>
+            <TraceLine icon="🖱️" text="UI: Start Prototyping clicked" />
+            {MISSION_PHASES.map((phase, index) => {
+              const trace = traces[index];
+              const showGate = phase.requiresProceed;
+              const gateCleared = trace.status === "running" || trace.status === "completed" || trace.status === "failed";
+              return (
+                <div key={phase.stepId}>
+                  {showGate ? (
+                    <TraceLine
+                      icon={gateCleared ? "✅" : "⏳"}
+                      text={gateCleared ? "Human: proceeded" : "Awaiting your review to proceed"}
+                      muted={!gateCleared}
+                    />
+                  ) : null}
+                  <TraceLine
+                    icon="🧭"
+                    text={`Orchestrator engaged → delegating to ${trace.specialistId || phase.specialistLabel}`}
+                    muted={trace.status === "pending"}
+                  />
+                  <PhaseCard phase={phase} trace={trace} />
                 </div>
-                {delegatedBy(event.detail) ? (
-                  <Text size={100} style={{ opacity: 0.6, display: "block" }}>
-                    🧭 {delegatedBy(event.detail)} → {event.agent_id ?? "unknown-agent"}
-                    {stepLabel(stepId(event.detail)) ? ` · ${stepLabel(stepId(event.detail))}` : ""}
-                  </Text>
-                ) : stepLabel(stepId(event.detail)) ? (
-                  <Text size={100} style={{ opacity: 0.6, display: "block" }}>
-                    step: {stepLabel(stepId(event.detail))}
-                  </Text>
-                ) : null}
-                <Text size={200} style={{ opacity: 0.8, display: "block" }}>
-                  {summarize(event.detail)}
-                </Text>
-                <Text size={100} style={{ opacity: 0.55 }}>
-                  ✅ {relativeTime(event.timestamp)}
-                </Text>
-              </div>
-            </div>
-          ))
+              );
+            })}
+            {missionComplete ? <TraceLine icon="🏁" text="Mission complete - every phase finished." /> : null}
+          </>
         )}
       </div>
     </div>
