@@ -105,3 +105,31 @@ async def test_provision_forwards_the_exact_agent_name_as_description():
         "Requirements Specialist",
         "Orchestrator",
     }
+
+
+async def test_provision_truncates_a_long_agent_name_to_stay_within_63_characters():
+    """Regression test for a real observed Foundry failure: 'Must start and
+    end with alphanumeric characters, can contain hyphens in the middle,
+    and must not exceed 63 characters.' - an LLM-generated agent name (from
+    the Build Agent's own "# agent: <name>" comment) can be long/descriptive
+    enough that "{mission_slug}-{slugified name}" exceeds the limit."""
+
+    api_client = _FakeAgentApiClient()
+    service = MissionAgentProvisioningService(
+        project_service=_FakeProjectService(api_client=api_client), model_deployment_ref="gpt-4o"
+    )
+
+    await service.provision(
+        mission_slug="derekpoc-c753ba86",
+        agent_names=[
+            "Customer Relationship Management and Escalation Handling Specialist Agent"
+        ],
+        architecture_document=_ARCHITECTURE_DOCUMENT,
+    )
+
+    created_name = api_client.created[0]["name"]
+    assert created_name is not None
+    assert len(created_name) <= 63
+    assert created_name[0].isalnum()
+    assert created_name[-1].isalnum()
+    assert created_name.startswith("derekpoc-c753ba86-")

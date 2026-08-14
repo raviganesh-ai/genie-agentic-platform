@@ -61,6 +61,35 @@ def _slugify(value: str) -> str:
     return slug or "agent"
 
 
+# Azure AI Foundry agent names must start and end with an alphanumeric
+# character, may contain hyphens in the middle, and must not exceed 63
+# characters total (a real, observed provisioning failure - see
+# MissionAgentProvisioningError). ``agent_name`` here is extracted directly
+# from the Build Agent's own generated "# agent: <name>" comment (see
+# app.deploy_launch.code_materializer.materialize_build) - an LLM-authored,
+# unbounded-length string - so the combined
+# "{mission_slug}-{slugified agent_name}" name must be defensively
+# truncated to this limit rather than trusting it fits.
+_FOUNDRY_AGENT_NAME_MAX_LENGTH = 63
+
+
+def _build_foundry_agent_name(mission_slug: str, agent_name: str) -> str:
+    """Builds a Foundry-valid agent name, truncating as needed to fit 63 chars."""
+
+    agent_slug = _slugify(agent_name)
+    prefix = f"{mission_slug}-"
+    available = _FOUNDRY_AGENT_NAME_MAX_LENGTH - len(prefix)
+    if available <= 0:
+        # mission_slug alone (plus separator) already exceeds the limit -
+        # fall back to a hard truncation of just the slug so this never
+        # raises here; Foundry's own validation still fails closed if this
+        # somehow still isn't valid.
+        return mission_slug[:_FOUNDRY_AGENT_NAME_MAX_LENGTH].strip("-") or "agent"
+
+    truncated_slug = agent_slug[:available].strip("-") or "agent"
+    return f"{prefix}{truncated_slug}"
+
+
 def _extract_agent_instructions(architecture_document: str, agent_name: str) -> str:
     """Deterministically extracts this agent's own description from the
     architecture document's "## Multi-Agent Workflow" section (never
@@ -117,7 +146,7 @@ class MissionAgentProvisioningService:
         try:
             for agent_name in agent_names:
                 foundry_agent_name = client.create_agent(
-                    name=f"{mission_slug}-{_slugify(agent_name)}",
+                    name=_build_foundry_agent_name(mission_slug, agent_name),
                     model=self._model_deployment_ref,
                     instructions=_extract_agent_instructions(architecture_document, agent_name),
                     description=agent_name,
@@ -161,7 +190,7 @@ class NullMissionAgentProvisioningService:
         for agent_name in agent_names:
             record = ProvisionedMissionAgent(
                 agent_name=agent_name,
-                foundry_agent_name=f"local-{mission_slug}-{_slugify(agent_name)}",
+                foundry_agent_name=f"local-{_build_foundry_agent_name(mission_slug, agent_name)}",
                 provisioned_at=datetime.now(UTC),
             )
             provisioned.append(record)
