@@ -588,6 +588,32 @@ def _build_delegation_tool(
         else:
             result = await agent_gateway.execute(request)
 
+        # Publish this delegated step's OWN step_completed the instant its
+        # real work is done - genie-orchestrator's own underlying Foundry
+        # run still has to produce a further, separate "echo" completion
+        # turn (verbatim re-typing this same result, see
+        # ``WorkflowStepExecutor._run_agent``) before ``execute_step``
+        # returns and ``WorkflowRunResult.step_results`` officially reflects
+        # this step as done - a real extra LLM round-trip that can add
+        # meaningful, sometimes lengthy, latency for no new information. A
+        # live SSE consumer (the Triage panel's Mission Trace, Workshop's
+        # own build-review gate) should not have to wait through that
+        # second call just to see the delegated agent's already-finished
+        # real output - it can safely react the moment this fires. The
+        # later, official step_completed still publishes as normal once the
+        # echo turn finishes (harmless duplicate, same content).
+        if event_bus is not None and workflow_run_id is not None and step_id is not None:
+            await event_bus.publish(
+                WorkflowStreamEvent(
+                    event_type="step_completed",
+                    session_id=context.session_id,
+                    workflow_run_id=workflow_run_id,
+                    step_id=step_id,
+                    agent_id=delegation.target_agent_id,
+                    output_preview=_preview(result.output_text),
+                )
+            )
+
         await governance_service.record_execution(
             session_id=context.session_id,
             trace_id=context.trace_id,

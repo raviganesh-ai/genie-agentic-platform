@@ -425,6 +425,23 @@ export function DeployLaunchPage(): JSX.Element {
   const isPipelineActive =
     !startError && activeRun?.status !== "failed" && (starting || activeRun?.status === "running");
 
+  // Deploy & Launch's own `start()` first self-heals any not-yet-finished
+  // upstream workflow step (e.g. build-solution resumed because Workshop's
+  // "Proceed" is a client-side gesture, not a wait for the backend's own,
+  // slower official step completion - see pipeline_service.py's
+  // `_ensure_upstream_steps_completed`) BEFORE this pipeline's own nine
+  // steps begin - real step 1 genuinely cannot start until that resume
+  // finishes, which can legitimately take minutes for a full build
+  // regeneration. Past a short grace window, treat "every one of our own
+  // steps is still pending" as evidence we are still waiting on that
+  // upstream work, not evidence step 1 is "about to start any second" -
+  // otherwise the optimistic override below keeps lying (a step 1 badge
+  // stuck on "In Progress" for many minutes while genie-orchestrator is
+  // actually still finishing an earlier mission phase).
+  const noOwnStepHasStartedYet = steps.every((step) => step.status === "pending");
+  const runAgeMs = activeRun ? Date.now() - Date.parse(activeRun.created_at) : 0;
+  const awaitingUpstreamStep = isPipelineActive && noOwnStepHasStartedYet && runAgeMs > 20_000;
+
   // What the user actually sees rendered (flow map + step-row list): while
   // the mission is genuinely in motion, the single next not-yet-started step
   // is optimistically shown as "In Progress" rather than "Not Started" -
@@ -434,14 +451,15 @@ export function DeployLaunchPage(): JSX.Element {
   // first `step_started` event/poll to land). Never overrides a real
   // completed/failed/running status - purely fills the "about to start"
   // gap so the whole page never looks frozen on a wall of "Not Started".
+  // Suppressed entirely while `awaitingUpstreamStep` is true - see above.
   const displaySteps = useMemo(() => {
-    if (!isPipelineActive) return steps;
+    if (!isPipelineActive || awaitingUpstreamStep) return steps;
     const nextIndex = steps.findIndex(
       (step) => step.status !== "completed" && step.status !== "failed" && step.status !== "running",
     );
     if (nextIndex === -1) return steps;
     return steps.map((step, index) => (index === nextIndex ? { ...step, status: "running" as const } : step));
-  }, [steps, isPipelineActive]);
+  }, [steps, isPipelineActive, awaitingUpstreamStep]);
 
   // Drives the gamified "Genie is working with..." activity banner: while
   // the pipeline is genuinely in motion (either the start() request is
@@ -449,9 +467,18 @@ export function DeployLaunchPage(): JSX.Element {
   // is showing, surface the currently-running step's narrative label (or a
   // generic "getting started" label before the first step has flipped to
   // running) so the user always sees concrete evidence of progress instead
-  // of a silent, static "Not Started" list.
+  // of a silent, static "Not Started" list. While genuinely still waiting
+  // on an earlier mission step (see `awaitingUpstreamStep`), show an
+  // honest "finishing an earlier step" message instead of falsely
+  // attributing activity to this pipeline's own step 1 - the real,
+  // still-live event text below this label (`AgentActivityAnimation`'s own
+  // `events` prop) already shows what is actually happening.
   const runningStep = useMemo(() => displaySteps.find((step) => step.status === "running") ?? null, [displaySteps]);
-  const activityLabel = runningStep ? STEP_WORKING_LABELS[runningStep.step_id] : STARTING_LABEL;
+  const activityLabel = awaitingUpstreamStep
+    ? "Genie is finishing an earlier mission step before Deploy & Launch's own steps can begin..."
+    : runningStep
+      ? STEP_WORKING_LABELS[runningStep.step_id]
+      : STARTING_LABEL;
 
   // Opens the mission's real, deployed launch URL in a brand-new browser
   // tab/window - never navigates the Genie platform itself away from this
@@ -530,7 +557,7 @@ export function DeployLaunchPage(): JSX.Element {
         ) : null}
 
         {isPipelineActive ? (
-          <AgentActivityAnimation label={activityLabel} events={liveEvents} />
+          <AgentActivityAnimation label={activityLabel} events={liveEvents} startedAt={activeRun?.created_at} />
         ) : null}
 
         <SectionCard

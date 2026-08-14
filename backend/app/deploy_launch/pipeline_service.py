@@ -143,6 +143,8 @@ class DeploymentPipelineService:
         architecture_step_id: str = "design-architecture",
         build_step_id: str = "build-solution",
         requirements_step_id: str = "analyze-requirements",
+        upstream_grace_check_attempts: int = 5,
+        upstream_grace_check_interval_seconds: float = 2.0,
     ) -> None:
         self._orchestrator = orchestrator
         self._session_service = session_service
@@ -157,6 +159,8 @@ class DeploymentPipelineService:
         self._architecture_step_id = architecture_step_id
         self._build_step_id = build_step_id
         self._requirements_step_id = requirements_step_id
+        self._upstream_grace_check_attempts = upstream_grace_check_attempts
+        self._upstream_grace_check_interval_seconds = upstream_grace_check_interval_seconds
         self._runs: dict[str, DeploymentPipelineRun] = {}
         self._workspaces: dict[str, _RunWorkspace] = {}
         self._materialized_builds: dict[str, MaterializedBuild] = {}
@@ -431,10 +435,25 @@ class DeploymentPipelineService:
         policies.
         """
         required_step_ids = (self._build_step_id,)
-        if all(
-            [await self._step_completed(run, step_id, trace_id=trace_id) for step_id in required_step_ids]
-        ):
-            return run
+
+        # The common case this self-heal exists for is a genuine race of a
+        # few SECONDS - Workshop's "Proceed" is a client-side navigation
+        # that does not wait for genie-orchestrator's own, slightly slower
+        # official step-completion write to land. A single, instantaneous
+        # check right as Deploy & Launch loads can lose that race even
+        # though the real work is already finished or about to be -
+        # unconditionally resuming (which discards the user's real
+        # policies/excluded_agents, see below) in that situation needlessly
+        # re-runs an already-approved build. Poll a few times with a short
+        # delay before concluding the step is genuinely not done and
+        # falling back to a real resume.
+        for attempt in range(self._upstream_grace_check_attempts):
+            if all(
+                [await self._step_completed(run, step_id, trace_id=trace_id) for step_id in required_step_ids]
+            ):
+                return run
+            if attempt < self._upstream_grace_check_attempts - 1:
+                await asyncio.sleep(self._upstream_grace_check_interval_seconds)
 
         step_inputs: dict[str, WorkflowStepInput] = {}
         if not await self._step_completed(run, self._build_step_id, trace_id=trace_id):

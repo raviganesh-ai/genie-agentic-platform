@@ -1,6 +1,16 @@
+import { useEffect, useState } from "react";
 import { Text } from "@fluentui/react-components";
 import { describeEvent } from "@/utils/workflowEventText";
 import type { WorkflowStreamEvent } from "@/types/workflowEvents";
+
+/** Formats a millisecond duration as e.g. "3s", "1m 42s", "18m 03s". */
+function formatElapsed(ms: number): string {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  if (minutes === 0) return `${seconds}s`;
+  return `${minutes}m ${seconds.toString().padStart(2, "0")}s`;
+}
 
 /**
  * A prominent, animated "Genie is working with your agents..." banner shown
@@ -15,11 +25,26 @@ import type { WorkflowStreamEvent } from "@/types/workflowEvents";
 export function AgentActivityAnimation({
   label,
   events = [],
+  startedAt,
 }: {
   label: string;
   events?: WorkflowStreamEvent[];
+  /** ISO timestamp this activity began - when provided, a ticking "Xm Ys"
+   *  elapsed counter is shown so a genuinely long-running phase never looks
+   *  indistinguishable from a frozen page. */
+  startedAt?: string | null;
 }): JSX.Element {
   const lastEvent = events[events.length - 1];
+
+  // Ticks once a second purely to force a re-render so the elapsed counter
+  // below stays live - no other state derives from `now` itself.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!startedAt) return undefined;
+    const interval = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(interval);
+  }, [startedAt]);
+  const elapsedLabel = startedAt ? formatElapsed(now - Date.parse(startedAt)) : null;
 
   return (
     <div
@@ -39,9 +64,16 @@ export function AgentActivityAnimation({
         🧞
       </span>
       <div style={{ flex: 1 }}>
-        <Text weight="semibold" size={300} style={{ display: "block", marginBottom: 6 }}>
-          {label}
-        </Text>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 6 }}>
+          <Text weight="semibold" size={300} style={{ display: "block" }}>
+            {label}
+          </Text>
+          {elapsedLabel ? (
+            <Text size={200} style={{ opacity: 0.55 }}>
+              ({elapsedLabel})
+            </Text>
+          ) : null}
+        </div>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <span className="genie-bounce-dots" aria-hidden="true">
             <span className="genie-bounce-dot" />
