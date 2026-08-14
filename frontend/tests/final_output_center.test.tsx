@@ -36,7 +36,7 @@ describe("FinalOutputPage", () => {
     expect(screen.getByRole("button", { name: /Export Markdown/i })).toBeInTheDocument();
   });
 
-  it("shows a Go to Deploy & Launch action once test-generation has completed", async () => {
+  it("shows a Go to Deploy & Launch action once build-solution has completed", async () => {
     mockFetchSequence([
       { match: "/outputs", response: [] },
       {
@@ -53,15 +53,6 @@ describe("FinalOutputPage", () => {
               started_at: "2026-07-23T10:00:00Z",
               completed_at: "2026-07-23T10:01:00Z",
             },
-            {
-              step_id: "test-generation",
-              agent_id: "test-generation-agent",
-              status: "completed",
-              output_text: "```python\n# tests\ndef test_search():\n    ...\n```",
-              error: null,
-              started_at: "2026-07-23T10:02:00Z",
-              completed_at: "2026-07-23T10:03:00Z",
-            },
           ],
         }),
       },
@@ -77,19 +68,19 @@ describe("FinalOutputPage", () => {
     );
   });
 
-  it("shows the Generated Test Suite section when a test-generation step result exists", async () => {
+  it("does not show a Go to Deploy & Launch action while build-solution is still running", async () => {
     mockFetchSequence([
       { match: "/outputs", response: [] },
       {
         match: `/workflows/runs/${FIXTURE_WORKFLOW_RUN_ID}`,
         response: buildWorkflowRunResult({
-          status: "completed",
+          status: "running",
           step_results: [
             {
-              step_id: "test-generation",
-              agent_id: "test-generation-agent",
+              step_id: "design-architecture",
+              agent_id: "architecture-designer",
               status: "completed",
-              output_text: "```python\n# tests for the search endpoint\ndef test_search():\n    ...\n```",
+              output_text: "Architecture approved.",
               error: null,
               started_at: "2026-07-23T10:00:00Z",
               completed_at: "2026-07-23T10:01:00Z",
@@ -104,7 +95,9 @@ describe("FinalOutputPage", () => {
       workflowRunId: FIXTURE_WORKFLOW_RUN_ID,
     });
 
-    await waitFor(() => expect(screen.getByText(/Generated Test Suite/i)).toBeInTheDocument());
-    expect(screen.getByText(/tests for the search endpoint/i)).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByText(/Genie is finishing the build/i)).toBeInTheDocument(),
+    );
+    expect(screen.queryByRole("button", { name: /Go to Deploy & Launch/i })).not.toBeInTheDocument();
   });
 });

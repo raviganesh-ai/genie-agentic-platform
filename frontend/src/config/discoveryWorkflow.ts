@@ -1,11 +1,12 @@
 /**
- * Configuration for the Requirement -> Architecture -> Build -> Security &
- * Test mission workflow, kicked off from Upload.
+ * Configuration for the Requirement -> Architecture -> Build mission
+ * workflow, kicked off from Upload.
  *
  * Mirrors config/workflows/registry.yaml's `solution-discovery-workflow` id
  * (backend source of truth). The user then reviews results directly on
- * Requirements/Architecture/Workshop/Outputs (Deploy & Launch, a separate
- * real pipeline, runs after this workflow completes).
+ * Requirements/Architecture/Workshop/Outputs. Deploy & Launch (a separate
+ * real pipeline) runs after this workflow completes, and generates + runs
+ * the test suite for real there, against the actually-deployed build.
  */
 export const DISCOVERY_WORKFLOW_ID: string =
   (import.meta.env.VITE_DISCOVERY_WORKFLOW_ID as string | undefined) ??
@@ -63,12 +64,5 @@ export const MISSION_PHASES: MissionPhase[] = [
     specialistAgentId: "build-agent",
     specialistLabel: "Build Agent",
     requiresProceed: true,
-  },
-  {
-    stepId: "test-generation",
-    label: "Test Generation",
-    specialistAgentId: "test-generation-agent",
-    specialistLabel: "Test Generation Agent",
-    requiresProceed: false,
   },
 ];

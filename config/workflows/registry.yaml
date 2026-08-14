@@ -23,8 +23,12 @@
 #
 # Deploy & Launch is deliberately NOT a workflow step: it is a separate,
 # real (non-LLM-narrative) multi-step Azure provisioning pipeline - see
-# app.deployment.pipeline_service - started directly from the Deploy &
-# Launch page once the human clicks Start.
+# app.deploy_launch.pipeline_service - started directly from the Deploy &
+# Launch page once the human clicks Start. Test generation (and its real
+# execution) also happens there now, as the pipeline's own
+# generate-test-suite/execute-test-suite steps AFTER the app is actually
+# deployed - not as a discovery-workflow step - so the generated tests
+# cover the real, deployed build rather than a pre-deploy narrative pass.
 #
 # Every step below has a `variable_sources` mapping so the whole graph can
 # run automatically from nothing but an uploaded call transcript/recording:
@@ -56,7 +60,8 @@ workflows:
       End-to-end mission from ingested customer input through requirement
       discovery, architecture recommendation, and UI/multi-agent-flow
       build, ready for the separate Deploy & Launch pipeline once
-      approved.
+      approved. Test generation happens later, inside that Deploy &
+      Launch pipeline, once the build is actually deployed.
     steps:
       - id: analyze-requirements
         agent_id: genie-orchestrator
@@ -114,24 +119,6 @@ workflows:
           # (no prior output exists yet), which is exactly the "nothing to
           # reuse" case that function already handles.
           previous_build_output: step:build-solution
-
-      - id: test-generation
-        agent_id: genie-orchestrator
-        description: >-
-          Generate unit, integration, and UI test cases covering the
-          generated build and report a pass/fail test-coverage gate
-          verdict.
-        depends_on:
-          - build-solution
-        prompt_id: orchestrator-test-generation-phase-v1
-        allowed_tool_names:
-          - call_test_generation_agent
-        required_memory_references:
-          - analyze-requirements
-          - build-solution
-        variable_sources:
-          artifact: step:build-solution
-          requirements: step:analyze-requirements
 
     enabled: true
 

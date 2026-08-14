@@ -14,7 +14,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 
-from app.agents.models import AgentDefinition
+from app.agents.models import AgentDefinition, AgentExecutionResult
 from app.agents.registry import AgentRegistry
 from app.deploy_launch.access_policy_service import AccessPolicyService
 from app.deploy_launch.backend_deployment_service import NullBackendDeploymentService
@@ -56,6 +56,8 @@ The Requirements Specialist agent extracts raw requirements.
 The orchestrator agent sequences every specialist.
 """
 
+_REQUIREMENTS_OUTPUT = "The mission requires a search feature and an orchestrator agent."
+
 _PASSING_TEST_OUTPUT = """
 ```python
 def test_always_passes():
@@ -78,20 +80,40 @@ class _FakeSessionService:
 
 class _FakeOrchestrator:
     def __init__(self, *, test_output_text: str) -> None:
+        self._test_output_text = test_output_text
+        self.execute_agent_calls: list[dict] = []
         self._run = WorkflowRunResult(
             workflow_run_id="run-1",
             workflow_id="solution-discovery-workflow",
             session_id="session-1",
             status="completed",
             step_results=[
+                _completed_step("analyze-requirements", "genie-orchestrator", _REQUIREMENTS_OUTPUT),
                 _completed_step("design-architecture", "architecture-designer", _ARCHITECTURE_DOCUMENT),
                 _completed_step("build-solution", "genie-orchestrator", _BUILD_OUTPUT),
-                _completed_step("test-generation", "genie-orchestrator", test_output_text),
             ],
         )
 
     async def get_workflow_run(self, workflow_run_id: str) -> WorkflowRunResult | None:
         return self._run if workflow_run_id == "run-1" else None
+
+    async def execute_agent(
+        self,
+        *,
+        agent_id: str,
+        prompt_id: str,
+        variables: dict[str, str],
+        session_id: str | None = None,
+        trace_id: str | None = None,
+    ) -> AgentExecutionResult:
+        # Simulates Deploy & Launch's real, post-deploy call to the Test
+        # Generation Agent (see pipeline_service.py's generate-test-suite
+        # step) - never reads a pre-existing workflow step's output, since
+        # test-generation no longer exists as a discovery-workflow step.
+        self.execute_agent_calls.append({"agent_id": agent_id, "prompt_id": prompt_id, "variables": variables})
+        return AgentExecutionResult(
+            agent_id=agent_id, output_text=self._test_output_text, correlation_id="test-correlation-id"
+        )
 
 
 def _completed_step(step_id: str, agent_id: str, output_text: str) -> WorkflowStepResult:
@@ -127,6 +149,7 @@ class _FakeOrchestratorPendingBuild:
             session_id="session-1",
             status="running",
             step_results=[
+                _completed_step("analyze-requirements", "genie-orchestrator", _REQUIREMENTS_OUTPUT),
                 _completed_step("design-architecture", "architecture-designer", _ARCHITECTURE_DOCUMENT),
             ],
         )
@@ -152,10 +175,22 @@ class _FakeOrchestratorPendingBuild:
             step_results=[
                 *self._run.step_results,
                 _completed_step("build-solution", "genie-orchestrator", _BUILD_OUTPUT),
-                _completed_step("test-generation", "genie-orchestrator", self._test_output_text),
             ],
         )
         return self._run
+
+    async def execute_agent(
+        self,
+        *,
+        agent_id: str,
+        prompt_id: str,
+        variables: dict[str, str],
+        session_id: str | None = None,
+        trace_id: str | None = None,
+    ) -> AgentExecutionResult:
+        return AgentExecutionResult(
+            agent_id=agent_id, output_text=self._test_output_text, correlation_id="test-correlation-id"
+        )
 
 
 class _FakeOrchestratorStuckOnEarlierGate:
@@ -164,9 +199,9 @@ class _FakeOrchestratorStuckOnEarlierGate:
     comes before ``build-solution``) - self-heal only ever targets
     build-solution, so resuming here legitimately cannot clear this
     earlier pause. ``resume_workflow`` returns normally (no exception),
-    but build-solution/test-generation are still not completed - the
-    pipeline must fail closed immediately with a clear message rather than
-    silently proceeding into a much later, unrelated step.
+    but build-solution is still not completed - the pipeline must fail
+    closed immediately with a clear message rather than silently
+    proceeding into a much later, unrelated step.
     """
 
     def __init__(self) -> None:
@@ -306,10 +341,10 @@ async def test_start_self_heals_incomplete_build_solution_with_safe_policy_defau
     assert step_inputs["build-solution"].variables == {"policies": "", "excluded_agents": ""}
     assert run.status == "completed"
 
-    # A second start() call for a NEW pipeline run: build-solution/
-    # test-generation are now both complete (the fake applied them during
-    # the first resume), so no further resume call is made - an
-    # already-completed build must never be re-triggered.
+    # A second start() call for a NEW pipeline run: build-solution is now
+    # complete (the fake applied it during the first resume), so no
+    # further resume call is made - an already-completed build must never
+    # be re-triggered.
     run2 = await service.start(session_id="session-1", requesting_user_id="user-1", workflow_run_id="run-1")
     run2 = await service.wait_for_run(run2.id)
 
@@ -318,13 +353,12 @@ async def test_start_self_heals_incomplete_build_solution_with_safe_policy_defau
 
 
 async def test_start_fails_closed_with_actionable_error_when_stuck_on_earlier_gate(tmp_path: Path):
-    """If the self-heal resume returns without clearing build-solution/
-    test-generation (e.g. the run is genuinely paused on an EARLIER stage's
-    own proceed gate), the pipeline must fail immediately with a clear,
-    actionable message attributed to the first step - never silently
-    proceed into `_execute_steps` and blow up on a much later, unrelated
-    step with a confusing "Workflow step 'build-solution' has not
-    completed" error.
+    """If the self-heal resume returns without clearing build-solution
+    (e.g. the run is genuinely paused on an EARLIER stage's own proceed
+    gate), the pipeline must fail immediately with a clear, actionable
+    message attributed to the first step - never silently proceed into
+    `_execute_steps` and blow up on a much later, unrelated step with a
+    confusing "Workflow step 'build-solution' has not completed" error.
     """
     orchestrator = _FakeOrchestratorStuckOnEarlierGate()
     service = DeploymentPipelineService(

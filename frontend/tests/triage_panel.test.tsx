@@ -122,8 +122,8 @@ describe("TriagePanel", () => {
           sseFrame(
             buildStreamEvent({
               event_type: "step_failed",
-              step_id: "test-generation",
-              agent_id: "test-generation-agent",
+              step_id: "build-solution",
+              agent_id: "build-agent",
               error: "Foundry service is temporarily unavailable.",
             }),
           ),

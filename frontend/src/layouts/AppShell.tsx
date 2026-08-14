@@ -33,13 +33,16 @@ interface NavItemConfig {
 // approval checkpoint that sits between steps (e.g. Requirements isn't
 // really "done" from the user's point of view until design-architecture
 // has been kicked off, which only happens after the requirements approval
-// is granted).
+// is granted). build-solution is the discovery workflow's LAST step, so
+// there is no next step to key off for "UI & Agent Design" - it (and
+// Deploy & Launch after it) instead falls through to the whole-run
+// completion check below.
 const NAV_ITEMS: NavItemConfig[] = [
   { to: "/", label: "Landing", icon: "🏠", end: true },
   { to: "/upload", label: "Upload", icon: "📤" },
   { to: "/requirements", label: "Requirements", icon: "📋", completionStepId: "design-architecture" },
   { to: "/architecture-studio", label: "Architecture", icon: "🏗️", completionStepId: "build-solution" },
-  { to: "/workshop", label: "UI & Agent Design", icon: "🤖", completionStepId: "test-generation" },
+  { to: "/workshop", label: "UI & Agent Design", icon: "🤖" },
   { to: "/outputs", label: "Deploy & Launch", icon: "🚀" },
 ];
 
@@ -97,7 +100,10 @@ function computeStageStatuses(
     } else if (item.completionStepId) {
       complete = reachedStepIds.has(item.completionStepId);
     } else {
-      // Deploy & Launch: only truly done once the whole run completes.
+      // UI & Agent Design / Deploy & Launch: build-solution is now the
+      // discovery workflow's last step, so both are only truly done once
+      // the whole run completes (there is no later step's presence to
+      // infer this from any more - see the comment above NAV_ITEMS).
       complete = run?.status === "completed";
     }
     if (index <= maxReachedIndex) {

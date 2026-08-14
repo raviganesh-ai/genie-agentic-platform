@@ -7,8 +7,15 @@ equivalents when the required settings are not configured, mirroring
 ``AzureAgentGateway``/``LocalAgentGateway`` - never fabricating a step's
 result. This is explicitly NOT an LLM-driven workflow step: it is invoked
 only after the ``solution-discovery-workflow`` has already produced an
-approved architecture (``design-architecture``), generated build
-(``build-solution``), and generated test suite (``test-generation``).
+approved architecture (``design-architecture``) and generated build
+(``build-solution``). Test generation happens here too, as this
+pipeline's own ``generate-test-suite`` step: it calls the Test Generation
+Agent directly (``AgentOrchestrator.execute_agent`` - the same
+outside-any-workflow-step execution path Workshop's per-component
+"Regenerate" action already uses) against the real, already-deployed
+build, so the generated tests cover what actually got deployed rather than
+a pre-deploy narrative pass. ``execute-test-suite`` then really runs those
+tests and fails the pipeline closed if they don't pass.
 
 Genie's Deploy & Launch stage has exactly one gate: the human clicking
 Start. There is no separate approval-checkpoint request/decide dance -
@@ -133,7 +140,7 @@ class DeploymentPipelineService:
         build_workspace_root: Path,
         architecture_step_id: str = "design-architecture",
         build_step_id: str = "build-solution",
-        test_generation_step_id: str = "test-generation",
+        requirements_step_id: str = "analyze-requirements",
     ) -> None:
         self._orchestrator = orchestrator
         self._session_service = session_service
@@ -147,7 +154,7 @@ class DeploymentPipelineService:
         self._build_workspace_root = build_workspace_root
         self._architecture_step_id = architecture_step_id
         self._build_step_id = build_step_id
-        self._test_generation_step_id = test_generation_step_id
+        self._requirements_step_id = requirements_step_id
         self._runs: dict[str, DeploymentPipelineRun] = {}
         self._workspaces: dict[str, _RunWorkspace] = {}
         self._materialized_builds: dict[str, MaterializedBuild] = {}
@@ -318,7 +325,7 @@ class DeploymentPipelineService:
         self, *, run: WorkflowRunResult, session_id: str, trace_id: str
     ) -> WorkflowRunResult:
         """Self-heals a workflow run that has not yet finished every step
-        Deploy & Launch reads from (``build-solution``/``test-generation``)
+        Deploy & Launch reads from (``build-solution``)
         before asking the user to click Start - e.g. an earlier page's
         fire-and-forget kickoff silently never reached the server, or the
         run is merely paused on the ``build-review-approval`` checkpoint
@@ -357,7 +364,7 @@ class DeploymentPipelineService:
         overrides that could silently discard the user's real governance
         policies.
         """
-        required_step_ids = (self._build_step_id, self._test_generation_step_id)
+        required_step_ids = (self._build_step_id,)
         if all(self._step_completed(run, step_id) for step_id in required_step_ids):
             return run
 
@@ -514,9 +521,30 @@ class DeploymentPipelineService:
                     detail = f"Frontend deployed at {frontend_result.frontend_url}."
 
                 elif step_id == "generate-test-suite":
-                    test_output_text = self._get_step_output(run, self._test_generation_step_id)
+                    # Generated for real, right here, against the real
+                    # deployed build (not read back from an upstream
+                    # workflow step) - Deploy & Launch is deliberately NOT
+                    # a workflow step (see module docstring), so this calls
+                    # the Test Generation Agent directly via
+                    # AgentOrchestrator.execute_agent, the same
+                    # outside-any-workflow-step execution path already used
+                    # by Workshop's per-component "Regenerate" action.
+                    build_output_text = self._get_step_output(run, self._build_step_id)
+                    requirements_text = self._get_step_output(run, self._requirements_step_id)
+                    generation_result = await self._orchestrator.execute_agent(
+                        agent_id="test-generation-agent",
+                        prompt_id="test-generation-v1",
+                        variables={
+                            "artifact": build_output_text,
+                            "requirements": requirements_text,
+                            "user_message": "",
+                        },
+                        session_id=pipeline_run.session_id,
+                        trace_id=pipeline_run.id,
+                    )
+                    test_output_text = generation_result.output_text
                     modules = extract_test_modules(test_output_text)
-                    detail = f"Using {len(modules)} generated test module(s) from the test-generation step."
+                    detail = f"Generated {len(modules)} test module(s) against the deployed build."
 
                 elif step_id == "execute-test-suite":
                     test_result = await self._test_execution_service.run_tests(

@@ -31,7 +31,6 @@ const PHASE_ICONS: Record<string, string> = {
   "analyze-requirements": "📋",
   "design-architecture": "🏗️",
   "build-solution": "🤖",
-  "test-generation": "🧪",
 };
 
 type PhaseStatus = "pending" | "awaiting-proceed" | "running" | "completed" | "failed";

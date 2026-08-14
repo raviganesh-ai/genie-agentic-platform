@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Button, Text } from "@fluentui/react-components";
 import { useNavigate } from "react-router-dom";
 import { useSessionContext } from "@/state/SessionContext";
@@ -68,12 +68,14 @@ export function FinalOutputPage(): JSX.Element {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lastLiveEvent]);
-  const testSuiteOutput = useMemo(
-    () => run?.step_results.find((result) => result.step_id === "test-generation")?.output_text ?? "",
-    [run],
-  );
-  const reviewComplete = Boolean(
-    run?.step_results.some((result) => result.step_id === "test-generation"),
+  // build-solution is the discovery workflow's last step - Deploy &
+  // Launch is only ready once it has actually completed (test generation
+  // and execution now happen for real, post-deploy, inside Deploy &
+  // Launch itself - see DeployLaunchPage.tsx).
+  const buildComplete = Boolean(
+    run?.step_results.some(
+      (result) => result.step_id === "build-solution" && result.status === "completed",
+    ),
   );
 
   if (!workflowRunId) {
@@ -99,22 +101,14 @@ export function FinalOutputPage(): JSX.Element {
 
       <LiveWorkflowPulse connected={liveConnected} events={liveEvents} />
 
-      {!reviewComplete ? (
+      {!buildComplete ? (
         <AgentActivityAnimation
-          label="Genie is finishing the security assessment and test generation for your solution..."
+          label="Genie is finishing the build for your solution..."
           events={liveEvents}
         />
       ) : null}
 
-      {testSuiteOutput ? (
-        <SectionCard title="🧪 Generated Test Suite">
-          <Text size={300} style={{ whiteSpace: "pre-wrap" }}>
-            {testSuiteOutput}
-          </Text>
-        </SectionCard>
-      ) : null}
-
-      {reviewComplete ? (
+      {buildComplete ? (
         <SectionCard
           title="🚀 Deploy & Launch"
           action={
@@ -124,9 +118,9 @@ export function FinalOutputPage(): JSX.Element {
           }
         >
           <Text size={300} style={{ opacity: 0.8 }}>
-            The security assessment and test generation have finished. Head to Deploy & Launch to
-            provision access control, deploy the agents and app, run full testing and a security
-            scan, and get the customer-facing launch link.
+            The build has finished. Head to Deploy & Launch to provision access control, deploy
+            the agents and app, then generate and run the full test suite and a security scan
+            against the real deployed build before getting the customer-facing launch link.
           </Text>
         </SectionCard>
       ) : null}
