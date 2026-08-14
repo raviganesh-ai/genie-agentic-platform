@@ -66,3 +66,36 @@ export const MISSION_PHASES: MissionPhase[] = [
     requiresProceed: true,
   },
 ];
+
+// Deploy & Launch's own nine steps (app.deploy_launch.pipeline_service,
+// DEPLOYMENT_STEP_ORDER/DEPLOYMENT_STEP_NAMES) are a separate real pipeline
+// that runs AFTER this discovery workflow, but it publishes its own live
+// step_started/step_completed/step_failed events onto the SAME session-wide
+// WorkflowEventBus/SSE stream (see pipeline_service.py's `_publish`, tagged
+// with `agent_id="deploy-launch-pipeline"`) - so the Triage panel's Mission
+// Trace can show a genuinely end-to-end trace (Requirements through Launch)
+// by treating these as more mission phases, not just the 3 discovery ones.
+// None of these require a separate human "proceed" gate - Deploy & Launch's
+// only gate is the single Start button.
+const DEPLOYMENT_PIPELINE_PHASES: MissionPhase[] = [
+  { stepId: "generate-access-policy", label: "Generate Access Policy & Least Access" },
+  { stepId: "provision-foundry-agents", label: "Deploy Agents to Foundry" },
+  { stepId: "deploy-backend-service", label: "Deploy Backend Service" },
+  { stepId: "sync-frontend-integration", label: "Update Frontend Integrations" },
+  { stepId: "deploy-frontend-app", label: "Deploy Frontend" },
+  { stepId: "generate-test-suite", label: "Generate Functional & Regression Tests" },
+  { stepId: "execute-test-suite", label: "Execute Full Fledge Testing" },
+  { stepId: "run-security-scan", label: "Security Scan (Backend & Frontend)" },
+  { stepId: "launch-mission", label: "Launch" },
+].map(({ stepId, label }) => ({
+  stepId,
+  label,
+  specialistAgentId: "deploy-launch-pipeline",
+  specialistLabel: "Deploy & Launch Pipeline",
+  requiresProceed: false,
+}));
+
+/** Full end-to-end mission trace: discovery's 3 phases followed by Deploy &
+ * Launch's 9 real pipeline steps - what the Triage panel's Mission Trace
+ * renders, so it never appears to "end" right after Build. */
+export const END_TO_END_MISSION_PHASES: MissionPhase[] = [...MISSION_PHASES, ...DEPLOYMENT_PIPELINE_PHASES];

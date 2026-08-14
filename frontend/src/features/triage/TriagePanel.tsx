@@ -4,7 +4,7 @@ import { useSessionContext } from "@/state/SessionContext";
 import { useAsyncResource } from "@/hooks/useAsyncResource";
 import { useWorkflowEventStream, workflowStepDeltaKey } from "@/hooks/useWorkflowEventStream";
 import { governanceApi } from "@/services/governanceApi";
-import { MISSION_PHASES, type MissionPhase } from "@/config/discoveryWorkflow";
+import { END_TO_END_MISSION_PHASES, type MissionPhase } from "@/config/discoveryWorkflow";
 import { summarizeAgentOutput } from "@/utils/textArtifacts";
 import { sanitizePreview } from "@/utils/workflowEventText";
 import type { GovernanceEvent } from "@/types/governance";
@@ -31,6 +31,15 @@ const PHASE_ICONS: Record<string, string> = {
   "analyze-requirements": "📋",
   "design-architecture": "🏗️",
   "build-solution": "🤖",
+  "generate-access-policy": "🔐",
+  "provision-foundry-agents": "🤖",
+  "deploy-backend-service": "⚙️",
+  "sync-frontend-integration": "🔗",
+  "deploy-frontend-app": "🌐",
+  "generate-test-suite": "🧪",
+  "execute-test-suite": "✅",
+  "run-security-scan": "🛡️",
+  "launch-mission": "🚀",
 };
 
 type PhaseStatus = "pending" | "awaiting-proceed" | "running" | "completed" | "failed";
@@ -214,9 +223,9 @@ function FlowConnector({ state }: { state: FlowNodeStatus }): JSX.Element {
 function ControlFlowMap({ traces }: { traces: PhaseTrace[] }): JSX.Element {
   return (
     <div style={{ display: "flex", alignItems: "center", width: "100%" }}>
-      {MISSION_PHASES.map((phase, index) => {
+      {END_TO_END_MISSION_PHASES.map((phase, index) => {
         const status = toFlowNodeStatus(traces[index].status);
-        const isLast = index === MISSION_PHASES.length - 1;
+        const isLast = index === END_TO_END_MISSION_PHASES.length - 1;
         const nextStatus = !isLast ? toFlowNodeStatus(traces[index + 1].status) : null;
         const connectorState: FlowNodeStatus =
           status === "complete" ? (nextStatus === "active" || nextStatus === "failed" ? nextStatus : "complete") : "pending";
@@ -376,7 +385,7 @@ export function TriagePanel({ enabled }: { enabled: boolean }): JSX.Element | nu
   const traces = useMemo(
     () =>
       computePhaseTraces(
-        MISSION_PHASES,
+        END_TO_END_MISSION_PHASES,
         sseEvents,
         stepDeltaText,
         governanceCompletedStepIds,
@@ -473,7 +482,7 @@ export function TriagePanel({ enabled }: { enabled: boolean }): JSX.Element | nu
         ) : (
           <>
             <TraceLine icon="🖱️" text="UI: Start Prototyping clicked" />
-            {MISSION_PHASES.map((phase, index) => {
+            {END_TO_END_MISSION_PHASES.map((phase, index) => {
               const trace = traces[index];
               const showGate = phase.requiresProceed;
               const gateCleared = trace.status === "running" || trace.status === "completed" || trace.status === "failed";
