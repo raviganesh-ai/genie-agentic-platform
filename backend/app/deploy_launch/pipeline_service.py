@@ -42,6 +42,7 @@ from pathlib import Path
 from typing import Final
 from uuid import uuid4
 
+from app.agents.gateway import get_enabled_agent
 from app.config.settings import Settings
 from app.deploy_launch.access_policy_service import AccessPolicyService
 from app.deploy_launch.backend_deployment_service import (
@@ -289,6 +290,7 @@ class DeploymentPipelineService:
                 mission_slug=mission_slug,
                 backend_root=backend_root,
                 frontend_root=frontend_root,
+                trace_id=trace_id,
             )
         except Exception:  # noqa: BLE001 - top-level background-task boundary; every
             # failure must resolve the run's status here since there is no
@@ -317,9 +319,72 @@ class DeploymentPipelineService:
             raise UnknownWorkflowRunError(f"No workflow run '{workflow_run_id}' found.")
         return run
 
-    def _step_completed(self, run: WorkflowRunResult, step_id: str) -> bool:
+    async def _step_completed(self, run: WorkflowRunResult, step_id: str, *, trace_id: str) -> bool:
+        """A step counts as done once its real output exists anywhere - the
+        official ``WorkflowRunResult`` step_results entry (``status ==
+        "completed"``), or - faster, and what actually matters for Deploy &
+        Launch - Shared Collaboration Memory already holds that step's real
+        specialist output (see ``_read_step_memory_output``). Genie's only
+        real gate on Deploy & Launch is the human's own review/approval on
+        Workshop (see the module docstring): once the human can see and
+        approve the real generated code, this pipeline must never impose an
+        additional backend-side wait of its own for the same content to be
+        echoed back a second time by genie-orchestrator.
+        """
         step = next((r for r in run.step_results if r.step_id == step_id), None)
-        return step is not None and step.status == "completed"
+        if step is not None and step.status == "completed":
+            return True
+        memory_output = await self._read_step_memory_output(
+            session_id=run.session_id, trace_id=trace_id, step_id=step_id
+        )
+        return memory_output is not None
+
+    async def _read_step_memory_output(
+        self, *, session_id: str, trace_id: str, step_id: str
+    ) -> str | None:
+        """Reads a workflow step's real specialist output straight out of
+        Shared Collaboration Memory, if the delegation tool call that
+        produced it has already written it there (see
+        ``app.agents.tools.orchestration_tools``'s ``_delegate``) - which
+        happens the instant that specialist's own real generation finishes,
+        well before genie-orchestrator's own separate, slower
+        echo-completion turn resolves the workflow step's own
+        ``WorkflowStepResult``. Returns ``None`` when nothing is written yet
+        (or memory is unavailable), so callers fall back to the official
+        step status instead.
+        """
+        # agent_registry/memory_service are always present on the real
+        # AgentOrchestrator (see its constructor) but are accessed
+        # defensively here - via getattr, never a direct attribute access -
+        # since some lighter-weight orchestrator test doubles only
+        # implement the handful of methods a given test actually exercises
+        # (get_workflow_run/resume_workflow/execute_agent), not the fuller
+        # AgentOrchestrator surface. Missing either simply means this
+        # faster memory-based path is unavailable - callers already fall
+        # back to the official step status in that case.
+        agent_registry = getattr(self._orchestrator, "agent_registry", None)
+        memory_service = getattr(self._orchestrator, "memory_service", None)
+        if agent_registry is None or memory_service is None:
+            return None
+
+        # Reads as genie-orchestrator's own identity - every
+        # solution-discovery-workflow step (including build-solution) is
+        # itself configured under this agent id (see
+        # config/workflows/registry.yaml), and this is the exact same key
+        # (the step id) and identity WorkflowStepExecutor._read_step_output
+        # already uses to read a prior step's real output back out of
+        # Shared Memory.
+        requesting_agent = get_enabled_agent(agent_registry, "genie-orchestrator")
+        records = await memory_service.shared.read(
+            requesting_agent=requesting_agent,
+            session_id=session_id,
+            trace_id=trace_id,
+            key=step_id,
+        )
+        if not records:
+            return None
+        output_text = records[0].content.get("output_text")
+        return output_text if isinstance(output_text, str) and output_text else None
 
     async def _ensure_upstream_steps_completed(
         self, *, run: WorkflowRunResult, session_id: str, trace_id: str
@@ -365,11 +430,13 @@ class DeploymentPipelineService:
         policies.
         """
         required_step_ids = (self._build_step_id,)
-        if all(self._step_completed(run, step_id) for step_id in required_step_ids):
+        if all(
+            [await self._step_completed(run, step_id, trace_id=trace_id) for step_id in required_step_ids]
+        ):
             return run
 
         step_inputs: dict[str, WorkflowStepInput] = {}
-        if not self._step_completed(run, self._build_step_id):
+        if not await self._step_completed(run, self._build_step_id, trace_id=trace_id):
             step_inputs[self._build_step_id] = WorkflowStepInput(
                 step_id=self._build_step_id,
                 variables={"policies": "", "excluded_agents": ""},
@@ -394,7 +461,10 @@ class DeploymentPipelineService:
         # error - fail closed HERE instead, immediately and clearly, so the
         # very first pipeline step records an actionable message pointing at
         # the real blocker (the resumed run's own `status`/`detail`).
-        if not all(self._step_completed(resumed, step_id) for step_id in required_step_ids):
+        resumed_completed = [
+            await self._step_completed(resumed, step_id, trace_id=trace_id) for step_id in required_step_ids
+        ]
+        if not all(resumed_completed):
             raise UnknownWorkflowRunError(
                 "Deploy & Launch cannot start: the mission workflow is not fully "
                 f"complete yet (status='{resumed.status}'"
@@ -405,13 +475,18 @@ class DeploymentPipelineService:
 
         return resumed
 
-    def _get_step_output(self, run: WorkflowRunResult, step_id: str) -> str:
+    async def _get_step_output(self, run: WorkflowRunResult, step_id: str, *, trace_id: str) -> str:
         step = next((r for r in run.step_results if r.step_id == step_id), None)
-        if step is None or step.status != "completed":
-            raise UnknownWorkflowRunError(
-                f"Workflow step '{step_id}' has not completed for run '{run.workflow_run_id}'."
-            )
-        return step.output_text or ""
+        if step is not None and step.status == "completed":
+            return step.output_text or ""
+        memory_output = await self._read_step_memory_output(
+            session_id=run.session_id, trace_id=trace_id, step_id=step_id
+        )
+        if memory_output is not None:
+            return memory_output
+        raise UnknownWorkflowRunError(
+            f"Workflow step '{step_id}' has not completed for run '{run.workflow_run_id}'."
+        )
 
     async def _execute_steps(
         self,
@@ -421,6 +496,7 @@ class DeploymentPipelineService:
         mission_slug: str,
         backend_root: Path,
         frontend_root: Path,
+        trace_id: str,
     ) -> None:
         orchestrator_foundry_name = "orchestrator"
         test_output_text = ""
@@ -438,8 +514,12 @@ class DeploymentPipelineService:
                     detail = f"Generated least-access policy for {len(document.agents)} agent(s)."
 
                 elif step_id == "provision-foundry-agents":
-                    architecture_document = self._get_step_output(run, self._architecture_step_id)
-                    build_output_text = self._get_step_output(run, self._build_step_id)
+                    architecture_document = await self._get_step_output(
+                        run, self._architecture_step_id, trace_id=trace_id
+                    )
+                    build_output_text = await self._get_step_output(
+                        run, self._build_step_id, trace_id=trace_id
+                    )
                     materialized = materialize_build(build_output_text)
                     agent_names = list(materialized.agent_modules.keys())
                     if materialized.orchestrator_module is not None:
@@ -529,8 +609,12 @@ class DeploymentPipelineService:
                     # AgentOrchestrator.execute_agent, the same
                     # outside-any-workflow-step execution path already used
                     # by Workshop's per-component "Regenerate" action.
-                    build_output_text = self._get_step_output(run, self._build_step_id)
-                    requirements_text = self._get_step_output(run, self._requirements_step_id)
+                    build_output_text = await self._get_step_output(
+                        run, self._build_step_id, trace_id=trace_id
+                    )
+                    requirements_text = await self._get_step_output(
+                        run, self._requirements_step_id, trace_id=trace_id
+                    )
                     generation_result = await self._orchestrator.execute_agent(
                         agent_id="test-generation-agent",
                         prompt_id="test-generation-v1",

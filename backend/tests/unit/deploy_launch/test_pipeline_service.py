@@ -128,6 +128,24 @@ def _completed_step(step_id: str, agent_id: str, output_text: str) -> WorkflowSt
     )
 
 
+class _FakeSharedMemory:
+    """Minimal SharedMemoryStore.read double: returns a single record
+    carrying {"output_text": ...} for each pre-seeded key, mirroring what
+    orchestration_tools's _delegate really writes for a delegated step the
+    instant its real generation finishes.
+    """
+
+    def __init__(self, records_by_key: dict[str, str]) -> None:
+        self._records_by_key = records_by_key
+
+    async def read(
+        self, *, requesting_agent, session_id: str, trace_id: str, key: str | None = None
+    ) -> list[SimpleNamespace]:
+        if key is not None and key in self._records_by_key:
+            return [SimpleNamespace(content={"output_text": self._records_by_key[key]})]
+        return []
+
+
 class _FakeOrchestratorPendingBuild:
     """Simulates a workflow run whose ``build-solution`` step has not
     completed yet - e.g. an earlier page's fire-and-forget kickoff never
@@ -142,6 +160,7 @@ class _FakeOrchestratorPendingBuild:
 
     def __init__(self, *, test_output_text: str) -> None:
         self.resume_calls: list[dict | None] = []
+        self.execute_agent_calls: list[dict] = []
         self._test_output_text = test_output_text
         self._run = WorkflowRunResult(
             workflow_run_id="run-1",
@@ -188,6 +207,7 @@ class _FakeOrchestratorPendingBuild:
         session_id: str | None = None,
         trace_id: str | None = None,
     ) -> AgentExecutionResult:
+        self.execute_agent_calls.append({"agent_id": agent_id, "prompt_id": prompt_id, "variables": variables})
         return AgentExecutionResult(
             agent_id=agent_id, output_text=self._test_output_text, correlation_id="test-correlation-id"
         )
@@ -350,6 +370,63 @@ async def test_start_self_heals_incomplete_build_solution_with_safe_policy_defau
 
     assert run2.status == "completed"
     assert len(orchestrator.resume_calls) == 1
+
+
+async def test_start_uses_shared_memory_output_without_waiting_for_official_step_completion(
+    tmp_path: Path,
+):
+    """``build-solution``'s real output can already be sitting in Shared
+    Collaboration Memory (written by the delegation tool - see
+    ``app.agents.tools.orchestration_tools``'s ``_delegate`` - the instant
+    the real generation finishes) well before genie-orchestrator's own
+    separate, slower echo-completion turn ever marks the workflow step's
+    own ``WorkflowStepResult`` as ``"completed"``. Once the human can see
+    (and has approved) that real generated code on Workshop, Deploy &
+    Launch must not impose any additional backend wait of its own for the
+    same content to be echoed back a second time - so no ``resume_workflow``
+    self-heal call should happen at all here, and the real memory-sourced
+    text must be what downstream steps (provision-foundry-agents,
+    generate-test-suite) actually use.
+    """
+    orchestrator = _FakeOrchestratorPendingBuild(test_output_text=_PASSING_TEST_OUTPUT)
+    orchestrator.agent_registry = AgentRegistry(
+        {
+            "genie-orchestrator": AgentDefinition(
+                id="genie-orchestrator",
+                name="Genie Orchestrator",
+                role="mission_orchestration",
+                description="Drives each mission phase.",
+                allowed_tools=[],
+                memory_access=["shared"],
+                enabled=True,
+            )
+        }
+    )
+    orchestrator.memory_service = SimpleNamespace(
+        shared=_FakeSharedMemory({"build-solution": _BUILD_OUTPUT})
+    )
+
+    service = DeploymentPipelineService(
+        orchestrator=orchestrator,  # type: ignore[arg-type]
+        session_service=_FakeSessionService(),  # type: ignore[arg-type]
+        event_bus=WorkflowEventBus(),
+        access_policy_service=_access_policy_service(),
+        mission_agent_provisioning_service=NullMissionAgentProvisioningService(),
+        backend_deployment_service=NullBackendDeploymentService(),
+        frontend_deployment_service=NullFrontendDeploymentService(),
+        test_execution_service=TestExecutionService(timeout_seconds=60),
+        security_scan_service=SecurityScanService(timeout_seconds=60),
+        build_workspace_root=tmp_path,
+    )
+
+    run = await service.start(session_id="session-1", requesting_user_id="user-1", workflow_run_id="run-1")
+    run = await service.wait_for_run(run.id)
+
+    assert orchestrator.resume_calls == []
+    assert run.status == "completed"
+    test_generation_call = orchestrator.execute_agent_calls[-1]
+    assert test_generation_call["agent_id"] == "test-generation-agent"
+    assert test_generation_call["variables"]["artifact"] == _BUILD_OUTPUT
 
 
 async def test_start_fails_closed_with_actionable_error_when_stuck_on_earlier_gate(tmp_path: Path):
