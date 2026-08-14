@@ -12,7 +12,11 @@ structural pause with no ApprovalService involved at all - see
 ``_enforce_human_proceed_gate``, used by Genie's own Requirements ->
 Architecture -> Code mission stages). Contains no agent reasoning: every
 step's actual execution is delegated to ``WorkflowStepExecutor`` ->
-``AgentGateway`` (``AzureAgentGateway`` in production).
+``AgentGateway`` (``AzureAgentGateway`` in production). A step that fails
+with a retryable ``FoundryUnavailableError`` is automatically retried a
+few times (see ``_execute_step_with_automatic_retries``/``_MAX_STEP_RETRIES``)
+before being surfaced as a "failed" step eligible for the existing MANUAL
+retry path (a caller resuming this same ``workflow_run_id``).
 """
 from __future__ import annotations
 
@@ -33,6 +37,17 @@ from app.workflows.models import WorkflowStep
 from app.workflows.registry import WorkflowRegistry
 
 __all__ = ["ApprovalCapabilityMissingError", "UnknownWorkflowError", "WorkflowRuntime"]
+
+# A step that fails with a retryable ``FoundryUnavailableError`` (a transient
+# Foundry-side hiccup - model hallucination, malformed tool call, a real
+# outage, ...) is automatically retried this many times (in addition to the
+# original attempt - i.e. up to 4 attempts total) before being surfaced to
+# the caller as a genuinely "failed" step. Only once every automatic attempt
+# has failed does the run become eligible for the existing MANUAL retry path
+# (resume_workflow), which lets a human fix whatever underlying issue caused
+# every automatic attempt to fail (bad input, a real prolonged outage, ...)
+# before trying again.
+_MAX_STEP_RETRIES = 3
 
 
 class UnknownWorkflowError(RuntimeError):
@@ -201,7 +216,7 @@ class WorkflowRuntime:
             # "failed" step result.
             raw_results = await asyncio.gather(
                 *(
-                    self._step_executor.execute_step(
+                    self._execute_step_with_automatic_retries(
                         step=step,
                         session_id=session_id,
                         trace_id=trace_id,
@@ -322,6 +337,52 @@ class WorkflowRuntime:
             step_results=step_results,
             agent_scope_id=effective_scope_id,
         )
+
+    async def _execute_step_with_automatic_retries(
+        self,
+        *,
+        step: WorkflowStep,
+        session_id: str,
+        trace_id: str,
+        correlation_id: str,
+        step_input: WorkflowStepInput | None,
+        transcript_text: str,
+        step_outputs: dict[str, str],
+        previous_variables: dict[str, str] | None,
+        agent_scope_id: str | None,
+        workflow_run_id: str,
+    ) -> WorkflowStepResult:
+        """Executes ``step``, automatically retrying up to ``_MAX_STEP_RETRIES``
+        additional times when it fails with a retryable ``FoundryUnavailableError``.
+
+        A transient Foundry-side hiccup (model hallucination, malformed tool
+        call, a brief outage, ...) often succeeds on a bare re-attempt with no
+        other change - so every earlier attempt's failure is swallowed here,
+        and only the LAST attempt's exception (if every attempt failed) is
+        ever surfaced to the caller, which stores it as a "failed" step
+        eligible for the existing MANUAL retry path (resume_workflow). Any
+        OTHER exception type is never retried - it propagates on the very
+        first attempt exactly as it did before automatic retries existed.
+        """
+
+        for attempt in range(1, _MAX_STEP_RETRIES + 2):
+            try:
+                return await self._step_executor.execute_step(
+                    step=step,
+                    session_id=session_id,
+                    trace_id=trace_id,
+                    correlation_id=correlation_id,
+                    step_input=step_input,
+                    transcript_text=transcript_text,
+                    step_outputs=step_outputs,
+                    previous_variables=previous_variables,
+                    agent_scope_id=agent_scope_id,
+                    workflow_run_id=workflow_run_id,
+                )
+            except FoundryUnavailableError:
+                if attempt > _MAX_STEP_RETRIES:
+                    raise
+        raise AssertionError("unreachable: loop above always returns or raises")
 
     def _enforce_human_proceed_gate(
         self,
