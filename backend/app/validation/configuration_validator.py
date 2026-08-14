@@ -38,6 +38,8 @@ class ConfigurationValidator:
             # a real production deployment must never allow that; see
             # app.deploy_launch.backend_deployment_service and
             # frontend_deployment_service's create_*_deployment_service factories.
+            if not settings.azure_subscription_id:
+                errors.append("azure_subscription_id is required in production.")
             if not settings.deployment_resource_group:
                 errors.append("deployment_resource_group is required in production.")
             if not settings.deployment_acr_name:

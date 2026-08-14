@@ -141,6 +141,7 @@ def foundry_configured_settings(valid_config_root: Path) -> Settings:
         memory_store_endpoint="https://genie-memory.example-project.documents.azure.com/",
         lineage_store_backend="cosmos_db",
         lineage_store_endpoint="https://genie-lineage.example-project.documents.azure.com/",
+        azure_subscription_id="00000000-0000-0000-0000-000000000000",
         deployment_resource_group="genie-example-rg",
         deployment_acr_name="genieexampleacr",
         deployment_container_apps_environment_id=(

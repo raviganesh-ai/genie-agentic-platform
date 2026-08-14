@@ -40,6 +40,14 @@ def test_passes_for_production_settings_with_deployment_config(foundry_configure
     assert result.passed
 
 
+def test_fails_closed_in_production_when_azure_subscription_id_missing(
+    foundry_configured_settings,
+):
+    broken = foundry_configured_settings.model_copy(update={"azure_subscription_id": None})
+    result = ConfigurationValidator().validate(broken)
+    assert not result.passed
+
+
 def test_fails_closed_in_production_when_deployment_resource_group_missing(
     foundry_configured_settings,
 ):
