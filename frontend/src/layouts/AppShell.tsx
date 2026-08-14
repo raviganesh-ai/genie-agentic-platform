@@ -1,13 +1,14 @@
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useState } from "react";
-import { NavLink, Outlet, useLocation } from "react-router-dom";
-import { Button, Switch, Text } from "@fluentui/react-components";
+import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
+import { Button, MessageBar, MessageBarBody, MessageBarTitle, Switch, Text } from "@fluentui/react-components";
 import { getActiveAccountName, isAuthenticated, onAccessTokenChange, signOut } from "@/services/authProvider";
 import { useSessionContext } from "@/state/SessionContext";
 import { useAsyncResource } from "@/hooks/useAsyncResource";
 import { workflowApi } from "@/services/workflowApi";
 import { TriagePanel } from "@/features/triage/TriagePanel";
 import type { WorkflowRunResult } from "@/types/workflow";
+import { isSessionExpiredError } from "@/types/common";
 
 /** Where a stage sits on the guided mission flow at any given moment. */
 type StageStatus = "locked" | "active" | "complete";
@@ -204,7 +205,9 @@ export function AppShell(): JSX.Element {
   // sidebar switch, leaving them wondering if anything is happening.
   const [triageOn, setTriageOn] = useState(true);
   const location = useLocation();
-  const { sessionId, workflowRunId } = useSessionContext();
+  const navigate = useNavigate();
+  const { sessionId, workflowRunId, setSessionId, setWorkflowRunId, setMissionStartedAt, setMissionError } =
+    useSessionContext();
   const currentIndex = findCurrentNavIndex(location.pathname);
   const [maxReachedIndex, setMaxReachedIndex] = useState(currentIndex);
 
@@ -227,7 +230,7 @@ export function AppShell(): JSX.Element {
         : Promise.reject(new Error("No active workflow run")),
     [sessionId, workflowRunId],
   );
-  const { data: run } = useAsyncResource(runFetcher, [sessionId, workflowRunId], {
+  const { data: run, error: runError } = useAsyncResource(runFetcher, [sessionId, workflowRunId], {
     enabled: Boolean(sessionId && workflowRunId),
     pollIntervalMs: MISSION_FLOW_POLL_MS,
   });
@@ -238,6 +241,21 @@ export function AppShell(): JSX.Element {
     currentIndex,
     maxReachedIndex,
   );
+  // Sessions live only in the backend's in-memory store - any backend
+  // restart/redeploy since this browser tab's session was created makes
+  // every poll here 404 forever with no other symptom (see
+  // isSessionExpiredError doc comment). Surface that clearly instead of
+  // leaving the current page's own "in progress" animation spinning
+  // forever with no explanation.
+  const sessionExpired = isSessionExpiredError(runError);
+
+  const handleStartNewMission = useCallback(() => {
+    setSessionId(null);
+    setWorkflowRunId(null);
+    setMissionStartedAt(null);
+    setMissionError(null);
+    navigate("/");
+  }, [navigate, setSessionId, setWorkflowRunId, setMissionStartedAt, setMissionError]);
 
   return (
     <div style={{ display: "flex", minHeight: "100vh" }}>
@@ -387,9 +405,25 @@ export function AppShell(): JSX.Element {
           transition: "padding-right 200ms ease",
         }}
       >
-        <Outlet />
+        {sessionExpired ? (
+          <MessageBar intent="error" layout="multiline">
+            <MessageBarBody>
+              <MessageBarTitle>Your session has expired</MessageBarTitle>
+              This mission's session is no longer available on the backend (it may have been
+              restarted since this page was opened). Your progress on this session can't be
+              recovered - start a new mission to continue.
+              <div style={{ marginTop: 8 }}>
+                <Button size="small" appearance="primary" onClick={handleStartNewMission}>
+                  Start a new mission
+                </Button>
+              </div>
+            </MessageBarBody>
+          </MessageBar>
+        ) : (
+          <Outlet />
+        )}
       </main>
-      <TriagePanel enabled={triageOn} />
+      <TriagePanel enabled={triageOn && !sessionExpired} />
     </div>
   );
 }

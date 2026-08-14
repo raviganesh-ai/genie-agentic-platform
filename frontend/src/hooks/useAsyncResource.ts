@@ -43,7 +43,17 @@ export function useAsyncResource<T>(
   const refresh = useCallback(() => setRefreshToken((t) => t + 1), []);
 
   useEffect(() => {
-    if (!enabled) return;
+    if (!enabled) {
+      // Reset to a clean slate rather than leaving stale data/error state
+      // around - e.g. once a session is cleared (sessionId set back to
+      // null after a "start a new mission" reset), a previously-thrown
+      // SessionNotFoundError must not keep showing as if it were still
+      // live once this resource is disabled.
+      setData(null);
+      setError(null);
+      setLoading(false);
+      return;
+    }
     let cancelled = false;
 
     const load = async () => {
