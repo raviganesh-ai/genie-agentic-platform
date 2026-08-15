@@ -47,6 +47,7 @@ from app.deploy_launch.frontend_deployment_service import create_frontend_deploy
 from app.deploy_launch.mission_agent_provisioning_service import (
     create_mission_agent_provisioning_service,
 )
+from app.deploy_launch.mission_identity_service import create_mission_identity_service
 from app.deploy_launch.pipeline_service import create_deployment_pipeline_service
 from app.governance.replay_service import ReplayService
 from app.governance.traceability_service import TraceabilityService
@@ -236,7 +237,19 @@ def create_app(
             orchestrator=orchestrator,
             session_service=session_service,
             event_bus=orchestrator.workflow_event_bus,
-            access_policy_service=AccessPolicyService(agent_registry=orchestrator.agent_registry),
+            access_policy_service=AccessPolicyService(
+                agent_registry=orchestrator.agent_registry,
+                mission_identity_service=create_mission_identity_service(
+                    settings=resolved_settings,
+                    subscription_id=resolved_settings.azure_subscription_id or "unknown",
+                    resource_group_name=resolved_settings.deployment_resource_group or "unknown",
+                ),
+            ),
+            mission_identity_service=create_mission_identity_service(
+                settings=resolved_settings,
+                subscription_id=resolved_settings.azure_subscription_id or "unknown",
+                resource_group_name=resolved_settings.deployment_resource_group or "unknown",
+            ),
             mission_agent_provisioning_service=create_mission_agent_provisioning_service(
                 settings=resolved_settings
             ),

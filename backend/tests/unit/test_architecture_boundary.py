@@ -57,6 +57,7 @@ _ALLOWED_RELATIVE_PATHS = {
     Path("deploy_launch/backend_deployment_service.py"),
     Path("deploy_launch/frontend_deployment_service.py"),
     Path("deploy_launch/code_materializer.py"),
+    Path("deploy_launch/mission_identity_service.py"),
 }
 
 

@@ -1,0 +1,36 @@
+# Approval framework policy.
+#
+# Enforced at runtime by ApprovalService (backend/app/governance/
+# approval_service.py, Phase 5). "checkpoints" must never be hardcoded in
+# source - GovernanceProviderValidator fails startup closed if this file is
+# missing, malformed, or defines zero checkpoints.
+default_expiry_minutes: 1440
+
+checkpoints:
+  - id: requirement-discovery-approval
+    name: Requirement Discovery Approval
+    description: >-
+      Human approval of discovered goals, requirements, risks, and
+      assumptions before architecture design proceeds.
+    required: true
+
+  - id: architecture-approval
+    name: Architecture Approval
+    description: >-
+      Human approval of the proposed Azure architecture before final
+      output generation.
+    required: true
+
+  - id: build-review-approval
+    name: Build Review Approval
+    description: >-
+      Human approval of the Build Agent's generated code (Workshop page)
+      before the automated governance phase (security assessment, test
+      generation, governance review) proceeds.
+    required: true
+
+  - id: final-output-approval
+    name: Final Output Approval
+    description: >-
+      Human approval of the final customer-facing output before delivery.
+    required: true

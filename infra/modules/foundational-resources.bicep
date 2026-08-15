@@ -8,6 +8,17 @@ param resourcePrefix string
 param resourceToken string
 param tags object
 
+// Built-in role definition ids - granted to Genie's own runtime managed
+// identity at THIS resource group's scope (not a single sub-resource like
+// Key Vault/Storage below) because Deploy & Launch's real per-mission RBAC
+// step (app.deploy_launch.mission_identity_service) needs to create a
+// brand-new Azure managed identity per deployed mission and assign it
+// real, least-privilege roles - both are resource-group-level
+// capabilities, not scoped to any one resource. Deliberately NOT
+// subscription-scoped Owner/Contributor.
+var managedIdentityContributorRoleId = 'e40ec5ca-96e0-45a2-b4ff-59039f2c2b59'
+var userAccessAdministratorRoleId = '18d7d88d-d35e-4fb5-a5c3-7773c20a72d9'
+
 module logAnalytics 'log-analytics.bicep' = {
   name: 'genie-log-analytics'
   params: {
@@ -33,6 +44,30 @@ module managedIdentity 'managed-identity.bicep' = {
     location: location
     name: '${resourcePrefix}-${resourceToken}-identity'
     tags: tags
+  }
+}
+
+resource managedIdentityContributorRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(resourceGroup().id, managedIdentity.outputs.principalId, managedIdentityContributorRoleId)
+  properties: {
+    roleDefinitionId: subscriptionResourceId(
+      'Microsoft.Authorization/roleDefinitions',
+      managedIdentityContributorRoleId
+    )
+    principalId: managedIdentity.outputs.principalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
+resource userAccessAdministratorRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(resourceGroup().id, managedIdentity.outputs.principalId, userAccessAdministratorRoleId)
+  properties: {
+    roleDefinitionId: subscriptionResourceId(
+      'Microsoft.Authorization/roleDefinitions',
+      userAccessAdministratorRoleId
+    )
+    principalId: managedIdentity.outputs.principalId
+    principalType: 'ServicePrincipal'
   }
 }
 

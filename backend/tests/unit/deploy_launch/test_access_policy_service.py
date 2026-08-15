@@ -7,6 +7,7 @@ import pytest
 
 from app.agents.registry import AgentRegistry
 from app.deploy_launch.access_policy_service import AccessPolicyService
+from app.deploy_launch.mission_identity_service import NullMissionIdentityService
 
 
 def _write(path: Path, text: str) -> None:
@@ -38,10 +39,14 @@ agents:
     return AgentRegistry.load(tmp_path, default_llm="model-a")
 
 
-def test_generate_builds_policy_from_enabled_agents_only(agent_registry: AgentRegistry):
-    service = AccessPolicyService(agent_registry=agent_registry)
+@pytest.mark.asyncio
+async def test_generate_builds_policy_from_enabled_agents_only(agent_registry: AgentRegistry):
+    service = AccessPolicyService(
+        agent_registry=agent_registry,
+        mission_identity_service=NullMissionIdentityService(),
+    )
 
-    document = service.generate()
+    document = await service.generate(mission_id="test-mission")
 
     assert len(document.agents) == 1
     grant = document.agents[0]
@@ -51,9 +56,13 @@ def test_generate_builds_policy_from_enabled_agents_only(agent_registry: AgentRe
     assert grant.memory_access == ["personal", "shared"]
 
 
-def test_generate_excludes_disabled_agents(agent_registry: AgentRegistry):
-    service = AccessPolicyService(agent_registry=agent_registry)
+@pytest.mark.asyncio
+async def test_generate_excludes_disabled_agents(agent_registry: AgentRegistry):
+    service = AccessPolicyService(
+        agent_registry=agent_registry,
+        mission_identity_service=NullMissionIdentityService(),
+    )
 
-    document = service.generate()
+    document = await service.generate(mission_id="test-mission")
 
     assert all(grant.agent_id != "disabled-agent" for grant in document.agents)

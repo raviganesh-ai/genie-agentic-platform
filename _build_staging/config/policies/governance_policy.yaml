@@ -1,0 +1,23 @@
+# Governance policy.
+#
+# Enforced at runtime by GovernanceService (backend/app/governance/
+# governance_service.py, Phase 5). All three sections are required -
+# GovernanceProviderValidator fails startup closed if any is missing or
+# malformed.
+agent_execution_governance:
+  track_registration: true
+  track_versions: true
+  track_lifecycle: true
+  track_executions: true
+  track_communication: true
+  track_memory_reads: true
+  track_memory_writes: true
+  track_tool_requests: true
+  track_policy_evaluations: true
+  track_denied_access: true
+
+decision_lineage:
+  require_evidence_references: true
+
+session_replay:
+  enabled: true

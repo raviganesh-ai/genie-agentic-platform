@@ -1,0 +1,325 @@
+# Agent registry manifest.
+#
+# Each entry defines an agent's externally configured identity and
+# capabilities for the Agent Arena experience described in
+# docs/GENIE_BUILD_SPEC.md. Every agent here is an independently deployed
+# Azure AI Foundry agent resource: its reasoning, instructions, and tools
+# are owned and versioned in Azure AI Foundry (portal/CLI/IaC), never in
+# Genie source code. This registry only describes *what* agents exist and
+# *which* Foundry resource (foundry_agent_id) each one maps to.
+#
+# foundry_agent_id is the Azure AI Foundry Prompt Agent's `agent_name` -
+# a human-readable resource name chosen up front by the operator (never
+# server-generated), used with the versioned azure-ai-projects
+# agents.get/create_version/delete API (NOT a raw classic Assistants API
+# "asst_..." id). It is required for AzureAgentGateway to execute the
+# agent in production; it may be left unset for agents only ever exercised
+# through LocalAgentGateway during local development. The values below
+# match each agent's own `id` for readability and are provisioned via
+# scripts/provision_foundry_agents.py - they name a resource, not a
+# secret, so unlike endpoints/keys they are fine to declare here directly.
+#
+# model_deployment_ref is optional and informational for already-provisioned
+# catalog agents (the model actually used for those is whatever the
+# referenced foundry_agent_id resource is configured with), but it IS the
+# real value passed to Foundry's create_agent(model=...) whenever a NEW
+# agent is provisioned/cloned at runtime (see
+# CustomerAgentProvisioningService, scripts/provision_foundry_agents.py) -
+# so it must always be the exact Cognitive Services deployment name, never
+# just any string the model accepts at creation time. When omitted, it
+# defaults to the platform-wide default LLM (Settings.default_llm /
+# GENIE_DEFAULT_LLM, "gpt-5-1" unless overridden). Anthropic Claude models
+# were evaluated but are not deployed: they require an Azure Marketplace
+# subscription, and this subscription currently has a default quota of 0
+# for every Claude SKU.
+#
+# owner / governance_policy_id / prompt_template_ref (Phase 10A, additive):
+# owner names the team accountable for this agent's Foundry deployment
+# (never a person's name). governance_policy_id is a descriptive policy
+# identifier used purely for Foundry inventory/drift tracking - it is not
+# cross-validated against config/policies/approval_policy.yaml checkpoints
+# (those govern workflow-step approval gates, a distinct concept).
+# prompt_template_ref names this agent's primary registered prompt
+# template (config/prompts/*.yaml) and must resolve via PromptRegistry.
+agents:
+  - id: requirements-analyst
+    name: Requirements Analyst
+    role: requirement_discovery
+    description: >-
+      Extracts goals, functional and non-functional requirements, risks,
+      assumptions, and constraints from ingested transcripts and documents.
+    capabilities:
+      - transcript_analysis
+      - requirement_extraction
+      - risk_identification
+    allowed_tools:
+      - azure_ai_search
+    memory_access:
+      - personal
+      - shared
+    foundry_agent_id: requirements-analyst
+    owner: requirements-team
+    governance_policy_id: standard-governance-policy-v1
+    prompt_template_ref: requirements-extraction-v1
+    enabled: true
+
+  - id: architecture-designer
+    name: Architecture Designer
+    role: architecture_design
+    description: >-
+      Derives a customer-specific multi-agent workflow and UI design from
+      the approved requirements, reasoning out which specialist agents
+      this scope of work needs and what each screen/interaction of the
+      UI must do. The hosting platform is fixed (Azure Static Web Apps
+      for the UI, Azure AI Foundry for every agent) and is not something
+      to re-architect.
+    capabilities:
+      - architecture_generation
+      - alternative_design_generation
+    allowed_tools:
+      - azure_ai_search
+    memory_access:
+      - shared
+      - enterprise
+    # Explicit override, demonstrating per-agent LLM configurability. Set
+    # to the same model as the platform default today (gpt-5-1) because
+    # gpt-4o is deprecating on this account; change this to any other
+    # deployed model name to diverge from the default again.
+    model_deployment_ref: gpt-5-1
+    foundry_agent_id: architecture-designer
+    owner: architecture-team
+    governance_policy_id: standard-governance-policy-v1
+    prompt_template_ref: architecture-recommendation-v1
+    # The Agentic Workflow this architecture leads into for the approved
+    # requirement scope: once the architecture is designed, the Build
+    # Agent generates the UI + dedicated multi-agent workflow, and the
+    # real Deploy & Launch pipeline provisions/launches it - this mirrors
+    # genie-orchestrator's own connected_agent_ids above, scoped to what
+    # this agent's own design sets in motion.
+    connected_agent_ids:
+      - build-agent
+      - security-assessment-agent
+      - test-generation-agent
+    enabled: true
+
+  - id: build-agent
+    name: Build Agent
+    role: solution_build
+    description: >-
+      Generates an extensive, multi-screen customer-facing React UI, one
+      independent Python 3.12 module per specialist agent built on the
+      Microsoft Agent Framework's Azure AI Foundry integration, and a
+      separate Orchestrator Agent module with the real
+      delegation/orchestration logic - each a real, individually
+      deployable piece with detailed inline comments - so that once
+      deployed to Azure AI Foundry, the generated backend service is the
+      sole caller of the Orchestrator Agent, which in turn coordinates
+      every specialist agent, to fulfill one approved requirement.
+    capabilities:
+      - ui_code_generation
+      - multi_agent_flow_design
+    allowed_tools: []
+    memory_access:
+      - shared
+    foundry_agent_id: build-agent
+    owner: architecture-team
+    governance_policy_id: standard-governance-policy-v1
+    prompt_template_ref: build-generation-v1
+    enabled: true
+
+  - id: security-assessment-agent
+    name: Security Assessment Agent
+    role: security_assessment
+    description: >-
+      Performs a full regression security assessment of the Build Agent's
+      generated UI and agent code against the OWASP Top 10 on every
+      review (not only what changed since a prior review), and reports a
+      pass/fail security gate verdict with findings and remediation
+      recommendations.
+    capabilities:
+      - security_review
+      - vulnerability_detection
+    allowed_tools: []
+    memory_access:
+      - shared
+    foundry_agent_id: security-assessment-agent
+    owner: governance-team
+    governance_policy_id: standard-governance-policy-v1
+    prompt_template_ref: security-assessment-v1
+    enabled: true
+
+  - id: test-generation-agent
+    name: Test Generation Agent
+    role: test_generation
+    description: >-
+      Generates unit, integration, and UI test cases covering every
+      function, endpoint, and interaction the Build Agent generated, and
+      reports a pass/fail test-coverage gate verdict based on structural
+      completeness against the approved requirements.
+    capabilities:
+      - test_case_generation
+      - coverage_assessment
+    allowed_tools: []
+    memory_access:
+      - shared
+    foundry_agent_id: test-generation-agent
+    owner: governance-team
+    governance_policy_id: standard-governance-policy-v1
+    prompt_template_ref: test-generation-v1
+    enabled: true
+
+  - id: genie-orchestrator
+    name: Genie Orchestrator
+    role: mission_orchestration
+    description: >-
+      Drives the mission phase by phase: for each solution-discovery-
+      workflow step (still approval-gated exactly as before), this same
+      agent is invoked, and it calls exactly one of its own registered
+      call_<agent> delegation tools (below) to actually execute the real
+      specialist for that phase, then returns that specialist's output.
+      Delegation is implemented as ordinary Foundry function-calling
+      tools (app.agents.tools.orchestration_tools), each of which executes
+      the target agent through the same AzureAgentGateway path as every
+      other agent - Azure AI Foundry's SDK exposes no distinct "Connected
+      Agents" mechanism for Prompt Agents in the pinned azure-ai-projects
+      version, so this registry's connected_agent_ids below is realized
+      via genuine per-phase function tools, not a Foundry-native feature.
+    capabilities:
+      - mission_orchestration
+    allowed_tools: []
+    memory_access:
+      - shared
+    foundry_agent_id: genie-orchestrator
+    connected_agent_ids:
+      - requirements-analyst
+      - architecture-designer
+      - build-agent
+      - security-assessment-agent
+      - test-generation-agent
+    tool_definitions:
+      - name: call_requirements_analyst
+        description: >-
+          Delegate the requirements-discovery phase to the Requirements
+          Analyst agent and return its real output verbatim. The platform
+          always supplies the real transcript_excerpt/user_message for
+          this step automatically - do not repeat their full text here;
+          short placeholders or empty strings are fine.
+        parameters:
+          - name: transcript_excerpt
+            type: string
+            description: The customer call transcript excerpt to analyze.
+            required: false
+          - name: user_message
+            type: string
+            description: Optional customer chat message for this phase, or empty.
+            required: false
+      - name: call_architecture_designer
+        description: >-
+          Delegate the architecture-design phase to the Architecture
+          Designer agent and return its real output verbatim. The
+          platform always supplies the real approved_requirements/
+          user_message for this step automatically - do not repeat their
+          full text here; short placeholders or empty strings are fine.
+        parameters:
+          - name: approved_requirements
+            type: string
+            description: The human-approved requirements to design an architecture for.
+            required: false
+          - name: user_message
+            type: string
+            description: Optional customer chat message for this phase, or empty.
+            required: false
+      - name: call_build_agent
+        description: >-
+          Delegate the build phase to the Build Agent and return its real
+          output verbatim. The platform always supplies the real
+          requirements/architecture/policies/excluded_agents/user_message
+          for this step automatically - do not repeat their full text
+          here; short placeholders or empty strings are fine.
+        parameters:
+          - name: requirements
+            type: string
+            description: The approved requirements the build must satisfy.
+            required: false
+          - name: architecture
+            type: string
+            description: The approved architecture the build must follow.
+            required: false
+          - name: policies
+            type: string
+            description: >-
+              Governance/policy expectations the user selected on the
+              Architecture Studio page that the generated code must
+              satisfy (semicolon-separated, may be empty).
+            required: false
+          - name: excluded_agents
+            type: string
+            description: >-
+              Names of specialist agents the user deselected on the
+              Architecture Studio page's "Multi-Agent Workflow" list
+              (comma-separated, may be empty) - no code should be
+              generated for these agents, and neither the Orchestrator
+              Agent nor the UI should reference them.
+            required: false
+          - name: user_message
+            type: string
+            description: Optional customer chat message for this phase, or empty.
+            required: false
+      - name: call_security_assessment_agent
+        description: >-
+          Delegate the security-assessment phase to the Security
+          Assessment Agent and return its real output verbatim. The
+          platform always supplies the real artifact/user_message for
+          this step automatically - do not repeat their full text here;
+          short placeholders or empty strings are fine.
+        parameters:
+          - name: artifact
+            type: string
+            description: The build artifact to assess for security posture.
+            required: false
+          - name: user_message
+            type: string
+            description: Optional customer chat message for this phase, or empty.
+            required: false
+      - name: call_test_generation_agent
+        description: >-
+          Delegate the test-generation phase to the Test Generation Agent
+          and return its real output verbatim. The platform always
+          supplies the real artifact/requirements/user_message for this
+          step automatically - do not repeat their full text here; short
+          placeholders or empty strings are fine.
+        parameters:
+          - name: artifact
+            type: string
+            description: The build artifact to generate test cases for.
+            required: false
+          - name: requirements
+            type: string
+            description: The approved requirements the generated tests must cover.
+            required: false
+          - name: user_message
+            type: string
+            description: Optional customer chat message for this phase, or empty.
+            required: false
+    owner: platform-engineering-team
+    governance_policy_id: standard-governance-policy-v1
+    prompt_template_ref: orchestrator-mission-v1
+    enabled: true
+
+  - id: debugging-agent
+    name: Debugging Agent
+    role: debugging
+    description: >-
+      Diagnoses workflow and agent execution failures (FailureDetected) and
+      recommends remediation, running through the same AzureAgentGateway
+      execution path as every other agent - never locally in production.
+    capabilities:
+      - failure_diagnosis
+    allowed_tools: []
+    memory_access:
+      - shared
+    foundry_agent_id: debugging-agent
+    owner: platform-engineering-team
+    governance_policy_id: debugging-governance-policy-v1
+    prompt_template_ref: failure-diagnosis-v1
+    enabled: true

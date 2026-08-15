@@ -32,6 +32,7 @@ __all__ = [
     "DeploymentStepId",
     "DeploymentStepResult",
     "DeploymentStepStatus",
+    "MissionIdentityInfo",
     "ProvisionedAgentStatus",
 ]
 
@@ -92,18 +93,37 @@ class AgentAccessPolicy(BaseModel):
     memory_access: list[str] = Field(default_factory=list)
 
 
+class MissionIdentityInfo(BaseModel):
+    """One mission's real Azure managed identity and its RBAC role assignments.
+
+    Populated by ``MissionIdentityService`` during the ``generate-access-policy``
+    step - every grant here is a real, verifiable Azure RBAC role assignment,
+    never fabricated or synthetic.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    identity_name: str = Field(min_length=1, description="Azure resource name of the managed identity")
+    identity_principal_id: str = Field(min_length=1, description="Azure AD principal ID (object ID)")
+    identity_client_id: str = Field(min_length=1, description="Managed identity client ID (app ID)")
+    identity_resource_id: str = Field(min_length=1, description="Full Azure resource ID")
+    assigned_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+
 class AccessPolicyDocument(BaseModel):
     """The real, consolidated least-access policy generated for one mission's build.
 
     Supersedes the old, LLM-narrative ``ServicePolicy`` concept: every
     grant here is derived deterministically from the catalog's own
-    ``AgentDefinition.allowed_tools``/``memory_access``, never invented or
-    summarized by an agent.
+    ``AgentDefinition.allowed_tools``/``memory_access`` (never invented),
+    and the mission's own real Azure managed identity with its RBAC roles
+    (never synthetic). Both are observable, verifiable facts.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     generated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    mission_identity: MissionIdentityInfo | None = None
     agents: list[AgentAccessPolicy] = Field(default_factory=list)
 
 

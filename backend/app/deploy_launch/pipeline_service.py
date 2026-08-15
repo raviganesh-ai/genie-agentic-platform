@@ -63,6 +63,10 @@ from app.deploy_launch.mission_agent_provisioning_service import (
     NullMissionAgentProvisioningService,
     ProvisionedMissionAgent,
 )
+from app.deploy_launch.mission_identity_service import (
+    MissionIdentityService,
+    NullMissionIdentityService,
+)
 from app.deploy_launch.models import (
     DEPLOYMENT_STEP_NAMES,
     DEPLOYMENT_STEP_ORDER,
@@ -133,6 +137,7 @@ class DeploymentPipelineService:
         session_service: SessionService,
         event_bus: WorkflowEventBus,
         access_policy_service: AccessPolicyService,
+        mission_identity_service: MissionIdentityService | NullMissionIdentityService,
         mission_agent_provisioning_service: MissionAgentProvisioningService
         | NullMissionAgentProvisioningService,
         backend_deployment_service: BackendDeploymentService | NullBackendDeploymentService,
@@ -150,6 +155,7 @@ class DeploymentPipelineService:
         self._session_service = session_service
         self._event_bus = event_bus
         self._access_policy_service = access_policy_service
+        self._mission_identity_service = mission_identity_service
         self._mission_agent_provisioning_service = mission_agent_provisioning_service
         self._backend_deployment_service = backend_deployment_service
         self._frontend_deployment_service = frontend_deployment_service
@@ -529,9 +535,9 @@ class DeploymentPipelineService:
 
             try:
                 if step_id == "generate-access-policy":
-                    document = self._access_policy_service.generate()
+                    document = await self._access_policy_service.generate(mission_id=mission_slug)
                     pipeline_run.access_policy = document
-                    detail = f"Generated least-access policy for {len(document.agents)} agent(s)."
+                    detail = f"Generated least-access policy for {len(document.agents)} agent(s) with managed identity {document.mission_identity.identity_name if document.mission_identity else 'unknown'}."
 
                 elif step_id == "provision-foundry-agents":
                     architecture_document = await self._get_step_output(
@@ -806,6 +812,7 @@ def create_deployment_pipeline_service(
     session_service: SessionService,
     event_bus: WorkflowEventBus,
     access_policy_service: AccessPolicyService,
+    mission_identity_service: MissionIdentityService | NullMissionIdentityService,
     mission_agent_provisioning_service: MissionAgentProvisioningService
     | NullMissionAgentProvisioningService,
     backend_deployment_service: BackendDeploymentService | NullBackendDeploymentService,
@@ -824,6 +831,7 @@ def create_deployment_pipeline_service(
         session_service=session_service,
         event_bus=event_bus,
         access_policy_service=access_policy_service,
+        mission_identity_service=mission_identity_service,
         mission_agent_provisioning_service=mission_agent_provisioning_service,
         backend_deployment_service=backend_deployment_service,
         frontend_deployment_service=frontend_deployment_service,

@@ -43,6 +43,7 @@ from app.deploy_launch.frontend_deployment_service import NullFrontendDeployment
 from app.deploy_launch.mission_agent_provisioning_service import (
     NullMissionAgentProvisioningService,
 )
+from app.deploy_launch.mission_identity_service import NullMissionIdentityService
 from app.deploy_launch.pipeline_service import DeploymentPipelineService
 from app.deploy_launch.security_scan_service import SecurityScanService
 from app.deploy_launch.test_execution_service import TestExecutionService
@@ -227,7 +228,11 @@ async def test_full_pipeline_runs_through_the_real_http_api(
             orchestrator=_StubUpstreamWorkflowOrchestrator(run=stub_run),  # type: ignore[arg-type]
             session_service=app.state.session_service,
             event_bus=orchestrator.workflow_event_bus,
-            access_policy_service=AccessPolicyService(agent_registry=orchestrator.agent_registry),
+            access_policy_service=AccessPolicyService(
+                agent_registry=orchestrator.agent_registry,
+                mission_identity_service=NullMissionIdentityService(),
+            ),
+            mission_identity_service=NullMissionIdentityService(),
             mission_agent_provisioning_service=NullMissionAgentProvisioningService(),
             backend_deployment_service=NullBackendDeploymentService(),
             frontend_deployment_service=NullFrontendDeploymentService(),

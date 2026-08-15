@@ -1,0 +1,87 @@
+[
+  {
+    "Log_s": "ERROR:    Traceback (most recent call last):",
+    "TableName": "PrimaryResult",
+    "TimeGenerated": "2026-08-13T16:44:29.595975Z"
+  },
+  {
+    "Log_s": "ERROR:    Traceback (most recent call last):",
+    "TableName": "PrimaryResult",
+    "TimeGenerated": "2026-08-13T16:44:35.5483471Z"
+  },
+  {
+    "Log_s": "ERROR:    Traceback (most recent call last):",
+    "TableName": "PrimaryResult",
+    "TimeGenerated": "2026-08-13T16:44:55.5320687Z"
+  },
+  {
+    "Log_s": "ERROR:    Traceback (most recent call last):",
+    "TableName": "PrimaryResult",
+    "TimeGenerated": "2026-08-13T16:45:29.6751965Z"
+  },
+  {
+    "Log_s": "ERROR:    Traceback (most recent call last):",
+    "TableName": "PrimaryResult",
+    "TimeGenerated": "2026-08-13T16:46:17.7211366Z"
+  },
+  {
+    "Log_s": "ERROR:    Traceback (most recent call last):",
+    "TableName": "PrimaryResult",
+    "TimeGenerated": "2026-08-13T16:47:48.5529223Z"
+  },
+  {
+    "Log_s": "ERROR:    Traceback (most recent call last):",
+    "TableName": "PrimaryResult",
+    "TimeGenerated": "2026-08-13T16:50:41.5993039Z"
+  },
+  {
+    "Log_s": "ERROR:    Traceback (most recent call last):",
+    "TableName": "PrimaryResult",
+    "TimeGenerated": "2026-08-13T16:55:45.5965108Z"
+  },
+  {
+    "Log_s": "ERROR:    Traceback (most recent call last):",
+    "TableName": "PrimaryResult",
+    "TimeGenerated": "2026-08-13T17:00:53.1354625Z"
+  },
+  {
+    "Log_s": "ERROR:    Traceback (most recent call last):",
+    "TableName": "PrimaryResult",
+    "TimeGenerated": "2026-08-13T17:05:58.5452753Z"
+  },
+  {
+    "Log_s": "ERROR:    Traceback (most recent call last):",
+    "TableName": "PrimaryResult",
+    "TimeGenerated": "2026-08-13T17:11:07.6671624Z"
+  },
+  {
+    "Log_s": "ERROR:    Traceback (most recent call last):",
+    "TableName": "PrimaryResult",
+    "TimeGenerated": "2026-08-13T17:16:22.6779445Z"
+  },
+  {
+    "Log_s": "ERROR:    Traceback (most recent call last):",
+    "TableName": "PrimaryResult",
+    "TimeGenerated": "2026-08-13T17:21:30.8336133Z"
+  },
+  {
+    "Log_s": "ERROR:    Traceback (most recent call last):",
+    "TableName": "PrimaryResult",
+    "TimeGenerated": "2026-08-13T17:26:42.5505603Z"
+  },
+  {
+    "Log_s": "ERROR:    Traceback (most recent call last):",
+    "TableName": "PrimaryResult",
+    "TimeGenerated": "2026-08-13T17:31:55.525108Z"
+  },
+  {
+    "Log_s": "ERROR:    Traceback (most recent call last):",
+    "TableName": "PrimaryResult",
+    "TimeGenerated": "2026-08-13T17:37:04.8803013Z"
+  },
+  {
+    "Log_s": "2026-08-14 02:13:51,354 ERROR app.api.error_mapping Domain error handled for POST /sessions/b1fa689c-1e5b-43fe-ad47-bbedcb2e1c0a/workflows/runs/996ac04e-ecf1-4ee7-9076-541ea2ea2808/resume (status=400, correlation_id=None): PromptResolutionError: Prompt 'orchestrator-build-phase-v1' is missing required variable(s): ['excluded_agents', 'policies'].",
+    "TableName": "PrimaryResult",
+    "TimeGenerated": "2026-08-14T02:13:51.9176375Z"
+  }
+]

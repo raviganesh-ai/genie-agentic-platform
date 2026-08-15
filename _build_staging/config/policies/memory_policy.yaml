@@ -1,0 +1,17 @@
+# Memory tier access policy.
+#
+# Enforced at runtime by MemoryAccessPolicyService (backend/app/memory/
+# memory_access_policy_service.py, Phase 4). All three sections are
+# required - MemoryPolicyValidator fails startup closed if any is missing
+# or malformed.
+personal_agent_memory:
+  accessible_by: owning_agent
+
+shared_collaboration_memory:
+  accessible_by: session_participants
+  emits_governance_events: true
+  require_approval_for_overwrite: true
+
+enterprise_knowledge_memory:
+  accessible_by: approved_reviewers
+  requires_approval_to_promote: true

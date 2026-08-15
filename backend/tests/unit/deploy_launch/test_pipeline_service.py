@@ -22,6 +22,7 @@ from app.deploy_launch.frontend_deployment_service import NullFrontendDeployment
 from app.deploy_launch.mission_agent_provisioning_service import (
     NullMissionAgentProvisioningService,
 )
+from app.deploy_launch.mission_identity_service import NullMissionIdentityService
 from app.deploy_launch.pipeline_service import DeploymentPipelineService
 from app.deploy_launch.security_scan_service import SecurityScanService
 from app.deploy_launch.test_execution_service import TestExecutionService
@@ -262,7 +263,10 @@ def _access_policy_service() -> AccessPolicyService:
         enabled=True,
     )
     registry = AgentRegistry({agent.id: agent})
-    return AccessPolicyService(agent_registry=registry)
+    return AccessPolicyService(
+        agent_registry=registry,
+        mission_identity_service=NullMissionIdentityService(),
+    )
 
 
 def _build_service(
@@ -273,6 +277,7 @@ def _build_service(
         session_service=_FakeSessionService(),  # type: ignore[arg-type]
         event_bus=WorkflowEventBus(),
         access_policy_service=_access_policy_service(),
+        mission_identity_service=NullMissionIdentityService(),
         mission_agent_provisioning_service=NullMissionAgentProvisioningService(),
         backend_deployment_service=NullBackendDeploymentService(),
         frontend_deployment_service=NullFrontendDeploymentService(),
@@ -341,6 +346,7 @@ async def test_start_self_heals_incomplete_build_solution_with_safe_policy_defau
         session_service=_FakeSessionService(),  # type: ignore[arg-type]
         event_bus=WorkflowEventBus(),
         access_policy_service=_access_policy_service(),
+        mission_identity_service=NullMissionIdentityService(),
         mission_agent_provisioning_service=NullMissionAgentProvisioningService(),
         backend_deployment_service=NullBackendDeploymentService(),
         frontend_deployment_service=NullFrontendDeploymentService(),
@@ -411,6 +417,7 @@ async def test_start_uses_shared_memory_output_without_waiting_for_official_step
         session_service=_FakeSessionService(),  # type: ignore[arg-type]
         event_bus=WorkflowEventBus(),
         access_policy_service=_access_policy_service(),
+        mission_identity_service=NullMissionIdentityService(),
         mission_agent_provisioning_service=NullMissionAgentProvisioningService(),
         backend_deployment_service=NullBackendDeploymentService(),
         frontend_deployment_service=NullFrontendDeploymentService(),
@@ -443,6 +450,7 @@ async def test_start_fails_closed_with_actionable_error_when_stuck_on_earlier_ga
         session_service=_FakeSessionService(),  # type: ignore[arg-type]
         event_bus=WorkflowEventBus(),
         access_policy_service=_access_policy_service(),
+        mission_identity_service=NullMissionIdentityService(),
         mission_agent_provisioning_service=NullMissionAgentProvisioningService(),
         backend_deployment_service=NullBackendDeploymentService(),
         frontend_deployment_service=NullFrontendDeploymentService(),
