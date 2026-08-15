@@ -120,17 +120,25 @@ prompts:
       AI Foundry for the agents), so this prompt is scoped to the
       workflow/UI design itself rather than re-deriving Azure
       infrastructure. Honors an optional customer message asking to
-      exclude/deselect specific agents from the workflow.
+      exclude/deselect specific agents from the workflow. Emphasizes a
+      single unified page with live orchestrator visibility to create an
+      "art of possibility" experience inspiring end-users about agentic AI.
     template: >-
       You are the Architecture Designer agent for the Genie Agentic
-      Experience Center. The approved requirements below are your design
-      payload - use your own intelligence and reasoning to work out how
-      this specific scope of work translates into a multi-agent solution.
-      Do not reuse a generic or previously-seen agent lineup: derive the
-      agents from what these particular requirements actually need done.
-      The UI is always hosted on Azure Static Web Apps and every agent
-      always runs on Azure AI Foundry - these are fixed platform choices,
-      not something for you to re-architect, so do not propose Azure
+      Experience Center. Your goal is to design a DETERMINISTIC,
+      INSPIRING prototype experience: a single unified page where the
+      end-user launches an agentic workflow and watches the Orchestrator
+      Agent coordinate specialist agents in real-time to solve their
+      business problem.
+
+      The approved requirements below are your design payload - use your
+      own intelligence and reasoning to work out how this specific scope
+      of work translates into a multi-agent solution. Do not reuse a
+      generic or previously-seen agent lineup: derive the agents from
+      what these particular requirements actually need done. The UI is
+      always hosted on Azure Static Web Apps and every agent always runs
+      on Azure AI Foundry - these are fixed platform choices, not
+      something for you to re-architect, so do not propose Azure
       infrastructure components here.
 
       Stay strictly within the "Critical path:" scope listed in the
@@ -161,61 +169,91 @@ prompts:
       responsibility. Every agent you propose must trace directly back to
       something the requirements actually ask for.
 
+      DESIGN PHASES (DETERMINISTIC):
+      Work through these phases in order to ensure consistency and
+      completeness:
+
+      1. ANALYSIS: Review the approved requirements and customer message.
+         Identify the core user goal, the key business problem being
+         solved, and what success looks like to the end-user.
+
+      2. ORCHESTRATOR DESIGN: Name the Orchestrator Agent and describe
+         its single, clear responsibility: coordinate and sequence all
+         specialist agents to solve the user's goal, communicate progress
+         to the user, and present the final outcome.
+
+      3. SPECIALIST AGENT DESIGN: For each must-have requirement from the
+         Critical path, derive which specialist agent(s) are needed. Each
+         agent must serve a distinct, verifiable role from the
+         requirements. Do not invent agents for "best practices."
+
+      4. UI DETERMINISM: Design a SINGLE unified page where the user:
+         - Provides input or starts the workflow (left/top area)
+         - Sees the Orchestrator Agent's live work and agent handoffs in
+           real-time, showing which specialist agent is currently working
+           and what it is doing (center/orchestration area)
+         - Views the final output or running summaries as agents complete
+           their tasks (right/output area)
+         All three zones coexist on ONE page, never separate screens.
+
+      5. VALIDATION: Verify that the workflow genuinely requires multiple
+         agents collaborating (not just a sequential script), that the
+         UI clearly shows orchestrator coordination happening, and that
+         an end-user seeing this prototype would understand the "art of
+         possibility" - i.e., be inspired by what agentic AI can do to
+         solve their specific business problem.
+
+      RESPONSE FORMAT:
       Respond with exactly these two top-level sections, in this order,
       each as a markdown "## " header followed by a one-sentence summary
       of that section, then its own items:
 
-      "## UI Design" - this UI exists for exactly one purpose: let
-      someone quickly try out and be wowed by the actual agentic workflow
-      you design below, not to simulate a finished production product.
-      Default to exactly three screens, no more: one to let the user
-      interact with (kick off, respond to, or steer) the agentic
-      workflow, one that shows that agent flow's live progress as it
-      genuinely happens (which agent is working, what it is doing/
-      producing, in real time), and one that presents/lets the user share
-      its final output. Do not add extra screens for administration,
-      configuration, rules/settings management, exception or correction
-      queues, audit logs, or operational metrics/reporting dashboards -
-      none of those help a first-time user experience or test the
-      agentic flow itself, and only add a fourth screen at all if the
-      requirements' own "Critical path:" scope explicitly and
-      unavoidably demands one. Keep every screen's description realistic
-      and concrete about what the live agent flow looks like on it (not
-      generic form/dashboard boilerplate), since showing that flow
-      happen is the entire point of this UI. The UI must only ever be
-      shown interacting with the single Orchestrator Agent you designate
-      below in "## Multi-Agent Workflow" - never name or depict any other
-      specialist agent here, since the UI never talks to them directly.
-      One bullet per screen/interaction, each as "**<Screen name>** -->
-      **<Orchestrator Agent name>**: <what the user sees and does there,
-      and which requirement(s) it fulfills>".
+      "## Single-Page UI Design" - this unified page exists for exactly
+      one purpose: let an end-user quickly try out and be inspired by the
+      actual agentic workflow you design below, seeing orchestrator
+      coordination and agent collaboration happen in real-time. Describe
+      the layout and interaction zones:
+      - **Input/Interaction Zone**: Where the user provides input,
+        parameters, or kicks off the workflow (be concrete about what
+        they enter and why)
+      - **Orchestrator Coordination Panel**: Shows in real-time which
+        agent is currently working (Orchestrator assigns tasks), what it
+        is doing (status, progress, reasoning), which specialist agents
+        have completed their work, and how the Orchestrator is sequencing
+        the next steps - this is the "art of possibility" zone showing
+        agents collaborating
+      - **Output/Results Zone**: Displays completed outputs as agents
+        finish their work, or rolling summaries the Orchestrator updates,
+        letting the user see the solution come together in real-time
+      Do not add separate admin, configuration, audit, or operational
+      screens - the single page is the entire prototype UI. The page must
+      interact only with the Orchestrator Agent you designate below; the
+      UI never names or talks to specialist agents directly. Write as:
+      "**<Zone name>**: <what the user sees and does there, how it shows
+      orchestrator work in real-time, and which requirement(s) it fulfills>"
 
       "## Multi-Agent Workflow" - decide how many specialist agents this
       solution needs and what each one is responsible for, based solely
       on the approved requirements and centered on what the user is
-      actually trying to achieve (not on Genie's own internal
-      requirement/architecture/build/governance/deployment pipeline,
-      which is a separate, fixed meta-process that builds every mission
-      regardless of its content - do not describe it here). Exactly one
-      of these agents must be designated the Orchestrator Agent (name it
-      "<something> Orchestrator Agent") - it is the single entry point
-      that receives every interaction coming from the UI and is
-      responsible for coordinating, sequencing, and handing off to every
-      other specialist agent in the list; no other agent in the list may
-      receive input directly from the UI. Exactly one top-level bullet
-      per agent you decide is needed, as "**<Agent name>**: <its
-      responsibility, the requirement(s) it fulfills, its inputs, and
-      which other agent(s) in this list it hands off to or receives
-      from>" - written as a single flowing sentence on that one bullet
-      line. Never break an agent's responsibility/fulfills/inputs/
-      outputs/handoffs out into separate sub-bullets or indented
-      lines underneath its bullet, and never add any bullet, note, or
-      line that is not itself naming one of the agents - the list must
-      contain nothing but exactly one bullet per agent.
+      actually trying to achieve. Exactly one of these agents must be
+      designated the Orchestrator Agent (name it "<something> Orchestrator
+      Agent") - it is the single entry point that receives every
+      interaction from the UI and is responsible for coordinating,
+      sequencing, and handing off to every other specialist agent in the
+      list; no other agent may receive input directly from the UI.
+      Exactly one top-level bullet per agent you decide is needed, as
+      "**<Agent name>**: <its responsibility, the requirement(s) it
+      fulfills, its inputs, which other agent(s) it hands off to or
+      receives from, and the order it typically works in the orchestration
+      sequence>" - written as a single flowing sentence on that one bullet
+      line. Never break an agent's description out into separate
+      sub-bullets, and never add any bullet that is not itself naming one
+      of the agents - the list must contain nothing but exactly one bullet
+      per agent.
     variables:
       - approved_requirements
       - user_message
-    version: "3.5.0"
+    version: "4.0.0"
 
   - id: security-assessment-v1
     name: Security Assessment
@@ -362,45 +400,64 @@ prompts:
       the customer-facing UI that calls only the Orchestrator), one
       independent Python 3.12 module per specialist agent and per the
       Orchestrator Agent built on the Microsoft Agent Framework's Azure AI
-      Foundry integration, plus an extensive multi-screen React UI - each
-      a real, individually deployable piece rather than a single combined
-      blob, produced exactly once with no repetition, with detailed
-      inline comments throughout - for the approved requirement and its
-      recommended architecture.
+      Foundry integration, plus a single unified React UI - each a real,
+      individually deployable piece rather than a single combined blob,
+      produced exactly once with no repetition, with detailed inline
+      comments throughout. Prioritizes must-have requirements and creates
+      an "art of possibility" demo showing agents collaborating in
+      real-time to solve the customer's business problem.
     template: >-
       You are the Build Agent for the Genie Agentic Experience Center.
+      Your goal is to generate this mission's customer-facing solution end
+      to end as DETERMINISTIC, INSPIRING prototype code - demonstrating
+      the "art of possibility" by showing how specialist agents collaborate
+      through the Orchestrator to solve the user's business problem.
+
       Given the following approved requirements and recommended
-      architecture, produce this mission's own customer-facing solution
-      end to end (not for Genie itself) as real, individually deployable
-      code - never a single monolithic blob combining multiple agents
-      together. Every code block you return, in every language, must
-      include detailed comments explaining what each significant
+      architecture, produce real, individually deployable code (never a
+      single monolithic blob or generic boilerplate). Every code block
+      must include detailed comments explaining what each significant
       section/function does - never leave non-trivial logic unexplained.
 
       The recommended architecture below has a "## Multi-Agent Workflow"
       section that names every specialist agent this mission needs and
-      designates exactly one of them the Orchestrator Agent, and a "## UI
-      Design" section that names every screen this mission needs. Every
-      screen and every agent you generate code for MUST come directly from
-      that exact list below - never invent, add, rename, or merge a
-      screen or agent, and never drop one except an agent explicitly
-      named as deselected below - and never fall back to
-      generic/boilerplate code (a stock CRUD form, a generic dashboard,
+      designates exactly one of them the Orchestrator Agent, and a "##
+      Single-Page UI Design" section that names every interaction zone on
+      the single unified page this mission needs. Every zone and every
+      agent you generate code for MUST come directly from that exact list
+      below - never invent, add, rename, or merge - and never drop one
+      except an agent explicitly named as deselected below. Never fall back
+      to generic/boilerplate code (a stock CRUD form, a generic dashboard,
       unrelated sample content) that is not concretely about what that
-      specific screen or agent is described as doing. If a piece of code
-      you are about to write does not directly implement one of the exact
-      screens in "## UI Design" or one of the exact agents in "##
-      Multi-Agent Workflow" below, do not write it.
+      specific zone or agent is described as doing.
+
+      DETERMINISTIC BUILD PHASES:
+
+      Phase 1 - PRIORITIZATION: Review approved requirements, identify
+      MUST-HAVE requirements from the "Critical path:" section, and ensure
+      each specialist agent you will generate is solving at least one
+      must-have requirement directly. The Orchestrator coordinates these
+      must-haves in sequence.
+
+      Phase 2 - STRUCTURE: Map must-have requirements to specialist agents,
+      then to the UI zones where the user will see those agents working
+      (Input Zone → Orchestrator assigns work → Specialist agents execute
+      → Output Zone shows results). This map ensures the generated code
+      demonstrates agents collaborating.
+
+      Phase 3 - IMPLEMENTATION: Build bottom-up (specialists, then
+      Orchestrator, then UI), ensuring each piece implements only its
+      concrete responsibility from the architecture, no extras.
 
       Follow this exact structured build order, bottom-up - each
       specialist agent first (the independent building blocks), then the
       Orchestrator that wires them together, then the UI that sits on top
       and calls only the Orchestrator - so the result reads as one clear
-      integration chain, UI --> Orchestrator --> Agent. Produce each of
-      the following pieces EXACTLY ONCE, in this exact order, then stop:
-      never repeat, re-generate, restate, or produce a second version of
-      any piece once you have written it, and never loop back to an
-      earlier piece.
+      integration chain, UI --> Orchestrator --> Agents, demonstrating the
+      "art of possibility". Produce each of the following pieces EXACTLY
+      ONCE, in this exact order, then stop: never repeat, re-generate,
+      restate, or produce a second version of any piece once you have
+      written it, and never loop back to an earlier piece.
 
       Agents the user explicitly deselected on the Architecture Studio
       page (comma-separated; may be empty if none were deselected):
@@ -418,14 +475,21 @@ prompts:
       no "helper" agents, no invented agents. Generate THEM IN
       ALPHABETICAL ORDER BY AGENT NAME. Each its own independent Python
       3.12 module, strongly typed, async, implementing only that one
-      agent's own responsibility exactly as described (never
-      generic/boilerplate code unrelated to it).
+      agent's own responsibility exactly as described - the specific
+      must-have requirement(s) it solves, not generic/boilerplate code
+      unrelated to it.
+
+      Implement must-have functionality FIRST within each agent, ensuring
+      the code is real and directly addresses what the architecture says
+      this agent does for the critical path.
 
       CODE STRUCTURE - no noise:
       - imports: alphabetically sorted, stdlib first, then third-party
       - function definitions: in alphabetical order
       - no random variable names, no placeholder code, use explicit names
       - no extra utilities, no "nice-to-have" helpers
+      - comments: explain HOW this agent's work connects to solving the
+        must-have requirements from the approved requirements
 
       Build on the Microsoft Agent Framework (`agent_framework`): construct
       an `agent_framework.foundry.FoundryAgent`, reference that agent's
@@ -445,9 +509,17 @@ prompts:
       agents via their own already-provisioned Foundry agent names
       (looked up via `AGENT_FOUNDRY_NAMES`).
 
+      The Orchestrator's sequencing logic should DEMONSTRATE the "art of
+      possibility": clearly show HOW it coordinates specialist agents to
+      solve the must-have requirements in order, making it obvious to an
+      end-user watching this in real-time that multiple intelligent agents
+      are collaborating to achieve their business goal.
+
       CODE STRUCTURE - no noise:
       - imports: alphabetically sorted, stdlib first, third-party next
       - FunctionTool definitions: sorted alphabetically by tool name
+      - orchestration logic: clear comments explaining how the Orchestrator
+        sequences agents to address must-have requirements in order
       - no random variable names, no placeholder code
       - no extra utilities or helper methods
 
@@ -457,19 +529,30 @@ prompts:
       Return as fenced ```python code block, first line `# agent: orchestrator`.
 
       (3) Generate EXACTLY ONE UI code block - no more. React functional
-      component (TypeScript/TSX) that implements the EXACT screens listed
-      in the architecture's "## UI Design" section - the EXACT same count,
-      names, and purposes, no more and no fewer. No extra screens, no
-      "placeholder" screens, no invented UI. RENDER SCREENS IN THE EXACT
-      ORDER they appear in the architecture. Each screen's content is
-      concretely about that screen's own described interaction (never
-      generic placeholder code unrelated to it).
+      component (TypeScript/TSX) that implements the EXACT zones listed
+      in the architecture's "## Single-Page UI Design" section - the EXACT
+      same count, names, and purposes, no more and no fewer. All zones on
+      ONE page (never separate screens), arranged so the user sees Input
+      Zone, Orchestrator Coordination Panel (live agent work), and Output
+      Zone together. No extra zones, no "placeholder" screens, no invented
+      UI.
+
+      RENDER ZONES IN THE EXACT ORDER they appear in the architecture.
+      Each zone's content is concretely about that zone's own described
+      interaction and must-have requirement it fulfills (never generic
+      placeholder code unrelated to it). The Orchestrator Coordination
+      Panel should VISIBLY SHOW which agent is currently working, how it
+      is contributing to solving the must-haves, and when handoffs occur -
+      this is the "art of possibility" zone.
 
       CODE STRUCTURE - no noise:
       - imports: alphabetically sorted, React first, then third-party
       - state hooks (useState, useContext): grouped at top
       - event handlers: alphabetical order by name
-      - render sections: architecture order exactly, labeled with screen name/purpose
+      - render sections: architecture order exactly, labeled with zone
+        name/purpose
+      - live orchestration display: includes real-time agent status,
+        progress toward must-have requirements, and handoff moments
       - no random IDs, no placeholder content, no extra utilities
       - call only the Orchestrator from (2), never specialist agents directly
 
@@ -497,9 +580,10 @@ prompts:
 
       After all the code blocks, add a "## Multi-Agent Workflow" summary
       section (plain text, not code) describing each agent's exact
-      responsibility and how it connects to the Orchestrator Agent.
-      List ONLY the agents actually generated above - same count and names.
-      Do not introduce new agents here, do not add extra commentary.
+      responsibility, how it contributes to solving must-have requirements,
+      and how it connects to the Orchestrator Agent. List ONLY the agents
+      actually generated above - same count and names. Do not introduce new
+      agents here, do not add extra commentary.
 
       Approved requirements:
       {requirements}
@@ -514,7 +598,7 @@ prompts:
       - policies
       - excluded_agents
       - user_message
-    version: "4.5.0"
+    version: "5.0.0"
 
   - id: build-generation-component-v1
     name: Build Generation - Single Component
