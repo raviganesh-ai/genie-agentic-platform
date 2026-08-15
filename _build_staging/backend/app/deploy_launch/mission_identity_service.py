@@ -149,11 +149,12 @@ class MissionIdentityService:
                 location="eastus2",  # TODO: externalize region per settings
                 tags={"genie-mission-id": mission_id},
             )
-            identity = msi_client.user_assigned_identities.create_or_update(
+            identity_poller = msi_client.user_assigned_identities.create_or_update(
                 resource_group_name=self._resource_group_name,
                 resource_name=identity_name,
                 parameters=identity_resource,
             )
+            identity = identity_poller.result()
             principal_id = identity.principal_id
             client_id = identity.client_id
 
