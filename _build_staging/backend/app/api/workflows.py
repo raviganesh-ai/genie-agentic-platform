@@ -40,7 +40,7 @@ class ResumeWorkflowRunRequest(BaseModel):
     step_inputs: dict[str, WorkflowStepInput] | None = None
 
 
-@router.post("/{workflow_id}/run")
+@router.post("/{workflow_id}/run", status_code=202)
 async def run_workflow(
     session_id: str,
     workflow_id: str,
@@ -49,13 +49,19 @@ async def run_workflow(
     session_service: SessionService = Depends(get_session_service),
     orchestrator: AgentOrchestrator = Depends(get_agent_orchestrator),
 ) -> WorkflowRunResult:
+    """Accepts a workflow run and returns immediately with a ``running`` snapshot.
+
+    A mission routinely runs far longer than the platform's HTTP request
+    cap, so this never waits for completion. Track the run via the live
+    workflow event stream or ``GET /runs/{workflow_run_id}``.
+    """
     await session_service.get_session(session_id=session_id, requesting_user_id=user.user_id)
     transcript_text = await session_service.get_combined_transcript_text(
         session_id=session_id, requesting_user_id=user.user_id
     )
     trace_id = body.trace_id if body else None
     step_inputs = body.step_inputs if body else None
-    return await orchestrator.run_workflow(
+    return await orchestrator.start_workflow_background(
         workflow_id=workflow_id,
         session_id=session_id,
         trace_id=trace_id,
@@ -64,7 +70,7 @@ async def run_workflow(
     )
 
 
-@router.post("/runs/{workflow_run_id}/resume")
+@router.post("/runs/{workflow_run_id}/resume", status_code=202)
 async def resume_workflow_run(
     session_id: str,
     workflow_run_id: str,
@@ -73,13 +79,14 @@ async def resume_workflow_run(
     session_service: SessionService = Depends(get_session_service),
     orchestrator: AgentOrchestrator = Depends(get_agent_orchestrator),
 ) -> WorkflowRunResult:
+    """Accepts a resume and returns immediately - see ``run_workflow``."""
     await session_service.get_session(session_id=session_id, requesting_user_id=user.user_id)
     transcript_text = await session_service.get_combined_transcript_text(
         session_id=session_id, requesting_user_id=user.user_id
     )
     trace_id = body.trace_id if body else None
     step_inputs = body.step_inputs if body else None
-    return await orchestrator.resume_workflow(
+    return await orchestrator.resume_workflow_background(
         workflow_run_id=workflow_run_id,
         session_id=session_id,
         trace_id=trace_id,

@@ -190,9 +190,14 @@ class DeploymentPipelineService:
         requesting_user_id: str,
         workflow_run_id: str,
         trace_id: str | None = None,
+        resume_from_step: str | None = None,
     ) -> DeploymentPipelineRun:
         """Kicks off every Deploy & Launch step in order as soon as the human
         clicks Start - there is no separate approval checkpoint to decide.
+
+        If ``resume_from_step`` is provided, the pipeline resumes from that step
+        instead of starting from the first step, allowing retry/recovery from a
+        failed step without re-running prior completed steps.
 
         The pipeline run is created (status ``running``, every step
         ``pending``) and stored - and therefore immediately visible to
@@ -236,6 +241,7 @@ class DeploymentPipelineService:
                 trace_id=resolved_trace_id,
                 backend_root=backend_root,
                 frontend_root=frontend_root,
+                resume_from_step=resume_from_step,
             )
         )
         self._background_tasks[pipeline_run.id] = task
@@ -265,6 +271,7 @@ class DeploymentPipelineService:
         trace_id: str,
         backend_root: Path,
         frontend_root: Path,
+        resume_from_step: str | None = None,
     ) -> None:
         """The background task body ``start()`` schedules: resolves the
         session/workflow run, self-heals any not-yet-finished upstream step,
@@ -272,7 +279,11 @@ class DeploymentPipelineService:
         terminal status (``completed`` or ``failed``). This task's own
         exception is never re-raised anywhere (there is no caller left to
         catch it), so every failure must already have been recorded on the
-        run/step themselves before this returns."""
+        run/step themselves before this returns.
+        
+        If ``resume_from_step`` is provided, only steps from that point onward
+        are executed, allowing recovery from a failed step without re-running
+        prior completed steps."""
 
         try:
             session = await self._session_service.get_session(
@@ -302,6 +313,7 @@ class DeploymentPipelineService:
                 backend_root=backend_root,
                 frontend_root=frontend_root,
                 trace_id=trace_id,
+                resume_from_step=resume_from_step,
             )
         except Exception:  # noqa: BLE001 - top-level background-task boundary; every
             # failure must resolve the run's status here since there is no
@@ -523,11 +535,35 @@ class DeploymentPipelineService:
         backend_root: Path,
         frontend_root: Path,
         trace_id: str,
+        resume_from_step: str | None = None,
     ) -> None:
+        """Executes the deployment pipeline steps in order.
+        
+        If ``resume_from_step`` is provided, only executes from that step onward,
+        skipping already-completed prior steps. All steps after the resume point
+        are reset to "not-started" status.
+        """
         orchestrator_foundry_name = "orchestrator"
         test_output_text = ""
 
-        for step_id in DEPLOYMENT_STEP_ORDER:
+        # Determine the starting index based on resume_from_step
+        start_index = 0
+        if resume_from_step:
+            try:
+                start_index = DEPLOYMENT_STEP_ORDER.index(resume_from_step)
+                # Reset all steps from the resume point onward to "not-started"
+                for step_id in DEPLOYMENT_STEP_ORDER[start_index:]:
+                    step_result = self._step_result(pipeline_run, step_id)
+                    step_result.status = "not-started"
+                    step_result.error = None
+                    step_result.detail = None
+                    step_result.started_at = None
+                    step_result.completed_at = None
+            except ValueError:
+                # Invalid step ID provided, start from beginning
+                start_index = 0
+
+        for step_id in DEPLOYMENT_STEP_ORDER[start_index:]:
             await self._publish(pipeline_run, step_id=step_id, event_type="step_started")
             step_result = self._step_result(pipeline_run, step_id)
             step_result.status = "running"

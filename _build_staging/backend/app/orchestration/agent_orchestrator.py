@@ -231,6 +231,51 @@ class AgentOrchestrator:
             transcript_text=transcript_text,
         )
 
+    async def start_workflow_background(
+        self,
+        *,
+        workflow_id: str,
+        session_id: str,
+        trace_id: str | None = None,
+        step_inputs: dict[str, WorkflowStepInput] | None = None,
+        transcript_text: str = "",
+        agent_scope_id: str | None = None,
+    ) -> WorkflowRunResult:
+        """Starts a run without waiting for it to finish.
+
+        Used by the HTTP API, whose requests cannot outlive the ingress
+        timeout. Server-side callers that genuinely need the final outcome
+        keep using ``run_workflow``.
+        """
+        return await self._execution_service.start_workflow_background(
+            workflow_id=workflow_id,
+            session_id=session_id,
+            trace_id=trace_id or str(uuid4()),
+            step_inputs=step_inputs,
+            transcript_text=transcript_text,
+            agent_scope_id=agent_scope_id,
+        )
+
+    async def resume_workflow_background(
+        self,
+        *,
+        workflow_run_id: str,
+        session_id: str,
+        trace_id: str | None = None,
+        step_inputs: dict[str, WorkflowStepInput] | None = None,
+        transcript_text: str = "",
+    ) -> WorkflowRunResult:
+        """Resumes a run without waiting for it to finish - see
+        ``start_workflow_background``.
+        """
+        return await self._execution_service.resume_workflow_background(
+            workflow_run_id=workflow_run_id,
+            session_id=session_id,
+            trace_id=trace_id or str(uuid4()),
+            step_inputs=step_inputs,
+            transcript_text=transcript_text,
+        )
+
     def request_reanalysis(
         self,
         *,

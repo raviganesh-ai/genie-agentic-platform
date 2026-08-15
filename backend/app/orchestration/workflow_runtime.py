@@ -110,6 +110,7 @@ class WorkflowRuntime:
         transcript_text: str = "",
         resume_from: WorkflowRunResult | None = None,
         agent_scope_id: str | None = None,
+        workflow_run_id: str | None = None,
         on_progress: Callable[[WorkflowRunResult], Awaitable[None]] | None = None,
     ) -> WorkflowRunResult:
         """Runs every wave of ``workflow_id`` until it completes, pauses for an
@@ -129,7 +130,14 @@ class WorkflowRuntime:
         except KeyError as exc:
             raise UnknownWorkflowError(f"Unknown workflow id '{workflow_id}'.") from exc
 
-        workflow_run_id = resume_from.workflow_run_id if resume_from else str(uuid4())
+        # A caller may pre-allocate the run id (see
+        # ``WorkflowExecutionService.start_workflow_background``) so the run
+        # is addressable via ``GET /runs/{id}`` the instant it is accepted,
+        # rather than only once this whole multi-minute call returns.
+        if resume_from is not None:
+            workflow_run_id = resume_from.workflow_run_id
+        elif workflow_run_id is None:
+            workflow_run_id = str(uuid4())
         # A resumed run always keeps its original dedicated-agent-fleet scope
         # (e.g. a requirement group id), even if the caller (a customer chat/
         # reanalyze interaction) does not re-supply it - so follow-up
