@@ -178,10 +178,20 @@ export interface ParsedCodeBlock {
   endIndex: number;
 }
 
+/**
+ * A ``` fence only counts when it OPENS ITS OWN LINE (optionally
+ * indented). Generated code legitimately contains triple backticks inside
+ * string literals - e.g. a Python agent that builds a markdown report with
+ * `lines.append("```text")` - and treating those as real fences split the
+ * block early, leaking the rest of the source into the narrative parser as
+ * garbled fake sections. Anchoring to line start keeps such inline
+ * backticks part of the code they belong to.
+ */
+
 /** Extracts every fenced ```lang ... ``` code block from free text. */
 export function extractCodeBlocks(text: string): ParsedCodeBlock[] {
   const blocks: ParsedCodeBlock[] = [];
-  const regex = /```([a-zA-Z0-9_-]*)\n([\s\S]*?)```/g;
+  const regex = /^[ \t]*```([a-zA-Z0-9_-]*)[ \t]*\r?\n([\s\S]*?)^[ \t]*```[ \t]*$/gm;
   let match: RegExpExecArray | null;
   while ((match = regex.exec(text)) !== null) {
     blocks.push({
@@ -216,7 +226,7 @@ export interface OpenCodeBlock {
  * still works on this still-growing partial code.
  */
 export function extractTrailingOpenCodeBlock(text: string): OpenCodeBlock | null {
-  const fenceRegex = /```([a-zA-Z0-9_-]*)\n?/g;
+  const fenceRegex = /^[ \t]*```([a-zA-Z0-9_-]*)[ \t]*(?:\r?\n|$)/gm;
   let match: RegExpExecArray | null;
   let count = 0;
   let openStart = -1;
@@ -279,7 +289,7 @@ export function isBuildOutputComplete(text: string): boolean {
 /** Returns the text with every fenced code block removed (surrounding whitespace collapsed). */
 export function stripCodeBlocks(text: string): string {
   return text
-    .replace(/```[a-zA-Z0-9_-]*\n[\s\S]*?```/g, "")
+    .replace(/^[ \t]*```[a-zA-Z0-9_-]*[ \t]*\r?\n[\s\S]*?^[ \t]*```[ \t]*$/gm, "")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
 }

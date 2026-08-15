@@ -58,9 +58,13 @@ _COMPONENT_FAILURE_MARKER = "GENERATION FAILED"
 # convention build-generation-component-v1 requires every component to
 # follow, and the same one frontend/src/utils/textArtifacts.ts's
 # AGENT_LABEL_COMMENT recognizes) - used to find already-succeeded
-# components inside a prior attempt's full output text.
+# components inside a prior attempt's full output text. Both fences are
+# line-anchored so triple backticks inside the component's own string
+# literals cannot terminate the block early.
 _AGENT_LABEL_BLOCK_PATTERN = re.compile(
-    r"```[a-zA-Z0-9_-]*\n(?:#|//)\s*agent:\s*(?P<name>[^\n]+?)\s*\n[\s\S]*?```"
+    r"^[ \t]*```[a-zA-Z0-9_-]*[ \t]*\n(?:#|//)\s*agent:\s*(?P<name>[^\n]+?)\s*\n"
+    r"[\s\S]*?^[ \t]*```[ \t]*$",
+    re.MULTILINE,
 )
 
 

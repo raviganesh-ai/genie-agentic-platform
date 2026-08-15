@@ -25,8 +25,14 @@ __all__ = [
     "materialize_build",
 ]
 
+# A ``` fence only counts when it OPENS ITS OWN LINE. Generated agent code
+# legitimately contains triple backticks inside string literals (e.g. an
+# agent that builds a markdown report with ``lines.append('```text')``);
+# without the line anchors those would terminate the block early and
+# materialize truncated, non-importable source.
 _FENCE_PATTERN: Final = re.compile(
-    r"```(python|tsx)\s*\n(.*?)```", re.DOTALL | re.IGNORECASE
+    r"^[ \t]*```(python|tsx)[ \t]*\n(.*?)^[ \t]*```[ \t]*$",
+    re.DOTALL | re.IGNORECASE | re.MULTILINE,
 )
 _AGENT_MARKER_PATTERN: Final = re.compile(r"^#\s*agent:\s*(.+)$")
 _UI_MARKER_PATTERN: Final = re.compile(r"^//\s*agent:\s*ui\s*$", re.IGNORECASE)

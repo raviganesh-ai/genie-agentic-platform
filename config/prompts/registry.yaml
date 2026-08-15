@@ -246,10 +246,11 @@ prompts:
       fulfills, its inputs, which other agent(s) it hands off to or
       receives from, and the order it typically works in the orchestration
       sequence>" - written as a single flowing sentence on that one bullet
-      line. Never break an agent's description out into separate
-      sub-bullets, and never add any bullet that is not itself naming one
-      of the agents - the list must contain nothing but exactly one bullet
-      per agent.
+      line. Never break an agent's responsibility/fulfills/inputs/
+      outputs/handoffs out into separate sub-bullets or indented lines
+      underneath its bullet, and never add any bullet, note, or line that
+      is not itself naming one of the agents - the list must contain
+      nothing but exactly one bullet per agent.
     variables:
       - approved_requirements
       - user_message
@@ -567,6 +568,14 @@ prompts:
       secret from configuration/environment variables, matching Genie's
       own no-hardcoding rule.
 
+      Formatting rule you MUST follow in every code block above: never
+      write a literal triple-backtick sequence inside the generated source
+      itself (not in a string literal, docstring, or comment) - it
+      terminates the surrounding fenced block early and truncates the
+      component. If generated code needs to emit markdown fences at
+      runtime, build the fence from a variable (e.g. three repeated
+      backtick characters) instead of writing it literally.
+
       Governance policies the user selected on the Architecture Studio
       page that this build MUST satisfy, in addition to the security
       rules above (semicolon-separated; may be empty if none were
@@ -666,6 +675,14 @@ prompts:
       port, API key, token, secret, or credential anywhere - read every
       endpoint, deployment name, and secret from configuration/environment
       variables, matching Genie's own no-hardcoding rule.
+
+      Formatting rule you MUST follow: never write a literal
+      triple-backtick sequence inside the generated source itself (not in
+      a string literal, docstring, or comment) - it terminates this
+      component's fenced block early and truncates the component. If the
+      code needs to emit markdown fences at runtime, build the fence from
+      a variable (e.g. three repeated backtick characters) instead of
+      writing it literally.
 
       Governance policies this component MUST satisfy, in addition to the
       security rules above (semicolon-separated; may be empty if none

@@ -27,7 +27,12 @@ from typing import Final
 
 __all__ = ["TestExecutionResult", "TestExecutionService", "extract_test_modules"]
 
-_FENCE_PATTERN: Final = re.compile(r"```python\s*\n(.*?)```", re.DOTALL | re.IGNORECASE)
+# Line-anchored so triple backticks inside a generated test's own string
+# literals cannot terminate the block early (see code_materializer).
+_FENCE_PATTERN: Final = re.compile(
+    r"^[ \t]*```python[ \t]*\n(.*?)^[ \t]*```[ \t]*$",
+    re.DOTALL | re.IGNORECASE | re.MULTILINE,
+)
 _PASSED_PATTERN: Final = re.compile(r"(\d+) passed")
 _FAILED_PATTERN: Final = re.compile(r"(\d+) failed")
 _ERRORS_PATTERN: Final = re.compile(r"(\d+) error(?:s)?")
