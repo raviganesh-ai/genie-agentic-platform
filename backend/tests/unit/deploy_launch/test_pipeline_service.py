@@ -17,7 +17,11 @@ from types import SimpleNamespace
 from app.agents.models import AgentDefinition, AgentExecutionResult
 from app.agents.registry import AgentRegistry
 from app.deploy_launch.access_policy_service import AccessPolicyService
-from app.deploy_launch.backend_deployment_service import NullBackendDeploymentService
+from app.deploy_launch.backend_deployment_service import (
+    BackendDeploymentError,
+    BackendDeploymentResult,
+    NullBackendDeploymentService,
+)
 from app.deploy_launch.frontend_deployment_service import NullFrontendDeploymentService
 from app.deploy_launch.mission_agent_provisioning_service import (
     NullMissionAgentProvisioningService,
@@ -270,7 +274,7 @@ def _access_policy_service() -> AccessPolicyService:
 
 
 def _build_service(
-    *, test_output_text: str, tmp_path: Path
+    *, test_output_text: str, tmp_path: Path, backend_deployment_service=None
 ) -> DeploymentPipelineService:
     return DeploymentPipelineService(
         orchestrator=_FakeOrchestrator(test_output_text=test_output_text),  # type: ignore[arg-type]
@@ -279,7 +283,7 @@ def _build_service(
         access_policy_service=_access_policy_service(),
         mission_identity_service=NullMissionIdentityService(),
         mission_agent_provisioning_service=NullMissionAgentProvisioningService(),
-        backend_deployment_service=NullBackendDeploymentService(),
+        backend_deployment_service=backend_deployment_service or NullBackendDeploymentService(),
         frontend_deployment_service=NullFrontendDeploymentService(),
         test_execution_service=TestExecutionService(timeout_seconds=60),
         security_scan_service=SecurityScanService(timeout_seconds=60),
@@ -523,3 +527,84 @@ async def test_start_fails_the_run_visibly_when_the_workflow_run_is_unknown(tmp_
     assert run.status == "failed"
     assert run.steps[0].status == "failed"
     assert run.steps[0].error is not None
+
+
+class _FailOnceThenSucceedBackendDeploymentService:
+    """Fails the very first ``deploy()`` call (simulating a real transient
+    Azure failure - e.g. the ACR build dependency-conflict bug this test
+    guards against) and succeeds on every subsequent call, so a test can
+    assert that retrying actually reaches a real "completed" state rather
+    than failing again for an unrelated reason."""
+
+    def __init__(self) -> None:
+        self.call_count = 0
+
+    async def deploy(
+        self,
+        *,
+        mission_slug: str,
+        build_root: Path,
+        mission_identity_resource_id: str | None = None,
+        on_progress=None,
+    ) -> BackendDeploymentResult:
+        self.call_count += 1
+        if self.call_count == 1:
+            raise BackendDeploymentError("Simulated ACR build failure.")
+        return BackendDeploymentResult(
+            image_tag=f"local/{mission_slug}:dev",
+            backend_url=f"http://localhost/missions/{mission_slug}/backend",
+        )
+
+
+async def test_retry_from_a_failed_step_reuses_the_same_run_and_its_prior_artifacts(tmp_path: Path):
+    """Regression test: retrying (resume_from_step set) a run that already
+    failed partway through must continue the SAME pipeline_run - not mint a
+    brand-new one - so later steps can still read the artifacts
+    (materialized build, provisioned Foundry agent names) produced by the
+    EARLIER, already-completed steps of that same run. Before this fix,
+    start() always created a fresh pipeline_run.id regardless of
+    resume_from_step, which orphaned that prior work and made every retry
+    fail again."""
+    backend_deployment_service = _FailOnceThenSucceedBackendDeploymentService()
+    service = _build_service(
+        test_output_text=_PASSING_TEST_OUTPUT,
+        tmp_path=tmp_path,
+        backend_deployment_service=backend_deployment_service,
+    )
+
+    first_attempt = await service.start(
+        session_id="session-1", requesting_user_id="user-1", workflow_run_id="run-1"
+    )
+    first_attempt = await service.wait_for_run(first_attempt.id)
+
+    assert first_attempt.status == "failed"
+    failed_step = next(step for step in first_attempt.steps if step.status == "failed")
+    assert failed_step.step_id == "deploy-backend-service"
+    # provision-foundry-agents (the step immediately before the failure)
+    # must have actually completed on this first attempt.
+    provision_step = next(
+        step for step in first_attempt.steps if step.step_id == "provision-foundry-agents"
+    )
+    assert provision_step.status == "completed"
+
+    retried = await service.start(
+        session_id="session-1",
+        requesting_user_id="user-1",
+        workflow_run_id="run-1",
+        resume_from_step=failed_step.step_id,
+    )
+
+    # The retry must be the SAME run (same id) - a new pipeline_run.id would
+    # mean the provision-foundry-agents artifacts (materialized build,
+    # Foundry agent names) from the first attempt are unreachable.
+    assert retried.id == first_attempt.id
+
+    retried = await service.wait_for_run(retried.id)
+
+    assert retried.status == "completed"
+    assert all(step.status == "completed" for step in retried.steps)
+    assert backend_deployment_service.call_count == 2
+    # Only one run should ever be visible for this session - a retry must
+    # not leave a stale duplicate "failed" entry alongside a new run.
+    assert [run.id for run in service.list_runs_for_session("session-1")] == [first_attempt.id]
+

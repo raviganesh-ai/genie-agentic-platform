@@ -216,23 +216,55 @@ class DeploymentPipelineService:
 
         resolved_trace_id = trace_id or str(uuid4())
 
-        pipeline_run = DeploymentPipelineRun(
-            id=str(uuid4()),
-            session_id=session_id,
-            workflow_run_id=workflow_run_id,
-            status="running",
-            steps=[
-                DeploymentStepResult(step_id=step_id, name=DEPLOYMENT_STEP_NAMES[step_id])
-                for step_id in DEPLOYMENT_STEP_ORDER
-            ],
-        )
-        self._runs[pipeline_run.id] = pipeline_run
+        # A retry (resume_from_step set) MUST continue the SAME run - i.e. the
+        # same pipeline_run.id - not mint a fresh one. Every later step reads
+        # its prerequisite artifacts (materialized build, provisioned Foundry
+        # agent names) out of self._materialized_builds/self._agent_foundry_names,
+        # both keyed by pipeline_run.id, and the run's own already-completed
+        # step results (provisioned_agents, access_policy, backend_url) live on
+        # the DeploymentPipelineRun object itself. Previously this always built
+        # a brand-new DeploymentPipelineRun with a fresh uuid4 id here
+        # regardless of resume_from_step, which orphaned all of that prior
+        # work - so "retry from failed step" always failed again (a KeyError
+        # the moment execution reached any step depending on earlier output),
+        # even though the UI presented it as a normal retry action.
+        existing_run: DeploymentPipelineRun | None = None
+        if resume_from_step:
+            candidates = [
+                run
+                for run in self._runs.values()
+                if run.session_id == session_id
+                and run.workflow_run_id == workflow_run_id
+                and run.status == "failed"
+            ]
+            if candidates:
+                existing_run = max(candidates, key=lambda run: run.updated_at)
 
-        backend_root = self._build_workspace_root / pipeline_run.id / "backend"
-        frontend_root = self._build_workspace_root / pipeline_run.id / "frontend"
-        self._workspaces[pipeline_run.id] = _RunWorkspace(
-            backend_root=backend_root, frontend_root=frontend_root
-        )
+        if existing_run is not None:
+            pipeline_run = existing_run
+            pipeline_run.status = "running"
+            pipeline_run.updated_at = datetime.now(UTC)
+            workspace = self._workspaces[pipeline_run.id]
+            backend_root = workspace.backend_root
+            frontend_root = workspace.frontend_root
+        else:
+            pipeline_run = DeploymentPipelineRun(
+                id=str(uuid4()),
+                session_id=session_id,
+                workflow_run_id=workflow_run_id,
+                status="running",
+                steps=[
+                    DeploymentStepResult(step_id=step_id, name=DEPLOYMENT_STEP_NAMES[step_id])
+                    for step_id in DEPLOYMENT_STEP_ORDER
+                ],
+            )
+            self._runs[pipeline_run.id] = pipeline_run
+
+            backend_root = self._build_workspace_root / pipeline_run.id / "backend"
+            frontend_root = self._build_workspace_root / pipeline_run.id / "frontend"
+            self._workspaces[pipeline_run.id] = _RunWorkspace(
+                backend_root=backend_root, frontend_root=frontend_root
+            )
 
         task = asyncio.create_task(
             self._prepare_and_run(
