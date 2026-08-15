@@ -207,7 +207,7 @@ AGENT_FOUNDRY_NAMES: dict[str, str] = {agent_foundry_names!r}
 
 _REQUIREMENTS_TXT = """fastapi>=0.115,<1.0
 uvicorn>=0.32,<1.0
-azure-ai-projects>=1.0,<2.0
+azure-ai-projects>=2.3,<3.0
 azure-identity>=1.19,<2.0
 agent-framework>=1.0
 """

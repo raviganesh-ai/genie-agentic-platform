@@ -22,8 +22,8 @@ describe("ArchitectureStudioPage", () => {
       workflowRunId: FIXTURE_WORKFLOW_RUN_ID,
     });
 
-    await waitFor(() => expect(screen.getAllByText(/UI Design/i).length).toBeGreaterThan(0));
-    expect(screen.getAllByText(/Multi-Agent Workflow/i).length).toBeGreaterThan(0);
+    await waitFor(() => expect(screen.getAllByText("UI").length).toBeGreaterThan(0));
+    expect(screen.getAllByText("Agents").length).toBeGreaterThan(0);
     expect(screen.queryAllByText(/Azure Reference Architecture/i).length).toBe(0);
     expect(screen.getAllByText(/Document Intake Agent/i).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/Classification Agent/i).length).toBeGreaterThan(0);

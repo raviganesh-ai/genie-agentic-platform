@@ -216,7 +216,24 @@ class BackendDeploymentService:
             poller = acr_client.registries.begin_schedule_run(
                 self._resource_group, self._acr_name, build_request
             )
-            poller.result()
+            run_result = poller.result()
+
+            # The ARM long-running-operation (poller.result()) only confirms the
+            # ACR "Run" resource itself was created/updated successfully - it does
+            # NOT mean the docker build+push inside that run succeeded. A failed
+            # build (bad Dockerfile, compile error, etc.) still returns a
+            # successful ARM operation with the Run's own `status` field set to
+            # something other than "Succeeded" and no image ever pushed. Previously
+            # this was never checked, so a failed build silently proceeded to
+            # deploy a Container App pointing at an image that was never pushed,
+            # surfacing later as a confusing "MANIFEST_UNKNOWN" pull error instead
+            # of the real build failure.
+            run_status = getattr(run_result, "status", None)
+            if run_status and run_status.lower() != "succeeded":
+                raise BackendDeploymentError(
+                    f"ACR build for image '{image_tag}' did not succeed (status: {run_status}). "
+                    "Check the ACR task run logs for the underlying build error."
+                )
         except BackendDeploymentError:
             raise
         except Exception as exc:

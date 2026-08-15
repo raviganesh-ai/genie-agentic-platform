@@ -73,6 +73,13 @@ function iconForTopSection(title: string): string {
   return "🧩";
 }
 
+/** Transform verbose section titles to crisp, concise display labels */
+function displayTitleForSection(title: string): string {
+  if (/ui design/i.test(title)) return "UI";
+  if (/multi-agent workflow/i.test(title)) return "Agents";
+  return title;
+}
+
 const GOVERNANCE_POLICY_OPTIONS: string[] = [
   "Must use managed identity (no embedded credentials)",
   "No hardcoded secrets, keys, or connection strings",
@@ -421,7 +428,7 @@ export function ArchitectureStudioPage(): JSX.Element {
                       <span className={highlighted ? "genie-sparkle" : undefined} style={{ fontSize: 18 }}>
                         {iconForTopSection(section.title)}
                       </span>
-                      <span>{section.title}</span>
+                      <span>{displayTitleForSection(section.title)}</span>
                     </span>
                   }
                 >
