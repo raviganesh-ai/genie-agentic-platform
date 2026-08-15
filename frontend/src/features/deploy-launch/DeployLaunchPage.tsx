@@ -370,15 +370,25 @@ export function DeployLaunchPage(): JSX.Element {
     setStarting(true);
     setStartError(null);
     const traceId = getTraceId(workflowRunId) ?? undefined;
+    
+    // When retrying after a failure, resume from the first failed step instead of starting from the beginning
+    let resumeFromStep: string | undefined;
+    if (activeRun?.status === "failed") {
+      const firstFailedStep = activeRun.steps.find((step) => step.status === "failed");
+      if (firstFailedStep) {
+        resumeFromStep = firstFailedStep.step_id;
+      }
+    }
+    
     try {
-      await deployLaunchApi.start(sessionId, workflowRunId, traceId);
+      await deployLaunchApi.start(sessionId, workflowRunId, traceId, resumeFromStep);
       refresh();
     } catch (err) {
       setStartError((err as ApiError).message ?? "Failed to start Deploy & Launch.");
     } finally {
       setStarting(false);
     }
-  }, [sessionId, workflowRunId, refresh]);
+  }, [sessionId, workflowRunId, activeRun, refresh]);
 
   // Starts Deploy & Launch automatically the first time this page has no
   // run yet for the current mission - the user's review already happened

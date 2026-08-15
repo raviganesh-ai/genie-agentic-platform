@@ -37,6 +37,10 @@ class StartDeploymentRequest(BaseModel):
 
     workflow_run_id: str = Field(min_length=1)
     trace_id: str | None = None
+    resume_from_step: str | None = Field(
+        default=None,
+        description="If provided, resume from this step instead of starting from the first step. Useful for retrying a failed pipeline.",
+    )
 
 
 def _get_owned_run(
@@ -65,6 +69,7 @@ async def start_deployment(
         requesting_user_id=user.user_id,
         workflow_run_id=body.workflow_run_id,
         trace_id=body.trace_id,
+        resume_from_step=body.resume_from_step,
     )
 
 

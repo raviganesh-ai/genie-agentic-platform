@@ -8,11 +8,20 @@ export const deployLaunchApi = {
    * checkpoint - the backend auto-requests that checkpoint the first time
    * this is called with no existing request, and raises a 409 while it is
    * still pending (see `DeploymentPipelineService.start`).
+   *
+   * If `resumeFromStep` is provided, the pipeline resumes from that step instead
+   * of starting from the first step, allowing retry from a failed step without
+   * re-running prior completed steps.
    */
-  start(sessionId: string, workflowRunId: string, traceId?: string): Promise<DeploymentPipelineRun> {
+  start(
+    sessionId: string,
+    workflowRunId: string,
+    traceId?: string,
+    resumeFromStep?: string,
+  ): Promise<DeploymentPipelineRun> {
     return apiFetch<DeploymentPipelineRun>(`/sessions/${sessionId}/deploy-launch/start`, {
       method: "POST",
-      body: { workflow_run_id: workflowRunId, trace_id: traceId ?? null },
+      body: { workflow_run_id: workflowRunId, trace_id: traceId ?? null, resume_from_step: resumeFromStep ?? null },
     });
   },
   list(sessionId: string): Promise<DeploymentPipelineRun[]> {
