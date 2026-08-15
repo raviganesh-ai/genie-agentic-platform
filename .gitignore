@@ -42,3 +42,5 @@ Thumbs.db
 /dryrun_output.txt
 /fix_models.txt
 scripts/.generated_prototype.html
+
+_build_staging/
