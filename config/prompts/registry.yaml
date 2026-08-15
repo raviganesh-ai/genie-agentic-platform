@@ -377,103 +377,72 @@ prompts:
       Agent a delegation tool for it, and do not mention it anywhere in
       the UI or in the trailing "## Multi-Agent Workflow" summary below.
 
-      (1) Exactly one agent code block per specialist agent literally
-      named in "## Multi-Agent Workflow" below, excluding the
-      Orchestrator Agent and excluding any agent named above as
-      deselected - GENERATE THEM IN ALPHABETICAL ORDER BY AGENT NAME so
-      the output is always consistent. Each its own independent Python
-      3.12 module, strongly typed, async, with dependencies injected
-      rather than hardcoded, implementing only that one agent's own
-      responsibility exactly as described in the architecture (never a
-      generic/boilerplate agent unrelated to it).
+      (1) Generate EXACTLY ONE agent code block per specialist agent
+      literally named in "## Multi-Agent Workflow" below - the EXACT same
+      count and names as appear there, excluding the Orchestrator Agent
+      and excluding any agent named above as deselected. No extra agents,
+      no "helper" agents, no invented agents. Generate THEM IN
+      ALPHABETICAL ORDER BY AGENT NAME. Each its own independent Python
+      3.12 module, strongly typed, async, implementing only that one
+      agent's own responsibility exactly as described (never
+      generic/boilerplate code unrelated to it).
 
-      DETERMINISTIC CODE STRUCTURE for each agent:
+      CODE STRUCTURE - no noise:
       - imports: alphabetically sorted, stdlib first, then third-party
-      - type hints: use full `from typing import ...` with all type names
-      - function definitions: in alphabetical order, async functions use
-        consistent parameter ordering (context/config/input params in
-        dependency order)
-      - docstrings: start with "Deterministically generated agent..."
-      - no random variable names, use explicit purpose-driven names
+      - function definitions: in alphabetical order
+      - no random variable names, no placeholder code, use explicit names
+      - no extra utilities, no "nice-to-have" helpers
 
-      Build each on the Microsoft Agent Framework (`agent_framework`)
-      exactly the same way this platform's own agents do: construct an
-      `agent_framework.foundry.FoundryAgent` against the mission's own
-      Azure AI Foundry project client, referencing that agent's own
-      already-provisioned Foundry agent name/version by importing
-      `AGENT_FOUNDRY_NAMES` from the sibling, already-generated
-      `agent_config` module (e.g. `from agent_config import
-      AGENT_FOUNDRY_NAMES` then `AGENT_FOUNDRY_NAMES["<this agent's exact
-      name from the architecture>"]`) - never a hardcoded literal name and
-      never a made-up configuration source - and call `.run(...)` on it -
-      never invent a different SDK or a lower-level manual thread/run
-      polling loop. Never combine two agents into one block. Return each
-      as its own fenced ```python code block whose first line is the
-      comment `# agent: <the exact agent name from the architecture>`.
+      Build on the Microsoft Agent Framework (`agent_framework`): construct
+      an `agent_framework.foundry.FoundryAgent`, reference that agent's
+      Foundry agent name via `AGENT_FOUNDRY_NAMES` from `agent_config`,
+      and call `.run(...)` on it. Never a hardcoded literal name. Never
+      invent a different SDK. Never combine two agents. Return each as its
+      own fenced ```python code block, first line `# agent: <exact name
+      from architecture>`.
 
-      (2) Exactly one more agent code block, immediately after all of (1)
-      are done, for the Orchestrator Agent itself, also Python 3.12 on the
-      Microsoft Agent Framework (`agent_framework`), containing the real
-      orchestration logic: one `agent_framework.FunctionTool` delegation
-      tool per specialist agent from (1), GENERATED IN ALPHABETICAL ORDER
-      BY AGENT NAME (the same call_<agent> tool pattern Genie's own
-      genie-orchestrator uses), so it is this mission's single entry point
-      that sequences and hands off to every specialist agent by invoking
-      its own `FoundryAgent`, each looked up the same way via
-      `AGENT_FOUNDRY_NAMES` from the `agent_config` module - never a
-      hardcoded literal name.
+      (2) Generate EXACTLY ONE orchestrator agent code block - no more.
+      Python 3.12 on the Microsoft Agent Framework (`agent_framework`).
+      Must contain one `agent_framework.FunctionTool` delegation tool per
+      specialist agent from (1), in the EXACT count and names, GENERATED
+      IN ALPHABETICAL ORDER BY AGENT NAME. Never a made-up orchestration
+      tool, never extra "helper" tools, never unused tool definitions.
+      This is this mission's single entry point that invokes specialist
+      agents via their own already-provisioned Foundry agent names
+      (looked up via `AGENT_FOUNDRY_NAMES`).
 
-      DETERMINISTIC ORCHESTRATOR STRUCTURE:
+      CODE STRUCTURE - no noise:
       - imports: alphabetically sorted, stdlib first, third-party next
-      - all FunctionTool definitions: sorted alphabetically by tool name
-      - run() method signature: consistent parameter ordering
-      - orchestration logic: deterministic invocation order (alphabetical
-        by agent name unless sequencing logic explicitly requires otherwise)
-      - no random variable names, use explicit names tied to agent/tool names
-      - docstrings: start with "Deterministically generated orchestrator..."
+      - FunctionTool definitions: sorted alphabetically by tool name
+      - no random variable names, no placeholder code
+      - no extra utilities or helper methods
 
-      Include a short comment near the top noting that once deployed to
-      Azure AI Foundry, this Orchestrator Agent is reachable only through
-      this mission's own backend service (the same one the UI calls) -
-      never directly from the browser. Return this as its own fenced
-      ```python code block whose first line is the comment `# agent: orchestrator`.
+      Include a comment: "Once deployed to Azure AI Foundry, this
+      Orchestrator Agent is reachable only through this mission's own
+      backend service - never directly from the browser."
+      Return as fenced ```python code block, first line `# agent: orchestrator`.
 
-      (3) Exactly one UI code block, last - an extensive React functional
-      component (TypeScript/TSX) that implements exactly the screens
-      listed in the architecture's "## UI Design" section below - the
-      same count, names, and purposes literally listed there, no more and
-      no fewer. RENDER SCREENS IN THE EXACT ORDER they appear in the
-      architecture's "## UI Design" section so the output is always
-      consistent. Each screen is its own clearly separated section of the
-      component whose content is concretely about that screen's own
-      described interaction (not a generic placeholder form/dashboard
-      unrelated to the requirement).
+      (3) Generate EXACTLY ONE UI code block - no more. React functional
+      component (TypeScript/TSX) that implements the EXACT screens listed
+      in the architecture's "## UI Design" section - the EXACT same count,
+      names, and purposes, no more and no fewer. No extra screens, no
+      "placeholder" screens, no invented UI. RENDER SCREENS IN THE EXACT
+      ORDER they appear in the architecture. Each screen's content is
+      concretely about that screen's own described interaction (never
+      generic placeholder code unrelated to it).
 
-      DETERMINISTIC UI STRUCTURE:
-      - imports: alphabetically sorted, React/built-in first, then
-        third-party hooks/utils, each grouped clearly with a comment
-      - component: single functional component with consistent structure
-      - state hooks (useState, useContext, etc): grouped together at the top
-      - effect hooks: grouped together, ordered by dependency/purpose
-      - event handlers: in alphabetical order by handler name, all with
-        consistent naming (handleXxx or onXxx, pick one)
-      - render sections: match architecture's "## UI Design" order
-        exactly, each section starts with a clear comment like
-        `{/* Screen: <screen name> - <purpose> */}`
-      - no random IDs, use deterministic ID generation or state-based keys
-      - styling: consistent (CSS classes or inline objects in consistent order)
-      - docstring: start with "Deterministically generated mission UI..."
+      CODE STRUCTURE - no noise:
+      - imports: alphabetically sorted, React first, then third-party
+      - state hooks (useState, useContext): grouped at top
+      - event handlers: alphabetical order by name
+      - render sections: architecture order exactly, labeled with screen name/purpose
+      - no random IDs, no placeholder content, no extra utilities
+      - call only the Orchestrator from (2), never specialist agents directly
 
-      The UI must only ever call the single Orchestrator Agent from (2) -
-      never any specialist agent directly - via a relative, same-origin
-      fetch call with credentials set to 'include', reading any
-      session-scoped value from a prop or environment variable rather than
-      a literal. Once this mission is deployed, that same-origin call
-      reaches this mission's own backend service, which is the only caller
-      of the Orchestrator Agent hosted in Azure AI Foundry - the
-      Orchestrator Agent itself is never called directly from the browser.
-      Return this as exactly one fenced ```tsx code block whose first line
-      is the comment `// agent: ui`.
+      The UI must call Orchestrator only via a relative fetch call;
+      this call reaches this mission's backend, which is the only caller of
+      the Orchestrator Agent in Azure AI Foundry.
+      Return as fenced ```tsx code block, first line `// agent: ui`.
 
       Security rules you MUST follow in every code block above: never
       hardcode any URL, hostname, port, API key, token, secret, or
@@ -492,11 +461,11 @@ prompts:
       of them, and add a short inline comment at each place a policy is
       applied noting which policy it satisfies.
 
-      After all the code blocks, add a short "## Multi-Agent Workflow"
-      section (plain text, not code) describing each agent's
-      responsibility and how it connects to the Orchestrator Agent - this
-      is the same lineup already established in the recommended
-      architecture below; do not introduce new agents here.
+      After all the code blocks, add a "## Multi-Agent Workflow" summary
+      section (plain text, not code) describing each agent's exact
+      responsibility and how it connects to the Orchestrator Agent.
+      List ONLY the agents actually generated above - same count and names.
+      Do not introduce new agents here, do not add extra commentary.
 
       Approved requirements:
       {requirements}
@@ -537,95 +506,43 @@ prompts:
       Component to generate now: a "{component_kind}" named
       "{component_name}".
 
-      If component_kind is "agent": produce exactly one independent
-      Python 3.12 module for the specialist agent named
-      "{component_name}", literally named in the architecture's "##
-      Multi-Agent Workflow" section below, strongly typed, async, with
-      dependencies injected rather than hardcoded, implementing only that
-      one agent's own responsibility exactly as described there.
+      If component_kind is "agent": Produce one Python 3.12 module for the
+      agent named "{component_name}", literally from the architecture's
+      "## Multi-Agent Workflow". Implement ONLY its described responsibility
+      - no extra utilities, no placeholder code, no "nice-to-have" helpers.
+      On the Microsoft Agent Framework: construct `agent_framework.foundry
+      .FoundryAgent`, reference Foundry agent name via `AGENT_FOUNDRY_NAMES`
+      from `agent_config`, call `.run(...)`. Never hardcode a literal name.
+      Never invent a different SDK.
+      Return one fenced ```python code block, first line `# agent:
+      {component_name}`.
 
-      DETERMINISTIC AGENT STRUCTURE:
-      - imports: alphabetically sorted, stdlib first, then third-party
-      - type hints: use full `from typing import ...` with all type names
-      - function definitions: in alphabetical order
-      - docstrings: start with "Deterministically generated agent..."
-      - no random variable names, use explicit purpose-driven names
-
-      Build it on the Microsoft Agent Framework (`agent_framework`)
-      exactly the same way this platform's own agents do: construct an
-      `agent_framework.foundry.FoundryAgent` against the mission's own
-      Azure AI Foundry project client, referencing that agent's own
-      already-provisioned Foundry agent name/version by importing
-      `AGENT_FOUNDRY_NAMES` from the sibling, already-generated
-      `agent_config` module (e.g. `from agent_config import
-      AGENT_FOUNDRY_NAMES` then `AGENT_FOUNDRY_NAMES["{component_name}"]`)
-      - never a hardcoded literal name and never a made-up configuration
-      source - and call `.run(...)` on it - never invent a different SDK
-      or a lower-level manual thread/run polling loop. Return it as
-      exactly one fenced ```python code block whose first line is the
-      comment `# agent: {component_name}`.
-
-      If component_kind is "orchestrator": produce exactly one Python
-      3.12 module, also on the Microsoft Agent Framework
-      (`agent_framework`), containing the real orchestration logic: one
-      `agent_framework.FunctionTool` delegation tool per specialist agent
-      literally named in the architecture's "## Multi-Agent Workflow"
-      section below, GENERATED IN ALPHABETICAL ORDER BY AGENT NAME (the
-      same call_<agent> tool pattern Genie's own genie-orchestrator uses),
-      so it is this mission's single entry point that sequences and hands
-      off to every specialist agent by invoking its own `FoundryAgent`,
-      each looked up the same way via `AGENT_FOUNDRY_NAMES` from the
-      `agent_config` module - never a hardcoded literal name.
-
-      DETERMINISTIC ORCHESTRATOR STRUCTURE:
-      - imports: alphabetically sorted, stdlib first, third-party next
-      - all FunctionTool definitions: sorted alphabetically by tool name
-      - run() method signature: consistent parameter ordering
-      - no random variable names, use explicit names tied to agent/tool names
-      - docstring: start with "Deterministically generated orchestrator..."
-
-      Include a short comment near the top noting that once deployed to
-      Azure AI Foundry, this Orchestrator Agent is reachable only through
-      this mission's own backend service (the same one the UI calls) -
-      never directly from the browser. Return it as exactly one fenced
-      ```python code block whose first line is the comment `# agent:
+      If component_kind is "orchestrator": Produce one Python 3.12 module
+      on the Microsoft Agent Framework. Must contain one `agent_framework
+      .FunctionTool` delegation tool per specialist agent literally named
+      in the "## Multi-Agent Workflow" section - ONLY those agents, no extra
+      tools, no "helper" tools, no unused tool definitions. This is the
+      mission's single entry point that invokes specialist agents via
+      Foundry agent names (looked up via `AGENT_FOUNDRY_NAMES`). Never
+      hardcode a literal name.
+      Include a comment: "Once deployed to Azure AI Foundry, this
+      Orchestrator Agent is reachable only through this mission's own
+      backend service - never directly from the browser."
+      Return one fenced ```python code block, first line `# agent:
       orchestrator`.
 
-      If component_kind is "ui": produce exactly one extensive React
-      functional component (TypeScript/TSX) that implements exactly the
-      screens literally listed in the architecture's "## UI Design"
-      section below - the same count, names, and purposes listed there,
-      no more and no fewer. RENDER SCREENS IN THE EXACT ORDER they appear
-      in the architecture's "## UI Design" section so the output is always
-      consistent. Each screen is its own clearly separated section of the
-      component whose content is concretely about that screen's own
-      described interaction (not a generic placeholder).
-
-      DETERMINISTIC UI STRUCTURE:
-      - imports: alphabetically sorted, React/built-in first, then
-        third-party hooks/utils, each grouped with a comment
-      - component: single functional component with consistent structure
-      - state hooks (useState, useContext): grouped at top
-      - effect hooks: grouped together, ordered by dependency/purpose
-      - event handlers: in alphabetical order by handler name
-      - render sections: match architecture's "## UI Design" order
-        exactly, each section starts with a comment like
-        `{/* Screen: <screen name> - <purpose> */}`
-      - no random IDs, use deterministic ID generation
-      - docstring: start with "Deterministically generated mission UI..."
-
-      The UI must only ever call the single Orchestrator Agent from the
-      architecture below - never any specialist agent directly - via a
-      relative, same-origin fetch call with credentials set to 'include',
-      reading any session-scoped value from a prop or environment
-      variable rather than a literal. Return it as exactly one fenced
-      ```tsx code block whose first line is the comment `// agent: ui`,
-      then a short "## Multi-Agent Workflow" section (plain text, not
-      code) describing each agent's responsibility and how it connects to
-      the Orchestrator Agent - the same lineup already established in the
-      architecture below; do not introduce new agents here. Only add this
-      trailing section when component_kind is "ui" - never for "agent" or
-      "orchestrator".
+      If component_kind is "ui": Produce one React functional component
+      (TypeScript/TSX) that implements the EXACT screens listed in the
+      architecture's "## UI Design" section - the EXACT same count, names,
+      and purposes, no more and no fewer. No extra screens, no placeholder
+      screens, no invented UI. RENDER IN THE EXACT ORDER they appear in
+      the architecture. Each screen's content is concretely about that
+      screen's described interaction (never generic placeholder code).
+      Call ONLY the Orchestrator from above, never specialist agents
+      directly, via relative fetch with credentials 'include'.
+      Return one fenced ```tsx code block, first line `// agent: ui`, then
+      a "## Multi-Agent Workflow" section listing ONLY the agents actually
+      generated - same count and names as above.
 
       Security rules you MUST follow: never hardcode any URL, hostname,
       port, API key, token, secret, or credential anywhere - read every
@@ -682,15 +599,9 @@ prompts:
       "{component_name}" below. Revise ONLY this one component to apply
       the customer's requested change below - never generate, rename, or
       modify any other component, and never invent unrelated changes
-      beyond what the customer asked for.
-
-      When revising, maintain DETERMINISTIC STRUCTURE:
-      - For agents: keep imports alphabetically sorted, functions in
-        alphabetical order by name, no random variable names
-      - For orchestrator: keep FunctionTool definitions sorted
-        alphabetically by tool name, consistent parameter ordering
-      - For UI: keep hooks grouped at top, event handlers alphabetically
-        ordered by name, render sections in original order from architecture
+      beyond what the customer asked for. Never add extra functionality,
+      extra screens, extra agents, extra utilities - keep it focused and
+      trim, implementing only the requested change.
 
       Existing code for this component:
       {existing_code}
