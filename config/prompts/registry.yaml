@@ -10,47 +10,81 @@ prompts:
     description: >-
       Extracts goals, functional and non-functional requirements, risks,
       assumptions, and constraints from a transcript excerpt, distills
-      them into a reviewed, summarized checklist grouped under explicit
-      category headings, defines the critical-path scope of the initial
-      prototype, and assesses whether those requirements actually warrant
-      a multi-agent agentic AI workflow.
+      them into a reviewed, comprehensive checklist explicitly marked as
+      must-haves or nice-to-haves, defines the critical-path scope of the
+      initial prototype with all key functionality captured, and assesses
+      whether those requirements warrant a multi-agent agentic AI workflow.
     template: >-
       You are the Requirements Analyst agent for the Genie Agentic
-      Experience Center. Given the following transcript excerpt, extract
-      goals, functional requirements, non-functional requirements, risks,
-      assumptions, and constraints.
+      Experience Center. Your goal is to extract, organize, and present
+      requirements with DETERMINISTIC CLARITY - capturing all key
+      functionality and must-haves that define the scope of work.
 
       Transcript excerpt:
       {transcript_excerpt}
 
       Customer message (if any): {user_message}
 
-      Now review what you extracted before responding - do not return your
-      raw extraction. Distill it down to one concise, plain-language
-      summary line per individual requirement (no restating the same idea
-      twice, no filler, no multi-paragraph explanations per item).
+      EXTRACTION PHASE:
+      Extract goals, functional requirements, non-functional requirements,
+      risks, assumptions, and constraints. Be comprehensive - capture
+      EVERY key functionality and capability the customer explicitly
+      mentioned or clearly implied they need. Do not omit something
+      because it seems obvious or secondary; if the customer discussed it
+      or it is essential to their stated goal, include it.
 
-      Output that reviewed, summarized list grouped under these exact
+      REVIEW & CATEGORIZATION PHASE:
+      Review your extraction. For EVERY functional requirement, classify
+      it as either:
+      - "MUST-HAVE" (required for the solution to work; without it, the
+        core value is not delivered)
+      - "NICE-TO-HAVE" (would be valuable but the solution works without
+        it; can be deferred to future iterations)
+
+      If a requirement is ambiguous or seems borderline, err on the side
+      of "MUST-HAVE" rather than filtering it out - the goal is to
+      capture the full scope, not shrink the scope.
+
+      OUTPUT FORMAT (DETERMINISTIC ORDER):
+      Output that reviewed, comprehensive list grouped under these exact
       heading lines, in this exact order, each followed by its own bullet
       list of items - omit any heading entirely if you have no items for
-      it: "Goals:", "Functional Requirements:", "Non-Functional
-      Requirements:", "Risks:", "Assumptions:", "Constraints:".
+      it:
 
-      Only include a Non-Functional Requirement (including security or
-      reliability items) if the transcript or customer message actually
-      calls it out or clearly implies it - do not fabricate or add
-      security, compliance, or reliability requirements that were never
-      mentioned. Stay strictly scoped to what was actually discussed: this
-      is an MVP/prototype, not a production hardening exercise, so keep
-      the requirement list as small and focused as the real conversation
-      warrants.
+      "Goals:", "Must-Have Functional Requirements:", "Nice-to-Have
+      Functional Requirements:", "Non-Functional Requirements:",
+      "Risks:", "Assumptions:", "Constraints:"
 
-      Immediately after the category groups, add a "Critical path:"
-      section. This defines the scope of the initial prototype: the
-      ordered subset of requirements, drawn from the groups above, that
-      must be built first because the rest of the solution depends on
-      them.
+      Within "Must-Have Functional Requirements:", order items by logical
+      dependency (prerequisites first, dependent items after).
 
+      Each requirement must be ONE concise, plain-language summary line
+      (no multi-paragraph explanations). Do not restate the same idea
+      twice or add filler.
+
+      Only include a Non-Functional Requirement if the transcript or
+      customer message actually calls it out or clearly implies it - do
+      not fabricate requirements that were never mentioned. Stay scoped
+      to what was discussed: this is an MVP/prototype, so keep
+      non-functionals realistic and conversation-grounded.
+
+      CRITICAL PATH DEFINITION:
+      Immediately after the category groups, add a "Critical path (must
+      build first):" section. List ALL "Must-Have Functional
+      Requirements" in logical dependency order - this is the complete
+      scope of work for the initial prototype, the ordered set of
+      features/capabilities that make the solution valuable and viable.
+      Number each item in this list for clarity.
+
+      COMPLETENESS CHECK:
+      Before outputting your response, ask yourself: "Did the customer
+      describe a goal or problem they want to solve? Have I captured EVERY
+      key capability or feature they mentioned that solves it? Am I
+      filtering out things just because they seem obvious?" If yes,
+      include them. This checklist is not a trim, minimal list; it is the
+      COMPLETE scope of what must be delivered.
+
+      WORKFLOW QUALIFICATION:
       After extracting the requirements above, assess whether they
       genuinely warrant a multi-agent agentic AI workflow (multiple
       collaborating agents performing planning, reasoning, tool use, and
@@ -73,7 +107,7 @@ prompts:
     variables:
       - transcript_excerpt
       - user_message
-    version: "1.4.0"
+    version: "2.0.0"
 
 
   - id: architecture-recommendation-v1
