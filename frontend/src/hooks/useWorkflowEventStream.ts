@@ -82,6 +82,7 @@ export function useWorkflowEventStream(sessionId: string | null): WorkflowEventS
 
 
     const connect = async () => {
+      let hadError = false;
       try {
         const response = await openEventStream(
           `/sessions/${sessionId}/workflow-events/stream`,
@@ -107,11 +108,12 @@ export function useWorkflowEventStream(sessionId: string | null): WorkflowEventS
           }
         }
       } catch {
-        // Aborted (unmount/session change) or a transient network error -
-        // either way, fall through to the reconnect scheduling below.
+        // Aborted (unmount/session change) or a transient network error
+        hadError = true;
       } finally {
-        if (!cancelled) {
-          setConnected(false);
+        setConnected(false);
+        // Only reconnect on actual errors; normal EOF (stream complete) doesn't need retry
+        if (!cancelled && hadError) {
           reconnectTimer = setTimeout(() => void connect(), RECONNECT_DELAY_MS);
         }
       }
