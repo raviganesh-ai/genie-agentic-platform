@@ -1,1 +1,0 @@
-"""Genie backend application package."""

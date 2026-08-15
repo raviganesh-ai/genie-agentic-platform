@@ -632,8 +632,16 @@ class DeploymentPipelineService:
                     ) -> None:
                         _step_result.detail = message
 
+                    mission_identity_resource_id = (
+                        pipeline_run.access_policy.mission_identity.identity_resource_id
+                        if pipeline_run.access_policy and pipeline_run.access_policy.mission_identity
+                        else None
+                    )
                     backend_result = await self._backend_deployment_service.deploy(
-                        mission_slug=mission_slug, build_root=backend_root, on_progress=_on_backend_progress
+                        mission_slug=mission_slug,
+                        build_root=backend_root,
+                        mission_identity_resource_id=mission_identity_resource_id,
+                        on_progress=_on_backend_progress,
                     )
                     pipeline_run.backend_url = backend_result.backend_url
                     detail = (

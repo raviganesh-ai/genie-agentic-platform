@@ -157,10 +157,17 @@ class BackendDeploymentService:
         *,
         mission_slug: str,
         build_root: Path,
+        mission_identity_resource_id: str | None = None,
         on_progress: DeploymentProgressCallback | None = None,
     ) -> BackendDeploymentResult:
         """Builds ``build_root`` (must contain its own ``Dockerfile``) in ACR and
         deploys the resulting image as a Container App named after ``mission_slug``.
+
+        When given, ``mission_identity_resource_id`` is the resource ID of the
+        mission's user-assigned managed identity (created by MissionIdentityService).
+        The Container App is assigned this identity so it can authenticate to Azure
+        services (ACR for image pull, Key Vault, Storage, Foundry) using managed
+        identity instead of hardcoded credentials.
 
         When given, ``on_progress`` is awaited with a short status message
         before each real sub-phase begins (upload, remote ACR build,
@@ -234,9 +241,11 @@ class BackendDeploymentService:
                 ContainerApp,
                 EnvironmentVar,
                 Ingress,
+                ManagedServiceIdentity,
                 RegistryCredentials,
                 Secret,
                 Template,
+                UserAssignedIdentity,
             )
 
             app_name = f"genie-{mission_slug}-backend"
@@ -251,9 +260,23 @@ class BackendDeploymentService:
                 EnvironmentVar(name="FOUNDRY_ENDPOINT", value=self._foundry_endpoint),
                 EnvironmentVar(name="FOUNDRY_PROJECT_NAME", value=self._foundry_project_name),
             ]
+            
+            # Build the Container App envelope with mission-specific managed identity.
+            # If mission_identity_resource_id is provided, assign the user-assigned
+            # identity to the Container App - this identity has been pre-provisioned
+            # with ACR_PULL, Storage, Key Vault, and Search roles by
+            # MissionIdentityService, so the app can authenticate without credentials.
+            identity_config = None
+            if mission_identity_resource_id:
+                identity_config = ManagedServiceIdentity(
+                    type="UserAssigned",
+                    user_assigned_identities={mission_identity_resource_id: UserAssignedIdentity()},
+                )
+            
             envelope = ContainerApp(
                 location=self._location,
                 managed_environment_id=self._container_apps_environment_id,
+                identity=identity_config,
                 configuration=Configuration(
                     ingress=Ingress(external=True, target_port=8000),
                     registries=[
@@ -292,9 +315,10 @@ class NullBackendDeploymentService:
         *,
         mission_slug: str,
         build_root: Path,
+        mission_identity_resource_id: str | None = None,
         on_progress: DeploymentProgressCallback | None = None,
     ) -> BackendDeploymentResult:
-        del build_root
+        del build_root, mission_identity_resource_id
         if on_progress is not None:
             await on_progress("Deploying backend service (local mode, no real Azure calls)...")
         return BackendDeploymentResult(
