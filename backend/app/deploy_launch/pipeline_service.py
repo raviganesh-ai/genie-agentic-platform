@@ -97,21 +97,80 @@ def _slugify(value: str) -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", value.strip().lower()).strip("-")
     return slug or "mission"
 
-_INDEX_HTML_TEMPLATE = """<!doctype html>
+_FRONTEND_INDEX_HTML_TEMPLATE = """<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Mission</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Mission Prototype</title>
   <script src="runtime-config.js"></script>
-  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 </head>
 <body>
   <div id="root"></div>
-  <script type="text/babel" data-type="module" src="MissionApp.tsx"></script>
+    <script type="module" src="/src/main.tsx"></script>
 </body>
 </html>
+"""
+
+_FRONTEND_PACKAGE_JSON = """{
+    "private": true,
+    "type": "module",
+    "scripts": {"build": "vite build"},
+    "dependencies": {"react": "18.3.1", "react-dom": "18.3.1"},
+    "devDependencies": {"@vitejs/plugin-react": "4.3.4", "@types/react": "18.3.18", "@types/react-dom": "18.3.5", "typescript": "5.7.2", "vite": "6.0.7"}
+}
+"""
+
+_FRONTEND_TSCONFIG_JSON = """{
+    "compilerOptions": {
+        "target": "ES2020",
+        "useDefineForClassFields": true,
+        "lib": ["ES2020", "DOM", "DOM.Iterable"],
+        "allowJs": false,
+        "skipLibCheck": true,
+        "esModuleInterop": true,
+        "allowSyntheticDefaultImports": true,
+        "strict": false,
+        "forceConsistentCasingInFileNames": true,
+        "module": "ESNext",
+        "moduleResolution": "Bundler",
+        "resolveJsonModule": true,
+        "isolatedModules": true,
+        "noEmit": true,
+        "jsx": "react-jsx"
+    },
+    "include": ["src"]
+}
+"""
+
+_FRONTEND_VITE_CONFIG = """import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+
+export default defineConfig({ plugins: [react()] });
+"""
+
+_FRONTEND_MAIN_TSX = """import React from "react";
+import { createRoot } from "react-dom/client";
+import * as GeneratedModule from "../MissionApp";
+
+type GeneratedComponent = React.ComponentType;
+const moduleValue = GeneratedModule as unknown as {
+    default?: GeneratedComponent;
+    App?: GeneratedComponent;
+    MissionApp?: GeneratedComponent;
+};
+const MissionApp = moduleValue.default ?? moduleValue.App ?? moduleValue.MissionApp;
+
+if (!MissionApp) {
+    throw new Error("Generated MissionApp.tsx must export a default component, App, or MissionApp.");
+}
+
+createRoot(document.getElementById("root")!).render(<MissionApp />);
+"""
+
+_FRONTEND_ENV_D_TS = """interface Window {
+    __MISSION_BACKEND_URL__?: string;
+}
 """
 
 
@@ -725,11 +784,28 @@ class DeploymentPipelineService:
                     (frontend_root / "MissionApp.tsx").write_text(
                         materialized.ui_component or "", encoding="utf-8"
                     )
-                    (frontend_root / "runtime-config.js").write_text(
+                    (frontend_root / "index.html").write_text(
+                        _FRONTEND_INDEX_HTML_TEMPLATE, encoding="utf-8"
+                    )
+                    (frontend_root / "package.json").write_text(
+                        _FRONTEND_PACKAGE_JSON, encoding="utf-8"
+                    )
+                    (frontend_root / "tsconfig.json").write_text(
+                        _FRONTEND_TSCONFIG_JSON, encoding="utf-8"
+                    )
+                    (frontend_root / "vite.config.ts").write_text(
+                        _FRONTEND_VITE_CONFIG, encoding="utf-8"
+                    )
+                    src_root = frontend_root / "src"
+                    src_root.mkdir(parents=True, exist_ok=True)
+                    (src_root / "main.tsx").write_text(_FRONTEND_MAIN_TSX, encoding="utf-8")
+                    (src_root / "env.d.ts").write_text(_FRONTEND_ENV_D_TS, encoding="utf-8")
+                    public_root = frontend_root / "public"
+                    public_root.mkdir(parents=True, exist_ok=True)
+                    (public_root / "runtime-config.js").write_text(
                         f'window.__MISSION_BACKEND_URL__ = "{pipeline_run.backend_url}";\n',
                         encoding="utf-8",
                     )
-                    (frontend_root / "index.html").write_text(_INDEX_HTML_TEMPLATE, encoding="utf-8")
                     detail = f"Frontend wired to real backend URL {pipeline_run.backend_url}."
 
                 elif step_id == "deploy-frontend-app":

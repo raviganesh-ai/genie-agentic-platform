@@ -128,8 +128,14 @@ class ContainerAppFrontendDeploymentService:
 
         dockerfile = ui_root / "Dockerfile"
         dockerfile.write_text(
+            "FROM node:20-alpine AS build\n"
+            "WORKDIR /app\n"
+            "COPY package.json ./\n"
+            "RUN npm install\n"
+            "COPY . .\n"
+            "RUN npm run build\n"
             "FROM nginx:alpine\n"
-            "COPY . /usr/share/nginx/html/\n"
+            "COPY --from=build /app/dist /usr/share/nginx/html\n"
             "EXPOSE 80\n",
             encoding="utf-8",
         )
