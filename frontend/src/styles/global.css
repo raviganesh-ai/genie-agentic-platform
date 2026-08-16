@@ -181,6 +181,34 @@ a,
   animation: genie-agent-activity-glow 3.2s ease-in-out infinite;
 }
 
+@keyframes genie-indeterminate-rail {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(340%);
+  }
+}
+
+.genie-indeterminate-rail {
+  height: 4px;
+  margin-top: 12px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: rgba(47, 131, 224, 0.18);
+}
+
+.genie-indeterminate-rail::after {
+  content: "";
+  display: block;
+  width: 30%;
+  height: 100%;
+  border-radius: inherit;
+  background: #6ba3ea;
+  box-shadow: 0 0 10px rgba(107, 163, 234, 0.8);
+  animation: genie-indeterminate-rail 1.3s ease-in-out infinite;
+}
+
 /* Mission flow sidebar - a "skill tree" style vertical pipeline, not a
    standard nav menu: glowing status nodes, an energy line that visibly
    flows toward whichever stage is currently active, and a subtle hover

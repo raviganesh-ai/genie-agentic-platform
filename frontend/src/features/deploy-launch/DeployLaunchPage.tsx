@@ -496,6 +496,13 @@ export function DeployLaunchPage(): JSX.Element {
     return steps.map((step, index) => (index === nextIndex ? { ...step, status: "running" as const } : step));
   }, [steps, isPipelineActive, awaitingUpstreamStep]);
 
+  const flowSteps = useMemo(() => {
+    if (!awaitingUpstreamStep) return displaySteps;
+    return displaySteps.map((step, index) =>
+      index === 0 ? { ...step, status: "running" as const } : step,
+    );
+  }, [awaitingUpstreamStep, displaySteps]);
+
   // Drives the gamified "Genie is working with..." activity banner: while
   // the pipeline is genuinely in motion (either the start() request is
   // still in flight, or a run exists and is running) but no error/failure
@@ -620,6 +627,27 @@ export function DeployLaunchPage(): JSX.Element {
           <AgentActivityAnimation label={activityLabel} events={liveEvents} startedAt={activeRun?.created_at} />
         ) : null}
 
+        {awaitingUpstreamStep ? (
+          <div
+            className="genie-upstream-build-progress"
+            style={{
+              border: "1px solid #2f83e055",
+              borderLeft: "4px solid #2f83e0",
+              borderRadius: 6,
+              padding: "12px 14px",
+              backgroundColor: "rgba(47, 131, 224, 0.08)",
+            }}
+          >
+            <Text weight="semibold" size={300} style={{ display: "block", marginBottom: 4 }}>
+              Build solution is still running
+            </Text>
+            <Text size={200} style={{ display: "block", opacity: 0.75 }}>
+              Deployment begins automatically as soon as generated UI and agent code are ready.
+            </Text>
+            <div className="genie-indeterminate-rail" aria-label="Build in progress" />
+          </div>
+        ) : null}
+
         <SectionCard
           title="🎮 Mission Progress"
           action={
@@ -631,7 +659,7 @@ export function DeployLaunchPage(): JSX.Element {
             </Badge>
           }
         >
-          <MissionFlowMap steps={displaySteps} />
+          <MissionFlowMap steps={flowSteps} />
           <div
             style={{
               height: 8,
