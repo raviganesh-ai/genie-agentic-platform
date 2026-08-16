@@ -43,6 +43,7 @@ __all__ = [
 ]
 
 _WEB_CONTAINER = "$web"
+_AUTHORIZATION_PERMISSION_MISMATCH = "AuthorizationPermissionMismatch"
 
 
 class FrontendDeploymentError(RuntimeError):
@@ -64,6 +65,10 @@ def _content_type_for(path: Path) -> str:
         ".svg": "image/svg+xml",
         ".png": "image/png",
     }.get(suffix, "application/octet-stream")
+
+
+def _is_authorization_permission_mismatch(exc: Exception) -> bool:
+    return _AUTHORIZATION_PERMISSION_MISMATCH in str(exc)
 
 
 class FrontendDeploymentService:
@@ -103,6 +108,13 @@ class FrontendDeploymentService:
         except Exception as exc:
             raise FrontendDeploymentError(f"Failed to construct Storage management client: {exc}") from exc
 
+    def _static_website_endpoint(self) -> str:
+        storage_client = self._storage_mgmt_client()
+        account = storage_client.storage_accounts.get_properties(
+            self._resource_group, self._storage_account_name
+        )
+        return account.primary_endpoints.web or ""
+
     async def deploy(
         self, *, ui_root: Path, on_progress: DeploymentProgressCallback | None = None
     ) -> FrontendDeploymentResult:
@@ -124,13 +136,20 @@ class FrontendDeploymentService:
 
             await _report("Enabling static website hosting on Azure Storage...")
             blob_service_client = self._blob_service_client()
-            blob_service_client.set_service_properties(
-                static_website=StaticWebsite(
-                    enabled=True,
-                    index_document="index.html",
-                    error_document404_path="index.html",
+            try:
+                blob_service_client.set_service_properties(
+                    static_website=StaticWebsite(
+                        enabled=True,
+                        index_document="index.html",
+                        error_document404_path="index.html",
+                    )
                 )
-            )
+            except Exception as exc:
+                if not _is_authorization_permission_mismatch(exc):
+                    raise
+                if not self._static_website_endpoint():
+                    raise
+                await _report("Static website hosting is already enabled; continuing upload...")
 
             container_client = blob_service_client.get_container_client(_WEB_CONTAINER)
             build_files = [path for path in sorted(ui_root.rglob("*")) if path.is_file()]
@@ -188,11 +207,7 @@ class FrontendDeploymentService:
 
         try:
             await _report("Reading the static website endpoint...")
-            storage_client = self._storage_mgmt_client()
-            account = storage_client.storage_accounts.get_properties(
-                self._resource_group, self._storage_account_name
-            )
-            frontend_url = account.primary_endpoints.web
+            frontend_url = self._static_website_endpoint()
         except Exception as exc:
             raise FrontendDeploymentError(f"Failed to read static website endpoint: {exc}") from exc
 
