@@ -212,7 +212,7 @@ prompts:
       one purpose: let an end-user quickly try out and be inspired by the
       actual agentic workflow you design below, seeing orchestrator
       coordination and agent collaboration happen in real-time. Describe
-      the layout and interaction zones:
+      the layout and interaction zones in 2-3 sentences each:
       - **Input/Interaction Zone**: Where the user provides input,
         parameters, or kicks off the workflow (be concrete about what
         they enter and why)
@@ -228,9 +228,9 @@ prompts:
       Do not add separate admin, configuration, audit, or operational
       screens - the single page is the entire prototype UI. The page must
       interact only with the Orchestrator Agent you designate below; the
-      UI never names or talks to specialist agents directly. Write as:
+      UI never names or talks to specialist agents directly. Write each zone in 2-3 sentences:
       "**<Zone name>**: <what the user sees and does there, how it shows
-      orchestrator work in real-time, and which requirement(s) it fulfills>"
+      orchestrator work in real-time, and which requirement(s) it fulfills>""
 
       "## Multi-Agent Workflow" - decide how many specialist agents this
       solution needs and what each one is responsible for, based solely
@@ -241,16 +241,12 @@ prompts:
       interaction from the UI and is responsible for coordinating,
       sequencing, and handing off to every other specialist agent in the
       list; no other agent may receive input directly from the UI.
-      Exactly one top-level bullet per agent you decide is needed, as
-      "**<Agent name>**: <its responsibility, the requirement(s) it
-      fulfills, its inputs, which other agent(s) it hands off to or
-      receives from, and the order it typically works in the orchestration
-      sequence>" - written as a single flowing sentence on that one bullet
-      line. Never break an agent's responsibility/fulfills/inputs/
-      outputs/handoffs out into separate sub-bullets or indented lines
-      underneath its bullet, and never add any bullet, note, or line that
-      is not itself naming one of the agents - the list must contain
-      nothing but exactly one bullet per agent.
+      Exactly one top-level bullet per agent you decide is needed: describe
+      its responsibility, the requirement(s) it fulfills, and which
+      other agents it hands off to or receives from, in 2-3 sentences
+      maximum. Never add any bullet or line that is not itself naming one
+      of the agents - the list must contain nothing but exactly one bullet
+      per agent.
     variables:
       - approved_requirements
       - user_message
