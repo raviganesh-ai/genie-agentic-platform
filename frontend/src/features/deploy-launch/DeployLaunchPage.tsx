@@ -250,9 +250,13 @@ function AgentRow({ agent }: { agent: ProvisionedAgentStatus }): JSX.Element {
 function StepRow({
   step,
   agents,
+  onRetry,
+  isRetrying,
 }: {
   step: DeploymentStepResult;
   agents?: ProvisionedAgentStatus[];
+  onRetry?: (stepId: DeploymentStepId) => Promise<void>;
+  isRetrying?: boolean;
 }): JSX.Element {
   const color = STEP_STATUS_COLORS[step.status];
   const duration = formatDuration(step.started_at, step.completed_at);
@@ -287,6 +291,17 @@ function StepRow({
           <Text size={200} style={{ color }}>
             {STEP_STATUS_LABELS[step.status]}
           </Text>
+          {step.status === "failed" && onRetry ? (
+            <Button
+              size="small"
+              appearance="subtle"
+              disabled={isRetrying}
+              onClick={() => void onRetry(step.step_id)}
+              style={{ marginLeft: 8 }}
+            >
+              {isRetrying ? "Retrying..." : "Retry"}
+            </Button>
+          ) : null}
         </div>
       </div>
       {step.detail ? (
@@ -499,6 +514,27 @@ export function DeployLaunchPage(): JSX.Element {
     window.open(activeRun.launch_url, "_blank", "noopener,noreferrer");
   }, [activeRun]);
 
+  const [retryingStep, setRetryingStep] = useState<DeploymentStepId | null>(null);
+  const [retryError, setRetryError] = useState<string | null>(null);
+
+  const handleRetryStep = useCallback(
+    async (stepId: DeploymentStepId) => {
+      if (!sessionId || !workflowRunId) return;
+      setRetryingStep(stepId);
+      setRetryError(null);
+      const traceId = getTraceId(workflowRunId) ?? undefined;
+      try {
+        await deployLaunchApi.start(sessionId, workflowRunId, traceId, stepId);
+        refresh();
+      } catch (err) {
+        setRetryError((err as ApiError).message ?? `Failed to retry ${DEPLOYMENT_STEP_NAMES[stepId]}.`);
+      } finally {
+        setRetryingStep(null);
+      }
+    },
+    [sessionId, workflowRunId, refresh],
+  );
+
   const [downloading, setDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
   const handleDownload = useCallback(async () => {
@@ -601,11 +637,27 @@ export function DeployLaunchPage(): JSX.Element {
               }}
             />
           </div>
+          {retryError ? (
+            <MessageBar intent="warning" layout="multiline" style={{ marginBottom: 12 }}>
+              <MessageBarBody>
+                <MessageBarTitle>Retry Failed</MessageBarTitle>
+                {retryError}
+              </MessageBarBody>
+            </MessageBar>
+          ) : null}
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {displaySteps.map((step) => {
               const agents =
                 step.step_id === "provision-foundry-agents" ? activeRun?.provisioned_agents ?? [] : undefined;
-              return <StepRow key={step.step_id} step={step} agents={agents} />;
+              return (
+                <StepRow
+                  key={step.step_id}
+                  step={step}
+                  agents={agents}
+                  onRetry={handleRetryStep}
+                  isRetrying={retryingStep === step.step_id}
+                />
+              );
             })}
           </div>
         </SectionCard>

@@ -223,17 +223,62 @@ class BackendDeploymentService:
             # NOT mean the docker build+push inside that run succeeded. A failed
             # build (bad Dockerfile, compile error, etc.) still returns a
             # successful ARM operation with the Run's own `status` field set to
-            # something other than "Succeeded" and no image ever pushed. Previously
-            # this was never checked, so a failed build silently proceeded to
-            # deploy a Container App pointing at an image that was never pushed,
-            # surfacing later as a confusing "MANIFEST_UNKNOWN" pull error instead
-            # of the real build failure.
-            run_status = getattr(run_result, "status", None)
-            if run_status and run_status.lower() != "succeeded":
+            # something other than "Succeeded" and no image ever pushed.
+            #
+            # Status transitions: Queued -> Started -> Succeeded|Failed
+            # Poll until we reach a terminal status (Succeeded or Failed),
+            # rather than failing immediately on "Queued" (which is just scheduled).
+            import asyncio
+            import time
+            
+            run_id = getattr(run_result, "run_id", None)
+            if not run_id:
                 raise BackendDeploymentError(
-                    f"ACR build for image '{image_tag}' did not succeed (status: {run_status}). "
-                    "Check the ACR task run logs for the underlying build error."
+                    f"ACR build for image '{image_tag}' returned no run ID."
                 )
+            
+            max_wait_seconds = 600  # 10 minutes
+            start_time = time.time()
+            poll_interval_seconds = 5
+            
+            while True:
+                elapsed = time.time() - start_time
+                if elapsed > max_wait_seconds:
+                    raise BackendDeploymentError(
+                        f"ACR build for image '{image_tag}' did not complete within "
+                        f"{max_wait_seconds} seconds. Check the ACR task run logs (run ID: {run_id})."
+                    )
+                
+                # Fetch latest run status
+                run_detail = acr_client.registries.get_build_details(
+                    self._resource_group, self._acr_name, run_id
+                )
+                run_status = getattr(run_detail, "status", None)
+                
+                if run_status:
+                    status_lower = run_status.lower()
+                    if status_lower == "succeeded":
+                        # Build completed successfully
+                        break
+                    elif status_lower == "failed":
+                        raise BackendDeploymentError(
+                            f"ACR build for image '{image_tag}' failed. "
+                            f"Check the ACR task run logs (run ID: {run_id}) for details."
+                        )
+                    elif status_lower in ("queued", "started"):
+                        # Still in progress - wait and retry
+                        await asyncio.sleep(poll_interval_seconds)
+                        continue
+                    else:
+                        # Unknown status
+                        raise BackendDeploymentError(
+                            f"ACR build for image '{image_tag}' returned unknown status: {run_status}. "
+                            f"Run ID: {run_id}"
+                        )
+                else:
+                    raise BackendDeploymentError(
+                        f"ACR build for image '{image_tag}' returned no status. Run ID: {run_id}"
+                    )
         except BackendDeploymentError:
             raise
         except Exception as exc:
