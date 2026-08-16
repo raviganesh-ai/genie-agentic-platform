@@ -44,7 +44,9 @@ from app.api.error_mapping import domain_error_handler
 from app.config.settings import Settings, get_settings
 from app.deploy_launch.access_policy_service import AccessPolicyService
 from app.deploy_launch.backend_deployment_service import create_backend_deployment_service
-from app.deploy_launch.frontend_deployment_service import create_frontend_deployment_service
+from app.deploy_launch.container_app_frontend_deployment_service import (
+    create_container_app_frontend_deployment_service,
+)
 from app.deploy_launch.mission_agent_provisioning_service import (
     create_mission_agent_provisioning_service,
 )
@@ -260,7 +262,9 @@ def create_app(
                 settings=resolved_settings
             ),
             backend_deployment_service=create_backend_deployment_service(settings=resolved_settings),
-            frontend_deployment_service=create_frontend_deployment_service(settings=resolved_settings),
+            frontend_deployment_service=create_container_app_frontend_deployment_service(
+                settings=resolved_settings
+            ),
         )
 
         app.state.ready = True

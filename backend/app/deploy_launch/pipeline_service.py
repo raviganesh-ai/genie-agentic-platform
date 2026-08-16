@@ -54,9 +54,9 @@ from app.deploy_launch.code_materializer import (
     generate_backend_service_scaffold,
     materialize_build,
 )
-from app.deploy_launch.frontend_deployment_service import (
-    FrontendDeploymentService,
-    NullFrontendDeploymentService,
+from app.deploy_launch.container_app_frontend_deployment_service import (
+    ContainerAppFrontendDeploymentService,
+    NullContainerAppFrontendDeploymentService,
 )
 from app.deploy_launch.mission_agent_provisioning_service import (
     MissionAgentProvisioningService,
@@ -141,7 +141,9 @@ class DeploymentPipelineService:
         mission_agent_provisioning_service: MissionAgentProvisioningService
         | NullMissionAgentProvisioningService,
         backend_deployment_service: BackendDeploymentService | NullBackendDeploymentService,
-        frontend_deployment_service: FrontendDeploymentService | NullFrontendDeploymentService,
+        frontend_deployment_service: (
+            ContainerAppFrontendDeploymentService | NullContainerAppFrontendDeploymentService
+        ),
         test_execution_service: TestExecutionService,
         security_scan_service: SecurityScanService,
         build_workspace_root: Path,
@@ -738,7 +740,9 @@ class DeploymentPipelineService:
                         _step_result.detail = message
 
                     frontend_result = await self._frontend_deployment_service.deploy(
-                        ui_root=frontend_root, on_progress=_on_frontend_progress
+                        mission_slug=mission_slug,
+                        ui_root=frontend_root,
+                        on_progress=_on_frontend_progress,
                     )
                     pipeline_run.frontend_url = frontend_result.frontend_url
                     detail = f"Frontend deployed at {frontend_result.frontend_url}."
@@ -892,7 +896,9 @@ def create_deployment_pipeline_service(
     mission_agent_provisioning_service: MissionAgentProvisioningService
     | NullMissionAgentProvisioningService,
     backend_deployment_service: BackendDeploymentService | NullBackendDeploymentService,
-    frontend_deployment_service: FrontendDeploymentService | NullFrontendDeploymentService,
+    frontend_deployment_service: (
+        ContainerAppFrontendDeploymentService | NullContainerAppFrontendDeploymentService
+    ),
 ) -> DeploymentPipelineService:
     """Wires a ``DeploymentPipelineService`` from already-constructed collaborators.
 

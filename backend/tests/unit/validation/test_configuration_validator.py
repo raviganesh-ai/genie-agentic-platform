@@ -72,12 +72,12 @@ def test_fails_closed_in_production_when_deployment_container_apps_environment_i
     assert not result.passed
 
 
-def test_fails_closed_in_production_when_deployment_storage_account_name_missing(
+def test_storage_account_name_is_not_required_for_container_app_frontend_deployment(
     foundry_configured_settings,
 ):
     broken = foundry_configured_settings.model_copy(update={"deployment_storage_account_name": None})
     result = ConfigurationValidator().validate(broken)
-    assert not result.passed
+    assert result.passed
 
 
 def test_fails_closed_in_production_when_deployment_location_missing(foundry_configured_settings):

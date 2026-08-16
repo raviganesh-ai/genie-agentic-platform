@@ -24,7 +24,7 @@ async def test_null_service_deploy_returns_a_local_placeholder_url():
 
     result = await service.deploy(ui_root="unused")  # type: ignore[arg-type]
 
-    assert result.frontend_url == "http://localhost/missions/frontend"
+    assert result.frontend_url == "http://localhost/missions/mission/frontend"
 
 
 def test_detects_storage_authorization_permission_mismatch():

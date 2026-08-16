@@ -48,8 +48,6 @@ class ConfigurationValidator:
                 errors.append(
                     "deployment_container_apps_environment_id is required in production."
                 )
-            if not settings.deployment_storage_account_name:
-                errors.append("deployment_storage_account_name is required in production.")
             if not settings.deployment_location:
                 errors.append("deployment_location is required in production.")
 

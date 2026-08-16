@@ -218,12 +218,18 @@ class NullFrontendDeploymentService:
     """Local/test double: real behavior end-to-end minus any actual Azure calls."""
 
     async def deploy(
-        self, *, ui_root: Path, on_progress: DeploymentProgressCallback | None = None
+        self,
+        *,
+        ui_root: Path,
+        mission_slug: str = "mission",
+        on_progress: DeploymentProgressCallback | None = None,
     ) -> FrontendDeploymentResult:
         del ui_root
         if on_progress is not None:
             await on_progress("Deploying frontend (local mode, no real Azure calls)...")
-        return FrontendDeploymentResult(frontend_url="http://localhost/missions/frontend")
+        return FrontendDeploymentResult(
+            frontend_url=f"http://localhost/missions/{mission_slug}/frontend"
+        )
 
 
 def create_frontend_deployment_service(
