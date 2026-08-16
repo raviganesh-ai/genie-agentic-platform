@@ -61,7 +61,7 @@ export function LandingPage(): JSX.Element {
   }, [title, selectedModel, setSelectedModelDeploymentRef, setSessionId, navigate]);
 
   return (
-    <div className="genie-fade-in" style={{ maxWidth: 600, margin: "8vh auto", textAlign: "center" }}>
+    <div className="genie-fade-in" style={{ maxWidth: 680, margin: "8vh auto", textAlign: "center" }}>
       <Text
         weight="bold"
         size={900}
@@ -88,8 +88,8 @@ export function LandingPage(): JSX.Element {
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: "minmax(220px, 1fr) minmax(220px, 1fr) auto",
-          gap: 8,
+          gridTemplateColumns: "minmax(0, 1fr) auto",
+          gap: 12,
           justifyContent: "center",
           alignItems: "center",
           marginBottom: 16,
@@ -107,25 +107,44 @@ export function LandingPage(): JSX.Element {
           onKeyDown={(event) => {
             if (event.key === "Enter" && !creating && title.trim()) void handleCreate();
           }}
-          style={{ width: 320 }}
+          style={{ width: "100%" }}
           required
         />
-        <Dropdown
-          placeholder={loadingModels ? "Loading models..." : "Select a model"}
-          value={selectedModel ?? undefined}
-          selectedOptions={selectedModel ? [selectedModel] : []}
-          disabled={loadingModels || models.length === 0 || creating}
-          onOptionSelect={(_, data) => setSelectedModel(data.optionValue ?? null)}
+        <Button
+          appearance="primary"
+          disabled={creating || !title.trim()}
+          onClick={() => void handleCreate()}
+          style={{ whiteSpace: "nowrap" }}
         >
-          {models.map((model) => (
-            <Option key={model} value={model}>
-              {model}
-            </Option>
-          ))}
-        </Dropdown>
-        <Button appearance="primary" disabled={creating || !title.trim()} onClick={() => void handleCreate()}>
           {creating ? "Creating your session..." : "✨ Start New Session"}
         </Button>
+        <div
+          style={{
+            gridColumn: "1 / -1",
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            minWidth: 0,
+          }}
+        >
+          <Text size={200} style={{ opacity: 0.7, flexShrink: 0 }}>
+            Generation model
+          </Text>
+          <Dropdown
+            placeholder={loadingModels ? "Loading models..." : "Select a model"}
+            value={selectedModel ?? undefined}
+            selectedOptions={selectedModel ? [selectedModel] : []}
+            disabled={loadingModels || models.length === 0 || creating}
+            onOptionSelect={(_, data) => setSelectedModel(data.optionValue ?? null)}
+            style={{ flex: 1, minWidth: 0 }}
+          >
+            {models.map((model) => (
+              <Option key={model} value={model}>
+                {model}
+              </Option>
+            ))}
+          </Dropdown>
+        </div>
       </div>
 
       {modelsError ? <ErrorState error={modelsError} /> : null}
