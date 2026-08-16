@@ -227,11 +227,12 @@ describe("WorkshopPage", () => {
   it(
     "treats build-solution as stuck (never actually started server-side) after a grace period with no result and no live stream, offering a retry",
     async () => {
-      // Fake only the setTimeout/clearTimeout pair the 90s stuck-detector
-      // uses - leave setInterval/queueMicrotask/Date alone so the
-      // unrelated live-stream reconnect loop (useWorkflowEventStream,
-      // itself driven by real Promise microtasks) keeps resolving
-      // normally instead of needing to be ticked forward here too.
+      // Fake only the setTimeout/clearTimeout pair the 5-minute
+      // stuck-detector uses - leave setInterval/queueMicrotask/Date alone
+      // so the unrelated live-stream reconnect loop
+      // (useWorkflowEventStream, itself driven by real Promise microtasks)
+      // keeps resolving normally instead of needing to be ticked forward
+      // here too.
       vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
       try {
         const fetchMock = mockFetchSequence([
@@ -248,7 +249,7 @@ describe("WorkshopPage", () => {
 
         expect(screen.queryByText(/hasn't started yet/i)).not.toBeInTheDocument();
 
-        await vi.advanceTimersByTimeAsync(90_000);
+        await vi.advanceTimersByTimeAsync(300_000);
 
         expect(screen.getByText(/UI & Agent Design hasn't started yet/i)).toBeInTheDocument();
 
@@ -313,7 +314,7 @@ describe("WorkshopPage", () => {
           ).toBeInTheDocument(),
         );
 
-        await vi.advanceTimersByTimeAsync(90_000);
+        await vi.advanceTimersByTimeAsync(300_000);
 
         expect(screen.queryByText(/hasn't started yet/i)).not.toBeInTheDocument();
       } finally {
