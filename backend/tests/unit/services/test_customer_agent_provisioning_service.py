@@ -296,6 +296,27 @@ async def test_model_scope_id_uses_a_foundry_safe_agent_name(local_settings: Set
     assert api_client.created[0]["model"] == "gpt-5-mini"
 
 
+async def test_model_override_keeps_orchestrator_on_configured_model(local_settings: Settings):
+    registry = _registry(
+        _agent(agent_id="genie-orchestrator", foundry_agent_id="orchestrator-foundry"),
+        _agent(agent_id="requirements-analyst", foundry_agent_id="requirements-foundry"),
+    )
+    service, api_client = _service(
+        api_client=_FakeAgentApiClient(), registry=registry, local_settings=local_settings
+    )
+
+    await service.provision_for_session(
+        session_id="session-1",
+        scope_id="model:gpt-5-mini",
+        trace_id="trace-1",
+        model_deployment_ref="gpt-5-mini",
+    )
+
+    created_by_description = {created["description"]: created for created in api_client.created}
+    assert created_by_description["genie-orchestrator"]["model"] == "test-model"
+    assert created_by_description["requirements-analyst"]["model"] == "gpt-5-mini"
+
+
 async def test_deprovision_by_scope_id_leaves_other_scopes_untouched(local_settings: Settings):
     registry = _registry(_agent(agent_id="agent-a", foundry_agent_id="agent-a-foundry"))
     service, api_client = _service(

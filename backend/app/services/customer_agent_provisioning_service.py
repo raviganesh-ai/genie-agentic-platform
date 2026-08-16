@@ -46,6 +46,7 @@ class CustomerAgentProvisioningError(RuntimeError):
 
 _FOUNDRY_AGENT_NAME_MAX_LENGTH = 63
 _INVALID_FOUNDRY_AGENT_NAME_CHARS = re.compile(r"[^A-Za-z0-9-]+")
+_ORCHESTRATOR_AGENT_ID = "genie-orchestrator"
 
 
 def _dedicated_agent_name(*, agent_id: str, scope_key: str) -> str:
@@ -150,7 +151,12 @@ class CustomerAgentProvisioningService:
             for agent in self._agent_registry.list():
                 if not agent.enabled or not agent.foundry_agent_id:
                     continue
-                effective_model = (model_deployment_ref or agent.model_deployment_ref or "").strip()
+                effective_model = (
+                    agent.model_deployment_ref
+                    if agent.id == _ORCHESTRATOR_AGENT_ID
+                    else model_deployment_ref or agent.model_deployment_ref
+                )
+                effective_model = (effective_model or "").strip()
                 if not effective_model:
                     raise CustomerAgentProvisioningError(
                         f"Cannot provision dedicated agent '{agent.id}': no model deployment ref resolved."

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+from app.agents.foundry.errors import FoundryUnavailableError
 from app.agents.gateway import AgentGateway, get_enabled_agent, resolve_prompt_text
 from app.agents.models import AgentDefinition, AgentExecutionRequest, AgentExecutionResult
 from app.agents.registry import AgentRegistry
@@ -26,6 +27,7 @@ from app.workflows.models import WorkflowStep
 __all__ = ["MissingMemoryReferenceError", "MissingPromptError", "WorkflowStepExecutor"]
 
 _PREVIEW_MAX_LENGTH = 240
+_DELEGATED_OUTPUT_MARKER = "DELEGATED_OUTPUT_STORED"
 
 
 def _preview(output_text: str | None) -> str | None:
@@ -184,6 +186,11 @@ class WorkflowStepExecutor:
             )
             if stored_output:
                 output_text = stored_output
+            elif (result.output_text or "").strip() == _DELEGATED_OUTPUT_MARKER:
+                raise FoundryUnavailableError(
+                    f"Delegated workflow step '{step.id}' returned the delegation marker "
+                    "without storing specialist output in shared memory."
+                )
 
         return WorkflowStepResult(
             step_id=step.id,
