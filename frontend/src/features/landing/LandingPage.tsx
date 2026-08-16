@@ -122,12 +122,14 @@ export function LandingPage(): JSX.Element {
           style={{
             gridColumn: "1 / -1",
             display: "flex",
-            alignItems: "center",
-            gap: 10,
+            flexDirection: "column",
+            alignItems: "stretch",
+            gap: 6,
             minWidth: 0,
+            textAlign: "left",
           }}
         >
-          <Text size={200} style={{ opacity: 0.7, flexShrink: 0 }}>
+          <Text size={200} style={{ opacity: 0.7 }}>
             Generation model
           </Text>
           <Dropdown
@@ -136,7 +138,7 @@ export function LandingPage(): JSX.Element {
             selectedOptions={selectedModel ? [selectedModel] : []}
             disabled={loadingModels || models.length === 0 || creating}
             onOptionSelect={(_, data) => setSelectedModel(data.optionValue ?? null)}
-            style={{ flex: 1, minWidth: 0 }}
+            style={{ width: "100%" }}
           >
             {models.map((model) => (
               <Option key={model} value={model}>
