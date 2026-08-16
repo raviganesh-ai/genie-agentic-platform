@@ -20,6 +20,8 @@ not something invented here.
 """
 from __future__ import annotations
 
+import asyncio
+import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -142,6 +144,36 @@ class FrontendDeploymentService:
                         overwrite=True,
                         content_settings=ContentSettings(content_type=_content_type_for(file_path)),
                     )
+
+            # Poll to verify uploads are visible in Storage (eventual consistency).
+            await _report("Verifying frontend upload to Storage...")
+            max_wait_seconds = 30
+            start_time = time.time()
+            poll_interval_seconds = 2
+            index_blob_found = False
+
+            while True:
+                elapsed = time.time() - start_time
+                if elapsed > max_wait_seconds:
+                    raise FrontendDeploymentError(
+                        f"Frontend upload verification timed out after {max_wait_seconds}s. "
+                        "index.html was not visible in Storage."
+                    )
+
+                try:
+                    # Check if index.html is readable (indicates upload succeeded and is visible).
+                    index_blob = container_client.get_blob_client("index.html")
+                    _ = index_blob.get_blob_properties()
+                    index_blob_found = True
+                    break
+                except Exception:
+                    # Not ready yet; wait and retry.
+                    await asyncio.sleep(poll_interval_seconds)
+
+            if not index_blob_found:
+                raise FrontendDeploymentError(
+                    "Frontend upload verification failed: index.html not found in Storage after upload."
+                )
         except FrontendDeploymentError:
             raise
         except Exception as exc:
