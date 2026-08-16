@@ -192,7 +192,7 @@ async def invoke(request: InvokeRequest) -> InvokeResponse:
             agent = FoundryAgent(
                 project_client=project_client,
                 agent_name=_ORCHESTRATOR_AGENT_NAME,
-                agent_version="latest",
+                agent_version=os.getenv("FOUNDRY_ORCHESTRATOR_AGENT_VERSION", "1"),
             )
             response = await agent.run(request.message)
             return InvokeResponse(output_text=(getattr(response, "text", None) or "").strip())

@@ -42,6 +42,8 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
+from uuid import NAMESPACE_URL, uuid5
 
 from app.config.settings import Settings
 
@@ -56,6 +58,7 @@ DeploymentProgressCallback = Callable[[str], Awaitable[None]]
 # Every other status (Queued/Started/Running, or anything Azure adds later)
 # is treated as still-in-flight by the polling loop in ``deploy()``.
 _ACR_RUN_FAILURE_STATUSES = frozenset({"failed", "canceled", "cancelled", "error", "timeout"})
+_COGNITIVE_SERVICES_USER_ROLE_ID = "a97b65f3-24c7-4388-baec-2e87135dc908"
 
 __all__ = [
     "BackendDeploymentError",
@@ -158,6 +161,65 @@ class BackendDeploymentService:
             return ContainerAppsAPIClient(DefaultAzureCredential(), self._subscription_id)
         except Exception as exc:
             raise BackendDeploymentError(f"Failed to construct Container Apps client: {exc}") from exc
+
+    def _configure_mission_identity(self, identity_resource_id: str) -> str:
+        """Returns the mission identity client id after granting Foundry invocation access."""
+
+        try:
+            from azure.identity import DefaultAzureCredential
+            from azure.mgmt.authorization import AuthorizationManagementClient
+            from azure.mgmt.msi import ManagedServiceIdentityClient
+        except ImportError as exc:
+            raise BackendDeploymentError(
+                "azure-mgmt-authorization / azure-mgmt-msi / azure-identity are not installed."
+            ) from exc
+
+        segments = [segment for segment in identity_resource_id.split("/") if segment]
+        try:
+            resource_group = segments[segments.index("resourceGroups") + 1]
+            identity_name = segments[segments.index("userAssignedIdentities") + 1]
+        except (ValueError, IndexError) as exc:
+            raise BackendDeploymentError(
+                f"Invalid mission identity resource id '{identity_resource_id}'."
+            ) from exc
+
+        credential = DefaultAzureCredential()
+        try:
+            identity = ManagedServiceIdentityClient(
+                credential, self._subscription_id
+            ).user_assigned_identities.get(resource_group, identity_name)
+            foundry_host = urlparse(self._foundry_endpoint).hostname or ""
+            foundry_account_name = foundry_host.split(".")[0]
+            if not foundry_account_name or not identity.principal_id or not identity.client_id:
+                raise BackendDeploymentError("Mission identity or Foundry account could not be resolved.")
+            foundry_scope = (
+                f"/subscriptions/{self._subscription_id}/resourceGroups/{self._resource_group}"
+                f"/providers/Microsoft.CognitiveServices/accounts/{foundry_account_name}"
+            )
+            assignment_id = str(uuid5(NAMESPACE_URL, f"{foundry_scope}:{identity.principal_id}:{_COGNITIVE_SERVICES_USER_ROLE_ID}"))
+            try:
+                AuthorizationManagementClient(credential, self._subscription_id).role_assignments.create(
+                    scope=foundry_scope,
+                    role_assignment_name=assignment_id,
+                    parameters={
+                        "roleDefinitionId": (
+                            f"/subscriptions/{self._subscription_id}/providers/Microsoft.Authorization/"
+                            f"roleDefinitions/{_COGNITIVE_SERVICES_USER_ROLE_ID}"
+                        ),
+                        "principalId": identity.principal_id,
+                        "principalType": "ServicePrincipal",
+                    },
+                )
+            except Exception as exc:
+                if "RoleAssignmentExists" not in str(exc):
+                    raise
+            return identity.client_id
+        except BackendDeploymentError:
+            raise
+        except Exception as exc:
+            raise BackendDeploymentError(
+                f"Failed to configure mission identity for Foundry access: {exc}"
+            ) from exc
 
     async def deploy(
         self,
@@ -326,6 +388,7 @@ class BackendDeploymentService:
             env_vars = [
                 EnvironmentVar(name="FOUNDRY_ENDPOINT", value=self._foundry_endpoint),
                 EnvironmentVar(name="FOUNDRY_PROJECT_NAME", value=self._foundry_project_name),
+                EnvironmentVar(name="FOUNDRY_ORCHESTRATOR_AGENT_VERSION", value="1"),
             ]
             
             # Build the Container App envelope with mission-specific managed identity.
@@ -335,6 +398,12 @@ class BackendDeploymentService:
             # MissionIdentityService, so the app can authenticate without credentials.
             identity_config = None
             if mission_identity_resource_id:
+                mission_identity_client_id = self._configure_mission_identity(
+                    mission_identity_resource_id
+                )
+                env_vars.append(
+                    EnvironmentVar(name="AZURE_CLIENT_ID", value=mission_identity_client_id)
+                )
                 identity_config = ManagedServiceIdentity(
                     type="UserAssigned",
                     user_assigned_identities={mission_identity_resource_id: UserAssignedIdentity()},
