@@ -153,7 +153,7 @@ import react from "@vitejs/plugin-react";
 export default defineConfig({ plugins: [react()] });
 """
 
-_FRONTEND_MAIN_TSX = """import React from "react";
+_FRONTEND_MAIN_TSX = """import React, { useState } from "react";
 import { createRoot } from "react-dom/client";
 import * as GeneratedModule from "../MissionApp";
 
@@ -163,13 +163,54 @@ const moduleValue = GeneratedModule as unknown as {
     App?: GeneratedComponent;
     MissionApp?: GeneratedComponent;
 };
-const MissionApp = moduleValue.default ?? moduleValue.App ?? moduleValue.MissionApp;
+const GeneratedMissionApp = moduleValue.default ?? moduleValue.App ?? moduleValue.MissionApp;
 
-if (!MissionApp) {
-    throw new Error("Generated MissionApp.tsx must export a default component, App, or MissionApp.");
+function MissionConsole() {
+    const [message, setMessage] = useState("");
+    const [response, setResponse] = useState("");
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState("");
+
+    async function invoke() {
+        if (!message.trim()) return;
+        setLoading(true);
+        setError("");
+        try {
+            const backendUrl = window.__MISSION_BACKEND_URL__;
+            if (!backendUrl) throw new Error("Mission backend URL is not configured.");
+            const result = await fetch(`${backendUrl}/invoke`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ message }),
+            });
+            if (!result.ok) throw new Error(`Mission backend returned ${result.status}.`);
+            const body = await result.json();
+            setResponse(body.output_text || "The mission backend returned no output.");
+        } catch (caught) {
+            setError(caught instanceof Error ? caught.message : "Unable to contact the mission backend.");
+        } finally {
+            setLoading(false);
+        }
+    }
+
+    return <main style={{ maxWidth: 960, margin: "0 auto", padding: 32, fontFamily: "Arial, sans-serif" }}>
+        <header style={{ marginBottom: 28 }}>
+            <p style={{ color: "#2864b4", fontWeight: 700, margin: 0 }}>MISSION PROTOTYPE</p>
+            <h1 style={{ margin: "8px 0" }}>Interactive Agent Workspace</h1>
+            <p style={{ color: "#56616f" }}>Send a request to this mission's dedicated backend and review the live response.</p>
+        </header>
+        {GeneratedMissionApp ? <section style={{ marginBottom: 28 }}><GeneratedMissionApp /></section> : null}
+        <section style={{ border: "1px solid #d5dbe3", borderRadius: 8, padding: 20 }}>
+            <label htmlFor="mission-message" style={{ display: "block", fontWeight: 700, marginBottom: 8 }}>What should this mission help you accomplish?</label>
+            <textarea id="mission-message" value={message} onChange={(event) => setMessage(event.target.value)} rows={5} style={{ width: "100%", boxSizing: "border-box", padding: 12, font: "inherit" }} placeholder="Describe the task, question, or decision you want the mission agents to handle." />
+            <button type="button" onClick={invoke} disabled={loading || !message.trim()} style={{ marginTop: 12, padding: "10px 16px", background: "#2864b4", color: "white", border: 0, borderRadius: 4, fontWeight: 700, cursor: "pointer" }}>{loading ? "Working..." : "Run Mission"}</button>
+            {error ? <p role="alert" style={{ color: "#b42318" }}>{error}</p> : null}
+            {response ? <pre style={{ whiteSpace: "pre-wrap", marginTop: 20, padding: 16, background: "#f4f7fb", borderRadius: 4 }}>{response}</pre> : null}
+        </section>
+    </main>;
 }
 
-createRoot(document.getElementById("root")!).render(<MissionApp />);
+createRoot(document.getElementById("root")!).render(<MissionConsole />);
 """
 
 _FRONTEND_ENV_D_TS = """interface Window {
