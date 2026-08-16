@@ -1,8 +1,12 @@
 """Unit tests for BackendDeploymentService's factory (real vs Null selection)."""
 from __future__ import annotations
 
+import sys
+from types import ModuleType, SimpleNamespace
+
 from app.config.settings import Settings
 from app.deploy_launch.backend_deployment_service import (
+    BackendDeploymentService,
     NullBackendDeploymentService,
     create_backend_deployment_service,
 )
@@ -44,3 +48,52 @@ def test_local_mode_with_deployment_config_but_no_foundry_config_returns_null_se
     )
 
     assert isinstance(service, NullBackendDeploymentService)
+
+
+def test_configure_mission_identity_accepts_lowercase_resource_id_segments(monkeypatch):
+    """Azure resource IDs are case-insensitive for ARM path segments; the
+    real mission identity lookup should accept values like
+    ``resourcegroups`` and ``userassignedidentities``."""
+
+    service = BackendDeploymentService(
+        subscription_id="sub-123",
+        resource_group="genie-dev-rg",
+        acr_name="acr123",
+        container_apps_environment_id="env-123",
+        location="eastus2",
+        foundry_endpoint="https://genie-demo-resource.services.ai.azure.com/api/projects/demo",
+        foundry_project_name="demo",
+    )
+
+    fake_credential = object()
+    fake_identity = SimpleNamespace(principal_id="principal-123", client_id="client-123")
+    assignment_calls = []
+
+    fake_authz = SimpleNamespace(
+        role_assignments=SimpleNamespace(
+            create=lambda **kwargs: assignment_calls.append(kwargs) or None
+        )
+    )
+    fake_msi = SimpleNamespace(
+        user_assigned_identities=SimpleNamespace(
+            get=lambda resource_group_name, identity_name: fake_identity
+        )
+    )
+
+    fake_azure_identity = ModuleType("azure.identity")
+    fake_azure_identity.DefaultAzureCredential = lambda: fake_credential
+    fake_azure_authz = ModuleType("azure.mgmt.authorization")
+    fake_azure_authz.AuthorizationManagementClient = lambda credential, subscription_id: fake_authz
+    fake_azure_msi = ModuleType("azure.mgmt.msi")
+    fake_azure_msi.ManagedServiceIdentityClient = lambda credential, subscription_id: fake_msi
+
+    monkeypatch.setitem(sys.modules, "azure.identity", fake_azure_identity)
+    monkeypatch.setitem(sys.modules, "azure.mgmt.authorization", fake_azure_authz)
+    monkeypatch.setitem(sys.modules, "azure.mgmt.msi", fake_azure_msi)
+
+    result = service._configure_mission_identity(
+        "/subscriptions/sub-123/resourcegroups/genie-dev-rg/providers/Microsoft.ManagedIdentity/userAssignedIdentities/genie-mission-demo"
+    )
+
+    assert result == "client-123"
+    assert assignment_calls

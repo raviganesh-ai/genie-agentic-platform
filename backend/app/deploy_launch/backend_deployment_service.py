@@ -175,9 +175,12 @@ class BackendDeploymentService:
             ) from exc
 
         segments = [segment for segment in identity_resource_id.split("/") if segment]
+        normalized_segments = [segment.lower() for segment in segments]
         try:
-            resource_group = segments[segments.index("resourceGroups") + 1]
-            identity_name = segments[segments.index("userAssignedIdentities") + 1]
+            resource_group_index = normalized_segments.index("resourcegroups")
+            identity_index = normalized_segments.index("userassignedidentities")
+            resource_group = segments[resource_group_index + 1]
+            identity_name = segments[identity_index + 1]
         except (ValueError, IndexError) as exc:
             raise BackendDeploymentError(
                 f"Invalid mission identity resource id '{identity_resource_id}'."
