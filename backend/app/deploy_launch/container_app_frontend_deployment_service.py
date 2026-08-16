@@ -213,6 +213,7 @@ class ContainerAppFrontendDeploymentService:
                 ContainerApp,
                 Ingress,
                 RegistryCredentials,
+                Scale,
                 Secret,
                 Template,
             )
@@ -232,7 +233,8 @@ class ContainerAppFrontendDeploymentService:
                     secrets=[Secret(name="acr-password", value=password)],
                 ),
                 template=Template(
-                    containers=[Container(name="frontend", image=image_tag)]
+                    containers=[Container(name="frontend", image=image_tag)],
+                    scale=Scale(min_replicas=1, max_replicas=10),
                 ),
             )
             await report("Creating/updating the mission frontend Container App...")
