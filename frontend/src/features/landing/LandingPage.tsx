@@ -22,7 +22,7 @@ export function LandingPage(): JSX.Element {
     setCreating(true);
     setError(null);
     try {
-      const session = await sessionApi.create(title.trim() || "Untitled Discovery Session");
+      const session = await sessionApi.create(title.trim());
       setSessionId(session.id);
       navigate("/upload");
     } catch (err) {
@@ -71,15 +71,16 @@ export function LandingPage(): JSX.Element {
         }}
       >
         <Input
-          placeholder="Give this session a name (optional)"
+          placeholder="Give this session a name"
           value={title}
           onChange={(_, data) => setTitle(data.value)}
           onKeyDown={(event) => {
-            if (event.key === "Enter" && !creating) void handleCreate();
+            if (event.key === "Enter" && !creating && title.trim()) void handleCreate();
           }}
           style={{ width: 320 }}
+          required
         />
-        <Button appearance="primary" disabled={creating} onClick={() => void handleCreate()}>
+        <Button appearance="primary" disabled={creating || !title.trim()} onClick={() => void handleCreate()}>
           {creating ? "Creating your session..." : "✨ Start New Session"}
         </Button>
       </div>
