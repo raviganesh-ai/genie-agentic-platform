@@ -837,9 +837,9 @@ prompts:
       automatically supplies the real requirements, architecture,
       policies, excluded_agents, and user_message shown below, so you do
       not need to repeat their full text in the tool call itself (short
-      placeholders or empty strings are fine) - then respond with EXACTLY
-      that tool's returned output text and nothing else - no additional
-      commentary, no summary.
+      placeholders or empty strings are fine). The tool persists the complete
+      generated source; respond with exactly DELEGATED_OUTPUT_STORED and
+      nothing else. Do not echo or summarize the generated source.
 
       requirements: {requirements}
 
@@ -856,7 +856,7 @@ prompts:
       - policies
       - excluded_agents
       - user_message
-    version: "1.3.0"
+    version: "1.4.0"
 
   - id: orchestrator-security-assessment-phase-v1
     name: Orchestrator Security Assessment Phase

@@ -173,11 +173,23 @@ class WorkflowStepExecutor:
             },
         )
 
+        output_text = result.output_text
+        if _display_agent_id(step, agent.id) != agent.id and self._memory_service is not None:
+            stored_output = await self._read_step_output(
+                source_step_id=step.id,
+                step_outputs={},
+                agent=agent,
+                session_id=session_id,
+                trace_id=trace_id,
+            )
+            if stored_output:
+                output_text = stored_output
+
         return WorkflowStepResult(
             step_id=step.id,
             agent_id=agent.id,
             status="completed",
-            output_text=result.output_text,
+            output_text=output_text,
             started_at=started_at,
             completed_at=datetime.now(UTC),
             resolved_variables=variables,
