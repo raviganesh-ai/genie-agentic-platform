@@ -5,6 +5,7 @@ import { useSessionContext } from "@/state/SessionContext";
 import { useWorkshop } from "@/hooks/useWorkshop";
 import { useAsyncResource } from "@/hooks/useAsyncResource";
 import { workflowApi } from "@/services/workflowApi";
+import { workshopApi } from "@/services/workshopApi";
 import { getTraceId } from "@/state/traceRegistry";
 import { ApiError } from "@/services/httpClient";
 import { PageHeader } from "@/layouts/AppShell";
@@ -33,6 +34,7 @@ export function WorkshopPage(): JSX.Element {
   const [rerunningBuild, setRerunningBuild] = useState(false);
   const [rerunBuildError, setRerunBuildError] = useState<string | null>(null);
   const [reviewAcknowledged, setReviewAcknowledged] = useState(false);
+  const [partialBuildComponents, setPartialBuildComponents] = useState<string>("");
   // Architecture Studio's approval handler kicks off build-solution with a
   // fire-and-forget resume call (it navigates here immediately rather than
   // waiting - see handleApproveArchitecture's comment there) so its own
@@ -91,9 +93,12 @@ export function WorkshopPage(): JSX.Element {
   // reappear first, then the one that actually failed regenerates. Falls back
   // to `buildOutputText` for the brief window before the retry's first delta
   // (or `step_started` reset) has arrived, so the view never flashes blank.
+  // Also falls back to `partialBuildComponents` (polled incrementally from the
+  // backend) when the build is still in-flight and taking >240s - this allows
+  // components to display as they're generated instead of timing out mid-response.
   const displayedBuildText = rerunningBuild
     ? liveBuildText || buildOutputText
-    : buildOutputText || liveBuildText;
+    : buildOutputText || liveBuildText || partialBuildComponents;
   // True as soon as the Build Agent's own real generation (every
   // specialist agent, the Orchestrator Agent, then the UI) has actually
   // finished streaming - well before `buildOutputText` above is populated,
@@ -150,6 +155,38 @@ export function WorkshopPage(): JSX.Element {
       setMissionError(null);
     }
   }, [missionError, buildStepResult, liveBuildText, setMissionError]);
+
+  // Poll for partial build components incrementally while the build-solution
+  // step is still in-flight. This avoids the 240s HTTP timeout by returning
+  // components as they're generated instead of waiting for all 10 to finish.
+  // Once buildStepResult is available, the full output has already arrived,
+  // so stop polling the partial endpoint.
+  useEffect(() => {
+    if (!sessionId || !workflowRunId || buildStepResult) {
+      return; // Don't poll once we have the complete result
+    }
+
+    const pollBuildComponents = async () => {
+      try {
+        const result = await workshopApi.getBuildComponents(sessionId, workflowRunId);
+        if (result.build_output) {
+          setPartialBuildComponents(result.build_output);
+        }
+      } catch {
+        // Silently ignore errors - polling is just optimization
+      }
+    };
+
+    // Poll every 2 seconds while build is in progress
+    const interval = window.setInterval(() => {
+      void pollBuildComponents();
+    }, 2000);
+
+    // Start immediately
+    void pollBuildComponents();
+
+    return () => window.clearInterval(interval);
+  }, [sessionId, workflowRunId, buildStepResult]);
 
   // The build-solution step can fail (e.g. a transient Foundry/agent
   // execution error) - the backend now stores that as a retryable "failed"

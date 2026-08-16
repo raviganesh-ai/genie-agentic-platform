@@ -78,4 +78,13 @@ export const workshopApi = {
       },
     );
   },
+  getBuildComponents(
+    sessionId: string,
+    workflowRunId: string,
+  ): Promise<{ build_output: string }> {
+    return apiFetch<{ build_output: string }>(
+      `/sessions/${sessionId}/workshop/build-components/${workflowRunId}`,
+      { method: "GET" },
+    );
+  },
 };

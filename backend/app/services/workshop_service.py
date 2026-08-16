@@ -201,6 +201,35 @@ class WorkshopService:
             rationale=rationale,
         )
 
+    async def get_build_output(
+        self,
+        *,
+        session_id: str,
+        requesting_user_id: str,
+        workflow_run_id: str,
+    ) -> str:
+        """Get the partial or complete build-solution step output.
+        
+        Returns whatever output is currently available without waiting
+        for the step to complete. Frontend polls this endpoint every 2s
+        to display components as they're generated, avoiding the 240s
+        HTTP timeout when generating all 10 components takes >240s.
+        """
+        await self._authorize(session_id, requesting_user_id)
+        run = await self._get_run(workflow_run_id)
+        
+        # Find the build-solution step result
+        build_step = next(
+            (r for r in run.step_results if r.step_id == "build-solution"),
+            None,
+        )
+        
+        # Return output whether the step is still running or has completed
+        # (frontend just gets whatever is available right now)
+        if build_step is not None:
+            return build_step.output_text or ""
+        return ""
+
     async def _authorize(self, session_id: str, requesting_user_id: str) -> None:
         await self._session_service.get_session(
             session_id=session_id, requesting_user_id=requesting_user_id

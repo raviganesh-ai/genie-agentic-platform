@@ -158,6 +158,28 @@ async def update_priorities(
     )
 
 
+@router.get("/build-components/{workflow_run_id}")
+async def get_build_components(
+    session_id: str,
+    workflow_run_id: str,
+    user: AuthenticatedUser = Depends(get_current_user),
+    workshop_service: WorkshopService = Depends(get_workshop_service),
+) -> dict:
+    """Get partial build-solution output as components are generated.
+    
+    Returns whatever build-solution output is currently available (either
+    partial if still in-flight, or complete if the step has finished).
+    Allows frontend to poll and display components as they arrive, avoiding
+    the 240s HTTP timeout when generating all 10 components.
+    """
+    output = await workshop_service.get_build_output(
+        session_id=session_id,
+        requesting_user_id=user.user_id,
+        workflow_run_id=workflow_run_id,
+    )
+    return {"build_output": output}
+
+
 @router.post("/regenerate-component")
 async def regenerate_component(
     session_id: str,
