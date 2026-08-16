@@ -155,9 +155,17 @@ from agent_framework.foundry import FoundryAgent
 from azure.ai.projects.aio import AIProjectClient
 from azure.identity.aio import DefaultAzureCredential
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 app = FastAPI(title="{mission_title} Backend")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origin_regex=os.getenv("CORS_ALLOWED_ORIGIN_REGEX", r"https://.*"),
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 _ORCHESTRATOR_AGENT_NAME = "{orchestrator_agent_name}"
 

@@ -77,7 +77,9 @@ def test_write_to_directory_includes_backend_service_scaffold(tmp_path: Path):
     assert (tmp_path / "Dockerfile").exists()
     assert (tmp_path / "requirements.txt").exists()
     assert (tmp_path / "agent_config.py").exists()
-    assert "acme-orchestrator" in (tmp_path / "main.py").read_text(encoding="utf-8")
+    main_source = (tmp_path / "main.py").read_text(encoding="utf-8")
+    assert "acme-orchestrator" in main_source
+    assert "CORSMiddleware" in main_source
     assert "acme-requirements-specialist" in (tmp_path / "agent_config.py").read_text(encoding="utf-8")
 
 
