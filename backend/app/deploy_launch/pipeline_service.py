@@ -35,6 +35,8 @@ to have finished the work.
 from __future__ import annotations
 
 import asyncio
+import html
+import json
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -106,7 +108,7 @@ _FRONTEND_INDEX_HTML_TEMPLATE = """<!doctype html>
 <head>
   <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Mission Prototype</title>
+    <title>{mission_title}</title>
   <script src="runtime-config.js"></script>
 </head>
 <body>
@@ -423,6 +425,7 @@ const moduleValue = GeneratedModule as unknown as {
 const GeneratedMissionApp = moduleValue.default ?? moduleValue.App ?? moduleValue.MissionApp;
 
 function MissionConsole() {
+    const missionTitle = window.__MISSION_TITLE__ || "Mission Prototype";
     const [message, setMessage] = useState("");
     const [response, setResponse] = useState("");
     const [loading, setLoading] = useState(false);
@@ -475,7 +478,7 @@ function MissionConsole() {
 
     return <main className="genie-shell genie-fade-in">
         <header className="genie-header">
-            <p className="genie-eyebrow"><span className="genie-live-dot" /> Mission Prototype</p>
+            <p className="genie-eyebrow"><span className="genie-live-dot" /> {missionTitle}</p>
             <h1>Interactive Agent Workspace</h1>
             <p>Send a request to this mission's dedicated backend and watch the agents collaborate live.</p>
         </header>
@@ -503,6 +506,7 @@ createRoot(document.getElementById("root")!).render(<MissionConsole />);
 
 _FRONTEND_ENV_D_TS = """interface Window {
     __MISSION_BACKEND_URL__?: string;
+    __MISSION_TITLE__?: string;
 }
 """
 
@@ -736,6 +740,7 @@ class DeploymentPipelineService:
                 pipeline_run=pipeline_run,
                 run=run,
                 mission_slug=mission_slug,
+                mission_title=session.title,
                 backend_root=backend_root,
                 frontend_root=frontend_root,
                 trace_id=trace_id,
@@ -958,6 +963,7 @@ class DeploymentPipelineService:
         pipeline_run: DeploymentPipelineRun,
         run: WorkflowRunResult,
         mission_slug: str,
+        mission_title: str,
         backend_root: Path,
         frontend_root: Path,
         trace_id: str,
@@ -1083,7 +1089,7 @@ class DeploymentPipelineService:
                 elif step_id == "deploy-backend-service":
                     materialized = self._materialized_builds[pipeline_run.id]
                     scaffold = generate_backend_service_scaffold(
-                        mission_title=mission_slug,
+                        mission_title=mission_title,
                         orchestrator_agent_name=orchestrator_foundry_name,
                         agent_foundry_names=self._agent_foundry_names[pipeline_run.id],
                     )
@@ -1118,7 +1124,8 @@ class DeploymentPipelineService:
                         materialized.ui_component or "", encoding="utf-8"
                     )
                     (frontend_root / "index.html").write_text(
-                        _FRONTEND_INDEX_HTML_TEMPLATE, encoding="utf-8"
+                        _FRONTEND_INDEX_HTML_TEMPLATE.format(mission_title=html.escape(mission_title)),
+                        encoding="utf-8",
                     )
                     (frontend_root / "package.json").write_text(
                         _FRONTEND_PACKAGE_JSON, encoding="utf-8"
@@ -1137,7 +1144,8 @@ class DeploymentPipelineService:
                     public_root = frontend_root / "public"
                     public_root.mkdir(parents=True, exist_ok=True)
                     (public_root / "runtime-config.js").write_text(
-                        f'window.__MISSION_BACKEND_URL__ = "{pipeline_run.backend_url}";\n',
+                        f'window.__MISSION_BACKEND_URL__ = "{pipeline_run.backend_url}";\n'
+                        f"window.__MISSION_TITLE__ = {json.dumps(mission_title)};\n",
                         encoding="utf-8",
                     )
                     detail = f"Frontend wired to real backend URL {pipeline_run.backend_url}."

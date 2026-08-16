@@ -161,7 +161,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-app = FastAPI(title="{mission_title} Backend")
+app = FastAPI(title={mission_title!r})
 app.add_middleware(
     CORSMiddleware,
     allow_origin_regex=os.getenv("CORS_ALLOWED_ORIGIN_REGEX", r"https://.*"),
@@ -288,7 +288,7 @@ def generate_backend_service_scaffold(
 
     return {
         "main.py": _MAIN_PY_TEMPLATE.format(
-            mission_title=mission_title, orchestrator_agent_name=orchestrator_agent_name
+            mission_title=f"{mission_title} Backend", orchestrator_agent_name=orchestrator_agent_name
         ),
         "requirements.txt": _REQUIREMENTS_TXT,
         "Dockerfile": _DOCKERFILE,
