@@ -202,7 +202,11 @@ function navLinkStyle(isActive: boolean): React.CSSProperties {
   };
 }
 
-const MISSION_FLOW_POLL_MS = Number(import.meta.env.VITE_MISSION_FLOW_POLL_MS ?? 4000);
+// Polling for the mission flow/stage statuses. Disabled by default (0) -
+// pages independently poll for their own data, and polling the top-level run
+// here just causes aggressive re-renders and a "flickering" feel. Set via
+// VITE_MISSION_FLOW_POLL_MS if needed for specific scenarios.
+const MISSION_FLOW_POLL_MS = Number(import.meta.env.VITE_MISSION_FLOW_POLL_MS ?? 0);
 
 export function AppShell(): JSX.Element {
   const [signedIn, setSignedIn] = useState(isAuthenticated());
