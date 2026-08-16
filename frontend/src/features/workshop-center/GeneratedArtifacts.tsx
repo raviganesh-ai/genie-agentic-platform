@@ -209,7 +209,7 @@ function buildArtifacts(outputText: string): Artifact[] {
         title: title.replace(/^Generated/, "Generating") + "...",
         kind: "generating",
         variant,
-        content: "",
+        content: openBlock.code,
       });
     } else {
       artifacts.push({
@@ -218,7 +218,7 @@ function buildArtifacts(outputText: string): Artifact[] {
         title: "Generating next component...",
         kind: "generating",
         variant: "agent",
-        content: "",
+        content: openBlock.code,
       });
     }
   }
@@ -541,16 +541,38 @@ export function GeneratedArtifacts({
                   </>
                 )
               ) : artifact.kind === "generating" ? (
-                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                  <span className="genie-bounce-dots" aria-hidden="true">
-                    <span className="genie-bounce-dot" />
-                    <span className="genie-bounce-dot" />
-                    <span className="genie-bounce-dot" />
-                  </span>
-                  <Text size={200} style={{ opacity: 0.7 }}>
-                    Writing this component&apos;s code now...
-                  </Text>
-                </div>
+                <>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+                    <span className="genie-bounce-dots" aria-hidden="true">
+                      <span className="genie-bounce-dot" />
+                      <span className="genie-bounce-dot" />
+                      <span className="genie-bounce-dot" />
+                    </span>
+                    <Text size={200} style={{ opacity: 0.7 }}>
+                      Streaming this component&apos;s code...
+                    </Text>
+                  </div>
+                  {artifact.content ? (
+                    <pre
+                      aria-label="Streaming code"
+                      style={{
+                        fontSize: 11,
+                        whiteSpace: "pre-wrap",
+                        maxHeight: 260,
+                        overflowY: "auto",
+                        fontFamily: "monospace",
+                        opacity: 0.9,
+                        backgroundColor: "#0b0f14",
+                        border: "1px solid #232a33",
+                        borderRadius: 6,
+                        padding: "8px 10px",
+                        margin: 0,
+                      }}
+                    >
+                      {artifact.content}
+                    </pre>
+                  ) : null}
+                </>
               ) : (
                 <Text size={300} style={{ whiteSpace: "pre-wrap", display: "block", opacity: 0.85 }}>
                   {artifact.content || "(no additional detail provided)"}

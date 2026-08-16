@@ -29,6 +29,7 @@ from app.api import (
     health,
     ingestion,
     memory,
+    model_catalog,
     outputs,
     peer_review,
     replay,
@@ -60,6 +61,7 @@ from app.services.foundry_agent_lifecycle_service import FoundryAgentLifecycleSe
 from app.services.foundry_agent_synchronization_service import (
     FoundryAgentSynchronizationService as RichFoundryAgentSynchronizationService,
 )
+from app.services.model_catalog_service import create_model_catalog_service
 from app.services.output_service import create_output_service
 from app.services.peer_review_service import create_peer_review_service
 from app.services.requirements_service import create_requirements_service
@@ -137,6 +139,10 @@ def create_app(
         app.state.token_validator = create_token_validator(resolved_settings)
         orchestrator = create_agent_orchestrator(settings=resolved_settings)
         app.state.agent_orchestrator = orchestrator
+        app.state.model_catalog_service = create_model_catalog_service(
+            settings=resolved_settings,
+            agent_registry=orchestrator.agent_registry,
+        )
 
         # config/agents/*.yaml -> FoundryAgentSynchronizationService ->
         # Azure AI Foundry -> foundryAgentReference verified -> startup
@@ -290,6 +296,7 @@ def create_app(
     app.include_router(uploads.router)
     app.include_router(ingestion.router)
     app.include_router(workflows.router)
+    app.include_router(model_catalog.router)
     app.include_router(workflow_events.router)
     app.include_router(agents.router)
     app.include_router(memory.router)

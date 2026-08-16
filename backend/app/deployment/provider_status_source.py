@@ -31,6 +31,15 @@ class ResourceProviderStatusSource(Protocol):
         ...
 
 
+class ModelDeploymentSource(Protocol):
+    """Abstraction over the model deployments exposed by a Foundry account."""
+
+    def list_model_deployments(
+        self, *, subscription_id: str, resource_group: str, account_name: str
+    ) -> list[str]:
+        ...
+
+
 class AzureResourceManagerProviderStatusSource:
     """Looks up provider registration state via the Azure Resource Manager SDK.
 
@@ -90,3 +99,33 @@ class AzureResourceManagerProviderStatusSource:
         if state in ("Registered", "Registering", "NotRegistered", "Unregistering"):
             return state  # type: ignore[return-value]
         return "Unknown"
+
+
+class AzureModelDeploymentSource:
+    """Lists Foundry model deployments through Azure Resource Manager."""
+
+    def list_model_deployments(
+        self, *, subscription_id: str, resource_group: str, account_name: str
+    ) -> list[str]:
+        if not subscription_id.strip() or not resource_group.strip() or not account_name.strip():
+            raise ResourceProviderStatusError(
+                "subscription_id, resource_group, and account_name must not be blank."
+            )
+        try:
+            from azure.identity import DefaultAzureCredential
+            from azure.mgmt.cognitiveservices import CognitiveServicesManagementClient
+        except ImportError as exc:
+            raise ResourceProviderStatusError(
+                "azure-mgmt-cognitiveservices / azure-identity are not installed; cannot "
+                "list model deployments."
+            ) from exc
+
+        try:
+            client = CognitiveServicesManagementClient(DefaultAzureCredential(), subscription_id)
+            return sorted(
+                {deployment.name for deployment in client.deployments.list(resource_group, account_name) if deployment.name}
+            )
+        except Exception as exc:
+            raise ResourceProviderStatusError(
+                f"Failed to list model deployments for account '{account_name}': {exc}"
+            ) from exc

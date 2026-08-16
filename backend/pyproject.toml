@@ -12,6 +12,7 @@ dependencies = [
     "azure-ai-projects>=2.3,<3.0",
     "azure-identity>=1.17,<2.0",
     "azure-mgmt-resource>=23.0,<24.0",
+    "azure-mgmt-cognitiveservices>=13.6,<14.0",
     "azure-mgmt-containerregistry>=10.3,<11.0",
     "azure-mgmt-appcontainers>=3.1,<4.0",
     "azure-mgmt-storage>=21.2,<22.0",

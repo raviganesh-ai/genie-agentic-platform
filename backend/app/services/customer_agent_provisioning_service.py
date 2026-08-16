@@ -49,6 +49,7 @@ class ProvisionedAgentRecord:
 
     agent_id: str
     foundry_agent_id: str
+    model_deployment_ref: str
     provisioned_at: datetime
 
 
@@ -98,7 +99,12 @@ class CustomerAgentProvisioningService:
         return list(self._provisioned.get(scope_id or session_id, {}).values())
 
     async def provision_for_session(
-        self, *, session_id: str, scope_id: str | None = None, trace_id: str | None = None
+        self,
+        *,
+        session_id: str,
+        scope_id: str | None = None,
+        trace_id: str | None = None,
+        model_deployment_ref: str | None = None,
     ) -> list[ProvisionedAgentRecord]:
         """Provision a dedicated Foundry agent for every enabled catalog agent.
 
@@ -128,15 +134,21 @@ class CustomerAgentProvisioningService:
             for agent in self._agent_registry.list():
                 if not agent.enabled or not agent.foundry_agent_id:
                     continue
+                effective_model = (model_deployment_ref or agent.model_deployment_ref or "").strip()
+                if not effective_model:
+                    raise CustomerAgentProvisioningError(
+                        f"Cannot provision dedicated agent '{agent.id}': no model deployment ref resolved."
+                    )
                 dedicated_foundry_agent_id = client.create_agent(
                     name=f"{agent.id}-cx-{key[:8]}",
-                    model=agent.model_deployment_ref or "",
+                    model=effective_model,
                     instructions=agent.description,
                     description=agent.name,
                 )
                 records[agent.id] = ProvisionedAgentRecord(
                     agent_id=agent.id,
                     foundry_agent_id=dedicated_foundry_agent_id,
+                    model_deployment_ref=effective_model,
                     provisioned_at=datetime.now(UTC),
                 )
                 await self._governance_service.record_lifecycle_event(
@@ -212,7 +224,12 @@ class NullCustomerAgentProvisioningService:
         return []
 
     async def provision_for_session(
-        self, *, session_id: str, scope_id: str | None = None, trace_id: str | None = None
+        self,
+        *,
+        session_id: str,
+        scope_id: str | None = None,
+        trace_id: str | None = None,
+        model_deployment_ref: str | None = None,
     ) -> list[ProvisionedAgentRecord]:
         return []
 

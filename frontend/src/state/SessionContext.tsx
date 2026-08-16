@@ -26,11 +26,13 @@ export interface SessionContextValue {
    * Studio triggers, so the value can't just be a local variable on that
    * page. */
   governancePolicies: string;
+  selectedModelDeploymentRef: string | null;
   setSessionId: (sessionId: string | null) => void;
   setWorkflowRunId: (workflowRunId: string | null) => void;
   setMissionStartedAt: (missionStartedAt: number | null) => void;
   setMissionError: (missionError: SafeError | null) => void;
   setGovernancePolicies: (governancePolicies: string) => void;
+  setSelectedModelDeploymentRef: (selectedModelDeploymentRef: string | null) => void;
 }
 
 const SessionContext = createContext<SessionContextValue | null>(null);
@@ -48,6 +50,7 @@ export function SessionProvider({
   initialMissionStartedAt = null,
   initialMissionError = null,
   initialGovernancePolicies = "",
+  initialSelectedModelDeploymentRef = null,
 }: {
   children: ReactNode;
   /** Test-only seams for rendering pages without going through LandingPage. */
@@ -56,12 +59,16 @@ export function SessionProvider({
   initialMissionStartedAt?: number | null;
   initialMissionError?: SafeError | null;
   initialGovernancePolicies?: string;
+  initialSelectedModelDeploymentRef?: string | null;
 }): JSX.Element {
   const [sessionId, setSessionId] = useState<string | null>(initialSessionId);
   const [workflowRunId, setWorkflowRunId] = useState<string | null>(initialWorkflowRunId);
   const [missionStartedAt, setMissionStartedAt] = useState<number | null>(initialMissionStartedAt);
   const [missionError, setMissionError] = useState<SafeError | null>(initialMissionError);
   const [governancePolicies, setGovernancePolicies] = useState<string>(initialGovernancePolicies);
+  const [selectedModelDeploymentRef, setSelectedModelDeploymentRef] = useState<string | null>(
+    initialSelectedModelDeploymentRef,
+  );
 
   const value = useMemo(
     () => ({
@@ -70,13 +77,22 @@ export function SessionProvider({
       missionStartedAt,
       missionError,
       governancePolicies,
+      selectedModelDeploymentRef,
       setSessionId,
       setWorkflowRunId,
       setMissionStartedAt,
       setMissionError,
       setGovernancePolicies,
+      setSelectedModelDeploymentRef,
     }),
-    [sessionId, workflowRunId, missionStartedAt, missionError, governancePolicies],
+    [
+      sessionId,
+      workflowRunId,
+      missionStartedAt,
+      missionError,
+      governancePolicies,
+      selectedModelDeploymentRef,
+    ],
   );
 
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;

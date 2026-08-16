@@ -15,12 +15,17 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, ConfigDict
 
-from app.api.dependencies import get_agent_orchestrator, get_session_service
+from app.api.dependencies import (
+    get_agent_orchestrator,
+    get_model_catalog_service,
+    get_session_service,
+)
 from app.models.workflow_models import WorkflowRunResult, WorkflowStepInput
 from app.orchestration.agent_orchestrator import AgentOrchestrator
 from app.orchestration.workflow_execution_service import UnknownWorkflowRunError
 from app.security.auth_models import AuthenticatedUser
 from app.security.dependencies import get_current_user
+from app.services.model_catalog_service import ModelCatalogService
 from app.services.session_service import SessionService
 
 router = APIRouter(prefix="/sessions/{session_id}/workflows", tags=["workflows"])
@@ -31,6 +36,7 @@ class RunWorkflowRequest(BaseModel):
 
     trace_id: str | None = None
     step_inputs: dict[str, WorkflowStepInput] | None = None
+    model_deployment_ref: str | None = None
 
 
 class ResumeWorkflowRunRequest(BaseModel):
@@ -38,6 +44,7 @@ class ResumeWorkflowRunRequest(BaseModel):
 
     trace_id: str | None = None
     step_inputs: dict[str, WorkflowStepInput] | None = None
+    model_deployment_ref: str | None = None
 
 
 @router.post("/{workflow_id}/run", status_code=202)
@@ -47,6 +54,7 @@ async def run_workflow(
     body: RunWorkflowRequest | None = None,
     user: AuthenticatedUser = Depends(get_current_user),
     session_service: SessionService = Depends(get_session_service),
+    model_catalog_service: ModelCatalogService = Depends(get_model_catalog_service),
     orchestrator: AgentOrchestrator = Depends(get_agent_orchestrator),
 ) -> WorkflowRunResult:
     """Accepts a workflow run and returns immediately with a ``running`` snapshot.
@@ -61,12 +69,24 @@ async def run_workflow(
     )
     trace_id = body.trace_id if body else None
     step_inputs = body.step_inputs if body else None
+    model_deployment_ref = body.model_deployment_ref.strip() if body and body.model_deployment_ref else None
+    agent_scope_id = None
+    if model_deployment_ref:
+        await model_catalog_service.ensure_available(model_deployment_ref)
+        agent_scope_id = f"model:{model_deployment_ref}"
+        await orchestrator.provision_customer_agents(
+            session_id=session_id,
+            scope_id=agent_scope_id,
+            trace_id=trace_id,
+            model_deployment_ref=model_deployment_ref,
+        )
     return await orchestrator.start_workflow_background(
         workflow_id=workflow_id,
         session_id=session_id,
         trace_id=trace_id,
         step_inputs=step_inputs,
         transcript_text=transcript_text,
+        agent_scope_id=agent_scope_id,
     )
 
 
@@ -77,6 +97,7 @@ async def resume_workflow_run(
     body: ResumeWorkflowRunRequest | None = None,
     user: AuthenticatedUser = Depends(get_current_user),
     session_service: SessionService = Depends(get_session_service),
+    model_catalog_service: ModelCatalogService = Depends(get_model_catalog_service),
     orchestrator: AgentOrchestrator = Depends(get_agent_orchestrator),
 ) -> WorkflowRunResult:
     """Accepts a resume and returns immediately - see ``run_workflow``."""
@@ -86,6 +107,9 @@ async def resume_workflow_run(
     )
     trace_id = body.trace_id if body else None
     step_inputs = body.step_inputs if body else None
+    model_deployment_ref = body.model_deployment_ref.strip() if body and body.model_deployment_ref else None
+    if model_deployment_ref:
+        await model_catalog_service.ensure_available(model_deployment_ref)
     return await orchestrator.resume_workflow_background(
         workflow_run_id=workflow_run_id,
         session_id=session_id,

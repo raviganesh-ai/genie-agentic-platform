@@ -68,12 +68,16 @@ export const workflowApi = {
     sessionId: string,
     workflowId: string,
     traceId?: string,
+    modelDeploymentRef?: string,
   ): Promise<WorkflowRunResult> {
     const accepted = await apiFetch<WorkflowRunResult>(
       `/sessions/${sessionId}/workflows/${workflowId}/run`,
       {
         method: "POST",
-        body: traceId ? { trace_id: traceId } : undefined,
+        body:
+          traceId || modelDeploymentRef
+            ? { trace_id: traceId, model_deployment_ref: modelDeploymentRef }
+            : undefined,
       },
     );
     return waitForRunToSettle(sessionId, accepted);
@@ -83,14 +87,19 @@ export const workflowApi = {
     workflowRunId: string,
     traceId?: string,
     stepInputs?: Record<string, WorkflowStepInput>,
+    modelDeploymentRef?: string,
   ): Promise<WorkflowRunResult> {
     const accepted = await apiFetch<WorkflowRunResult>(
       `/sessions/${sessionId}/workflows/runs/${workflowRunId}/resume`,
       {
         method: "POST",
         body:
-          traceId || stepInputs
-            ? { trace_id: traceId, step_inputs: stepInputs }
+          traceId || stepInputs || modelDeploymentRef
+            ? {
+                trace_id: traceId,
+                step_inputs: stepInputs,
+                model_deployment_ref: modelDeploymentRef,
+              }
             : undefined,
       },
     );

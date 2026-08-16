@@ -16,7 +16,13 @@ const UPLOAD_TYPES: UploadType[] = ["transcript", "audio", "video", "supporting_
 
 export function UploadPage(): JSX.Element {
   const navigate = useNavigate();
-  const { sessionId, setWorkflowRunId, setMissionStartedAt, setMissionError } = useSessionContext();
+  const {
+    sessionId,
+    selectedModelDeploymentRef,
+    setWorkflowRunId,
+    setMissionStartedAt,
+    setMissionError,
+  } = useSessionContext();
   const [uploadType, setUploadType] = useState<UploadType>("transcript");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -59,14 +65,21 @@ export function UploadPage(): JSX.Element {
     setMissionError(null);
     navigate("/requirements");
     try {
-      const result = await run(DISCOVERY_WORKFLOW_ID);
+      const result = await run(DISCOVERY_WORKFLOW_ID, selectedModelDeploymentRef ?? undefined);
       setWorkflowRunId(result.workflow_run_id);
     } catch (err) {
       setMissionStartedAt(null);
       const safe: SafeError = err instanceof ApiError ? err : { message: "Unable to start the workflow." };
       setMissionError(safe);
     }
-  }, [run, setWorkflowRunId, setMissionStartedAt, setMissionError, navigate]);
+  }, [
+    navigate,
+    run,
+    selectedModelDeploymentRef,
+    setMissionError,
+    setMissionStartedAt,
+    setWorkflowRunId,
+  ]);
 
   if (!sessionId) {
     return (

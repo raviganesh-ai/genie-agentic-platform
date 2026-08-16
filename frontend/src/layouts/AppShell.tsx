@@ -216,8 +216,15 @@ export function AppShell(): JSX.Element {
   const [triageOn, setTriageOn] = useState(true);
   const location = useLocation();
   const navigate = useNavigate();
-  const { sessionId, workflowRunId, setSessionId, setWorkflowRunId, setMissionStartedAt, setMissionError } =
-    useSessionContext();
+  const {
+    sessionId,
+    workflowRunId,
+    setSessionId,
+    setWorkflowRunId,
+    setMissionStartedAt,
+    setMissionError,
+    setSelectedModelDeploymentRef,
+  } = useSessionContext();
   const currentIndex = findCurrentNavIndex(location.pathname);
   const [maxReachedIndex, setMaxReachedIndex] = useState(currentIndex);
 
@@ -264,8 +271,16 @@ export function AppShell(): JSX.Element {
     setWorkflowRunId(null);
     setMissionStartedAt(null);
     setMissionError(null);
+    setSelectedModelDeploymentRef(null);
     navigate("/");
-  }, [navigate, setSessionId, setWorkflowRunId, setMissionStartedAt, setMissionError]);
+  }, [
+    navigate,
+    setMissionError,
+    setMissionStartedAt,
+    setSelectedModelDeploymentRef,
+    setSessionId,
+    setWorkflowRunId,
+  ]);
 
   return (
     <div style={{ display: "flex", minHeight: "100vh" }}>

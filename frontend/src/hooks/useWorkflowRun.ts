@@ -6,7 +6,7 @@ import type { SafeError } from "@/types/common";
 import type { WorkflowRunResult } from "@/types/workflow";
 
 export interface WorkflowRunController {
-  run: (workflowId: string) => Promise<WorkflowRunResult>;
+  run: (workflowId: string, modelDeploymentRef?: string) => Promise<WorkflowRunResult>;
   resume: (workflowRunId: string) => Promise<WorkflowRunResult>;
   running: boolean;
   error: SafeError | null;
@@ -22,13 +22,18 @@ export function useWorkflowRun(sessionId: string | null): WorkflowRunController 
   const [error, setError] = useState<SafeError | null>(null);
 
   const run = useCallback(
-    async (workflowId: string): Promise<WorkflowRunResult> => {
+    async (workflowId: string, modelDeploymentRef?: string): Promise<WorkflowRunResult> => {
       if (!sessionId) throw new Error("No active session");
       setRunning(true);
       setError(null);
       try {
         const traceId = mintTraceId();
-        const result = await workflowApi.run(sessionId, workflowId, traceId);
+        const result = await workflowApi.run(
+          sessionId,
+          workflowId,
+          traceId,
+          modelDeploymentRef,
+        );
         registerTraceId(result.workflow_run_id, traceId);
         return result;
       } catch (err) {

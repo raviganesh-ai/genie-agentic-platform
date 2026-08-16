@@ -21,6 +21,7 @@ from app.services.architecture_service import ArchitectureService
 from app.services.foundry_agent_inventory_service import FoundryAgentInventoryService
 from app.services.foundry_agent_lifecycle_service import FoundryAgentLifecycleService
 from app.services.foundry_agent_synchronization_service import FoundryAgentSynchronizationService
+from app.services.model_catalog_service import ModelCatalogService
 from app.services.output_service import OutputService
 from app.services.peer_review_service import PeerReviewService
 from app.services.requirements_service import RequirementsService
@@ -38,6 +39,7 @@ __all__ = [
     "get_foundry_synchronization_service",
     "get_governance_service",
     "get_memory_service",
+    "get_model_catalog_service",
     "get_output_service",
     "get_peer_review_service",
     "get_replay_service",
@@ -96,6 +98,10 @@ def get_workflow_event_bus(request: Request) -> WorkflowEventBus:
 
 def get_memory_service(request: Request) -> MemoryService:
     return request.app.state.agent_orchestrator.memory_service
+
+
+def get_model_catalog_service(request: Request) -> ModelCatalogService:
+    return request.app.state.model_catalog_service
 
 
 def get_replay_service(request: Request) -> ReplayService:

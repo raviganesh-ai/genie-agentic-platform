@@ -1,7 +1,8 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Button, Input, Text } from "@fluentui/react-components";
+import { Button, Dropdown, Input, Option, Text } from "@fluentui/react-components";
 import { sessionApi } from "@/services/sessionApi";
+import { modelCatalogApi } from "@/services/modelCatalogApi";
 import { ApiError } from "@/services/httpClient";
 import { useSessionContext } from "@/state/SessionContext";
 import { ErrorState } from "@/components/ErrorState";
@@ -13,10 +14,36 @@ import type { SafeError } from "@/types/common";
  */
 export function LandingPage(): JSX.Element {
   const navigate = useNavigate();
-  const { setSessionId } = useSessionContext();
+  const { setSessionId, setSelectedModelDeploymentRef } = useSessionContext();
   const [title, setTitle] = useState("");
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<SafeError | null>(null);
+  const [models, setModels] = useState<string[]>([]);
+  const [loadingModels, setLoadingModels] = useState(true);
+  const [modelsError, setModelsError] = useState<SafeError | null>(null);
+  const [selectedModel, setSelectedModel] = useState<string | null>(null);
+
+  useEffect(() => {
+    let mounted = true;
+    setLoadingModels(true);
+    modelCatalogApi
+      .getAvailable()
+      .then((catalog) => {
+        if (!mounted) return;
+        setModels(catalog.available_models);
+        setSelectedModel(catalog.default_model);
+      })
+      .catch((err) => {
+        if (!mounted) return;
+        setModelsError(err instanceof ApiError ? err : { message: "Unable to load available models." });
+      })
+      .finally(() => {
+        if (mounted) setLoadingModels(false);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   const handleCreate = useCallback(async () => {
     setCreating(true);
@@ -24,13 +51,14 @@ export function LandingPage(): JSX.Element {
     try {
       const session = await sessionApi.create(title.trim());
       setSessionId(session.id);
+      setSelectedModelDeploymentRef(selectedModel);
       navigate("/upload");
     } catch (err) {
       setError(err instanceof ApiError ? err : { message: "Unable to create a session." });
     } finally {
       setCreating(false);
     }
-  }, [title, setSessionId, navigate]);
+  }, [title, selectedModel, setSelectedModelDeploymentRef, setSessionId, navigate]);
 
   return (
     <div className="genie-fade-in" style={{ maxWidth: 600, margin: "8vh auto", textAlign: "center" }}>
@@ -59,9 +87,11 @@ export function LandingPage(): JSX.Element {
 
       <div
         style={{
-          display: "flex",
+          display: "grid",
+          gridTemplateColumns: "minmax(220px, 1fr) minmax(220px, 1fr) auto",
           gap: 8,
           justifyContent: "center",
+          alignItems: "center",
           marginBottom: 16,
           padding: 20,
           borderRadius: 12,
@@ -80,11 +110,25 @@ export function LandingPage(): JSX.Element {
           style={{ width: 320 }}
           required
         />
+        <Dropdown
+          placeholder={loadingModels ? "Loading models..." : "Select a model"}
+          value={selectedModel ?? undefined}
+          selectedOptions={selectedModel ? [selectedModel] : []}
+          disabled={loadingModels || models.length === 0 || creating}
+          onOptionSelect={(_, data) => setSelectedModel(data.optionValue ?? null)}
+        >
+          {models.map((model) => (
+            <Option key={model} value={model}>
+              {model}
+            </Option>
+          ))}
+        </Dropdown>
         <Button appearance="primary" disabled={creating || !title.trim()} onClick={() => void handleCreate()}>
           {creating ? "Creating your session..." : "✨ Start New Session"}
         </Button>
       </div>
 
+      {modelsError ? <ErrorState error={modelsError} /> : null}
       {error ? <ErrorState error={error} onRetry={() => void handleCreate()} /> : null}
     </div>
   );

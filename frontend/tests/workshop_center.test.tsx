@@ -141,6 +141,7 @@ describe("WorkshopPage", () => {
     });
 
     await waitFor(() => expect(screen.getByText(/Generating UI Code/i)).toBeInTheDocument());
+    expect(screen.getByLabelText("Streaming code")).toHaveTextContent("export function App");
     expect(
       screen.queryByRole("checkbox", { name: /AI can perform mistake/i }),
     ).not.toBeInTheDocument();

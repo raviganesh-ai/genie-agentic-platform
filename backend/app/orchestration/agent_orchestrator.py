@@ -161,7 +161,12 @@ class AgentOrchestrator:
         return await self.agent_gateway.execute(request)
 
     async def provision_customer_agents(
-        self, *, session_id: str, scope_id: str | None = None, trace_id: str | None = None
+        self,
+        *,
+        session_id: str,
+        scope_id: str | None = None,
+        trace_id: str | None = None,
+        model_deployment_ref: str | None = None,
     ) -> list[ProvisionedAgentRecord]:
         """Provision a dedicated Foundry agent fleet for one customer session (or scope).
 
@@ -171,7 +176,10 @@ class AgentOrchestrator:
         """
 
         return await self._customer_agent_provisioning_service.provision_for_session(
-            session_id=session_id, scope_id=scope_id, trace_id=trace_id
+            session_id=session_id,
+            scope_id=scope_id,
+            trace_id=trace_id,
+            model_deployment_ref=model_deployment_ref,
         )
 
     async def deprovision_customer_agents(
