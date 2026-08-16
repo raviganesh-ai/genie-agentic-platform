@@ -279,6 +279,23 @@ async def test_scope_id_provisions_an_isolated_fleet_distinct_from_the_session_f
     assert service.resolve(session_id="session-1", agent_id="agent-a") is None
 
 
+async def test_model_scope_id_uses_a_foundry_safe_agent_name(local_settings: Settings):
+    registry = _registry(_agent(agent_id="agent-a", foundry_agent_id="agent-a-foundry"))
+    service, api_client = _service(
+        api_client=_FakeAgentApiClient(), registry=registry, local_settings=local_settings
+    )
+
+    await service.provision_for_session(
+        session_id="session-1",
+        scope_id="model:gpt-5-mini",
+        trace_id="trace-1",
+        model_deployment_ref="gpt-5-mini",
+    )
+
+    assert api_client.created[0]["name"] == "agent-a-cx-model-gpt-5-mini"
+    assert api_client.created[0]["model"] == "gpt-5-mini"
+
+
 async def test_deprovision_by_scope_id_leaves_other_scopes_untouched(local_settings: Settings):
     registry = _registry(_agent(agent_id="agent-a", foundry_agent_id="agent-a-foundry"))
     service, api_client = _service(

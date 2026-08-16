@@ -20,6 +20,7 @@ to keep it open.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import uuid4
@@ -41,6 +42,21 @@ __all__ = [
 
 class CustomerAgentProvisioningError(RuntimeError):
     """Raised when provisioning/deprovisioning a customer's dedicated agents fails."""
+
+
+_FOUNDRY_AGENT_NAME_MAX_LENGTH = 63
+_INVALID_FOUNDRY_AGENT_NAME_CHARS = re.compile(r"[^A-Za-z0-9-]+")
+
+
+def _dedicated_agent_name(*, agent_id: str, scope_key: str) -> str:
+    suffix = _INVALID_FOUNDRY_AGENT_NAME_CHARS.sub("-", scope_key).strip("-").lower()
+    if not suffix:
+        suffix = "scope"
+    name = f"{agent_id}-cx-{suffix}"
+    name = name[:_FOUNDRY_AGENT_NAME_MAX_LENGTH].rstrip("-")
+    if not name or not name[-1].isalnum():
+        name = f"{name.rstrip('-')}0"
+    return name
 
 
 @dataclass(frozen=True)
@@ -140,7 +156,7 @@ class CustomerAgentProvisioningService:
                         f"Cannot provision dedicated agent '{agent.id}': no model deployment ref resolved."
                     )
                 dedicated_foundry_agent_id = client.create_agent(
-                    name=f"{agent.id}-cx-{key[:8]}",
+                    name=_dedicated_agent_name(agent_id=agent.id, scope_key=key),
                     model=effective_model,
                     instructions=agent.description,
                     description=agent.name,
