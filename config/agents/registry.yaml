@@ -28,7 +28,7 @@
 # so it must always be the exact Cognitive Services deployment name, never
 # just any string the model accepts at creation time. When omitted, it
 # defaults to the platform-wide default LLM (Settings.default_llm /
-# GENIE_DEFAULT_LLM, "gpt-5-1" unless overridden). Anthropic Claude models
+# GENIE_DEFAULT_LLM, "gpt-5-mini" unless overridden). Anthropic Claude models
 # were evaluated but are not deployed: they require an Azure Marketplace
 # subscription, and this subscription currently has a default quota of 0
 # for every Claude SKU.

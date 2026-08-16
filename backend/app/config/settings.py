@@ -19,17 +19,17 @@ MemoryStoreBackend = Literal["in_memory", "cosmos_db"]
 
 # Default LLM used by every agent unless it (or the caller) supplies an
 # explicit override. Not a secret or endpoint - a plain application default,
-# externally overridable via GENIE_DEFAULT_LLM. "gpt-5-1" (hyphenated) is
-# used because it is sold directly by Azure (no Azure Marketplace
-# subscription/quota required) AND because it is the EXACT Cognitive
-# Services deployment name provisioned on the real Foundry account - Foundry
-# agent run-time model resolution requires an exact deployment-name match
-# (unlike agent create/update, which silently accepts other string forms
-# such as the dotted "gpt-5.1" and only fails when a run is actually
-# attempted). Anthropic Claude models require a Marketplace subscription
-# and, as of this writing, this subscription has a default quota of 0 for
-# every Claude SKU.
-DEFAULT_LLM = "gpt-5-1"
+# externally overridable via GENIE_DEFAULT_LLM. "gpt-5-mini" is used because
+# it is the EXACT Cognitive Services deployment name provisioned on the real
+# Foundry account - Foundry agent run-time model resolution requires an
+# exact deployment-name match (unlike agent create/update, which silently
+# accepts other string forms and only fails when a run is actually
+# attempted). There is no "gpt-5.1-mini" deployment provisioned on this
+# Foundry account (only "gpt-5-1" for gpt-5.1 and "gpt-5-mini" for the base
+# gpt-5-mini model) - never invent a deployment name that does not exist.
+# Anthropic Claude models require a Marketplace subscription and, as of this
+# writing, this subscription has a default quota of 0 for every Claude SKU.
+DEFAULT_LLM = "gpt-5-mini"
 
 
 class Settings(BaseSettings):
