@@ -241,12 +241,12 @@ prompts:
       interaction from the UI and is responsible for coordinating,
       sequencing, and handing off to every other specialist agent in the
       list; no other agent may receive input directly from the UI.
-      Exactly one top-level bullet per agent you decide is needed: describe
-      its responsibility, the requirement(s) it fulfills, and which
-      other agents it hands off to or receives from, in 2-3 sentences
-      maximum. Never add any bullet or line that is not itself naming one
-      of the agents - the list must contain nothing but exactly one bullet
-      per agent.
+      Exactly one top-level bullet per agent you decide is needed, as a single
+      flowing sentence: describe its responsibility, the requirement(s) it
+      fulfills, and which other agents it hands off to or receives from
+      (keep each description to 2-3 sentences maximum). Never break an
+      agent's responsibility into separate sub-bullets for Inputs/Outputs/
+      Handoffs - the list must contain nothing but exactly one bullet per agent.
     variables:
       - approved_requirements
       - user_message
