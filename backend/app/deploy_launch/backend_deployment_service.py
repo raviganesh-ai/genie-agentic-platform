@@ -89,6 +89,29 @@ def _tar_gzip_directory(source_dir: Path) -> bytes:
     return buffer.getvalue()
 
 
+def _extract_resource_group_and_identity_name(identity_resource_id: str) -> tuple[str, str]:
+    """Parses an ARM resource ID for a user-assigned managed identity.
+
+    Azure normalizes resource ID path segments case-insensitively; the real
+    service may emit ``resourcegroups`` / ``userassignedidentities`` even when
+    code or examples show the PascalCase names. Accept both forms so the
+    deployment path does not fail closed on a valid Azure resource ID.
+    """
+
+    segments = [segment for segment in identity_resource_id.split("/") if segment]
+    normalized_segments = [segment.lower() for segment in segments]
+    resource_group_index = next((idx for idx, segment in enumerate(normalized_segments) if segment == "resourcegroups"), None)
+    identity_index = next((idx for idx, segment in enumerate(normalized_segments) if segment == "userassignedidentities"), None)
+
+    if resource_group_index is None or identity_index is None:
+        raise BackendDeploymentError(f"Invalid mission identity resource id '{identity_resource_id}'.")
+
+    if resource_group_index + 1 >= len(segments) or identity_index + 1 >= len(segments):
+        raise BackendDeploymentError(f"Invalid mission identity resource id '{identity_resource_id}'.")
+
+    return segments[resource_group_index + 1], segments[identity_index + 1]
+
+
 class BackendDeploymentService:
     """Builds a mission's backend image in ACR and deploys it to Container Apps."""
 
@@ -174,17 +197,10 @@ class BackendDeploymentService:
                 "azure-mgmt-authorization / azure-mgmt-msi / azure-identity are not installed."
             ) from exc
 
-        segments = [segment for segment in identity_resource_id.split("/") if segment]
-        normalized_segments = [segment.lower() for segment in segments]
         try:
-            resource_group_index = normalized_segments.index("resourcegroups")
-            identity_index = normalized_segments.index("userassignedidentities")
-            resource_group = segments[resource_group_index + 1]
-            identity_name = segments[identity_index + 1]
-        except (ValueError, IndexError) as exc:
-            raise BackendDeploymentError(
-                f"Invalid mission identity resource id '{identity_resource_id}'."
-            ) from exc
+            resource_group, identity_name = _extract_resource_group_and_identity_name(identity_resource_id)
+        except BackendDeploymentError:
+            raise
 
         credential = DefaultAzureCredential()
         try:

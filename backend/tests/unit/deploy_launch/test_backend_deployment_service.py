@@ -4,6 +4,8 @@ from __future__ import annotations
 import sys
 from types import ModuleType, SimpleNamespace
 
+import pytest
+
 from app.config.settings import Settings
 from app.deploy_launch.backend_deployment_service import (
     BackendDeploymentService,
@@ -50,10 +52,17 @@ def test_local_mode_with_deployment_config_but_no_foundry_config_returns_null_se
     assert isinstance(service, NullBackendDeploymentService)
 
 
-def test_configure_mission_identity_accepts_lowercase_resource_id_segments(monkeypatch):
-    """Azure resource IDs are case-insensitive for ARM path segments; the
-    real mission identity lookup should accept values like
-    ``resourcegroups`` and ``userassignedidentities``."""
+@pytest.mark.parametrize(
+    "resource_id",
+    [
+        "/subscriptions/sub-123/resourcegroups/genie-dev-rg/providers/Microsoft.ManagedIdentity/userAssignedIdentities/genie-mission-demo",
+        "/subscriptions/sub-123/resourceGroups/genie-dev-rg/providers/Microsoft.ManagedIdentity/userAssignedIdentities/genie-mission-demo",
+        "/subscriptions/sub-123/resourceGroups/genie-dev-rg/providers/Microsoft.ManagedIdentity/UserAssignedIdentities/genie-mission-demo",
+    ],
+)
+def test_configure_mission_identity_accepts_valid_resource_id_casing(monkeypatch, resource_id):
+    """Azure resource IDs are case-insensitive for ARM path segments; real
+    mission identity lookups must accept all valid casing variants."""
 
     service = BackendDeploymentService(
         subscription_id="sub-123",
@@ -91,9 +100,7 @@ def test_configure_mission_identity_accepts_lowercase_resource_id_segments(monke
     monkeypatch.setitem(sys.modules, "azure.mgmt.authorization", fake_azure_authz)
     monkeypatch.setitem(sys.modules, "azure.mgmt.msi", fake_azure_msi)
 
-    result = service._configure_mission_identity(
-        "/subscriptions/sub-123/resourcegroups/genie-dev-rg/providers/Microsoft.ManagedIdentity/userAssignedIdentities/genie-mission-demo"
-    )
+    result = service._configure_mission_identity(resource_id)
 
     assert result == "client-123"
     assert assignment_calls
