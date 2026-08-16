@@ -76,7 +76,11 @@ from app.deploy_launch.models import (
     ProvisionedAgentStatus,
 )
 from app.deploy_launch.security_scan_service import SecurityScanService
-from app.deploy_launch.test_execution_service import TestExecutionService, extract_test_modules
+from app.deploy_launch.test_execution_service import (
+    TestExecutionService,
+    extract_test_modules,
+    has_pytest_discoverable_tests,
+)
 from app.models.workflow_models import WorkflowRunResult, WorkflowStepInput
 from app.models.workflow_stream_models import WorkflowStreamEvent, WorkflowStreamEventType
 from app.orchestration.agent_orchestrator import AgentOrchestrator
@@ -851,6 +855,29 @@ class DeploymentPipelineService:
                     )
                     test_output_text = generation_result.output_text
                     modules = extract_test_modules(test_output_text)
+                    if not has_pytest_discoverable_tests(modules):
+                        correction_result = await self._orchestrator.execute_agent(
+                            agent_id="test-generation-agent",
+                            prompt_id="test-generation-v1",
+                            variables={
+                                "artifact": build_output_text,
+                                "requirements": requirements_text,
+                                "user_message": (
+                                    "Your prior response contained no pytest-discoverable Python test. "
+                                    "Return one or more fenced python blocks containing module-level "
+                                    "test_<name> functions with real assertions."
+                                ),
+                            },
+                            session_id=pipeline_run.session_id,
+                            trace_id=pipeline_run.id,
+                        )
+                        test_output_text = correction_result.output_text
+                        modules = extract_test_modules(test_output_text)
+                    if not has_pytest_discoverable_tests(modules):
+                        raise DeploymentPipelineStepFailedError(
+                            "Test Generation Agent did not produce a pytest-discoverable test function "
+                            "after a corrective retry."
+                        )
                     detail = f"Generated {len(modules)} test module(s) against the deployed build."
 
                 elif step_id == "execute-test-suite":

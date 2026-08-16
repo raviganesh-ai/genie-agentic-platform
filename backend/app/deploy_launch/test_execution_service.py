@@ -36,6 +36,8 @@ _FENCE_PATTERN: Final = re.compile(
 _PASSED_PATTERN: Final = re.compile(r"(\d+) passed")
 _FAILED_PATTERN: Final = re.compile(r"(\d+) failed")
 _ERRORS_PATTERN: Final = re.compile(r"(\d+) error(?:s)?")
+_PYTEST_FUNCTION_PATTERN: Final = re.compile(r"^\s*def\s+test_[A-Za-z0-9_]+\s*\(", re.MULTILINE)
+_PYTEST_CLASS_PATTERN: Final = re.compile(r"^\s*class\s+Test[A-Za-z0-9_]*\s*[(:]", re.MULTILINE)
 _DEFAULT_TIMEOUT_SECONDS: Final = 120
 
 
@@ -47,6 +49,15 @@ def extract_test_modules(output_text: str) -> list[str]:
     """
 
     return [body.strip("\n") for body in _FENCE_PATTERN.findall(output_text)]
+
+
+def has_pytest_discoverable_tests(modules: list[str]) -> bool:
+    """Returns whether generated modules contain at least one pytest test declaration."""
+
+    return any(
+        _PYTEST_FUNCTION_PATTERN.search(module) or _PYTEST_CLASS_PATTERN.search(module)
+        for module in modules
+    )
 
 
 @dataclass(frozen=True)

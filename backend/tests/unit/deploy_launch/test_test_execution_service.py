@@ -5,7 +5,11 @@ from pathlib import Path
 
 import pytest
 
-from app.deploy_launch.test_execution_service import TestExecutionService, extract_test_modules
+from app.deploy_launch.test_execution_service import (
+    TestExecutionService,
+    extract_test_modules,
+    has_pytest_discoverable_tests,
+)
 
 _PASSING_TEST = """
 ```python
@@ -74,6 +78,11 @@ def test_extract_test_modules_is_case_insensitive_on_the_fence_language():
 
     assert len(modules) == 1
     assert "test_x" in modules[0]
+
+
+def test_detects_pytest_discoverable_function_and_rejects_helper_only_module():
+    assert has_pytest_discoverable_tests(extract_test_modules(_PASSING_TEST))
+    assert not has_pytest_discoverable_tests(extract_test_modules(_NO_TEST_FUNCTIONS))
 
 
 async def test_run_tests_reports_no_tests_found_when_output_has_no_code(tmp_path: Path):
