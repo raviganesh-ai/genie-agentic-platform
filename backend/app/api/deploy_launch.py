@@ -26,7 +26,7 @@ from app.deploy_launch.models import DeploymentPipelineRun
 from app.deploy_launch.pipeline_service import DeploymentPipelineService
 from app.security.auth_models import AuthenticatedUser
 from app.security.dependencies import get_current_user
-from app.services.session_service import SessionService, SessionNotFoundError
+from app.services.session_service import SessionNotFoundError, SessionService
 from app.services.workshop_service import UnknownWorkflowRunError
 
 router = APIRouter(prefix="/sessions/{session_id}/deploy-launch", tags=["deploy-launch"])

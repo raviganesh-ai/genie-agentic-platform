@@ -34,8 +34,10 @@ silently-invented shortcut.
 """
 from __future__ import annotations
 
+import asyncio
 import io
 import tarfile
+import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -49,6 +51,11 @@ from app.config.settings import Settings
 # (``DeploymentPipelineService``) surface live "what's happening right now"
 # detail instead of a single static message for the whole step.
 DeploymentProgressCallback = Callable[[str], Awaitable[None]]
+
+# Terminal ACR run statuses that mean the build did not produce an image.
+# Every other status (Queued/Started/Running, or anything Azure adds later)
+# is treated as still-in-flight by the polling loop in ``deploy()``.
+_ACR_RUN_FAILURE_STATUSES = frozenset({"failed", "canceled", "cancelled", "error", "timeout"})
 
 __all__ = [
     "BackendDeploymentError",
@@ -225,12 +232,10 @@ class BackendDeploymentService:
             # successful ARM operation with the Run's own `status` field set to
             # something other than "Succeeded" and no image ever pushed.
             #
-            # Status transitions: Queued -> Started -> Succeeded|Failed
-            # Poll until we reach a terminal status (Succeeded or Failed),
-            # rather than failing immediately on "Queued" (which is just scheduled).
-            import asyncio
-            import time
-            
+            # Status transitions: Queued -> Started -> Running -> Succeeded|Failed
+            # (ACR can also report Canceled/Error/Timeout as terminal outcomes).
+            # Poll until we reach a terminal status rather than failing
+            # immediately on a non-terminal one like "Queued"/"Running".
             run_id = getattr(run_result, "run_id", None)
             if not run_id:
                 raise BackendDeploymentError(
@@ -260,21 +265,21 @@ class BackendDeploymentService:
                     if status_lower == "succeeded":
                         # Build completed successfully
                         break
-                    elif status_lower == "failed":
+                    elif status_lower in _ACR_RUN_FAILURE_STATUSES:
                         raise BackendDeploymentError(
-                            f"ACR build for image '{image_tag}' failed. "
-                            f"Check the ACR task run logs (run ID: {run_id}) for details."
+                            f"ACR build for image '{image_tag}' ended with status "
+                            f"'{run_status}'. Check the ACR task run logs "
+                            f"(run ID: {run_id}) for details."
                         )
-                    elif status_lower in ("queued", "started"):
-                        # Still in progress - wait and retry
+                    else:
+                        # Any non-terminal status (Queued/Started/Running) - and
+                        # deliberately any status this code does not recognize -
+                        # is treated as still-in-flight rather than a hard
+                        # failure, so a newly-introduced ACR status can never
+                        # abort an otherwise-healthy build. The max_wait_seconds
+                        # timeout above remains the backstop.
                         await asyncio.sleep(poll_interval_seconds)
                         continue
-                    else:
-                        # Unknown status
-                        raise BackendDeploymentError(
-                            f"ACR build for image '{image_tag}' returned unknown status: {run_status}. "
-                            f"Run ID: {run_id}"
-                        )
                 else:
                     raise BackendDeploymentError(
                         f"ACR build for image '{image_tag}' returned no status. Run ID: {run_id}"

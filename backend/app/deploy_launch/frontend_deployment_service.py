@@ -151,6 +151,7 @@ class FrontendDeploymentService:
             start_time = time.time()
             poll_interval_seconds = 2
             index_blob_found = False
+            last_error: Exception | None = None
 
             while True:
                 elapsed = time.time() - start_time
@@ -158,6 +159,7 @@ class FrontendDeploymentService:
                     raise FrontendDeploymentError(
                         f"Frontend upload verification timed out after {max_wait_seconds}s. "
                         "index.html was not visible in Storage."
+                        + (f" Last error: {last_error}" if last_error else "")
                     )
 
                 try:
@@ -166,8 +168,13 @@ class FrontendDeploymentService:
                     _ = index_blob.get_blob_properties()
                     index_blob_found = True
                     break
-                except Exception:
-                    # Not ready yet; wait and retry.
+                except Exception as exc:  # noqa: BLE001 - eventual-consistency retry
+                    # Any failure here (blob not yet visible, transient service
+                    # error) means "not ready yet" - the loop's own timeout is
+                    # the real failure path. The last error is retained so a
+                    # genuine, persistent fault (auth, wrong container) is
+                    # reported instead of a bare, misleading timeout message.
+                    last_error = exc
                     await asyncio.sleep(poll_interval_seconds)
 
             if not index_blob_found:

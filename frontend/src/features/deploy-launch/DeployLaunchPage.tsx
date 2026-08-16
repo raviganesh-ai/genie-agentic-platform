@@ -447,8 +447,18 @@ export function DeployLaunchPage(): JSX.Element {
   const completedStepCount = useMemo(() => steps.filter((step) => step.status === "completed").length, [steps]);
   const progressPct = Math.round((completedStepCount / steps.length) * 100);
 
+  // Drives both the activity banner and the optimistic "next step is
+  // running" override below. Deliberately also covers the pre-run window -
+  // `runs` has loaded but no run exists yet - because the page auto-starts
+  // the pipeline in that exact state (see the auto-start effect above), and
+  // `starting` is only true while the POST itself is in flight. Without
+  // that third clause the page falls back to a silent wall of "Not Started"
+  // twice: once before the auto-start effect fires, and again between
+  // `handleStart` clearing `starting` and the `refresh()` result landing.
   const isPipelineActive =
-    !startError && activeRun?.status !== "failed" && (starting || activeRun?.status === "running");
+    !startError &&
+    activeRun?.status !== "failed" &&
+    (starting || activeRun?.status === "running" || (!!runs && !activeRun));
 
   // Deploy & Launch's own `start()` first self-heals any not-yet-finished
   // upstream workflow step (e.g. build-solution resumed because Workshop's
@@ -501,9 +511,13 @@ export function DeployLaunchPage(): JSX.Element {
   const runningStep = useMemo(() => displaySteps.find((step) => step.status === "running") ?? null, [displaySteps]);
   const activityLabel = awaitingUpstreamStep
     ? "Genie is finishing an earlier mission step before Deploy & Launch's own steps can begin..."
-    : runningStep
-      ? STEP_WORKING_LABELS[runningStep.step_id]
-      : STARTING_LABEL;
+    : !activeRun
+      ? // No run record exists yet (still auto-starting) - naming step 1's
+        // specific work here would claim progress that has not begun.
+        STARTING_LABEL
+      : runningStep
+        ? STEP_WORKING_LABELS[runningStep.step_id]
+        : STARTING_LABEL;
 
   // Opens the mission's real, deployed launch URL in a brand-new browser
   // tab/window - never navigates the Genie platform itself away from this
