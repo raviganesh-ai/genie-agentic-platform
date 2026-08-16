@@ -567,6 +567,7 @@ def _build_delegation_tool(
             variables=variables,
             correlation_id=context.trace_id,
             session_id=context.session_id,
+            agent_scope_id=context.agent_scope_id,
         )
         workflow_run_id, step_id = _split_trace_id(context.trace_id)
         if delegation.tool_name == _BUILD_AGENT_TOOL_NAME:

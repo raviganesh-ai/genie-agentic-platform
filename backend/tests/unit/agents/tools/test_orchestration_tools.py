@@ -160,6 +160,7 @@ async def test_call_requirements_analyst_delegates_and_records_governance_event(
         agent=_orchestrator_agent(),
         session_id="session-1",
         trace_id="run-1:analyze-requirements",
+        agent_scope_id="model:gpt-5-mini",
     )
 
     result = await registry.execute(
@@ -176,6 +177,7 @@ async def test_call_requirements_analyst_delegates_and_records_governance_event(
     assert request.variables == {"transcript_excerpt": "We need a chatbot.", "user_message": ""}
     assert request.correlation_id == "run-1:analyze-requirements"
     assert request.session_id == "session-1"
+    assert request.agent_scope_id == "model:gpt-5-mini"
 
     [event] = governance_service.calls
     assert event["agent_id"] == "requirements-analyst"

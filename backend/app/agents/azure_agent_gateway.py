@@ -152,6 +152,7 @@ class AzureAgentGateway:
             agent=agent,
             session_id=request.session_id,
             trace_id=request.correlation_id,
+            agent_scope_id=request.agent_scope_id,
             allowed_tool_names=request.allowed_tool_names,
             variables=request.variables,
         )

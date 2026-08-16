@@ -151,11 +151,9 @@ class CustomerAgentProvisioningService:
             for agent in self._agent_registry.list():
                 if not agent.enabled or not agent.foundry_agent_id:
                     continue
-                effective_model = (
-                    agent.model_deployment_ref
-                    if agent.id == _ORCHESTRATOR_AGENT_ID
-                    else model_deployment_ref or agent.model_deployment_ref
-                )
+                if agent.id == _ORCHESTRATOR_AGENT_ID:
+                    continue
+                effective_model = model_deployment_ref or agent.model_deployment_ref
                 effective_model = (effective_model or "").strip()
                 if not effective_model:
                     raise CustomerAgentProvisioningError(

@@ -186,7 +186,7 @@ class WorkflowStepExecutor:
             )
             if stored_output:
                 output_text = stored_output
-            elif (result.output_text or "").strip() == _DELEGATED_OUTPUT_MARKER:
+            elif _DELEGATED_OUTPUT_MARKER in (result.output_text or ""):
                 raise FoundryUnavailableError(
                     f"Delegated workflow step '{step.id}' returned the delegation marker "
                     "without storing specialist output in shared memory."

@@ -296,7 +296,7 @@ async def test_model_scope_id_uses_a_foundry_safe_agent_name(local_settings: Set
     assert api_client.created[0]["model"] == "gpt-5-mini"
 
 
-async def test_model_override_keeps_orchestrator_on_configured_model(local_settings: Settings):
+async def test_model_override_does_not_clone_the_shared_orchestrator(local_settings: Settings):
     registry = _registry(
         _agent(agent_id="genie-orchestrator", foundry_agent_id="orchestrator-foundry"),
         _agent(agent_id="requirements-analyst", foundry_agent_id="requirements-foundry"),
@@ -313,7 +313,7 @@ async def test_model_override_keeps_orchestrator_on_configured_model(local_setti
     )
 
     created_by_description = {created["description"]: created for created in api_client.created}
-    assert created_by_description["genie-orchestrator"]["model"] == "test-model"
+    assert "genie-orchestrator" not in created_by_description
     assert created_by_description["requirements-analyst"]["model"] == "gpt-5-mini"
 
 

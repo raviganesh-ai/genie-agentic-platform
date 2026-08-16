@@ -49,6 +49,7 @@ class ToolCallContext:
     agent: AgentDefinition
     session_id: str | None
     trace_id: str
+    agent_scope_id: str | None = None
     allowed_tool_names: list[str] | None = None
     variables: dict[str, str] = field(default_factory=dict)
 
