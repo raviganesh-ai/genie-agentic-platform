@@ -486,22 +486,32 @@ export function DeployLaunchPage(): JSX.Element {
   // first `step_started` event/poll to land). Never overrides a real
   // completed/failed/running status - purely fills the "about to start"
   // gap so the whole page never looks frozen on a wall of "Not Started".
-  // Suppressed entirely while `awaitingUpstreamStep` is true - see above.
+  // Also applies during `awaitingUpstreamStep` (step 1 is genuinely next in
+  // line even though Deploy & Launch is still waiting on an earlier mission
+  // step to resume) - the activity banner above already states plainly that
+  // Genie is finishing that earlier step first, so showing step 1 as "In
+  // Progress" here isn't dishonest, just optimistic about ordering. In that
+  // specific case its row also gets an explanatory `detail` line so a long
+  // wait (a full build regeneration can take minutes) reads as "still
+  // working on something upstream" rather than "frozen on step 1".
   const displaySteps = useMemo(() => {
-    if (!isPipelineActive || awaitingUpstreamStep) return steps;
+    if (!isPipelineActive) return steps;
     const nextIndex = steps.findIndex(
       (step) => step.status !== "completed" && step.status !== "failed" && step.status !== "running",
     );
     if (nextIndex === -1) return steps;
-    return steps.map((step, index) => (index === nextIndex ? { ...step, status: "running" as const } : step));
+    return steps.map((step, index) => {
+      if (index !== nextIndex) return step;
+      if (awaitingUpstreamStep) {
+        return {
+          ...step,
+          status: "running" as const,
+          detail: "Waiting on an earlier mission step to finish first - this can take a minute or two.",
+        };
+      }
+      return { ...step, status: "running" as const };
+    });
   }, [steps, isPipelineActive, awaitingUpstreamStep]);
-
-  const flowSteps = useMemo(() => {
-    if (!awaitingUpstreamStep) return displaySteps;
-    return displaySteps.map((step, index) =>
-      index === 0 ? { ...step, status: "running" as const } : step,
-    );
-  }, [awaitingUpstreamStep, displaySteps]);
 
   // Drives the gamified "Genie is working with..." activity banner: while
   // the pipeline is genuinely in motion (either the start() request is
@@ -627,27 +637,6 @@ export function DeployLaunchPage(): JSX.Element {
           <AgentActivityAnimation label={activityLabel} events={liveEvents} startedAt={activeRun?.created_at} />
         ) : null}
 
-        {awaitingUpstreamStep ? (
-          <div
-            className="genie-upstream-build-progress"
-            style={{
-              border: "1px solid #2f83e055",
-              borderLeft: "4px solid #2f83e0",
-              borderRadius: 6,
-              padding: "12px 14px",
-              backgroundColor: "rgba(47, 131, 224, 0.08)",
-            }}
-          >
-            <Text weight="semibold" size={300} style={{ display: "block", marginBottom: 4 }}>
-              Build solution is still running
-            </Text>
-            <Text size={200} style={{ display: "block", opacity: 0.75 }}>
-              Deployment begins automatically as soon as generated UI and agent code are ready.
-            </Text>
-            <div className="genie-indeterminate-rail" aria-label="Build in progress" />
-          </div>
-        ) : null}
-
         <SectionCard
           title="🎮 Mission Progress"
           action={
@@ -659,7 +648,7 @@ export function DeployLaunchPage(): JSX.Element {
             </Badge>
           }
         >
-          <MissionFlowMap steps={flowSteps} />
+          <MissionFlowMap steps={displaySteps} />
           <div
             style={{
               height: 8,

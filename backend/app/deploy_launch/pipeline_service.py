@@ -153,9 +153,266 @@ import react from "@vitejs/plugin-react";
 export default defineConfig({ plugins: [react()] });
 """
 
+# Mirrors the core visual language of Genie's own Mission Control app
+# (frontend/src/styles/global.css): the same dark gradient background,
+# accent colors, and "live agent working" animations (bounce dots, glow,
+# indeterminate rail, pulsing live dot). Every generated mission prototype
+# ships this stylesheet so it reads as a genuine extension of Genie - not a
+# bare, unstyled document - regardless of how much/little styling the LLM-
+# generated UI component itself adds. Base element selectors (h1/h2/button/
+# textarea/etc.) carry sensible defaults; utility classes (`genie-card`,
+# `genie-badge`, `genie-btn`, `genie-live-dot`, `genie-bounce-dots`,
+# `genie-agent-activity`) are documented to the Build Agent's own UI-
+# generation prompts so its markup can opt into the same gamified look.
+_FRONTEND_STYLES_CSS = """/* Genie Mission Prototype shell - shares Genie's own visual language. */
+:root {
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, Helvetica, Arial, sans-serif;
+  background-color: #0b0f14;
+  background-image:
+    radial-gradient(circle at 12% -10%, rgba(47, 131, 224, 0.16), transparent 45%),
+    radial-gradient(circle at 100% 0%, rgba(78, 147, 229, 0.08), transparent 40%);
+  background-attachment: fixed;
+  color: #e6e9ee;
+}
+
+h1, h2, h3 {
+  font-weight: 700;
+  margin: 0 0 8px;
+}
+
+p {
+  color: #aab3bf;
+  line-height: 1.5;
+}
+
+button {
+  font: inherit;
+}
+
+input, textarea, select {
+  font: inherit;
+  color: #e6e9ee;
+  background-color: #10151c;
+  border: 1px solid #2a323d;
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+input:focus, textarea:focus, select:focus {
+  outline: 2px solid #2f83e0;
+  outline-offset: 1px;
+}
+
+.genie-shell {
+  max-width: 1040px;
+  margin: 0 auto;
+  padding: 32px 24px 64px;
+}
+
+@keyframes genie-fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.genie-fade-in {
+  animation: genie-fade-in 260ms ease both;
+}
+
+.genie-header {
+  margin-bottom: 28px;
+}
+
+.genie-eyebrow {
+  display: inline-block;
+  color: #6ba3ea;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-size: 12px;
+  margin: 0 0 6px;
+}
+
+.genie-card {
+  background-color: rgba(255, 255, 255, 0.03);
+  border: 1px solid #232b35;
+  border-radius: 12px;
+  padding: 20px;
+  margin-bottom: 20px;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.03) inset;
+}
+
+.genie-zone-title {
+  font-size: 16px;
+  margin-bottom: 12px;
+}
+
+.genie-btn {
+  padding: 10px 18px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  font-weight: 700;
+  cursor: pointer;
+  background-color: #1a2028;
+  color: #e6e9ee;
+}
+
+.genie-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.genie-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.genie-btn-primary {
+  background: linear-gradient(120deg, #2f83e0, #6a4fc9);
+  color: white;
+}
+
+.genie-btn-primary:hover:not(:disabled) {
+  box-shadow: 0 0 16px rgba(47, 131, 224, 0.45);
+}
+
+.genie-error {
+  color: #ef7f74;
+  font-weight: 600;
+}
+
+.genie-output {
+  white-space: pre-wrap;
+  margin-top: 16px;
+  padding: 14px 16px;
+  background-color: #0e1319;
+  border: 1px solid #232b35;
+  border-radius: 8px;
+}
+
+.genie-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  background-color: #1a2028;
+  color: #aab3bf;
+}
+
+.genie-badge-active {
+  background-color: rgba(47, 131, 224, 0.18);
+  color: #6ba3ea;
+}
+
+.genie-badge-complete {
+  background-color: rgba(63, 166, 106, 0.18);
+  color: #3fa66a;
+}
+
+.genie-badge-pending {
+  background-color: rgba(170, 179, 191, 0.12);
+  color: #7c8794;
+}
+
+@keyframes genie-live-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(63, 166, 106, 0.55); }
+  50% { box-shadow: 0 0 0 4px rgba(63, 166, 106, 0); }
+}
+
+.genie-live-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: #3fa66a;
+  animation: genie-live-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes genie-bounce-dot {
+  0%, 100% { transform: translateY(0); opacity: 0.5; }
+  40% { transform: translateY(-6px); opacity: 1; }
+}
+
+.genie-bounce-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.genie-bounce-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background-color: #6ba3ea;
+  animation: genie-bounce-dot 1.1s ease-in-out infinite;
+}
+
+.genie-bounce-dot:nth-child(2) { animation-delay: 0.15s; }
+.genie-bounce-dot:nth-child(3) { animation-delay: 0.3s; }
+
+@keyframes genie-agent-activity-glow {
+  0%, 100% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+}
+
+.genie-agent-activity {
+  background-image: linear-gradient(
+    120deg,
+    rgba(47, 131, 224, 0.14) 0%,
+    rgba(138, 99, 210, 0.1) 50%,
+    rgba(47, 131, 224, 0.14) 100%
+  );
+  background-size: 200% 200%;
+  animation: genie-agent-activity-glow 3.2s ease-in-out infinite;
+  border-radius: 12px;
+}
+
+@keyframes genie-indeterminate-rail {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(340%); }
+}
+
+.genie-progress-rail {
+  height: 4px;
+  margin-top: 12px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: rgba(47, 131, 224, 0.18);
+}
+
+.genie-progress-rail::after {
+  content: "";
+  display: block;
+  width: 30%;
+  height: 100%;
+  border-radius: inherit;
+  background: #6ba3ea;
+  box-shadow: 0 0 10px rgba(107, 163, 234, 0.8);
+  animation: genie-indeterminate-rail 1.3s ease-in-out infinite;
+}
+"""
+
 _FRONTEND_MAIN_TSX = """import React, { useState } from "react";
 import { createRoot } from "react-dom/client";
 import * as GeneratedModule from "../MissionApp";
+import "./styles.css";
 
 type GeneratedComponent = React.ComponentType;
 const moduleValue = GeneratedModule as unknown as {
@@ -175,17 +432,40 @@ function MissionConsole() {
         if (!message.trim()) return;
         setLoading(true);
         setError("");
+        setResponse("");
         try {
             const backendUrl = window.__MISSION_BACKEND_URL__;
             if (!backendUrl) throw new Error("Mission backend URL is not configured.");
-            const result = await fetch(`${backendUrl}/invoke`, {
+            const result = await fetch(`${backendUrl}/invoke/stream`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ message }),
             });
-            if (!result.ok) throw new Error(`Mission backend returned ${result.status}.`);
-            const body = await result.json();
-            setResponse(body.output_text || "The mission backend returned no output.");
+            if (!result.ok || !result.body) throw new Error(`Mission backend returned ${result.status}.`);
+            const reader = result.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = "";
+            let sawOutput = false;
+            for (;;) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                buffer += decoder.decode(value, { stream: true });
+                const frames = buffer.split("\n\n");
+                buffer = frames.pop() ?? "";
+                for (const frame of frames) {
+                    const payload = frame.replace(/^data:\\s*/, "");
+                    if (!payload) continue;
+                    const event = JSON.parse(payload);
+                    if (event.delta) {
+                        sawOutput = true;
+                        setResponse((prior) => prior + event.delta);
+                    } else if (event.done) {
+                        sawOutput = true;
+                        setResponse(event.output_text || "");
+                    }
+                }
+            }
+            if (!sawOutput) setError("The mission backend returned no output.");
         } catch (caught) {
             setError(caught instanceof Error ? caught.message : "Unable to contact the mission backend.");
         } finally {
@@ -193,19 +473,27 @@ function MissionConsole() {
         }
     }
 
-    return <main style={{ maxWidth: 960, margin: "0 auto", padding: 32, fontFamily: "Arial, sans-serif" }}>
-        <header style={{ marginBottom: 28 }}>
-            <p style={{ color: "#2864b4", fontWeight: 700, margin: 0 }}>MISSION PROTOTYPE</p>
-            <h1 style={{ margin: "8px 0" }}>Interactive Agent Workspace</h1>
-            <p style={{ color: "#56616f" }}>Send a request to this mission's dedicated backend and review the live response.</p>
+    return <main className="genie-shell genie-fade-in">
+        <header className="genie-header">
+            <p className="genie-eyebrow"><span className="genie-live-dot" /> Mission Prototype</p>
+            <h1>Interactive Agent Workspace</h1>
+            <p>Send a request to this mission's dedicated backend and watch the agents collaborate live.</p>
         </header>
-        {GeneratedMissionApp ? <section style={{ marginBottom: 28 }}><GeneratedMissionApp /></section> : null}
-        <section style={{ border: "1px solid #d5dbe3", borderRadius: 8, padding: 20 }}>
-            <label htmlFor="mission-message" style={{ display: "block", fontWeight: 700, marginBottom: 8 }}>What should this mission help you accomplish?</label>
-            <textarea id="mission-message" value={message} onChange={(event) => setMessage(event.target.value)} rows={5} style={{ width: "100%", boxSizing: "border-box", padding: 12, font: "inherit" }} placeholder="Describe the task, question, or decision you want the mission agents to handle." />
-            <button type="button" onClick={invoke} disabled={loading || !message.trim()} style={{ marginTop: 12, padding: "10px 16px", background: "#2864b4", color: "white", border: 0, borderRadius: 4, fontWeight: 700, cursor: "pointer" }}>{loading ? "Working..." : "Run Mission"}</button>
-            {error ? <p role="alert" style={{ color: "#b42318" }}>{error}</p> : null}
-            {response ? <pre style={{ whiteSpace: "pre-wrap", marginTop: 20, padding: 16, background: "#f4f7fb", borderRadius: 4 }}>{response}</pre> : null}
+        {GeneratedMissionApp ? <section className="genie-fade-in"><GeneratedMissionApp /></section> : null}
+        <section className="genie-card">
+            <label htmlFor="mission-message" className="genie-zone-title" style={{ display: "block" }}>What should this mission help you accomplish?</label>
+            <textarea id="mission-message" value={message} onChange={(event) => setMessage(event.target.value)} rows={5} style={{ width: "100%" }} placeholder="Describe the task, question, or decision you want the mission agents to handle." />
+            <div style={{ marginTop: 12, display: "flex", alignItems: "center", gap: 12 }}>
+                <button type="button" className="genie-btn genie-btn-primary" onClick={invoke} disabled={loading || !message.trim()}>Run Mission</button>
+                {loading ? <span className="genie-bounce-dots"><span className="genie-bounce-dot" /><span className="genie-bounce-dot" /><span className="genie-bounce-dot" /></span> : null}
+            </div>
+            {error ? <p role="alert" className="genie-error">{error}</p> : null}
+            {response ? (
+                <div className={loading ? "genie-agent-activity" : undefined} style={{ padding: loading ? 4 : 0 }}>
+                    {loading ? <p className="genie-eyebrow"><span className="genie-live-dot" /> Streaming live</p> : null}
+                    <pre className="genie-output">{response}</pre>
+                </div>
+            ) : null}
         </section>
     </main>;
 }
@@ -845,6 +1133,7 @@ class DeploymentPipelineService:
                     src_root.mkdir(parents=True, exist_ok=True)
                     (src_root / "main.tsx").write_text(_FRONTEND_MAIN_TSX, encoding="utf-8")
                     (src_root / "env.d.ts").write_text(_FRONTEND_ENV_D_TS, encoding="utf-8")
+                    (src_root / "styles.css").write_text(_FRONTEND_STYLES_CSS, encoding="utf-8")
                     public_root = frontend_root / "public"
                     public_root.mkdir(parents=True, exist_ok=True)
                     (public_root / "runtime-config.js").write_text(

@@ -149,13 +149,16 @@ never reachable directly from the browser.
 """
 from __future__ import annotations
 
+import json
 import os
+from collections.abc import AsyncIterator
 
 from agent_framework.foundry import FoundryAgent
 from azure.ai.projects.aio import AIProjectClient
 from azure.identity.aio import DefaultAzureCredential
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 app = FastAPI(title="{mission_title} Backend")
@@ -196,6 +199,39 @@ async def invoke(request: InvokeRequest) -> InvokeResponse:
             )
             response = await agent.run(request.message)
             return InvokeResponse(output_text=(getattr(response, "text", None) or "").strip())
+
+
+async def _stream_agent_response(message: str) -> AsyncIterator[str]:
+    """Yields Server-Sent Events as the Orchestrator Agent's reply streams in.
+
+    Each event line is a JSON object: ``{{"delta": "<incremental text>"}}``
+    while the response is still being generated, then exactly one final
+    ``{{"done": true, "output_text": "<full response>"}}`` once the model
+    has finished - lets the mission UI show the Orchestrator genuinely
+    working in real time instead of waiting on one long blocking call.
+    """
+    endpoint = os.environ["FOUNDRY_ENDPOINT"]
+    project_name = os.environ["FOUNDRY_PROJECT_NAME"]
+    async with DefaultAzureCredential() as credential:
+        async with AIProjectClient(endpoint=endpoint, credential=credential) as project_client:
+            agent = FoundryAgent(
+                project_client=project_client,
+                agent_name=_ORCHESTRATOR_AGENT_NAME,
+                agent_version=os.getenv("FOUNDRY_ORCHESTRATOR_AGENT_VERSION", "1"),
+            )
+            accumulated = ""
+            async for update in agent.run(message, tools=None, stream=True):
+                delta = getattr(update, "text", None) or ""
+                if not delta:
+                    continue
+                accumulated += delta
+                yield "data: " + json.dumps(dict(delta=delta)) + "\\n\\n"
+            yield "data: " + json.dumps(dict(done=True, output_text=accumulated.strip())) + "\\n\\n"
+
+
+@app.post("/invoke/stream")
+async def invoke_stream(request: InvokeRequest) -> StreamingResponse:
+    return StreamingResponse(_stream_agent_response(request.message), media_type="text/event-stream")
 '''
 
 _AGENT_CONFIG_PY_TEMPLATE = '''"""Deterministically generated agent-name configuration - never LLM-authored.

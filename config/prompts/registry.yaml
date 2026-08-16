@@ -553,9 +553,50 @@ prompts:
       - no random IDs, no placeholder content, no extra utilities
       - call only the Orchestrator from (2), never specialist agents directly
 
-      The UI must call Orchestrator only via a relative fetch call;
-      this call reaches this mission's backend, which is the only caller of
-      the Orchestrator Agent in Azure AI Foundry.
+      VISUAL STYLE - this prototype must look like a genuine, polished
+      part of Genie, not a bare unstyled page: the surrounding shell
+      already loads a stylesheet with Genie's own dark, gradient-accented
+      look and a set of ready-made utility classes - use them instead of
+      inventing new inline styles. Wrap each zone in a `<section
+      className="genie-card">` with a `<h2 className="genie-zone-title">`
+      heading. Use `<span className="genie-badge genie-badge-active">`
+      for the specialist agent currently working, `genie-badge-complete`
+      once it hands off, and `genie-badge-pending` before its turn. Show a
+      `<span className="genie-live-dot">` next to whatever is actively
+      updating in real time, and `<span className="genie-bounce-dots">`
+      (containing three `<span className="genie-bounce-dot">`) as a
+      loading affordance while waiting on the Orchestrator. Give the zone
+      that is currently receiving live orchestration updates the
+      `genie-agent-activity` class for a subtle animated glow. Use
+      `<button className="genie-btn genie-btn-primary">` for the primary
+      action and plain `genie-btn` for secondary ones, and `genie-input`/
+      `genie-textarea` classes are not required (bare `<input>`/
+      `<textarea>` already inherit the themed look). This must read as
+      gamified and alive - a user should feel like they are watching a
+      real multi-agent control room, not filling out a form.
+
+      REAL-TIME INTERACTION CONTRACT - this mission's own backend exposes
+      exactly one endpoint the UI is allowed to call: `POST /invoke/stream`
+      (relative path, same origin) with a JSON body `{{ "message": string }}`
+      built from whatever the user entered in the Input/Interaction zone.
+      It returns a `text/event-stream` response - do NOT `await
+      response.json()`. Instead read `response.body.getReader()`, decode
+      chunks with `TextDecoder`, and split on blank lines (`\n\n`) into
+      individual events, each shaped `data: <json>` where the JSON is
+      either `{{ "delta": string }}` (an incremental slice of the
+      Orchestrator's real response as it is generated) or `{{ "done": true,
+      "output_text": string }}` (sent exactly once, last). Append every
+      `delta` you receive straight into the Orchestrator Coordination
+      Panel/Output zone's own live text state AS IT ARRIVES - this
+      incremental text genuinely is the Orchestrator narrating its own
+      coordination and specialist hand-offs in real time (it was instructed
+      to describe that as it works), so rendering it live, word by word, is
+      what makes agent collaboration visibly real rather than simulated.
+      Never fabricate a fake progress percentage, fake per-agent timer, or
+      fake "Active Agent" value that isn't actually derived from this real
+      stream - if you want to highlight which specialist is currently
+      being discussed, derive it by matching agent names literally
+      mentioned in the streamed text so far, not from invented state.
       Return as fenced ```tsx code block, first line `// agent: ui`.
 
       Security rules you MUST follow in every code block above: never
@@ -603,7 +644,7 @@ prompts:
       - policies
       - excluded_agents
       - user_message
-    version: "5.0.0"
+    version: "5.2.0"
 
   - id: build-generation-component-v1
     name: Build Generation - Single Component
@@ -662,7 +703,34 @@ prompts:
       the architecture. Each screen's content is concretely about that
       screen's described interaction (never generic placeholder code).
       Call ONLY the Orchestrator from above, never specialist agents
-      directly, via relative fetch with credentials 'include'.
+      directly.
+      REAL-TIME INTERACTION CONTRACT - this mission's own backend exposes
+      exactly one endpoint the UI is allowed to call: `POST /invoke/stream`
+      (relative path, same origin) with a JSON body `{{ "message": string }}`.
+      It returns a `text/event-stream` response - do NOT `await
+      response.json()`. Read `response.body.getReader()`, decode chunks
+      with `TextDecoder`, split on blank lines (`\n\n`) into events shaped
+      `data: <json>`, where the JSON is either `{{ "delta": string }}` (an
+      incremental slice of the Orchestrator's real response) or
+      `{{ "done": true, "output_text": string }}` (sent once, last). Append
+      every `delta` into the relevant screen's own live text state AS IT
+      ARRIVES so the user watches the Orchestrator's real coordination
+      narration stream in live, word by word - never fabricate fake
+      progress/timers/active-agent state not derived from this real
+      stream.
+      VISUAL STYLE: the surrounding shell already loads a stylesheet with
+      Genie's own dark, gradient-accented look and ready-made utility
+      classes - use them instead of inventing new inline styles. Wrap each
+      screen in a `<section className="genie-card">` with a `<h2
+      className="genie-zone-title">` heading; use `genie-badge`/
+      `genie-badge-active`/`genie-badge-complete`/`genie-badge-pending` for
+      agent status, `genie-live-dot` next to real-time updates,
+      `genie-bounce-dots` (with three `genie-bounce-dot` children) as a
+      loading affordance, `genie-agent-activity` for a subtle glow on
+      whatever is actively updating, and `genie-btn`/`genie-btn-primary`
+      for buttons. Bare `<input>`/`<textarea>` already inherit the themed
+      look. This must read as gamified and alive, matching Genie's own
+      look, not a bare unstyled form.
       Return one fenced ```tsx code block, first line `// agent: ui`, then
       a "## Multi-Agent Workflow" section listing ONLY the agents actually
       generated - same count and names as above.
@@ -712,7 +780,7 @@ prompts:
       - component_kind
       - component_name
       - user_message
-    version: "1.2.0"
+    version: "1.4.0"
 
   - id: build-component-regeneration-v1
     name: Build Generation - Regenerate Single Component
