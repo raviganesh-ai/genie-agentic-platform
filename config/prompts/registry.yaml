@@ -791,9 +791,9 @@ prompts:
       exactly once - the platform automatically supplies the real
       transcript_excerpt and user_message shown below, so you do not need
       to repeat their full text in the tool call itself (short
-      placeholders or empty strings are fine) - then respond with EXACTLY
-      that tool's returned output text and nothing else - no additional
-      commentary, no summary.
+      placeholders or empty strings are fine). The tool persists the complete
+      generated result; respond with exactly DELEGATED_OUTPUT_STORED and
+      nothing else. Do not echo or summarize the generated result.
 
       transcript_excerpt: {transcript_excerpt}
 
@@ -801,7 +801,7 @@ prompts:
     variables:
       - transcript_excerpt
       - user_message
-    version: "1.1.0"
+    version: "1.2.0"
 
   - id: orchestrator-architecture-phase-v1
     name: Orchestrator Architecture Phase
@@ -814,9 +814,9 @@ prompts:
       exactly once - the platform automatically supplies the real
       approved_requirements and user_message shown below, so you do not
       need to repeat their full text in the tool call itself (short
-      placeholders or empty strings are fine) - then respond with EXACTLY
-      that tool's returned output text and nothing else - no additional
-      commentary, no summary.
+      placeholders or empty strings are fine). The tool persists the complete
+      generated result; respond with exactly DELEGATED_OUTPUT_STORED and
+      nothing else. Do not echo or summarize the generated result.
 
       approved_requirements: {approved_requirements}
 
@@ -824,7 +824,7 @@ prompts:
     variables:
       - approved_requirements
       - user_message
-    version: "1.1.0"
+    version: "1.2.0"
 
   - id: orchestrator-build-phase-v1
     name: Orchestrator Build Phase
