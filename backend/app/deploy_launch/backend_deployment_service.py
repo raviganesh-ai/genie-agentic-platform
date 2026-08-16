@@ -250,7 +250,7 @@ class BackendDeploymentService:
                     )
                 
                 # Fetch latest run status
-                run_detail = acr_client.registries.get_build_details(
+                run_detail = acr_client.runs.get(
                     self._resource_group, self._acr_name, run_id
                 )
                 run_status = getattr(run_detail, "status", None)
