@@ -708,42 +708,6 @@ export function DeployLaunchPage(): JSX.Element {
               </SectionCard>
             ) : null}
 
-            {activeRun.test_summary || activeRun.security_findings_count !== null ? (
-              <SectionCard
-                title="🧪 Testing & Security"
-                action={
-                  <div style={{ display: "flex", gap: 6 }}>
-                    {activeRun.test_summary ? (
-                      <Badge shape="rounded" style={{ backgroundColor: "#3fa66a", color: "#0b0f14" }}>
-                        ✅ Tests Passed
-                      </Badge>
-                    ) : null}
-                    {activeRun.security_findings_count !== null ? (
-                      <Badge
-                        shape="rounded"
-                        style={{
-                          backgroundColor: activeRun.security_findings_count === 0 ? "#3fa66a" : "#d99a2b",
-                          color: "#0b0f14",
-                        }}
-                      >
-                        🛡️ {activeRun.security_findings_count} Finding
-                        {activeRun.security_findings_count === 1 ? "" : "s"}
-                      </Badge>
-                    ) : null}
-                  </div>
-                }
-              >
-                {activeRun.test_summary ? (
-                  <Text size={300} style={{ whiteSpace: "pre-wrap", display: "block", marginBottom: 8 }}>
-                    {activeRun.test_summary}
-                  </Text>
-                ) : null}
-                {activeRun.security_findings_count !== null ? (
-                  <Text size={300}>Security scan findings: {activeRun.security_findings_count}</Text>
-                ) : null}
-              </SectionCard>
-            ) : null}
-
             {activeRun.status === "completed" && activeRun.launch_url ? (
               <SectionCard title="🎉 Mission Launched!" highlight>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
