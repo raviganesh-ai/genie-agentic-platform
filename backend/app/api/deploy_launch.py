@@ -26,7 +26,7 @@ from app.deploy_launch.models import DeploymentPipelineRun
 from app.deploy_launch.pipeline_service import DeploymentPipelineService
 from app.security.auth_models import AuthenticatedUser
 from app.security.dependencies import get_current_user
-from app.services.session_service import SessionService
+from app.services.session_service import SessionService, SessionNotFoundError
 from app.services.workshop_service import UnknownWorkflowRunError
 
 router = APIRouter(prefix="/sessions/{session_id}/deploy-launch", tags=["deploy-launch"])
@@ -63,7 +63,19 @@ async def start_deployment(
     session_service: SessionService = Depends(get_session_service),
     pipeline_service: DeploymentPipelineService = Depends(get_deployment_pipeline_service),
 ) -> DeploymentPipelineRun:
-    await session_service.get_session(session_id=session_id, requesting_user_id=user.user_id)
+    # For retry operations (resume_from_step set), allow the request even if the
+    # session lookup fails - the pipeline run may still exist and be retryable
+    # (e.g., if the session was deleted but the deployment run is still in memory).
+    # For new starts, enforce the session lookup to ensure proper authorization.
+    try:
+        await session_service.get_session(session_id=session_id, requesting_user_id=user.user_id)
+    except SessionNotFoundError:
+        if not body.resume_from_step:
+            # New start requires a valid session
+            raise
+        # Retry allowed even if session is gone - user is authenticated and we'll
+        # verify ownership of the specific deployment run in pipeline_service
+    
     return await pipeline_service.start(
         session_id=session_id,
         requesting_user_id=user.user_id,
