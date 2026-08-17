@@ -134,7 +134,7 @@ export function LandingPage(): JSX.Element {
           </Text>
           <Dropdown
             placeholder={loadingModels ? "Loading models..." : "Select a model"}
-            value={selectedModel ?? undefined}
+            value={selectedModel ?? ""}
             selectedOptions={selectedModel ? [selectedModel] : []}
             disabled={loadingModels || models.length === 0 || creating}
             onOptionSelect={(_, data) => setSelectedModel(data.optionValue ?? null)}
