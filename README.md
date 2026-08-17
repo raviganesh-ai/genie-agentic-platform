@@ -12,6 +12,8 @@ Genie is an Azure-native Agentic AI solutioning platform. It ingests transcripts
 - [Core concepts](#core-concepts)
 - [Agents](#agents)
 - [Workflows](#workflows)
+- [How a mission gets built](#how-a-mission-gets-built)
+- [Deploy & Launch pipeline](#deploy--launch-pipeline)
 - [Repository layout](#repository-layout)
 - [Local development](#local-development)
 - [Configuration reference](#configuration-reference)
@@ -37,9 +39,10 @@ flowchart TB
     end
 
     subgraph Backend["FastAPI Backend (Python 3.12, async)"]
-        API["API layer\n(16 routers: sessions, uploads, ingestion,\nworkflows, agents, memory, governance, approvals,\narchitecture, requirements, workshop, replay,\noutputs, debugging, foundry-admin, health)"]
-        SVC["Application services\n(session, requirements, workshop,\narchitecture, output services)"]
-        ORCH["Orchestration\n(WorkflowRuntime, AgentOrchestrator,\nHandoff / Collaboration / Reanalysis)"]
+        API["API layer\n(19 routers: sessions, uploads, ingestion,\nworkflows, workflow-events, agents, memory, peer-review,\napprovals, architecture, requirements, workshop, replay,\noutputs, deploy-launch, debugging, foundry-admin, model-catalog, health)"]
+        SVC["Application services\n(session, requirements, workshop,\narchitecture, peer review, output services)"]
+        ORCH["Orchestration\n(WorkflowRuntime, AgentOrchestrator,\ngenie-orchestrator tool delegation,\nHandoff / Collaboration / Reanalysis)"]
+        DL["Deploy & Launch Pipeline\n(deterministic, non-LLM Azure provisioning\n- see app.deploy_launch)"]
         GW["AzureAgentGateway"]
         MEM["Memory Service\n(Personal / Shared / Enterprise)"]
         GOV["Governance Service\n(lineage, approvals, replay, traceability)"]
@@ -58,10 +61,13 @@ flowchart TB
 
     FE -- "HTTPS + Entra bearer token" --> API
     API --> SVC --> ORCH
+    API --> DL
     ORCH --> GW --> FOUNDRY
     ORCH --> MEM --> SEARCH
     ORCH --> MEM --> STORE
     ORCH --> GOV
+    DL --> FOUNDRY
+    DL --> GOV
     VAL -.->|"gates startup"| API
     Backend -- "MSI" --> MI
     MI --> KV
@@ -111,43 +117,47 @@ Before accepting any traffic, the backend runs 10 mandatory startup validators (
 
 ## Agents
 
-Agents are **never** implemented as Python/TypeScript classes containing reasoning logic. Each agent is a real resource provisioned in Azure AI Foundry; Genie's `config/agents/*.yaml` registry only records *which* Foundry resource backs each logical agent id, its capabilities, memory access, and prompt template reference. `AzureAgentGateway` resolves the prompt, opens a thread against the existing Foundry agent, posts the message, and reads the reply — it never creates agents at runtime.
+Agents are **never** implemented as Python/TypeScript classes containing reasoning logic. Each agent is a real resource provisioned in Azure AI Foundry; Genie's `config/agents/registry.yaml` registry only records *which* Foundry resource backs each logical agent id, its capabilities, memory access, and prompt template reference. `AzureAgentGateway` resolves the prompt, opens a thread against the existing Foundry agent, posts the message, and reads the reply — it never creates agents at runtime.
 
-### Enabled agents (wired into real workflows)
+### The real agent lineup
 
-| Agent id | Name | Role | Capabilities | Memory access | Prompt template |
-|---|---|---|---|---|---|
-| `requirements-analyst` | Requirements Analyst | requirement_discovery | transcript_analysis, requirement_extraction, risk_identification | personal, shared | `requirements-extraction-v1` |
-| `architecture-designer` | Architecture Designer | architecture_design | architecture_generation, alternative_design_generation | shared, enterprise | `architecture-recommendation-v1` |
-| `risk-assessor` | Risk Assessor | risk_analysis | risk_scoring, readiness_scoring | shared | `risk-assessment-v1` |
-| `governance-reviewer` | Governance Reviewer | governance | policy_review, approval_recording | shared | `governance-review-v1` |
-| `memory-curator` | Memory Curator | memory_management | memory_promotion_review | shared, enterprise | `memory-curation-review-v1` |
-| `debugging-agent` | Debugging Agent | debugging | failure_diagnosis | shared | `failure-diagnosis-v1` |
+Genie's mission pipeline is deliberately lean — seven real Foundry agents, no inert "catalog" of unused agents:
 
-### Supported agents catalog (provisioned in Foundry, now wired into real workflow steps)
+| Agent id | Name | Role | Prompt template | Notes |
+|---|---|---|---|---|
+| `genie-orchestrator` | Genie Orchestrator | mission_orchestration | `orchestrator-mission-v1` | The **only** agent every workflow step actually addresses directly — see [delegation pattern](#the-orchestrator-delegation-pattern) below |
+| `requirements-analyst` | Requirements Analyst | requirement_discovery | `requirements-extraction-v1` | Extracts goals/requirements/risks and rules on agentic-workflow qualification |
+| `architecture-designer` | Architecture Designer | architecture_design | `architecture-recommendation-v1` | Designs the multi-agent workflow and single-page UI, strictly scoped to the approved critical path |
+| `build-agent` | Build Agent | solution_build | `build-generation-v1` / `build-generation-component-v1` / `build-component-regeneration-v1` | Generates the real UI + specialist agent + orchestrator code, one component at a time |
+| `security-assessment-agent` | Security Assessment Agent | security_assessment | `security-assessment-v1` | Independent OWASP Top 10 review of the generated build; reports `SECURITY_GATE: PASS/FAIL` |
+| `test-generation-agent` | Test Generation Agent | test_generation | `test-generation-v1` | Independent test-coverage review of the generated build; reports `TEST_COVERAGE_GATE: PASS/FAIL` |
+| `debugging-agent` | Debugging Agent | debugging | `failure-diagnosis-v1` | Diagnoses a detected workflow/agent execution failure |
 
-Defined in `config/agents/foundry_agents_catalog.yaml` — all 22 are `enabled: true` and each has a real Foundry agent resource. They are wired into the workflows above so they actually execute during a real session (not just inert inventory entries).
+### The orchestrator delegation pattern
 
-**Business agents (14, wired into `solution-discovery-workflow`):** Discovery Agent, Requirements Agent, Industry Expert Agent, Data Architect Agent, Solution Architect Agent, Risk & Compliance Agent, Innovation Agent, UI Designer Agent, Roadmap Agent, Governance Agent, Executive Summary Agent, Cost Optimization Agent, Responsible AI Agent, Workshop Facilitator Agent.
-
-**Debugging agents (8, wired into `debugging-workflow`):** Test Failure Analyst Agent, Backend Debugging Agent, Frontend Debugging Agent, Agent Orchestration Debugging Agent, Security Debugging Agent, Azure Deployment Debugging Agent, Governance Trace Debugging Agent, Memory Debugging Agent.
+Every `solution-discovery-workflow` step invokes `genie-orchestrator`, never the specialist directly. `genie-orchestrator` calls exactly one of its own registered Foundry function-calling tools (`call_requirements_analyst`, `call_architecture_designer`, `call_build_agent`, `call_security_assessment_agent`, `call_test_generation_agent` — implemented in `app/agents/tools/orchestration_tools.py`) to execute that phase's real specialist through the exact same `AzureAgentGateway` path as any other agent call, then returns that specialist's output **verbatim** as the step's own result. This exists because the pinned `azure-ai-projects` SDK version has no native "Connected Agents" mechanism for Prompt Agents — `connected_agent_ids` in the registry is realized via genuine per-phase function tools instead, not a Foundry-native feature. Each agent's own registry entry also declares `connected_agent_ids` purely for inventory/documentation, mirroring what `genie-orchestrator` is actually wired to call.
 
 ### Agent metadata fields
 
-Every agent entry carries: `id`, `name`, `role`, `description`, `capabilities`, `allowed_tools`, `memory_access` (subset of `personal`/`shared`/`enterprise`), `foundry_agent_id` (the real provisioned Foundry resource id), `model_deployment_ref` (optional — informational only, defaults to `Settings.default_llm`), `owner` (accountable team, never a person), `governance_policy_id`, `prompt_template_ref`, and `enabled`.
+Every agent entry carries: `id`, `name`, `role`, `description`, `capabilities`, `allowed_tools`, `memory_access` (subset of `personal`/`shared`/`enterprise`), `foundry_agent_id` (the real provisioned Foundry resource id), `model_deployment_ref` (optional — informational only, defaults to `Settings.default_llm`), `owner` (accountable team, never a person), `governance_policy_id`, `prompt_template_ref`, `connected_agent_ids` (documentation only — see above), and `enabled`.
 
 ### Default LLM
 
-`Settings.default_llm` (env `GENIE_DEFAULT_LLM`) applies to any agent that doesn't declare its own `model_deployment_ref`. Currently `gpt-5.1` (GA, sold directly through Azure — no Marketplace subscription needed). Anthropic Claude models were evaluated but require an Azure Marketplace subscription with non-zero SKU quota, which is not available by default.
+`Settings.default_llm` (env `GENIE_DEFAULT_LLM`) applies to any agent that doesn't declare its own `model_deployment_ref`. Currently `gpt-5-mini` by default (`architecture-designer` overrides to `gpt-5-1`, demonstrating per-agent LLM configurability). Anthropic Claude models were evaluated but require an Azure Marketplace subscription with non-zero SKU quota, which is not available by default.
 
 ---
 
 ## Workflows
 
-Workflows (`config/workflows/registry.yaml`) define ordered, dependency-graphed steps across agents; `WorkflowRuntime` computes execution "waves" from the `depends_on` graph and runs same-wave steps in parallel via `asyncio.gather`.
+Workflows (`config/workflows/registry.yaml`) define ordered, dependency-graphed steps; `WorkflowRuntime` computes execution "waves" from the `depends_on` graph and runs same-wave steps in parallel via `asyncio.gather`. Genie's own Mission Control flow is deliberately just human-paced stages — each step has `requires_human_proceed: true`, so a run simply stops at `waiting_for_proceed` until a human explicitly resumes it; editing an earlier, already-persisted stage never cascades into automatically re-running a downstream one.
 
-- **`solution-discovery-workflow`** — 18 steps spanning 18 agents (4 of the original 6 registry agents + all 14 business catalog agents) across 9 dependency waves: initial discovery (`discovery-agent`, `workshop-facilitator-agent`) → requirements capture (`requirements-analyst`, `requirements-agent`) → industry context + risk (`industry-expert-agent`, `risk-assessor`, `risk-compliance-agent`) → architecture design (`architecture-designer`, `data-architect-agent`) → end-to-end solution architecture (`solution-architect-agent`) → parallel enrichment (`innovation-agent`, `ui-designer-agent`, `cost-optimization-agent`, `responsible-ai-agent`, `roadmap-agent`) → governance review (`governance-reviewer`, gated by an `architecture-approval` checkpoint) → cross-cutting governance coordination (`governance-agent`) → executive summary (`executive-summary-agent`, gated by a `final-output-approval` checkpoint).
-- **`debugging-workflow`** — `debugging-agent` plus all 8 specialist debugging catalog agents (test-failure, backend, frontend, orchestration, security, Azure deployment, governance-trace, memory) run in parallel on `FailureDetected`, each diagnosing from its own domain angle, executed through the exact same `AzureAgentGateway` path as every other workflow (never a bespoke/local diagnostic path).
+- **`solution-discovery-workflow`** — three steps, all addressed to `genie-orchestrator` (see [delegation pattern](#the-orchestrator-delegation-pattern) above):
+  1. `analyze-requirements` (prompt `orchestrator-requirements-phase-v1`, tool `call_requirements_analyst`) — extract requirements from the session transcript.
+  2. `design-architecture` (prompt `orchestrator-architecture-phase-v1`, tool `call_architecture_designer`, human-gated) — derive the multi-agent workflow + UI design from the approved requirements.
+  3. `build-solution` (prompt `orchestrator-build-phase-v1`, tool `call_build_agent`, human-gated) — generate the real UI + agent + orchestrator code for the approved architecture. On a retried attempt, this step's own prior output is fed back in as `previous_build_output` so `call_build_agent` skips regenerating any component that already succeeded, instead of rebuilding the whole mission from scratch.
+
+  Test generation and its real execution are deliberately **not** steps in this workflow — they happen later, inside the separate [Deploy & Launch pipeline](#deploy--launch-pipeline), against the mission's actually-deployed build.
+- **`debugging-workflow`** — a single `diagnose-failure` step (agent `debugging-agent`, prompt `failure-diagnosis-v1`) triggered on a detected workflow/agent execution failure, executed through the exact same `AzureAgentGateway` path as every other workflow (never a bespoke/local diagnostic path).
 
 ### Agentic-workflow qualification check
 
@@ -162,18 +172,86 @@ The backend (`RequirementsService.get_qualification`, `GET /sessions/{id}/requir
 
 ---
 
+## How a mission gets built
+
+This is the "how": the exact mechanism Genie uses to turn an uploaded transcript into a working, requirements-traceable UI + multi-agent backend — end to end, nothing hardcoded or templated.
+
+```mermaid
+flowchart LR
+    T["Transcript / recording\n/ document upload"] --> RA["Requirements Analyst\nMUST-HAVE vs NICE-TO-HAVE\n+ numbered Critical Path"]
+    RA -->|"human approves"| AD["Architecture Designer\nMulti-Agent Workflow +\nSingle-Page UI Design"]
+    AD -->|"human approves"| BA["Build Agent\n(one component at a time)"]
+    BA --> SA["Security Assessment Agent\nSECURITY_GATE: PASS/FAIL"]
+    BA --> TG["Test Generation Agent\nTEST_COVERAGE_GATE: PASS/FAIL"]
+    SA --> WS["Workshop Center\n(peer review + Apply Selected Fixes)"]
+    TG --> WS
+    WS -->|"human approves"| DL["Deploy & Launch pipeline\n(real Azure provisioning)"]
+```
+
+### 1. Requirements are pinned into a single scope contract
+
+`requirements-analyst` (prompt `requirements-extraction-v1`) classifies every functional requirement as `MUST-HAVE` or `NICE-TO-HAVE` (erring toward MUST-HAVE when ambiguous — the goal is to capture full scope, never shrink it), then emits a numbered **"Critical path (must build first):"** list. This list is the one scope boundary every later stage is measured against. The same step also emits the `AGENTIC_WORKFLOW_QUALIFICATION` verdict described above.
+
+### 2. Architecture Designer decides *what* to build — strictly bounded to that scope
+
+`architecture-designer` (prompt `architecture-recommendation-v1`) reasons out two sections from the approved requirements alone:
+
+- **`## Multi-Agent Workflow`** — exactly one Orchestrator Agent plus however many specialist agents the critical path genuinely needs (no "best practice" agents invented beyond what the requirements ask for).
+- **`## Single-Page UI Design`** — only the mission-specific *input* zone(s) (1-3 zones), using a fixed, deterministic field→control mapping so every mission's UI stays consistent: ≤6 mutually exclusive choices → dropdown; multi-select → checkbox group; bounded number where position matters → slider; exact number → number input; toggle → checkbox; file/folder → drag-and-drop picker; date/time → picker; only genuinely open-ended values → text field. The surrounding shell always supplies the live Agent Pipeline panel and Mission Queue (progress, streamed narration, results, downloads) identically for every mission, so this design step never touches that — only the bespoke input surface.
+
+The prompt is explicit: *"Stay strictly within the 'Critical path:' scope... treat [anything outside it] as future backlog, out of scope for this design."*
+
+### 3. Build Agent turns that design into real code — one component at a time, with zero drift allowed
+
+`call_build_agent` (`app/agents/tools/orchestration_tools.py`) invokes the Build Agent **once per component** (`build-generation-component-v1`), in a fixed bottom-up order: each specialist agent module (alphabetical), then the Orchestrator module, then the UI component. The prompt hard-constrains every component to the architecture's own list: *"Every zone and every agent you generate code for MUST come directly from that exact list below — never invent, add, rename, or merge."* The UI component must implement **only** the input zones named in step 2, using the same deterministic control-mapping rule, styled with Genie's own shell classes (`genie-card`, `genie-zone-title`, `genie-btn-primary`, `genie-dropzone`) and a fixed contract (`{ onSubmit: (message, attachments?) => void }`) — it never renders its own progress/output/agent-status UI, because the shell already does. On a retried build, `previous_build_output` lets the tool skip regenerating any component that already succeeded rather than rebuilding the whole mission from scratch. Users can also request a targeted change to a single already-generated component from Workshop Center (`WorkshopService.regenerate_component`, prompt `build-component-regeneration-v1`) without touching anything else.
+
+### 4. Two independent agents verify the build against the original requirements — never trusting the builder's own claims
+
+- **Security Assessment Agent** (`security-assessment-v1`) reviews the entire generated artifact against the OWASP Top 10 every time (not just the diff) and is explicitly told to *"form your own independent judgment... do not defer to, assume the correctness of, or be swayed by"* the Build Agent's own claims. Ends with `SECURITY_GATE: PASS|FAIL` plus structured findings.
+- **Test Generation Agent** (`test-generation-v1`) generates real, pytest-discoverable unit/integration tests and Vitest/RTL UI tests, and independently confirms *"every requirement's critical path have at least one covering test"* before reporting `TEST_COVERAGE_GATE: PASS|FAIL`.
+
+Both marker-line verdicts are parsed verbatim (never invented or overridden) by `PeerReviewService` (`app/services/peer_review_service.py`) using the same "agents return marker lines, never JSON" convention used throughout Genie. Workshop Center's **Apply Selected Fixes** action regenerates the build with a customer-chosen subset of findings and forces both gates to re-run against the new artifact.
+
+### 5. Human approval + full decision lineage at every hop
+
+Every stage above (`design-architecture`, `build-solution`) is `requires_human_proceed: true` — nothing auto-advances, and revisiting an earlier stage never silently cascades into re-running a downstream one. `TraceabilityService` (`app/governance/traceability_service.py`) assembles a complete, customer-facing lineage per recommendation — which agent produced it, which evidence/memory it used, which approvals were granted, and every governance event on its trace id — so any generated screen or agent can be traced back to the exact requirement and approval that authorized it. This is what Genie's **Replay Center** and **Triage Mode** panels render live.
+
+---
+
+## Deploy & Launch pipeline
+
+Deploy & Launch is deliberately **not** an LLM-narrative workflow step — it is a real, deterministic, code-driven Azure provisioning pipeline (`app/deploy_launch/pipeline_service.py`) that executes each named step in this exact order against real Azure SDKs (or Null/local equivalents when the required settings aren't configured, mirroring the `AzureAgentGateway` / `LocalAgentGateway` fail-closed pattern) — never fabricating a result for a step it didn't actually perform. It runs once a mission's `build-solution` step has been approved, and it deploys **one customer mission's generated build** (a separate concern from Genie's own infrastructure, which is provisioned once via `infra/main.bicep`).
+
+| # | Step id | Customer-facing name | What actually happens |
+|---|---|---|---|
+| 1 | `generate-access-policy` | Generate Access Policy & Least Access | Derives a least-privilege access policy for the mission's generated agents |
+| 2 | `provision-foundry-agents` | Deploy Agents to Foundry | Provisions each generated specialist + orchestrator agent as a real Azure AI Foundry resource |
+| 3 | `deploy-backend-service` | Deploy Backend Service | Builds and deploys the mission's generated backend service |
+| 4 | `sync-frontend-integration` | Update Frontend Integrations | Wires the generated UI to the newly deployed backend/agents |
+| 5 | `deploy-frontend-app` | Deploy Frontend | Deploys the mission's generated UI |
+| 6 | `generate-test-suite` | Generate Functional & Regression Tests | Test Generation Agent produces the real test suite for the deployed build (gated by `has_pytest_discoverable_tests()`, with one corrective retry) |
+| 7 | `execute-test-suite` | Execute Full Fledge Testing | `TestExecutionService` really shells out to `pytest` against the generated tests in a sandboxed subprocess — a genuine pass/fail, never a fabricated success |
+| 8 | `run-security-scan` | Security Scan (Backend & Frontend) | Real security scan of the deployed backend and frontend artifacts |
+| 9 | `launch-mission` | Launch | Mints the customer-facing launch link once every prior step has passed |
+
+Each step's real status (`pending` → `running` → `completed`/`failed`/`skipped`) streams live to the Deploy & Launch page so the human watches actual provisioning happen — never a simulated progress bar.
+
+---
+
 ## Repository layout
 
 ```
 backend/           FastAPI application (Python 3.12+)
   app/
-    agents/        AgentRegistry, AzureAgentGateway, Foundry provider/sync/lifecycle
-    api/            16 routers (thin — auth + delegation only)
+    agents/        AgentRegistry, AzureAgentGateway, orchestration tools, Foundry provider/sync/lifecycle
+    api/            19 routers (thin — auth + delegation only)
     architecture/   Architecture Studio services
     config/         Settings (pydantic-settings, env prefix GENIE_)
     debugging/      Debugging workflow trigger service
+    deploy_launch/  Deploy & Launch pipeline (real, deterministic Azure provisioning
+                    of one mission's generated build - see "Deploy & Launch pipeline")
     deployment/     Pre-infra deployment-readiness tooling (resource provider checks)
-    governance/      Governance, lineage, decision graph, approval, replay services
+    governance/      Governance, lineage, decision graph, approval, replay, traceability services
     memory/         Personal / Shared / Enterprise memory services
     models/         Shared Pydantic models
     orchestration/  WorkflowRuntime, AgentOrchestrator, handoff/collaboration/reanalysis
@@ -181,8 +259,9 @@ backend/           FastAPI application (Python 3.12+)
     prompts/        PromptRegistry
     repositories/   Protocol + in-memory repository implementations
     security/       Entra ID token validation, auth dependencies
-    services/       Session / Requirements / Workshop / Architecture / Output /
+    services/       Session / Requirements / Workshop / Architecture / Peer Review / Output /
                     Foundry agent provisioning & lifecycle services
+    transcription/  Upload/recording transcription (speech-to-text) service
     utils/          Shared YAML loader
     validation/     10 fail-closed startup validators + runner
     workflows/      WorkflowRegistry
@@ -193,7 +272,7 @@ frontend/           React + TypeScript Mission Control UI (Vite)
     app/            App bootstrap (MSAL init, router)
     components/     Shared UI components
     features/       9 feature pages (landing, upload, requirement-map,
-                     architecture-studio, workshop-center, governance-center,
+                     architecture-studio, workshop-center, deploy-launch,
                      replay-center, final-output-center, triage) - plus two
                      hub wrappers in layouts/ (RequirementsHubPage,
                      OutputsHubPage) that group related pages under one
@@ -537,8 +616,7 @@ All three require `GENIE_AZURE_FOUNDRY_ENDPOINT` / `GENIE_AZURE_FOUNDRY_PROJECT_
 
 ## Known gaps / next phases
 
-- No CI pipeline (`.github/workflows/`) exists yet.
-- `memory-curator` is provisioned and enabled but intentionally not a workflow step (it's invoked separately as part of the shared→enterprise memory promotion flow, not the discovery/debugging pipelines).
+- CI (`.github/workflows/ci.yml`) runs backend pytest/ruff and frontend typecheck/lint/vitest on every push/PR to `main`, but there is **no CD/auto-deploy step** — shipping a change to the live Container App / Static Web App is still a manual `az acr build` + `az containerapp update` + `swa deploy` sequence (see [Deploying application code](#deploying-application-code-backend--frontend)).
 - End-to-end Playwright coverage (`e2e/`) is scaffolded but not yet fully built out.
 - Admin consent for the Entra API permission may require a tenant administrator in some tenants — see [Authentication](#authentication).
 - Shared Collaboration Memory currently has no write call sites anywhere in the backend — nothing ever calls `memory_service.shared.write`. The Requirement Discovery Map's main requirements list (which reads from Shared Memory) is therefore likely empty in real usage today; the agentic-workflow qualification check above was deliberately built to read `WorkflowRunResult.step_results` directly instead, so it works independently of this gap.
