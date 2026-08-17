@@ -166,6 +166,44 @@ async def test_run_tests_times_out_on_a_hanging_generated_test(tmp_path: Path):
     assert "timed out" in result.summary
 
 
+def test_summarize_reports_pytest_never_launching_distinctly_from_zero_collected(tmp_path: Path):
+    """A production runtime missing the ``pytest`` package (e.g. `pip
+    install .` without the `dev` extra) makes `python -m pytest` fail
+    before pytest ever prints its own banner - e.g. `No module named
+    pytest`. That must be reported as a real execution failure, never
+    misread as "the generated test suite has no runnable test
+    function(s)", which wrongly blames the generated code instead of the
+    environment."""
+
+    service = TestExecutionService()
+
+    result = service._summarize(
+        raw_output="/usr/local/bin/python3.12: No module named pytest\n",
+        exit_code=1,
+    )
+
+    assert result.ran is False
+    assert result.success is False
+    assert "pytest did not run" in result.summary
+    assert "No tests were collected" not in result.summary
+
+
+def test_summarize_still_reports_zero_collected_when_pytest_genuinely_ran(tmp_path: Path):
+    raw_output = (
+        "============================= test session starts ==============================\n"
+        "collected 0 items\n"
+        "============================== no tests ran in 0.01s ==============================\n"
+    )
+
+    service = TestExecutionService()
+
+    result = service._summarize(raw_output=raw_output, exit_code=5)
+
+    assert result.ran is True
+    assert result.success is False
+    assert "No tests were collected" in result.summary
+
+
 async def test_run_tests_subprocess_does_not_leak_ambient_environment_secrets(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):

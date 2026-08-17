@@ -38,6 +38,7 @@ _FAILED_PATTERN: Final = re.compile(r"(\d+) failed")
 _ERRORS_PATTERN: Final = re.compile(r"(\d+) error(?:s)?")
 _PYTEST_FUNCTION_PATTERN: Final = re.compile(r"^\s*def\s+test_[A-Za-z0-9_]+\s*\(", re.MULTILINE)
 _PYTEST_CLASS_PATTERN: Final = re.compile(r"^\s*class\s+Test[A-Za-z0-9_]*\s*[(:]", re.MULTILINE)
+_PYTEST_RAN_MARKER: Final = re.compile(r"in \d+\.\d+s")
 _DEFAULT_TIMEOUT_SECONDS: Final = 120
 
 
@@ -138,6 +139,38 @@ class TestExecutionService:
             )
 
         raw_output = stdout.decode("utf-8", errors="replace")
+        return self._summarize(raw_output=raw_output, exit_code=process.returncode)
+
+    def _summarize(self, *, raw_output: str, exit_code: int | None) -> TestExecutionResult:
+        """Parses one completed pytest subprocess invocation's output.
+
+        Split out from ``run_tests`` so this parsing logic - in particular,
+        telling a real pytest run apart from pytest never having launched at
+        all - is directly unit-testable against synthetic output, without
+        needing an actual broken Python environment to reproduce it.
+        """
+
+        if not _PYTEST_RAN_MARKER.search(raw_output):
+            # pytest always prints a final summary line ending in "in
+            # <N.NN>s" (e.g. "1 passed in 0.04s", "no tests ran in 0.03s")
+            # once it actually launches - even in quiet ("-q") mode. Its
+            # total absence means pytest itself never ran (e.g.
+            # `ModuleNotFoundError: No module named pytest` in a runtime
+            # environment where pytest isn't installed, or some other
+            # interpreter-level failure before pytest could start). This
+            # must never be reported as "the generated test suite has no
+            # runnable test function(s)" - that wrongly blames the
+            # LLM-generated code for what is really an environment problem.
+            return TestExecutionResult(
+                ran=False,
+                exit_code=exit_code,
+                summary=(
+                    f"pytest did not run (exit code {exit_code}): "
+                    f"{raw_output.strip()[-500:] or '(no output)'}"
+                ),
+                raw_output=raw_output,
+            )
+
         passed_match = _PASSED_PATTERN.search(raw_output)
         failed_match = _FAILED_PATTERN.search(raw_output)
         errors_match = _ERRORS_PATTERN.search(raw_output)
@@ -158,7 +191,7 @@ class TestExecutionService:
 
         return TestExecutionResult(
             ran=True,
-            exit_code=process.returncode,
+            exit_code=exit_code,
             passed=passed,
             failed=failed,
             errors=errors,
