@@ -200,7 +200,21 @@ prompts:
          artifacts, sliders or number inputs for tunable parameters,
          checkboxes for toggles, labeled text fields for free-form values)
          that this mission's actual domain needs the user to fill in
-         before a run starts.
+         before a run starts. Choose each control by this rule, not by
+         guesswork or habit, so every mission's controls come out
+         consistent: a fixed set of up to about six mutually exclusive
+         named choices -> a dropdown; a fixed set where the user may
+         genuinely pick MORE THAN ONE -> a group of checkboxes
+         (multi-select), never a single dropdown; a numeric value bounded
+         by a known min/max where the relative position matters as much
+         as the exact figure -> a slider; a numeric value where only the
+         exact figure matters -> a plain number input; a single true/false
+         toggle -> one checkbox; an uploaded artifact (a file, a folder,
+         or several files at once) -> a drag-and-drop/file picker; a date
+         or time -> a date/time picker; and only a genuinely open-ended,
+         unstructured value that cannot be enumerated or bounded -> a
+         labeled text field. Never default a field to a text box when the
+         requirements imply an enumerable or bounded value.
 
       5. VALIDATION: Verify that the workflow genuinely requires multiple
          agents collaborating (not just a sequential script), that the
@@ -224,9 +238,13 @@ prompts:
       genuinely needs before a run starts - name the REAL form controls
       each one uses (a dropdown of named choices, a drag-and-drop/file
       picker for a named artifact type, a slider or number input for a
-      tunable parameter, a checkbox for a toggle, a labeled text field for
-      a free-form value) and what each control's value means for the run.
-      Never describe a generic catch-all "message box" as the only
+      tunable parameter, a checkbox or checkbox group for a toggle or
+      multi-select, a labeled text field for a free-form value) and what
+      each control's value means for the run. Apply the control-selection
+      rule from phase 4 above consistently - the same kind of value (a
+      bounded number, a multi-pick list, a single toggle) must always map
+      to the same kind of control across every zone. Never describe a
+      generic catch-all "message box" as the only
       control - derive real, specific fields from what the requirements
       say the user actually needs to configure. Do not add separate
       admin, configuration, audit, or operational screens, and never
@@ -255,7 +273,7 @@ prompts:
     variables:
       - approved_requirements
       - user_message
-    version: "4.1.0"
+    version: "4.2.0"
 
   - id: security-assessment-v1
     name: Security Assessment
@@ -545,14 +563,24 @@ prompts:
 
       RENDER INPUT ZONES IN THE EXACT ORDER they appear in the
       architecture. Each zone's fields are concretely about that zone's
-      own described interaction and must-have requirement it fulfills -
-      use REAL, SPECIFIC controls (`<select>` for a fixed set of choices,
-      a drag-and-drop/file `<input type="file">` styled with the
-      `genie-dropzone` class for uploaded artifacts, `<input
-      type="range">`/`type="number"` for tunable parameters, `<input
-      type="checkbox">` for toggles, labeled `<input>`/`<textarea>` for
-      free-form values) - never a single generic catch-all textarea when
-      the architecture describes concrete fields.
+      own described interaction and must-have requirement it fulfills.
+      Pick each field's control by this exact rule, never by guesswork or
+      default habit, so control choice stays consistent across every
+      mission: a fixed set of up to about six mutually exclusive named
+      choices -> `<select>`; a fixed set where more than one may genuinely
+      be picked -> a group of `<input type="checkbox">` (multi-select -
+      never a single `<select>` for this case); an uploaded artifact
+      (file, folder, or multiple files) -> a drag-and-drop/file `<input
+      type="file">` styled with the `genie-dropzone` class; a bounded
+      numeric value where relative position matters as much as the exact
+      figure -> `<input type="range">` with the live current value shown
+      next to it; a numeric value where only the exact figure matters ->
+      `<input type="number">`; a single true/false toggle -> one `<input
+      type="checkbox">`; a date or time -> `<input type="date">`/`type=
+      "datetime-local">`; and only a genuinely open-ended, unstructured
+      value -> a labeled `<input>`/`<textarea>`. Never fall back to a
+      single generic catch-all textarea when the architecture describes
+      concrete, enumerable, or bounded fields.
 
       CODE STRUCTURE - no noise:
       - imports: alphabetically sorted, React first, then third-party
@@ -641,7 +669,7 @@ prompts:
       - policies
       - excluded_agents
       - user_message
-    version: "5.5.0"
+    version: "5.6.0"
 
   - id: build-generation-component-v1
     name: Build Generation - Single Component
@@ -702,13 +730,24 @@ prompts:
       progress, streamed output, and downloads for every submission
       automatically (see COMPONENT CONTRACT below); your component's
       entire job is collecting rich, mission-specific input. RENDER INPUT
-      ZONES IN THE EXACT ORDER they appear in the architecture, each
-      using REAL, SPECIFIC controls (`<select>` for fixed choices, a
-      `genie-dropzone`-styled drag-and-drop/file input for uploaded
-      artifacts, range/number inputs for tunable parameters, checkboxes
-      for toggles, labeled text fields for free-form values) - never a
-      single generic catch-all textarea when the architecture describes
-      concrete fields. Never call any agent directly.
+      ZONES IN THE EXACT ORDER they appear in the architecture. Pick each
+      field's control by this exact rule, never by guesswork or default
+      habit, so control choice stays consistent across every mission: a
+      fixed set of up to about six mutually exclusive named choices ->
+      `<select>`; a fixed set where more than one may genuinely be picked
+      -> a group of `<input type="checkbox">` (multi-select - never a
+      single `<select>` for this case); an uploaded artifact (file,
+      folder, or multiple files) -> a `genie-dropzone`-styled drag-and-
+      drop/file input; a bounded numeric value where relative position
+      matters as much as the exact figure -> `<input type="range">` with
+      the live current value shown next to it; a numeric value where only
+      the exact figure matters -> `<input type="number">`; a single
+      true/false toggle -> one `<input type="checkbox">`; a date or time
+      -> `<input type="date">`/`type="datetime-local">`; and only a
+      genuinely open-ended, unstructured value -> a labeled `<input>`/
+      `<textarea>`. Never fall back to a single generic catch-all textarea
+      when the architecture describes concrete, enumerable, or bounded
+      fields. Never call any agent directly.
 
       COMPONENT CONTRACT - your default-exported component receives
       exactly one prop object: `{{ onSubmit: (message: string,
@@ -779,7 +818,7 @@ prompts:
       - component_kind
       - component_name
       - user_message
-    version: "1.7.0"
+    version: "1.8.0"
 
   - id: build-component-regeneration-v1
     name: Build Generation - Regenerate Single Component

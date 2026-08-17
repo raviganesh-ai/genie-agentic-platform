@@ -70,3 +70,31 @@ def test_architecture_and_build_prompts_never_mandate_a_duplicate_live_agent_pan
     build_component_v1 = " ".join(registry.get("build-generation-component-v1").template.split())
     assert "COMPONENT CONTRACT" in build_component_v1
     assert "onSubmit" in build_component_v1
+
+
+def test_control_selection_rules_are_explicit_and_consistent_across_ui_prompts():
+    """Regression guard: the architecture and both build-generation prompts
+    must give an explicit, deterministic rule mapping requirement shape to
+    control type (dropdown vs. checkbox-group multi-select vs. slider vs.
+    number vs. toggle vs. file picker vs. date vs. free text), rather than
+    leaving control choice to the model's guesswork - this is what makes
+    generated mission input forms consistent across missions instead of
+    everything defaulting to a generic textarea.
+    """
+    registry = PromptRegistry.load(_REPO_CONFIG_ROOT / "prompts")
+
+    architecture = " ".join(registry.get("architecture-recommendation-v1").template.split())
+    assert "not by guesswork or habit" in architecture
+    assert "multi-select" in architecture.lower()
+    assert "a slider" in architecture.lower()
+
+    build_v1 = " ".join(registry.get("build-generation-v1").template.split())
+    assert "never by guesswork or default habit" in build_v1
+    assert '`<select>`' in build_v1
+    assert 'type="checkbox">` (multi-select' in build_v1
+    assert 'type="range">`' in build_v1
+
+    build_component_v1 = " ".join(registry.get("build-generation-component-v1").template.split())
+    assert "never by guesswork or default habit" in build_component_v1
+    assert '`<select>`' in build_component_v1
+    assert 'type="checkbox">` (multi-select' in build_component_v1
