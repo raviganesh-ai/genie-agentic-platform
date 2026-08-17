@@ -156,7 +156,7 @@ from collections.abc import AsyncIterator
 from agent_framework.foundry import FoundryAgent
 from azure.ai.projects.aio import AIProjectClient
 from azure.identity.aio import DefaultAzureCredential
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -172,13 +172,47 @@ app.add_middleware(
 
 _ORCHESTRATOR_AGENT_NAME = "{orchestrator_agent_name}"
 
+# Generous but bounded - guards against unbounded memory/token usage from an
+# oversized upload (OWASP: resource consumption). Plain text only, no binary
+# storage - kept deliberately simple.
+_MAX_ATTACHMENT_CHARS = 200_000
+
+
+class Attachment(BaseModel):
+    name: str
+    content: str
+
 
 class InvokeRequest(BaseModel):
     message: str
+    attachments: list[Attachment] = []
 
 
 class InvokeResponse(BaseModel):
     output_text: str
+
+
+def _compose_message(request: InvokeRequest) -> str:
+    """Folds any uploaded file attachments into one message for the Orchestrator Agent.
+
+    Each attachment's full text content is embedded ahead of the user's own
+    message, clearly labeled by file name, so the Orchestrator Agent reasons
+    over uploaded file content the same way it reasons over any other text -
+    no separate file-handling contract on the agent side is required.
+    """
+    total_chars = sum(len(attachment.content) for attachment in request.attachments)
+    if total_chars > _MAX_ATTACHMENT_CHARS:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Attached file content exceeds the {{_MAX_ATTACHMENT_CHARS:,}} character limit.",
+        )
+    if not request.attachments:
+        return request.message
+    sections = [
+        f"--- Attached file: {{attachment.name}} ---\\n{{attachment.content}}"
+        for attachment in request.attachments
+    ]
+    return "\\n\\n".join([*sections, request.message])
 
 
 @app.get("/health")
@@ -188,6 +222,7 @@ async def health() -> dict[str, str]:
 
 @app.post("/invoke", response_model=InvokeResponse)
 async def invoke(request: InvokeRequest) -> InvokeResponse:
+    message = _compose_message(request)
     endpoint = os.environ["FOUNDRY_ENDPOINT"]
     project_name = os.environ["FOUNDRY_PROJECT_NAME"]
     async with DefaultAzureCredential() as credential:
@@ -197,7 +232,7 @@ async def invoke(request: InvokeRequest) -> InvokeResponse:
                 agent_name=_ORCHESTRATOR_AGENT_NAME,
                 agent_version=os.getenv("FOUNDRY_ORCHESTRATOR_AGENT_VERSION", "1"),
             )
-            response = await agent.run(request.message)
+            response = await agent.run(message)
             return InvokeResponse(output_text=(getattr(response, "text", None) or "").strip())
 
 
@@ -231,7 +266,8 @@ async def _stream_agent_response(message: str) -> AsyncIterator[str]:
 
 @app.post("/invoke/stream")
 async def invoke_stream(request: InvokeRequest) -> StreamingResponse:
-    return StreamingResponse(_stream_agent_response(request.message), media_type="text/event-stream")
+    message = _compose_message(request)
+    return StreamingResponse(_stream_agent_response(message), media_type="text/event-stream")
 '''
 
 _AGENT_CONFIG_PY_TEMPLATE = '''"""Deterministically generated agent-name configuration - never LLM-authored.

@@ -334,6 +334,15 @@ async def test_full_pipeline_runs_every_step(tmp_path: Path):
     # string - must be reflected in the provisioned Foundry agent names.
     assert "local-acme-mission-" in agent_config_source
 
+    # The deterministic frontend shell's live Agent Collaboration panel
+    # reads window.__MISSION_AGENTS__ from runtime-config.js - it must list
+    # every specialist by their real display name and must never include the
+    # internal "orchestrator" coordinator as its own collaborator pill.
+    runtime_config_source = (build_root.parent / "frontend" / "public" / "runtime-config.js").read_text(
+        encoding="utf-8"
+    )
+    assert '__MISSION_AGENTS__ = ["Requirements Specialist"]' in runtime_config_source
+
 
 async def test_start_self_heals_incomplete_build_solution_with_safe_policy_defaults(tmp_path: Path):
     """A run whose build-solution step never completed (e.g. a lost

@@ -84,6 +84,24 @@ def test_write_to_directory_includes_backend_service_scaffold(tmp_path: Path):
     assert "acme-requirements-specialist" in (tmp_path / "agent_config.py").read_text(encoding="utf-8")
 
 
+def test_backend_service_scaffold_main_py_is_valid_python_and_supports_attachments():
+    scaffold = generate_backend_service_scaffold(
+        mission_title="Acme Mission",
+        orchestrator_agent_name="acme-orchestrator",
+        agent_foundry_names={"Requirements Specialist": "acme-requirements-specialist"},
+    )
+    main_source = scaffold["main.py"]
+
+    compile(main_source, "main.py", "exec")  # never emits an unterminated/garbled literal
+    assert "class Attachment(BaseModel):" in main_source
+    assert "attachments: list[Attachment] = []" in main_source
+    assert "_MAX_ATTACHMENT_CHARS" in main_source
+    assert "status_code=413" in main_source
+    # The escape sequence must survive as a literal 2-char "\n" in the
+    # generated f-string, never a real newline (see 2026-08-17 incident).
+    assert '"--- Attached file: {attachment.name} ---\\n{attachment.content}"' in main_source
+
+
 def test_generate_agent_config_module_embeds_the_real_agent_foundry_name_mapping():
     module_source = generate_agent_config_module(
         {"Requirements Specialist": "acme-requirements-specialist", "orchestrator": "acme-orchestrator"}

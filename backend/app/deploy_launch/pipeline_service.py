@@ -411,7 +411,7 @@ input:focus, textarea:focus, select:focus {
 }
 """
 
-_FRONTEND_MAIN_TSX = """import React, { useState } from "react";
+_FRONTEND_MAIN_TSX = """import React, { useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import * as GeneratedModule from "../MissionApp";
 import "./styles.css";
@@ -424,15 +424,99 @@ const moduleValue = GeneratedModule as unknown as {
 };
 const GeneratedMissionApp = moduleValue.default ?? moduleValue.App ?? moduleValue.MissionApp;
 
+// Kept in sync with the mission backend's own _MAX_ATTACHMENT_CHARS guard
+// (app.deploy_launch.code_materializer) - checked client-side too so a user
+// gets immediate feedback instead of waiting on a 413 response.
+const MAX_ATTACHMENT_CHARS = 200_000;
+
+type Attachment = { name: string; content: string };
+type AgentStatus = "pending" | "active" | "complete";
+
+/**
+ * Deterministic, best-effort "who's working right now" visualization: since
+ * the Orchestrator narrates its own coordination and hand-offs as it streams
+ * (see the build-generation prompts' REAL-TIME INTERACTION CONTRACT), the
+ * furthest-mentioned agent name in the text-so-far is treated as the active
+ * one, every agent mentioned before it as complete, and everything else as
+ * still pending - never a fabricated progress value.
+ */
+function computeAgentStatuses(agents: string[], text: string, loading: boolean): Record<string, AgentStatus> {
+    const lowerText = text.toLowerCase();
+    const mentions = agents
+        .map((name) => ({ name, index: lowerText.lastIndexOf(name.toLowerCase()) }))
+        .filter((entry) => entry.index >= 0)
+        .sort((a, b) => a.index - b.index);
+    if (mentions.length === 0) {
+        return Object.fromEntries(agents.map((name) => [name, "pending" as AgentStatus]));
+    }
+    const activeName = mentions[mentions.length - 1].name;
+    const mentionedNames = new Set(mentions.map((entry) => entry.name));
+    return Object.fromEntries(
+        agents.map((name) => {
+            if (name === activeName) return [name, (loading ? "active" : "complete") as AgentStatus];
+            if (mentionedNames.has(name)) return [name, "complete" as AgentStatus];
+            return [name, "pending" as AgentStatus];
+        }),
+    );
+}
+
 function MissionConsole() {
     const missionTitle = window.__MISSION_TITLE__ || "Mission Prototype";
+    const missionAgents = window.__MISSION_AGENTS__ || [];
     const [message, setMessage] = useState("");
+    const [attachments, setAttachments] = useState<Attachment[]>([]);
+    const [attachmentsError, setAttachmentsError] = useState("");
     const [response, setResponse] = useState("");
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState("");
 
+    const attachmentChars = useMemo(
+        () => attachments.reduce((total, attachment) => total + attachment.content.length, 0),
+        [attachments],
+    );
+    const agentStatuses = useMemo(
+        () => computeAgentStatuses(missionAgents, response, loading),
+        [missionAgents, response, loading],
+    );
+
+    async function handleFilesSelected(event: React.ChangeEvent<HTMLInputElement>) {
+        const files = event.target.files;
+        if (!files || files.length === 0) return;
+        setAttachmentsError("");
+        const next: Attachment[] = [];
+        for (const file of Array.from(files)) {
+            try {
+                next.push({ name: file.name, content: await file.text() });
+            } catch {
+                setAttachmentsError(`Unable to read "${file.name}" as text - only plain-text files are supported.`);
+            }
+        }
+        setAttachments((prior) => [...prior, ...next]);
+        event.target.value = "";
+    }
+
+    function removeAttachment(name: string) {
+        setAttachments((prior) => prior.filter((attachment) => attachment.name !== name));
+    }
+
+    function downloadOutput() {
+        if (!response) return;
+        const blob = new Blob([response], { type: "text/plain;charset=utf-8" });
+        const url = URL.createObjectURL(blob);
+        const anchor = document.createElement("a");
+        const safeTitle = missionTitle.replace(/[^a-z0-9-_]+/gi, "-").toLowerCase() || "mission";
+        anchor.href = url;
+        anchor.download = `${safeTitle}-output.txt`;
+        anchor.click();
+        URL.revokeObjectURL(url);
+    }
+
     async function invoke() {
         if (!message.trim()) return;
+        if (attachmentChars > MAX_ATTACHMENT_CHARS) {
+            setError(`Attached file content exceeds the ${MAX_ATTACHMENT_CHARS.toLocaleString()} character limit - remove a file and try again.`);
+            return;
+        }
         setLoading(true);
         setError("");
         setResponse("");
@@ -442,7 +526,7 @@ function MissionConsole() {
             const result = await fetch(`${backendUrl}/invoke/stream`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ message }),
+                body: JSON.stringify({ message, attachments }),
             });
             if (!result.ok || !result.body) throw new Error(`Mission backend returned ${result.status}.`);
             const reader = result.body.getReader();
@@ -482,10 +566,42 @@ function MissionConsole() {
             <h1>Interactive Agent Workspace</h1>
             <p>Send a request to this mission's dedicated backend and watch the agents collaborate live.</p>
         </header>
+        {missionAgents.length > 0 ? (
+            <section className={loading ? "genie-card genie-agent-activity" : "genie-card"}>
+                <h2 className="genie-zone-title">Agent Collaboration</h2>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                    {missionAgents.map((name) => {
+                        const status = agentStatuses[name] ?? "pending";
+                        return (
+                            <span key={name} className={`genie-badge genie-badge-${status}`}>
+                                {status === "active" ? <span className="genie-live-dot" /> : null}
+                                {name}
+                            </span>
+                        );
+                    })}
+                </div>
+                {loading ? <div className="genie-progress-rail" /> : null}
+            </section>
+        ) : null}
         {GeneratedMissionApp ? <section className="genie-fade-in"><GeneratedMissionApp /></section> : null}
         <section className="genie-card">
             <label htmlFor="mission-message" className="genie-zone-title" style={{ display: "block" }}>What should this mission help you accomplish?</label>
             <textarea id="mission-message" value={message} onChange={(event) => setMessage(event.target.value)} rows={5} style={{ width: "100%" }} placeholder="Describe the task, question, or decision you want the mission agents to handle." />
+            <div style={{ marginTop: 12 }}>
+                <label htmlFor="mission-attachments" className="genie-zone-title" style={{ display: "block" }}>Attach one or more files (optional)</label>
+                <input id="mission-attachments" type="file" multiple accept=".txt,.md,.json,.csv,.log,.yaml,.yml" onChange={(event) => void handleFilesSelected(event)} />
+                {attachments.length > 0 ? (
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 8 }}>
+                        {attachments.map((attachment) => (
+                            <span key={attachment.name} className="genie-badge">
+                                {attachment.name}
+                                <button type="button" onClick={() => removeAttachment(attachment.name)} aria-label={`Remove ${attachment.name}`} style={{ marginLeft: 6, background: "none", border: "none", color: "inherit", cursor: "pointer", padding: 0, font: "inherit" }}>×</button>
+                            </span>
+                        ))}
+                    </div>
+                ) : null}
+                {attachmentsError ? <p role="alert" className="genie-error">{attachmentsError}</p> : null}
+            </div>
             <div style={{ marginTop: 12, display: "flex", alignItems: "center", gap: 12 }}>
                 <button type="button" className="genie-btn genie-btn-primary" onClick={invoke} disabled={loading || !message.trim()}>Run Mission</button>
                 {loading ? <span className="genie-bounce-dots"><span className="genie-bounce-dot" /><span className="genie-bounce-dot" /><span className="genie-bounce-dot" /></span> : null}
@@ -495,6 +611,7 @@ function MissionConsole() {
                 <div className={loading ? "genie-agent-activity" : undefined} style={{ padding: loading ? 4 : 0 }}>
                     {loading ? <p className="genie-eyebrow"><span className="genie-live-dot" /> Streaming live</p> : null}
                     <pre className="genie-output">{response}</pre>
+                    {!loading ? <button type="button" className="genie-btn" onClick={downloadOutput} style={{ marginTop: 8 }}>⬇ Download output as file</button> : null}
                 </div>
             ) : null}
         </section>
@@ -507,6 +624,7 @@ createRoot(document.getElementById("root")!).render(<MissionConsole />);
 _FRONTEND_ENV_D_TS = """interface Window {
     __MISSION_BACKEND_URL__?: string;
     __MISSION_TITLE__?: string;
+    __MISSION_AGENTS__?: string[];
 }
 """
 
@@ -1143,9 +1261,21 @@ class DeploymentPipelineService:
                     (src_root / "styles.css").write_text(_FRONTEND_STYLES_CSS, encoding="utf-8")
                     public_root = frontend_root / "public"
                     public_root.mkdir(parents=True, exist_ok=True)
+                    # Specialist agent display names (never "orchestrator" -
+                    # that's the internal coordinator, not shown as its own
+                    # collaborator) - lets the deterministic shell render a
+                    # real, accurate live Agent Collaboration panel without
+                    # depending on the LLM-generated UI to invent/describe
+                    # its own agent roster correctly.
+                    mission_agent_names = [
+                        name
+                        for name in self._agent_foundry_names.get(pipeline_run.id, {})
+                        if name != "orchestrator"
+                    ]
                     (public_root / "runtime-config.js").write_text(
                         f'window.__MISSION_BACKEND_URL__ = "{pipeline_run.backend_url}";\n'
-                        f"window.__MISSION_TITLE__ = {json.dumps(mission_title)};\n",
+                        f"window.__MISSION_TITLE__ = {json.dumps(mission_title)};\n"
+                        f"window.__MISSION_AGENTS__ = {json.dumps(mission_agent_names)};\n",
                         encoding="utf-8",
                     )
                     detail = f"Frontend wired to real backend URL {pipeline_run.backend_url}."
