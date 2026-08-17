@@ -580,15 +580,25 @@ prompts:
       (relative path, same origin) with a JSON body `{{ "message": string,
       "attachments"?: {{ "name": string, "content": string }}[] }}` built
       from whatever the user entered in the Input/Interaction zone. The
-      deterministic shell that always wraps your component already offers
-      its own multi-file upload widget, live Agent Collaboration panel, and
-      "download output as file" button, so you do NOT need to duplicate
-      those - focus your own UI on the mission's specific interaction
-      instead. Only add your own file-upload control if the mission's
-      requirements specifically call for a bespoke upload experience (e.g.
-      a single required document field with its own label/validation); if
-      you do, populate `attachments` with each file's exact `name` and its
-      full text `content` (read via `File.text()`) alongside `message`.
+      deterministic shell that always wraps your component already renders a
+      full "Mission Queue" dashboard below it - a drag-and-drop dropzone plus
+      a message composer where EVERY typed request or uploaded file becomes
+      its own independent queue item, auto-run concurrently against
+      `/invoke/stream`, each rendered as its own card with its own
+      step-by-step phase label (queued/contacting backend/agents
+      collaborating/complete/failed), its own live Agent Collaboration
+      badges, its own streamed output, and its own "download output" button.
+      You do NOT need to duplicate any of that (file upload, output display,
+      agent status, downloads) - focus your own UI purely on the mission's
+      specific bespoke interaction. Only add your own file-upload or
+      submit control if the mission's requirements specifically call for a
+      bespoke, single-purpose input (e.g. one required document field with
+      its own label/validation) that should trigger its own scoped
+      `/invoke/stream` call independent of the shell's queue; if you do,
+      populate `attachments` with each file's exact `name` and its full text
+      `content` (read via `File.text()`) alongside `message`, and manage
+      that call's own loading/output state locally rather than assuming a
+      single shared response exists anywhere else on the page.
       It returns a `text/event-stream` response - do NOT `await
       response.json()`. Instead read `response.body.getReader()`, decode
       chunks with `TextDecoder`, and split on blank lines (`\n\n`) into
@@ -654,7 +664,7 @@ prompts:
       - policies
       - excluded_agents
       - user_message
-    version: "5.3.0"
+    version: "5.4.0"
 
   - id: build-generation-component-v1
     name: Build Generation - Single Component
@@ -718,12 +728,16 @@ prompts:
       exactly one endpoint the UI is allowed to call: `POST /invoke/stream`
       (relative path, same origin) with a JSON body `{{ "message": string,
       "attachments"?: {{ "name": string, "content": string }}[] }}`. The
-      surrounding deterministic shell already offers its own multi-file
-      upload widget, live Agent Collaboration panel, and "download output
-      as file" button - only add your own upload control if a screen's
-      described interaction specifically calls for a bespoke one, and if
-      so populate `attachments` with each file's `name` and full text
-      `content` (via `File.text()`) alongside `message`.
+      surrounding deterministic shell already renders a full "Mission Queue"
+      dashboard - drag-and-drop plus a message composer where every typed
+      request or uploaded file becomes its own independent, auto-run queue
+      item with its own step-by-step phase, live Agent Collaboration badges,
+      streamed output, and download button - only add your own upload or
+      submit control if a screen's described interaction specifically calls
+      for a bespoke one triggering its own scoped call, and if so populate
+      `attachments` with each file's `name` and full text `content` (via
+      `File.text()`) alongside `message`, managing that call's own
+      loading/output state locally.
       It returns a `text/event-stream` response - do NOT `await
       response.json()`. Read `response.body.getReader()`, decode chunks
       with `TextDecoder`, split on blank lines (`\n\n`) into events shaped
@@ -797,7 +811,7 @@ prompts:
       - component_kind
       - component_name
       - user_message
-    version: "1.5.0"
+    version: "1.6.0"
 
   - id: build-component-regeneration-v1
     name: Build Generation - Regenerate Single Component

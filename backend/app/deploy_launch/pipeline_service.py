@@ -409,9 +409,146 @@ input:focus, textarea:focus, select:focus {
   box-shadow: 0 0 10px rgba(107, 163, 234, 0.8);
   animation: genie-indeterminate-rail 1.3s ease-in-out infinite;
 }
+
+.genie-hero {
+  position: relative;
+  overflow: hidden;
+  padding: 32px 28px;
+  border-radius: 18px;
+  margin-bottom: 24px;
+  background:
+    radial-gradient(circle at 15% 20%, rgba(107, 163, 234, 0.25), transparent 55%),
+    radial-gradient(circle at 85% 0%, rgba(138, 99, 210, 0.22), transparent 50%),
+    linear-gradient(135deg, #121826 0%, #0d1117 100%);
+  border: 1px solid #232b35;
+}
+
+.genie-hero-kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #6ba3ea;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-size: 12px;
+  margin: 0 0 10px;
+}
+
+.genie-hero h1 {
+  font-size: 28px;
+  margin-bottom: 6px;
+}
+
+.genie-hero p {
+  max-width: 620px;
+  margin: 0;
+}
+
+.genie-dropzone {
+  border: 2px dashed #2a323d;
+  border-radius: 12px;
+  padding: 24px;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 160ms ease, background-color 160ms ease, transform 160ms ease;
+  background-color: rgba(255, 255, 255, 0.015);
+}
+
+.genie-dropzone:hover {
+  border-color: #3d4a5c;
+}
+
+.genie-dropzone-active {
+  border-color: #6ba3ea;
+  background-color: rgba(47, 131, 224, 0.08);
+  transform: scale(1.01);
+}
+
+.genie-dropzone-icon {
+  font-size: 28px;
+  display: block;
+  margin-bottom: 8px;
+}
+
+.genie-queue-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 14px;
+  margin-top: 16px;
+}
+
+.genie-queue-item {
+  background-color: rgba(255, 255, 255, 0.03);
+  border: 1px solid #232b35;
+  border-radius: 12px;
+  padding: 16px;
+  transition: transform 160ms ease, border-color 160ms ease;
+}
+
+.genie-queue-item:hover {
+  transform: translateY(-2px);
+  border-color: #333f4d;
+}
+
+.genie-queue-item-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.genie-queue-item-title {
+  font-weight: 700;
+  font-size: 14px;
+  word-break: break-word;
+}
+
+.genie-step-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #7c8794;
+  margin: 0 0 8px;
+}
+
+.genie-kind-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  background-color: rgba(107, 163, 234, 0.14);
+  flex-shrink: 0;
+}
+
+.genie-empty-state {
+  border: 1px dashed #2a323d;
+  border-radius: 12px;
+  padding: 20px;
+  text-align: center;
+  color: #7c8794;
+}
+
+.genie-icon-btn {
+  background: none;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  padding: 0;
+  font: inherit;
+  opacity: 0.7;
+}
+
+.genie-icon-btn:hover {
+  opacity: 1;
+}
 """
 
-_FRONTEND_MAIN_TSX = """import React, { useMemo, useState } from "react";
+_FRONTEND_MAIN_TSX = """import React, { useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import * as GeneratedModule from "../MissionApp";
 import "./styles.css";
@@ -431,6 +568,17 @@ const MAX_ATTACHMENT_CHARS = 200_000;
 
 type Attachment = { name: string; content: string };
 type AgentStatus = "pending" | "active" | "complete";
+type QueueItemStatus = "queued" | "running" | "complete" | "error";
+type QueueItem = {
+    id: string;
+    kind: "message" | "file";
+    title: string;
+    message: string;
+    attachments: Attachment[];
+    status: QueueItemStatus;
+    output: string;
+    error: string;
+};
 
 /**
  * Deterministic, best-effort "who's working right now" visualization: since
@@ -460,73 +608,32 @@ function computeAgentStatuses(agents: string[], text: string, loading: boolean):
     );
 }
 
+function newItemId(prefix: string): string {
+    return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
 function MissionConsole() {
     const missionTitle = window.__MISSION_TITLE__ || "Mission Prototype";
     const missionAgents = window.__MISSION_AGENTS__ || [];
-    const [message, setMessage] = useState("");
-    const [attachments, setAttachments] = useState<Attachment[]>([]);
-    const [attachmentsError, setAttachmentsError] = useState("");
-    const [response, setResponse] = useState("");
-    const [loading, setLoading] = useState(false);
-    const [error, setError] = useState("");
+    const [draftMessage, setDraftMessage] = useState("");
+    const [queue, setQueue] = useState<QueueItem[]>([]);
+    const [isDragging, setIsDragging] = useState(false);
+    const [dropError, setDropError] = useState("");
+    const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-    const attachmentChars = useMemo(
-        () => attachments.reduce((total, attachment) => total + attachment.content.length, 0),
-        [attachments],
-    );
-    const agentStatuses = useMemo(
-        () => computeAgentStatuses(missionAgents, response, loading),
-        [missionAgents, response, loading],
-    );
-
-    async function handleFilesSelected(event: React.ChangeEvent<HTMLInputElement>) {
-        const files = event.target.files;
-        if (!files || files.length === 0) return;
-        setAttachmentsError("");
-        const next: Attachment[] = [];
-        for (const file of Array.from(files)) {
-            try {
-                next.push({ name: file.name, content: await file.text() });
-            } catch {
-                setAttachmentsError(`Unable to read "${file.name}" as text - only plain-text files are supported.`);
-            }
-        }
-        setAttachments((prior) => [...prior, ...next]);
-        event.target.value = "";
-    }
-
-    function removeAttachment(name: string) {
-        setAttachments((prior) => prior.filter((attachment) => attachment.name !== name));
-    }
-
-    function downloadOutput() {
-        if (!response) return;
-        const blob = new Blob([response], { type: "text/plain;charset=utf-8" });
-        const url = URL.createObjectURL(blob);
-        const anchor = document.createElement("a");
-        const safeTitle = missionTitle.replace(/[^a-z0-9-_]+/gi, "-").toLowerCase() || "mission";
-        anchor.href = url;
-        anchor.download = `${safeTitle}-output.txt`;
-        anchor.click();
-        URL.revokeObjectURL(url);
-    }
-
-    async function invoke() {
-        if (!message.trim()) return;
-        if (attachmentChars > MAX_ATTACHMENT_CHARS) {
-            setError(`Attached file content exceeds the ${MAX_ATTACHMENT_CHARS.toLocaleString()} character limit - remove a file and try again.`);
-            return;
-        }
-        setLoading(true);
-        setError("");
-        setResponse("");
+    // Every queued input (typed message or dropped file) is processed as its
+    // OWN independent call to the mission backend - each gets its own live
+    // status, its own streamed output, and its own download button, instead
+    // of forcing everything through a single shared request/response.
+    async function runItem(item: QueueItem) {
+        setQueue((prior) => prior.map((entry) => (entry.id === item.id ? { ...entry, status: "running", output: "", error: "" } : entry)));
         try {
             const backendUrl = window.__MISSION_BACKEND_URL__;
             if (!backendUrl) throw new Error("Mission backend URL is not configured.");
             const result = await fetch(`${backendUrl}/invoke/stream`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ message, attachments }),
+                body: JSON.stringify({ message: item.message, attachments: item.attachments }),
             });
             if (!result.ok || !result.body) throw new Error(`Mission backend returned ${result.status}.`);
             const reader = result.body.getReader();
@@ -542,36 +649,118 @@ function MissionConsole() {
                 for (const frame of frames) {
                     const payload = frame.replace(/^data:\\s*/, "");
                     if (!payload) continue;
-                    const event = JSON.parse(payload);
-                    if (event.delta) {
+                    const parsed = JSON.parse(payload);
+                    if (parsed.delta) {
                         sawOutput = true;
-                        setResponse((prior) => prior + event.delta);
-                    } else if (event.done) {
+                        setQueue((prior) => prior.map((entry) => (entry.id === item.id ? { ...entry, output: entry.output + parsed.delta } : entry)));
+                    } else if (parsed.done) {
                         sawOutput = true;
-                        setResponse(event.output_text || "");
+                        setQueue((prior) => prior.map((entry) => (entry.id === item.id ? { ...entry, output: parsed.output_text || entry.output } : entry)));
                     }
                 }
             }
-            if (!sawOutput) setError("The mission backend returned no output.");
+            setQueue((prior) => prior.map((entry) => (entry.id !== item.id
+                ? entry
+                : sawOutput
+                    ? { ...entry, status: "complete" }
+                    : { ...entry, status: "error", error: "The mission backend returned no output." })));
         } catch (caught) {
-            setError(caught instanceof Error ? caught.message : "Unable to contact the mission backend.");
-        } finally {
-            setLoading(false);
+            setQueue((prior) => prior.map((entry) => (entry.id === item.id
+                ? { ...entry, status: "error", error: caught instanceof Error ? caught.message : "Unable to contact the mission backend." }
+                : entry)));
         }
     }
 
+    function enqueue(item: QueueItem) {
+        setQueue((prior) => [...prior, item]);
+        void runItem(item);
+    }
+
+    function addMessageToQueue() {
+        const trimmed = draftMessage.trim();
+        if (!trimmed) return;
+        enqueue({
+            id: newItemId("msg"),
+            kind: "message",
+            title: trimmed.length > 60 ? `${trimmed.slice(0, 60)}...` : trimmed,
+            message: trimmed,
+            attachments: [],
+            status: "queued",
+            output: "",
+            error: "",
+        });
+        setDraftMessage("");
+    }
+
+    async function addFilesToQueue(files: FileList | File[]) {
+        setDropError("");
+        for (const file of Array.from(files)) {
+            try {
+                const content = await file.text();
+                if (content.length > MAX_ATTACHMENT_CHARS) {
+                    setDropError(`"${file.name}" exceeds the ${MAX_ATTACHMENT_CHARS.toLocaleString()} character limit and was skipped.`);
+                    continue;
+                }
+                enqueue({
+                    id: newItemId("file"),
+                    kind: "file",
+                    title: file.name,
+                    message: `Process the attached file "${file.name}" and report the outcome.`,
+                    attachments: [{ name: file.name, content }],
+                    status: "queued",
+                    output: "",
+                    error: "",
+                });
+            } catch {
+                setDropError(`Unable to read "${file.name}" as text - only plain-text files are supported.`);
+            }
+        }
+    }
+
+    function handleDrop(event: React.DragEvent<HTMLDivElement>) {
+        event.preventDefault();
+        setIsDragging(false);
+        if (event.dataTransfer.files.length > 0) void addFilesToQueue(event.dataTransfer.files);
+    }
+
+    function removeItem(id: string) {
+        setQueue((prior) => prior.filter((entry) => entry.id !== id));
+    }
+
+    function downloadItemOutput(item: QueueItem) {
+        if (!item.output) return;
+        const blob = new Blob([item.output], { type: "text/plain;charset=utf-8" });
+        const url = URL.createObjectURL(blob);
+        const anchor = document.createElement("a");
+        const safeTitle = item.title.replace(/[^a-z0-9-_]+/gi, "-").toLowerCase() || "mission-output";
+        anchor.href = url;
+        anchor.download = `${safeTitle}.txt`;
+        anchor.click();
+        URL.revokeObjectURL(url);
+    }
+
+    const activeCount = queue.filter((entry) => entry.status === "running").length;
+    const completeCount = queue.filter((entry) => entry.status === "complete").length;
+
     return <main className="genie-shell genie-fade-in">
-        <header className="genie-header">
-            <p className="genie-eyebrow"><span className="genie-live-dot" /> {missionTitle}</p>
-            <h1>Interactive Agent Workspace</h1>
-            <p>Send a request to this mission's dedicated backend and watch the agents collaborate live.</p>
+        <header className="genie-hero">
+            <p className="genie-hero-kicker"><span className="genie-live-dot" /> {missionTitle}</p>
+            <h1>Mission Control</h1>
+            <p>Give the agents one or more things to work on - type a request, or drag in files - and watch each one processed live, end to end.</p>
         </header>
         {missionAgents.length > 0 ? (
-            <section className={loading ? "genie-card genie-agent-activity" : "genie-card"}>
-                <h2 className="genie-zone-title">Agent Collaboration</h2>
+            <section className={activeCount > 0 ? "genie-card genie-agent-activity" : "genie-card"}>
+                <h2 className="genie-zone-title">Agent Pipeline</h2>
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
                     {missionAgents.map((name) => {
-                        const status = agentStatuses[name] ?? "pending";
+                        const perItemStatuses = queue
+                            .filter((entry) => entry.status === "running" || entry.status === "complete")
+                            .map((entry) => computeAgentStatuses(missionAgents, entry.output, entry.status === "running")[name]);
+                        const status: AgentStatus = perItemStatuses.includes("active")
+                            ? "active"
+                            : perItemStatuses.includes("complete")
+                                ? "complete"
+                                : "pending";
                         return (
                             <span key={name} className={`genie-badge genie-badge-${status}`}>
                                 {status === "active" ? <span className="genie-live-dot" /> : null}
@@ -580,40 +769,112 @@ function MissionConsole() {
                         );
                     })}
                 </div>
-                {loading ? <div className="genie-progress-rail" /> : null}
+                {activeCount > 0 ? <div className="genie-progress-rail" /> : null}
             </section>
         ) : null}
-        {GeneratedMissionApp ? <section className="genie-fade-in"><GeneratedMissionApp /></section> : null}
+        {GeneratedMissionApp ? (
+            <section className="genie-card genie-fade-in">
+                <h2 className="genie-zone-title">Custom Mission Interface</h2>
+                <GeneratedMissionApp />
+            </section>
+        ) : null}
         <section className="genie-card">
-            <label htmlFor="mission-message" className="genie-zone-title" style={{ display: "block" }}>What should this mission help you accomplish?</label>
-            <textarea id="mission-message" value={message} onChange={(event) => setMessage(event.target.value)} rows={5} style={{ width: "100%" }} placeholder="Describe the task, question, or decision you want the mission agents to handle." />
-            <div style={{ marginTop: 12 }}>
-                <label htmlFor="mission-attachments" className="genie-zone-title" style={{ display: "block" }}>Attach one or more files (optional)</label>
-                <input id="mission-attachments" type="file" multiple accept=".txt,.md,.json,.csv,.log,.yaml,.yml" onChange={(event) => void handleFilesSelected(event)} />
-                {attachments.length > 0 ? (
-                    <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 8 }}>
-                        {attachments.map((attachment) => (
-                            <span key={attachment.name} className="genie-badge">
-                                {attachment.name}
-                                <button type="button" onClick={() => removeAttachment(attachment.name)} aria-label={`Remove ${attachment.name}`} style={{ marginLeft: 6, background: "none", border: "none", color: "inherit", cursor: "pointer", padding: 0, font: "inherit" }}>×</button>
-                            </span>
-                        ))}
-                    </div>
-                ) : null}
-                {attachmentsError ? <p role="alert" className="genie-error">{attachmentsError}</p> : null}
+            <h2 className="genie-zone-title">Give the Mission Something to Do</h2>
+            <textarea
+                value={draftMessage}
+                onChange={(event) => setDraftMessage(event.target.value)}
+                onKeyDown={(event) => {
+                    if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+                        event.preventDefault();
+                        addMessageToQueue();
+                    }
+                }}
+                rows={3}
+                style={{ width: "100%" }}
+                placeholder="Describe a task, question, or decision - press Ctrl+Enter or click Add to Queue."
+            />
+            <div style={{ marginTop: 10, display: "flex", justifyContent: "flex-end" }}>
+                <button type="button" className="genie-btn genie-btn-primary" onClick={addMessageToQueue} disabled={!draftMessage.trim()}>+ Add to Queue</button>
             </div>
-            <div style={{ marginTop: 12, display: "flex", alignItems: "center", gap: 12 }}>
-                <button type="button" className="genie-btn genie-btn-primary" onClick={invoke} disabled={loading || !message.trim()}>Run Mission</button>
-                {loading ? <span className="genie-bounce-dots"><span className="genie-bounce-dot" /><span className="genie-bounce-dot" /><span className="genie-bounce-dot" /></span> : null}
+            <div
+                className={isDragging ? "genie-dropzone genie-dropzone-active" : "genie-dropzone"}
+                style={{ marginTop: 16 }}
+                onClick={() => fileInputRef.current?.click()}
+                onDragOver={(event) => { event.preventDefault(); setIsDragging(true); }}
+                onDragLeave={() => setIsDragging(false)}
+                onDrop={handleDrop}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") fileInputRef.current?.click(); }}
+            >
+                <span className="genie-dropzone-icon">📂</span>
+                <p style={{ margin: 0 }}>Drag &amp; drop one or more files here, or click to browse</p>
+                <input
+                    ref={fileInputRef}
+                    type="file"
+                    multiple
+                    accept=".txt,.md,.json,.csv,.log,.yaml,.yml"
+                    style={{ display: "none" }}
+                    onChange={(event) => {
+                        if (event.target.files) void addFilesToQueue(event.target.files);
+                        event.target.value = "";
+                    }}
+                />
             </div>
-            {error ? <p role="alert" className="genie-error">{error}</p> : null}
-            {response ? (
-                <div className={loading ? "genie-agent-activity" : undefined} style={{ padding: loading ? 4 : 0 }}>
-                    {loading ? <p className="genie-eyebrow"><span className="genie-live-dot" /> Streaming live</p> : null}
-                    <pre className="genie-output">{response}</pre>
-                    {!loading ? <button type="button" className="genie-btn" onClick={downloadOutput} style={{ marginTop: 8 }}>⬇ Download output as file</button> : null}
+            {dropError ? <p role="alert" className="genie-error">{dropError}</p> : null}
+        </section>
+        <section className="genie-card">
+            <h2 className="genie-zone-title">Mission Queue{queue.length > 0 ? ` - ${completeCount}/${queue.length} complete` : ""}</h2>
+            {queue.length === 0 ? (
+                <div className="genie-empty-state">No inputs yet - add a request or drop a file above to see the agents get to work.</div>
+            ) : (
+                <div className="genie-queue-grid">
+                    {queue.map((item) => {
+                        const itemAgentStatuses = computeAgentStatuses(missionAgents, item.output, item.status === "running");
+                        return (
+                            <article key={item.id} className={item.status === "running" ? "genie-queue-item genie-agent-activity" : "genie-queue-item"}>
+                                <div className="genie-queue-item-header">
+                                    <span className="genie-kind-icon">{item.kind === "file" ? "📄" : "💬"}</span>
+                                    <span className="genie-queue-item-title" style={{ flex: 1 }}>{item.title}</span>
+                                    <button type="button" className="genie-icon-btn" onClick={() => removeItem(item.id)} aria-label={`Remove ${item.title}`}>×</button>
+                                </div>
+                                <p className="genie-step-label">
+                                    {item.status === "queued" ? "Waiting in queue…" : null}
+                                    {item.status === "running" ? (item.output ? "Agents collaborating…" : "Contacting mission backend…") : null}
+                                    {item.status === "complete" ? "Complete" : null}
+                                    {item.status === "error" ? "Failed" : null}
+                                </p>
+                                {item.status === "running" && !item.output ? (
+                                    <span className="genie-bounce-dots"><span className="genie-bounce-dot" /><span className="genie-bounce-dot" /><span className="genie-bounce-dot" /></span>
+                                ) : null}
+                                {item.status === "running" && missionAgents.length > 0 ? (
+                                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
+                                        {missionAgents.map((name) => (
+                                            <span key={name} className={`genie-badge genie-badge-${itemAgentStatuses[name] ?? "pending"}`} style={{ fontSize: 11 }}>
+                                                {name}
+                                            </span>
+                                        ))}
+                                    </div>
+                                ) : null}
+                                {item.status === "error" ? (
+                                    <>
+                                        <p role="alert" className="genie-error">{item.error}</p>
+                                        <button type="button" className="genie-btn" onClick={() => void runItem(item)}>Retry</button>
+                                    </>
+                                ) : null}
+                                {item.output ? (
+                                    <>
+                                        <pre className="genie-output" style={{ maxHeight: 220, overflow: "auto" }}>{item.output}</pre>
+                                        {item.status === "complete" ? (
+                                            <button type="button" className="genie-btn" onClick={() => downloadItemOutput(item)} style={{ marginTop: 8 }}>⬇ Download output</button>
+                                        ) : null}
+                                    </>
+                                ) : null}
+                            </article>
+                        );
+                    })}
                 </div>
-            ) : null}
+            )}
         </section>
     </main>;
 }

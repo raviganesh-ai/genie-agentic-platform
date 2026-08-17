@@ -617,3 +617,33 @@ async def test_retry_from_a_failed_step_reuses_the_same_run_and_its_prior_artifa
     # not leave a stale duplicate "failed" entry alongside a new run.
     assert [run.id for run in service.list_runs_for_session("session-1")] == [first_attempt.id]
 
+
+def test_frontend_main_tsx_renders_a_gamified_multi_input_mission_queue():
+    """The deterministic mission shell must never regress back to a plain
+    single-textbox/single-response "document" UI: every generated mission
+    frontend needs a drag-and-drop-capable Mission Queue where each typed
+    request or uploaded file becomes its own independent, auto-run item with
+    its own step-by-step phase label - not one shared response blob. This
+    also guards against the Python-template escape-doubling bug class (an
+    undoubled ``\\n``/``\\n\\n`` here would corrupt the SSE frame-splitting
+    logic silently at template-definition time).
+    """
+    from app.deploy_launch.pipeline_service import _FRONTEND_MAIN_TSX, _FRONTEND_STYLES_CSS
+
+    assert "type QueueItem = {" in _FRONTEND_MAIN_TSX
+    assert 'type QueueItemStatus = "queued" | "running" | "complete" | "error"' in _FRONTEND_MAIN_TSX
+    assert "async function runItem(item: QueueItem)" in _FRONTEND_MAIN_TSX
+    assert "function addMessageToQueue()" in _FRONTEND_MAIN_TSX
+    assert "async function addFilesToQueue(files: FileList | File[])" in _FRONTEND_MAIN_TSX
+    assert "onDrop={handleDrop}" in _FRONTEND_MAIN_TSX
+    assert 'frames = buffer.split("\\n\\n")' in _FRONTEND_MAIN_TSX
+    assert "Waiting in queue" in _FRONTEND_MAIN_TSX
+    assert "Contacting mission backend" in _FRONTEND_MAIN_TSX
+    assert "Agents collaborating" in _FRONTEND_MAIN_TSX
+
+    assert ".genie-dropzone {" in _FRONTEND_STYLES_CSS
+    assert ".genie-dropzone-active {" in _FRONTEND_STYLES_CSS
+    assert ".genie-queue-grid {" in _FRONTEND_STYLES_CSS
+    assert ".genie-queue-item {" in _FRONTEND_STYLES_CSS
+    assert ".genie-hero {" in _FRONTEND_STYLES_CSS
+
