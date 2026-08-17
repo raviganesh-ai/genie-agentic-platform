@@ -187,14 +187,20 @@ prompts:
          agent must serve a distinct, verifiable role from the
          requirements. Do not invent agents for "best practices."
 
-      4. UI DETERMINISM: Design a SINGLE unified page where the user:
-         - Provides input or starts the workflow (left/top area)
-         - Sees the Orchestrator Agent's live work and agent handoffs in
-           real-time, showing which specialist agent is currently working
-           and what it is doing (center/orchestration area)
-         - Views the final output or running summaries as agents complete
-           their tasks (right/output area)
-         All three zones coexist on ONE page, never separate screens.
+      4. UI DETERMINISM: The surrounding shell that always wraps this
+         mission's UI already provides, for every mission with zero
+         per-mission design work: a live "Agent Pipeline" panel animating
+         real-time hand-offs between specialist agents, and a "Mission
+         Queue" that runs every submitted input, streams the
+         Orchestrator's live narration word-by-word, and displays and
+         lets the user download each result. Never redesign or duplicate
+         any of that here. Design ONLY the mission-specific INPUT zone(s):
+         the concrete, real form controls (dropdowns for a fixed set of
+         choices, file/folder pickers or drag-and-drop for uploaded
+         artifacts, sliders or number inputs for tunable parameters,
+         checkboxes for toggles, labeled text fields for free-form values)
+         that this mission's actual domain needs the user to fill in
+         before a run starts.
 
       5. VALIDATION: Verify that the workflow genuinely requires multiple
          agents collaborating (not just a sequential script), that the
@@ -208,29 +214,28 @@ prompts:
       each as a markdown "## " header followed by a one-sentence summary
       of that section, then its own items:
 
-      "## Single-Page UI Design" - this unified page exists for exactly
-      one purpose: let an end-user quickly try out and be inspired by the
-      actual agentic workflow you design below, seeing orchestrator
-      coordination and agent collaboration happen in real-time. Describe
-      the layout and interaction zones in 2-3 sentences each:
-      - **Input/Interaction Zone**: Where the user provides input,
-        parameters, or kicks off the workflow (be concrete about what
-        they enter and why)
-      - **Orchestrator Coordination Panel**: Shows in real-time which
-        agent is currently working (Orchestrator assigns tasks), what it
-        is doing (status, progress, reasoning), which specialist agents
-        have completed their work, and how the Orchestrator is sequencing
-        the next steps - this is the "art of possibility" zone showing
-        agents collaborating
-      - **Output/Results Zone**: Displays completed outputs as agents
-        finish their work, or rolling summaries the Orchestrator updates,
-        letting the user see the solution come together in real-time
-      Do not add separate admin, configuration, audit, or operational
-      screens - the single page is the entire prototype UI. The page must
-      interact only with the Orchestrator Agent you designate below; the
-      UI never names or talks to specialist agents directly. Write each zone in 2-3 sentences:
-      "**<Zone name>**: <what the user sees and does there, how it shows
-      orchestrator work in real-time, and which requirement(s) it fulfills>""
+      "## Single-Page UI Design" - this section designs ONLY this
+      mission's own bespoke INPUT zone(s); it never describes an
+      Orchestrator Coordination Panel or an Output/Results zone, because
+      the surrounding shell ALWAYS provides those, identically, for every
+      mission - live agent hand-off narration, streamed output, and
+      downloads, with zero per-mission design needed. List 1-3 concrete
+      input zones that together collect everything this mission's domain
+      genuinely needs before a run starts - name the REAL form controls
+      each one uses (a dropdown of named choices, a drag-and-drop/file
+      picker for a named artifact type, a slider or number input for a
+      tunable parameter, a checkbox for a toggle, a labeled text field for
+      a free-form value) and what each control's value means for the run.
+      Never describe a generic catch-all "message box" as the only
+      control - derive real, specific fields from what the requirements
+      say the user actually needs to configure. Do not add separate
+      admin, configuration, audit, or operational screens, and never
+      design a zone that shows agent status/handoffs or displays output -
+      the single page is this one input surface; the shell composes the
+      submitted values into the Orchestrator's run automatically. Write
+      each zone in 2-3 sentences:
+      "**<Zone name>**: <what concrete fields/controls it has, what each
+      one means for the run, and which requirement(s) it fulfills>"
 
       "## Multi-Agent Workflow" - decide how many specialist agents this
       solution needs and what each one is responsible for, based solely
@@ -250,7 +255,7 @@ prompts:
     variables:
       - approved_requirements
       - user_message
-    version: "4.0.0"
+    version: "4.1.0"
 
   - id: security-assessment-v1
     name: Security Assessment
@@ -526,32 +531,42 @@ prompts:
       Return as fenced ```python code block, first line `# agent: orchestrator`.
 
       (3) Generate EXACTLY ONE UI code block - no more. React functional
-      component (TypeScript/TSX) that implements the EXACT zones listed
-      in the architecture's "## Single-Page UI Design" section - the EXACT
-      same count, names, and purposes, no more and no fewer. All zones on
-      ONE page (never separate screens), arranged so the user sees Input
-      Zone, Orchestrator Coordination Panel (live agent work), and Output
-      Zone together. No extra zones, no "placeholder" screens, no invented
-      UI.
+      component (TypeScript/TSX) that implements ONLY the input zone(s)
+      listed in the architecture's "## Single-Page UI Design" section -
+      the EXACT same count, names, and purposes, no more and no fewer.
+      Never render an Orchestrator Coordination Panel, an agent-status/
+      hand-off display, or an output/results display of any kind - the
+      surrounding shell (see the COMPONENT CONTRACT below) ALWAYS
+      provides live agent narration, progress, streamed output, and
+      downloads for every submission automatically; building your own
+      copy of any of that would be pure redundant dead code that never
+      receives real data. Your component's entire job is collecting
+      rich, mission-specific input and handing it off - nothing else.
 
-      RENDER ZONES IN THE EXACT ORDER they appear in the architecture.
-      Each zone's content is concretely about that zone's own described
-      interaction and must-have requirement it fulfills (never generic
-      placeholder code unrelated to it). The Orchestrator Coordination
-      Panel should VISIBLY SHOW which agent is currently working, how it
-      is contributing to solving the must-haves, and when handoffs occur -
-      this is the "art of possibility" zone.
+      RENDER INPUT ZONES IN THE EXACT ORDER they appear in the
+      architecture. Each zone's fields are concretely about that zone's
+      own described interaction and must-have requirement it fulfills -
+      use REAL, SPECIFIC controls (`<select>` for a fixed set of choices,
+      a drag-and-drop/file `<input type="file">` styled with the
+      `genie-dropzone` class for uploaded artifacts, `<input
+      type="range">`/`type="number"` for tunable parameters, `<input
+      type="checkbox">` for toggles, labeled `<input>`/`<textarea>` for
+      free-form values) - never a single generic catch-all textarea when
+      the architecture describes concrete fields.
 
       CODE STRUCTURE - no noise:
       - imports: alphabetically sorted, React first, then third-party
-      - state hooks (useState, useContext): grouped at top
+      - state hooks (useState, useContext): grouped at top, one per field
       - event handlers: alphabetical order by name
       - render sections: architecture order exactly, labeled with zone
         name/purpose
-      - live orchestration display: includes real-time agent status,
-        progress toward must-have requirements, and handoff moments
+      - a single submit handler that composes one clearly labeled
+        `message` string from every field's current value (e.g. "Run
+        name: <value>\nWorking directory: <value>\n...") and calls the
+        `onSubmit` prop described below exactly once per user action
       - no random IDs, no placeholder content, no extra utilities
-      - call only the Orchestrator from (2), never specialist agents directly
+      - never call `/invoke/stream` yourself, never render your own
+        output/progress/agent-status UI, never talk to any agent directly
 
       VISUAL STYLE - this prototype must look like a genuine, polished
       part of Genie, not a bare unstyled page: the surrounding shell
@@ -559,64 +574,26 @@ prompts:
       look and a set of ready-made utility classes - use them instead of
       inventing new inline styles. Wrap each zone in a `<section
       className="genie-card">` with a `<h2 className="genie-zone-title">`
-      heading. Use `<span className="genie-badge genie-badge-active">`
-      for the specialist agent currently working, `genie-badge-complete`
-      once it hands off, and `genie-badge-pending` before its turn. Show a
-      `<span className="genie-live-dot">` next to whatever is actively
-      updating in real time, and `<span className="genie-bounce-dots">`
-      (containing three `<span className="genie-bounce-dot">`) as a
-      loading affordance while waiting on the Orchestrator. Give the zone
-      that is currently receiving live orchestration updates the
-      `genie-agent-activity` class for a subtle animated glow. Use
-      `<button className="genie-btn genie-btn-primary">` for the primary
-      action and plain `genie-btn` for secondary ones, and `genie-input`/
-      `genie-textarea` classes are not required (bare `<input>`/
-      `<textarea>` already inherit the themed look). This must read as
-      gamified and alive - a user should feel like they are watching a
-      real multi-agent control room, not filling out a form.
+      heading. Use `<div className="genie-dropzone">` (with an
+      `onDragOver`/`onDrop` pair, exactly like the shell's own dropzone)
+      for any file/folder input, and `<button className="genie-btn
+      genie-btn-primary">` for the submit action. This must read as
+      gamified and alive - a user should feel like they are configuring a
+      real mission control panel, not filling out a bureaucratic form.
 
-      REAL-TIME INTERACTION CONTRACT - this mission's own backend exposes
-      exactly one endpoint the UI is allowed to call: `POST /invoke/stream`
-      (relative path, same origin) with a JSON body `{{ "message": string,
-      "attachments"?: {{ "name": string, "content": string }}[] }}` built
-      from whatever the user entered in the Input/Interaction zone. The
-      deterministic shell that always wraps your component already renders a
-      full "Mission Queue" dashboard below it - a drag-and-drop dropzone plus
-      a message composer where EVERY typed request or uploaded file becomes
-      its own independent queue item, auto-run concurrently against
-      `/invoke/stream`, each rendered as its own card with its own
-      step-by-step phase label (queued/contacting backend/agents
-      collaborating/complete/failed), its own live Agent Collaboration
-      badges, its own streamed output, and its own "download output" button.
-      You do NOT need to duplicate any of that (file upload, output display,
-      agent status, downloads) - focus your own UI purely on the mission's
-      specific bespoke interaction. Only add your own file-upload or
-      submit control if the mission's requirements specifically call for a
-      bespoke, single-purpose input (e.g. one required document field with
-      its own label/validation) that should trigger its own scoped
-      `/invoke/stream` call independent of the shell's queue; if you do,
-      populate `attachments` with each file's exact `name` and its full text
-      `content` (read via `File.text()`) alongside `message`, and manage
-      that call's own loading/output state locally rather than assuming a
-      single shared response exists anywhere else on the page.
-      It returns a `text/event-stream` response - do NOT `await
-      response.json()`. Instead read `response.body.getReader()`, decode
-      chunks with `TextDecoder`, and split on blank lines (`\n\n`) into
-      individual events, each shaped `data: <json>` where the JSON is
-      either `{{ "delta": string }}` (an incremental slice of the
-      Orchestrator's real response as it is generated) or `{{ "done": true,
-      "output_text": string }}` (sent exactly once, last). Append every
-      `delta` you receive straight into the Orchestrator Coordination
-      Panel/Output zone's own live text state AS IT ARRIVES - this
-      incremental text genuinely is the Orchestrator narrating its own
-      coordination and specialist hand-offs in real time (it was instructed
-      to describe that as it works), so rendering it live, word by word, is
-      what makes agent collaboration visibly real rather than simulated.
-      Never fabricate a fake progress percentage, fake per-agent timer, or
-      fake "Active Agent" value that isn't actually derived from this real
-      stream - if you want to highlight which specialist is currently
-      being discussed, derive it by matching agent names literally
-      mentioned in the streamed text so far, not from invented state.
+      COMPONENT CONTRACT - your default-exported component receives
+      exactly one prop object: `{{ onSubmit: (message: string,
+      attachments?: {{ name: string, content: string }}[]) => void }}`.
+      Read file contents via `File.text()` before calling `onSubmit`
+      (never pass a raw `File`). Call `onSubmit` exactly once per user
+      action, with a single well-labeled `message` string built from
+      every field's current value and, only when the mission genuinely
+      needs uploaded file content, an `attachments` array. The instant
+      you call it, the surrounding shell's own Mission Queue creates a
+      new live item for this exact submission, streams the Orchestrator's
+      real narration into it word-by-word, and shows its final output
+      and download link - you never need to (and must not) build any of
+      that yourself.
       Return as fenced ```tsx code block, first line `// agent: ui`.
 
       Security rules you MUST follow in every code block above: never
@@ -664,7 +641,7 @@ prompts:
       - policies
       - excluded_agents
       - user_message
-    version: "5.4.0"
+    version: "5.5.0"
 
   - id: build-generation-component-v1
     name: Build Generation - Single Component
@@ -716,52 +693,43 @@ prompts:
       orchestrator`.
 
       If component_kind is "ui": Produce one React functional component
-      (TypeScript/TSX) that implements the EXACT screens listed in the
-      architecture's "## UI Design" section - the EXACT same count, names,
-      and purposes, no more and no fewer. No extra screens, no placeholder
-      screens, no invented UI. RENDER IN THE EXACT ORDER they appear in
-      the architecture. Each screen's content is concretely about that
-      screen's described interaction (never generic placeholder code).
-      Call ONLY the Orchestrator from above, never specialist agents
-      directly.
-      REAL-TIME INTERACTION CONTRACT - this mission's own backend exposes
-      exactly one endpoint the UI is allowed to call: `POST /invoke/stream`
-      (relative path, same origin) with a JSON body `{{ "message": string,
-      "attachments"?: {{ "name": string, "content": string }}[] }}`. The
-      surrounding deterministic shell already renders a full "Mission Queue"
-      dashboard - drag-and-drop plus a message composer where every typed
-      request or uploaded file becomes its own independent, auto-run queue
-      item with its own step-by-step phase, live Agent Collaboration badges,
-      streamed output, and download button - only add your own upload or
-      submit control if a screen's described interaction specifically calls
-      for a bespoke one triggering its own scoped call, and if so populate
-      `attachments` with each file's `name` and full text `content` (via
-      `File.text()`) alongside `message`, managing that call's own
-      loading/output state locally.
-      It returns a `text/event-stream` response - do NOT `await
-      response.json()`. Read `response.body.getReader()`, decode chunks
-      with `TextDecoder`, split on blank lines (`\n\n`) into events shaped
-      `data: <json>`, where the JSON is either `{{ "delta": string }}` (an
-      incremental slice of the Orchestrator's real response) or
-      `{{ "done": true, "output_text": string }}` (sent once, last). Append
-      every `delta` into the relevant screen's own live text state AS IT
-      ARRIVES so the user watches the Orchestrator's real coordination
-      narration stream in live, word by word - never fabricate fake
-      progress/timers/active-agent state not derived from this real
-      stream.
+      (TypeScript/TSX) that implements ONLY the input zone(s) listed in
+      the architecture's "## Single-Page UI Design" section - the EXACT
+      same count, names, and purposes, no more and no fewer. No extra
+      zones, no placeholder screens, no invented UI, and never an
+      Orchestrator Coordination Panel or an output/results display of any
+      kind - the surrounding shell already provides live agent narration,
+      progress, streamed output, and downloads for every submission
+      automatically (see COMPONENT CONTRACT below); your component's
+      entire job is collecting rich, mission-specific input. RENDER INPUT
+      ZONES IN THE EXACT ORDER they appear in the architecture, each
+      using REAL, SPECIFIC controls (`<select>` for fixed choices, a
+      `genie-dropzone`-styled drag-and-drop/file input for uploaded
+      artifacts, range/number inputs for tunable parameters, checkboxes
+      for toggles, labeled text fields for free-form values) - never a
+      single generic catch-all textarea when the architecture describes
+      concrete fields. Never call any agent directly.
+
+      COMPONENT CONTRACT - your default-exported component receives
+      exactly one prop object: `{{ onSubmit: (message: string,
+      attachments?: {{ name: string, content: string }}[]) => void }}`.
+      Read file contents via `File.text()` before calling `onSubmit`
+      (never pass a raw `File`). Compose one clearly labeled `message`
+      string from every field's current value and call `onSubmit` exactly
+      once per user action - the shell's own Mission Queue then creates a
+      live item for this submission, streams the Orchestrator's real
+      narration into it word-by-word, and shows its output/download link
+      automatically. Never call `/invoke/stream` yourself, never render
+      your own output/progress/agent-status UI.
       VISUAL STYLE: the surrounding shell already loads a stylesheet with
       Genie's own dark, gradient-accented look and ready-made utility
-      classes - use them instead of inventing new inline styles. Wrap each
-      screen in a `<section className="genie-card">` with a `<h2
-      className="genie-zone-title">` heading; use `genie-badge`/
-      `genie-badge-active`/`genie-badge-complete`/`genie-badge-pending` for
-      agent status, `genie-live-dot` next to real-time updates,
-      `genie-bounce-dots` (with three `genie-bounce-dot` children) as a
-      loading affordance, `genie-agent-activity` for a subtle glow on
-      whatever is actively updating, and `genie-btn`/`genie-btn-primary`
-      for buttons. Bare `<input>`/`<textarea>` already inherit the themed
-      look. This must read as gamified and alive, matching Genie's own
-      look, not a bare unstyled form.
+      classes - use them instead of inventing new inline styles. Wrap
+      each zone in a `<section className="genie-card">` with a `<h2
+      className="genie-zone-title">` heading, `genie-dropzone` for any
+      file input, and `genie-btn`/`genie-btn-primary` for buttons. Bare
+      `<input>`/`<textarea>`/`<select>` already inherit the themed look.
+      This must read as gamified and alive, matching Genie's own look,
+      not a bare unstyled form.
       Return one fenced ```tsx code block, first line `// agent: ui`, then
       a "## Multi-Agent Workflow" section listing ONLY the agents actually
       generated - same count and names as above.
@@ -811,7 +779,7 @@ prompts:
       - component_kind
       - component_name
       - user_message
-    version: "1.6.0"
+    version: "1.7.0"
 
   - id: build-component-regeneration-v1
     name: Build Generation - Regenerate Single Component

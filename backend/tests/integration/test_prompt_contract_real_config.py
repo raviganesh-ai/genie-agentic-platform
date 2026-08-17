@@ -35,3 +35,38 @@ def test_architecture_recommendation_prompt_forbids_per_agent_sub_bullets():
     assert "single flowing sentence" in template
     assert "Never break an agent's responsibility" in template
     assert "nothing but exactly one bullet per agent" in template
+
+
+def test_architecture_and_build_prompts_never_mandate_a_duplicate_live_agent_panel():
+    """Regression guard for the "prototype looks pathetic" fix (see
+    /memories/repo/deploy-backend.md): the generated mission shell now
+    ALWAYS provides a live Agent Pipeline panel and a Mission Queue with
+    real streamed output/downloads for every mission, with zero
+    per-mission design work. If the architecture-design or build-generation
+    prompts ever again instruct designing/generating a bespoke
+    "Orchestrator Coordination Panel" or an "Output/Results Zone", every
+    future mission's custom UI would go back to hand-rolling its own fake,
+    never-updating duplicate of what the shell already does for real -
+    exactly the regression this test exists to catch immediately.
+    """
+    registry = PromptRegistry.load(_REPO_CONFIG_ROOT / "prompts")
+
+    for prompt_id in ("architecture-recommendation-v1", "build-generation-v1", "build-generation-component-v1"):
+        # Normalize whitespace: this YAML's folded (">-") block scalars
+        # preserve literal newlines for wrapped bullet-list continuation
+        # lines (a pre-existing, harmless quirk of every prompt in this
+        # file), so a phrase that happens to wrap across two source lines
+        # would otherwise fail a naive substring check.
+        template = " ".join(registry.get(prompt_id).template.split())
+        assert "the orchestrator coordination panel should" not in template.lower()
+        assert 'art of possibility" zone showing' not in template
+        assert "displays completed outputs as agents" not in template.lower()
+
+    build_v1 = " ".join(registry.get("build-generation-v1").template.split())
+    assert "COMPONENT CONTRACT" in build_v1
+    assert "onSubmit" in build_v1
+    assert "never render your own output/progress/agent-status UI" in build_v1
+
+    build_component_v1 = " ".join(registry.get("build-generation-component-v1").template.split())
+    assert "COMPONENT CONTRACT" in build_component_v1
+    assert "onSubmit" in build_component_v1

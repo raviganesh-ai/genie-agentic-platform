@@ -546,6 +546,102 @@ input:focus, textarea:focus, select:focus {
 .genie-icon-btn:hover {
   opacity: 1;
 }
+
+.genie-pipeline-caption {
+  font-size: 13px;
+  margin: 0 0 16px;
+}
+
+.genie-pipeline {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0;
+}
+
+.genie-pipeline-node {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  border: 1px solid #232b35;
+  background-color: rgba(255, 255, 255, 0.03);
+  font-size: 12px;
+  font-weight: 700;
+  color: #7c8794;
+  white-space: nowrap;
+  transition: background-color 200ms ease, border-color 200ms ease, color 200ms ease, transform 200ms ease;
+}
+
+.genie-pipeline-node-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: #3d4a5c;
+  flex-shrink: 0;
+}
+
+.genie-pipeline-node-active {
+  border-color: #2f83e0;
+  background-color: rgba(47, 131, 224, 0.18);
+  color: #6ba3ea;
+  transform: scale(1.05);
+}
+
+.genie-pipeline-node-active .genie-pipeline-node-dot {
+  background-color: #6ba3ea;
+  animation: genie-live-pulse 1.2s ease-in-out infinite;
+}
+
+.genie-pipeline-node-complete {
+  border-color: #3fa66a;
+  background-color: rgba(63, 166, 106, 0.14);
+  color: #3fa66a;
+}
+
+.genie-pipeline-node-complete .genie-pipeline-node-dot {
+  background-color: #3fa66a;
+}
+
+@keyframes genie-pipeline-flow {
+  0% { background-position: 0% 0%; }
+  100% { background-position: 200% 0%; }
+}
+
+.genie-pipeline-connector {
+  width: 28px;
+  height: 2px;
+  margin: 0 4px;
+  border-radius: 2px;
+  background-color: #232b35;
+  flex-shrink: 0;
+}
+
+.genie-pipeline-connector-active {
+  background-image: linear-gradient(90deg, #2f83e0 0%, #6ba3ea 30%, #232b35 30%, #232b35 100%);
+  background-size: 250% 100%;
+  animation: genie-pipeline-flow 1.4s linear infinite;
+}
+
+.genie-quick-request {
+  margin-top: 4px;
+}
+
+.genie-quick-request-summary {
+  cursor: pointer;
+  font-weight: 700;
+  color: #6ba3ea;
+  list-style: none;
+}
+
+.genie-quick-request-summary::-webkit-details-marker {
+  display: none;
+}
+
+.genie-quick-request-body {
+  margin-top: 14px;
+}
 """
 
 _FRONTEND_MAIN_TSX = """import React, { useRef, useState } from "react";
@@ -553,7 +649,18 @@ import { createRoot } from "react-dom/client";
 import * as GeneratedModule from "../MissionApp";
 import "./styles.css";
 
-type GeneratedComponent = React.ComponentType;
+type Attachment = { name: string; content: string };
+
+// Any custom, mission-specific component the Build Agent generated receives
+// exactly these props: a single onSubmit callback to hand off whatever
+// structured input it collected, plus the list of specialist agent names for
+// display purposes only. It never receives (and must never build its own)
+// progress/output/streaming state - the shell below owns all of that.
+type MissionAppProps = {
+    onSubmit: (message: string, attachments?: Attachment[]) => void;
+    missionAgents: string[];
+};
+type GeneratedComponent = React.ComponentType<Partial<MissionAppProps>>;
 const moduleValue = GeneratedModule as unknown as {
     default?: GeneratedComponent;
     App?: GeneratedComponent;
@@ -566,7 +673,6 @@ const GeneratedMissionApp = moduleValue.default ?? moduleValue.App ?? moduleValu
 // gets immediate feedback instead of waiting on a 413 response.
 const MAX_ATTACHMENT_CHARS = 200_000;
 
-type Attachment = { name: string; content: string };
 type AgentStatus = "pending" | "active" | "complete";
 type QueueItemStatus = "queued" | "running" | "complete" | "error";
 type QueueItem = {
@@ -676,6 +782,26 @@ function MissionConsole() {
         void runItem(item);
     }
 
+    // The single hand-off point for any Build-Agent-generated custom input
+    // form: it calls this exactly once per user action with a composed
+    // message (and optional attachments), and the shell takes it from there
+    // - creating a real, live-tracked Mission Queue item automatically, with
+    // zero extra plumbing required by the generated component.
+    function submitFromCustomUI(message: string, attachments?: Attachment[]) {
+        const trimmed = message.trim();
+        if (!trimmed) return;
+        enqueue({
+            id: newItemId("mission"),
+            kind: attachments && attachments.length > 0 ? "file" : "message",
+            title: trimmed.length > 60 ? `${trimmed.slice(0, 60)}...` : trimmed,
+            message: trimmed,
+            attachments: attachments ?? [],
+            status: "queued",
+            output: "",
+            error: "",
+        });
+    }
+
     function addMessageToQueue() {
         const trimmed = draftMessage.trim();
         if (!trimmed) return;
@@ -751,8 +877,13 @@ function MissionConsole() {
         {missionAgents.length > 0 ? (
             <section className={activeCount > 0 ? "genie-card genie-agent-activity" : "genie-card"}>
                 <h2 className="genie-zone-title">Agent Pipeline</h2>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                    {missionAgents.map((name) => {
+                <p className="genie-pipeline-caption">
+                    The Orchestrator hands work through each specialist below in sequence -
+                    a node lights up while its agent is actively contributing, and turns
+                    solid once that agent's part of the hand-off is complete.
+                </p>
+                <div className="genie-pipeline">
+                    {missionAgents.map((name, index) => {
                         const perItemStatuses = queue
                             .filter((entry) => entry.status === "running" || entry.status === "complete")
                             .map((entry) => computeAgentStatuses(missionAgents, entry.output, entry.status === "running")[name]);
@@ -762,10 +893,15 @@ function MissionConsole() {
                                 ? "complete"
                                 : "pending";
                         return (
-                            <span key={name} className={`genie-badge genie-badge-${status}`}>
-                                {status === "active" ? <span className="genie-live-dot" /> : null}
-                                {name}
-                            </span>
+                            <React.Fragment key={name}>
+                                <div className={`genie-pipeline-node genie-pipeline-node-${status}`}>
+                                    <span className="genie-pipeline-node-dot" />
+                                    <span>{name}</span>
+                                </div>
+                                {index < missionAgents.length - 1 ? (
+                                    <div className={status === "pending" ? "genie-pipeline-connector" : "genie-pipeline-connector genie-pipeline-connector-active"} />
+                                ) : null}
+                            </React.Fragment>
                         );
                     })}
                 </div>
@@ -774,59 +910,113 @@ function MissionConsole() {
         ) : null}
         {GeneratedMissionApp ? (
             <section className="genie-card genie-fade-in">
-                <h2 className="genie-zone-title">Custom Mission Interface</h2>
-                <GeneratedMissionApp />
+                <h2 className="genie-zone-title">Mission Input</h2>
+                <GeneratedMissionApp onSubmit={submitFromCustomUI} missionAgents={missionAgents} />
             </section>
         ) : null}
-        <section className="genie-card">
-            <h2 className="genie-zone-title">Give the Mission Something to Do</h2>
-            <textarea
-                value={draftMessage}
-                onChange={(event) => setDraftMessage(event.target.value)}
-                onKeyDown={(event) => {
-                    if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
-                        event.preventDefault();
-                        addMessageToQueue();
-                    }
-                }}
-                rows={3}
-                style={{ width: "100%" }}
-                placeholder="Describe a task, question, or decision - press Ctrl+Enter or click Add to Queue."
-            />
-            <div style={{ marginTop: 10, display: "flex", justifyContent: "flex-end" }}>
-                <button type="button" className="genie-btn genie-btn-primary" onClick={addMessageToQueue} disabled={!draftMessage.trim()}>+ Add to Queue</button>
-            </div>
-            <div
-                className={isDragging ? "genie-dropzone genie-dropzone-active" : "genie-dropzone"}
-                style={{ marginTop: 16 }}
-                onClick={() => fileInputRef.current?.click()}
-                onDragOver={(event) => { event.preventDefault(); setIsDragging(true); }}
-                onDragLeave={() => setIsDragging(false)}
-                onDrop={handleDrop}
-                role="button"
-                tabIndex={0}
-                onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") fileInputRef.current?.click(); }}
-            >
-                <span className="genie-dropzone-icon">📂</span>
-                <p style={{ margin: 0 }}>Drag &amp; drop one or more files here, or click to browse</p>
-                <input
-                    ref={fileInputRef}
-                    type="file"
-                    multiple
-                    accept=".txt,.md,.json,.csv,.log,.yaml,.yml"
-                    style={{ display: "none" }}
-                    onChange={(event) => {
-                        if (event.target.files) void addFilesToQueue(event.target.files);
-                        event.target.value = "";
+        {GeneratedMissionApp ? (
+            <details className="genie-card genie-quick-request">
+                <summary className="genie-quick-request-summary">+ Quick request (send a message or file directly)</summary>
+                <div className="genie-quick-request-body">
+                    <textarea
+                        value={draftMessage}
+                        onChange={(event) => setDraftMessage(event.target.value)}
+                        onKeyDown={(event) => {
+                            if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+                                event.preventDefault();
+                                addMessageToQueue();
+                            }
+                        }}
+                        rows={3}
+                        style={{ width: "100%" }}
+                        placeholder="Describe a task, question, or decision - press Ctrl+Enter or click Add to Queue."
+                    />
+                    <div style={{ marginTop: 10, display: "flex", justifyContent: "flex-end" }}>
+                        <button type="button" className="genie-btn genie-btn-primary" onClick={addMessageToQueue} disabled={!draftMessage.trim()}>+ Add to Queue</button>
+                    </div>
+                    <div
+                        className={isDragging ? "genie-dropzone genie-dropzone-active" : "genie-dropzone"}
+                        style={{ marginTop: 16 }}
+                        onClick={() => fileInputRef.current?.click()}
+                        onDragOver={(event) => { event.preventDefault(); setIsDragging(true); }}
+                        onDragLeave={() => setIsDragging(false)}
+                        onDrop={handleDrop}
+                        role="button"
+                        tabIndex={0}
+                        onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") fileInputRef.current?.click(); }}
+                    >
+                        <span className="genie-dropzone-icon">📂</span>
+                        <p style={{ margin: 0 }}>Drag &amp; drop one or more files here, or click to browse</p>
+                        <input
+                            ref={fileInputRef}
+                            type="file"
+                            multiple
+                            accept=".txt,.md,.json,.csv,.log,.yaml,.yml"
+                            style={{ display: "none" }}
+                            onChange={(event) => {
+                                if (event.target.files) void addFilesToQueue(event.target.files);
+                                event.target.value = "";
+                            }}
+                        />
+                    </div>
+                    {dropError ? <p role="alert" className="genie-error">{dropError}</p> : null}
+                </div>
+            </details>
+        ) : (
+            <section className="genie-card">
+                <h2 className="genie-zone-title">Give the Mission Something to Do</h2>
+                <textarea
+                    value={draftMessage}
+                    onChange={(event) => setDraftMessage(event.target.value)}
+                    onKeyDown={(event) => {
+                        if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+                            event.preventDefault();
+                            addMessageToQueue();
+                        }
                     }}
+                    rows={3}
+                    style={{ width: "100%" }}
+                    placeholder="Describe a task, question, or decision - press Ctrl+Enter or click Add to Queue."
                 />
-            </div>
-            {dropError ? <p role="alert" className="genie-error">{dropError}</p> : null}
-        </section>
+                <div style={{ marginTop: 10, display: "flex", justifyContent: "flex-end" }}>
+                    <button type="button" className="genie-btn genie-btn-primary" onClick={addMessageToQueue} disabled={!draftMessage.trim()}>+ Add to Queue</button>
+                </div>
+                <div
+                    className={isDragging ? "genie-dropzone genie-dropzone-active" : "genie-dropzone"}
+                    style={{ marginTop: 16 }}
+                    onClick={() => fileInputRef.current?.click()}
+                    onDragOver={(event) => { event.preventDefault(); setIsDragging(true); }}
+                    onDragLeave={() => setIsDragging(false)}
+                    onDrop={handleDrop}
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") fileInputRef.current?.click(); }}
+                >
+                    <span className="genie-dropzone-icon">📂</span>
+                    <p style={{ margin: 0 }}>Drag &amp; drop one or more files here, or click to browse</p>
+                    <input
+                        ref={fileInputRef}
+                        type="file"
+                        multiple
+                        accept=".txt,.md,.json,.csv,.log,.yaml,.yml"
+                        style={{ display: "none" }}
+                        onChange={(event) => {
+                            if (event.target.files) void addFilesToQueue(event.target.files);
+                            event.target.value = "";
+                        }}
+                    />
+                </div>
+                {dropError ? <p role="alert" className="genie-error">{dropError}</p> : null}
+            </section>
+        )}
         <section className="genie-card">
             <h2 className="genie-zone-title">Mission Queue{queue.length > 0 ? ` - ${completeCount}/${queue.length} complete` : ""}</h2>
             {queue.length === 0 ? (
-                <div className="genie-empty-state">No inputs yet - add a request or drop a file above to see the agents get to work.</div>
+                <div className="genie-empty-state">
+                    {GeneratedMissionApp
+                        ? "No inputs yet - submit the form above to see the agents get to work."
+                        : "No inputs yet - add a request or drop a file above to see the agents get to work."}
+                </div>
             ) : (
                 <div className="genie-queue-grid">
                     {queue.map((item) => {

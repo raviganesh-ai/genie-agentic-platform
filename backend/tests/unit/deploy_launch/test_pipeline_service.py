@@ -647,3 +647,43 @@ def test_frontend_main_tsx_renders_a_gamified_multi_input_mission_queue():
     assert ".genie-queue-item {" in _FRONTEND_STYLES_CSS
     assert ".genie-hero {" in _FRONTEND_STYLES_CSS
 
+
+def test_frontend_main_tsx_gives_custom_ui_an_onsubmit_contract_and_animated_pipeline():
+    """Regression guard for the "prototype looks pathetic" fix: any custom,
+    mission-specific component the Build Agent generates must never build its
+    own duplicate live-agent/output panel - it only collects input and hands
+    it off via a single ``onSubmit`` prop, and the shell's real "Agent
+    Pipeline" must be an animated, explained visualization (not a static row
+    of badges) so the live hand-offs actually read as alive.
+    """
+    from app.deploy_launch.pipeline_service import _FRONTEND_MAIN_TSX, _FRONTEND_STYLES_CSS
+
+    # The generated component receives a typed onSubmit contract, never its
+    # own /invoke/stream wiring - it hands control straight to the shell's
+    # real Mission Queue.
+    assert "type MissionAppProps = {" in _FRONTEND_MAIN_TSX
+    assert "onSubmit: (message: string, attachments?: Attachment[]) => void;" in _FRONTEND_MAIN_TSX
+    assert "type GeneratedComponent = React.ComponentType<Partial<MissionAppProps>>;" in _FRONTEND_MAIN_TSX
+    assert "function submitFromCustomUI(message: string, attachments?: Attachment[])" in _FRONTEND_MAIN_TSX
+    assert "<GeneratedMissionApp onSubmit={submitFromCustomUI} missionAgents={missionAgents} />" in _FRONTEND_MAIN_TSX
+    assert '<h2 className="genie-zone-title">Mission Input</h2>' in _FRONTEND_MAIN_TSX
+
+    # The Agent Pipeline is now an animated node/connector visualization with
+    # an explanatory caption, not a static badge row.
+    assert "genie-pipeline-caption" in _FRONTEND_MAIN_TSX
+    assert 'className="genie-pipeline"' in _FRONTEND_MAIN_TSX
+    assert "genie-pipeline-node genie-pipeline-node-" in _FRONTEND_MAIN_TSX
+    assert "genie-pipeline-connector" in _FRONTEND_MAIN_TSX
+
+    # The generic composer is de-emphasized into a collapsed disclosure once
+    # a real custom mission-input form exists, instead of competing with it.
+    assert '<details className="genie-card genie-quick-request">' in _FRONTEND_MAIN_TSX
+    assert "Quick request (send a message or file directly)" in _FRONTEND_MAIN_TSX
+
+    assert ".genie-pipeline {" in _FRONTEND_STYLES_CSS
+    assert ".genie-pipeline-node-active {" in _FRONTEND_STYLES_CSS
+    assert ".genie-pipeline-node-complete {" in _FRONTEND_STYLES_CSS
+    assert ".genie-pipeline-connector-active {" in _FRONTEND_STYLES_CSS
+    assert "@keyframes genie-pipeline-flow {" in _FRONTEND_STYLES_CSS
+    assert ".genie-quick-request-summary {" in _FRONTEND_STYLES_CSS
+
