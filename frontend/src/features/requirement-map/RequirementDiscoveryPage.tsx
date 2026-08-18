@@ -137,12 +137,14 @@ const CATEGORY_DEFS: { key: string; heading: RegExp; icon: string; accent: strin
 /**
  * Groups the analyst's reviewed, summarized output (requirements-extraction-v1)
  * into one collapsible section per category heading it was instructed to
- * emit, plus the "Critical path:" ordering kept separate so it can be shown
- * as its own implementation-order callout instead of buried inside a
- * category list. Falls back to a single "Requirements" bucket for any
- * lines that appear before the first recognized heading (e.g. older runs
- * recorded before this grouping existed) so nothing the agent produced is
- * ever silently dropped.
+ * emit, plus the "Critical path:" ordering parsed separately (kept out of
+ * the rendered category lists since it now must repeat each item's exact
+ * category wording verbatim - showing it again would just duplicate what's
+ * already visible above) but still serialized back out for the
+ * architecture step's scope-boundary contract. Falls back to a single
+ * "Requirements" bucket for any lines that appear before the first
+ * recognized heading (e.g. older runs recorded before this grouping
+ * existed) so nothing the agent produced is ever silently dropped.
  */
 function parseGroupedRequirements(text: string): ParsedRequirements {
   const groupItems: Record<string, string[]> = {};
@@ -233,10 +235,12 @@ export function RequirementDiscoveryPage(): JSX.Element {
   // analyze-requirements step output), separate from the (currently
   // unpopulated - Shared Memory is never written to) structured records
   // above. Parsed into one collapsible category group per heading the
-  // requirements-extraction-v1 prompt is instructed to emit - plus a
-  // separate "Critical path" ordering shown as its own implementation-order
-  // section - so the user can scan, edit, remove, and add requirements at
-  // the group level before approving the design-architecture gate.
+  // requirements-extraction-v1 prompt is instructed to emit, so the user can
+  // scan, edit, remove, and add requirements at the group level before
+  // approving the design-architecture gate. The "Critical path" ordering is
+  // still round-tripped through serialization for the architecture step's
+  // contract, but is no longer shown as its own section since it now
+  // duplicates the category items verbatim.
   const runFetcher = useCallback(
     () =>
       sessionId && workflowRunId
@@ -352,54 +356,6 @@ export function RequirementDiscoveryPage(): JSX.Element {
               : group,
           ),
         };
-      });
-    },
-    [withOverrides],
-  );
-  // Adds an approved requirement to implementation order without removing
-  // it from its category; Critical Path is sequencing, never scope reduction.
-  const moveGroupItemToCriticalPath = useCallback(
-    (groupKey: string, index: number) => {
-      setRequirementOverrides((prev) => {
-        const base = withOverrides(prev);
-        const group = base.groups.find((candidate) => candidate.key === groupKey);
-        const item = group?.items[index];
-        if (item === undefined) return base;
-        const itemId = requirementId(item);
-        if (
-          itemId &&
-          base.criticalPath.some((candidate) => requirementId(candidate) === itemId)
-        ) {
-          return base;
-        }
-        return {
-          groups: base.groups,
-          criticalPath: [...base.criticalPath, item],
-        };
-      });
-    },
-    [withOverrides],
-  );
-
-  const updateCriticalPathItem = useCallback(
-    (index: number, value: string) => {
-      setRequirementOverrides((prev) => {
-        const base = withOverrides(prev);
-        return {
-          ...base,
-          criticalPath: base.criticalPath.map((item, i) =>
-            i === index ? preserveRequirementId(item, value) : item,
-          ),
-        };
-      });
-    },
-    [withOverrides],
-  );
-  const removeCriticalPathItem = useCallback(
-    (index: number) => {
-      setRequirementOverrides((prev) => {
-        const base = withOverrides(prev);
-        return { ...base, criticalPath: base.criticalPath.filter((_, i) => i !== index) };
       });
     },
     [withOverrides],
@@ -571,28 +527,6 @@ export function RequirementDiscoveryPage(): JSX.Element {
         </div>
 
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          {effectiveRequirements.criticalPath.length > 0 ? (
-            <div
-              title="Implementation Order"
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 6,
-                padding: "6px 12px",
-                borderRadius: 999,
-                border: "1px solid #d99a2b55",
-                backgroundColor: "#d99a2b1a",
-              }}
-            >
-              <span style={{ fontSize: 15 }}>🎯</span>
-              <Text size={200} weight="semibold" style={{ color: "#d99a2b" }}>
-                {effectiveRequirements.criticalPath.length}
-              </Text>
-              <Text size={100} style={{ opacity: 0.7 }}>
-                Implementation Order
-              </Text>
-            </div>
-          ) : null}
           {CATEGORY_DEFS.map((def) => {
             const count = groupCounts[def.key] ?? 0;
             return (
@@ -692,107 +626,6 @@ export function RequirementDiscoveryPage(): JSX.Element {
         />
       ) : null}
 
-      {effectiveRequirements.criticalPath.length > 0 ? (
-        <SectionCard
-          title={
-            <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <span style={{ fontSize: 18 }}>🎯</span>
-              <span>Implementation Order</span>
-              <Text size={200} style={{ opacity: 0.6, fontWeight: 400 }}>
-                (Critical Path)
-              </Text>
-            </span>
-          }
-        >
-          <Text size={200} style={{ display: "block", marginBottom: 12, opacity: 0.8 }}>
-            This orders implementation only. Every approved requirement below remains in prototype scope.
-          </Text>
-          {editMode ? (
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {effectiveRequirements.criticalPath.map((item, index) => (
-                <div
-                  key={index}
-                  className="genie-fade-in genie-req-item"
-                  style={{
-                    display: "flex",
-                    gap: 8,
-                    alignItems: "flex-start",
-                    padding: "8px 10px",
-                    borderRadius: 8,
-                    border: "1px solid #d99a2b55",
-                    backgroundColor: "rgba(217, 154, 43, 0.08)",
-                  }}
-                >
-                  <span
-                    style={{
-                      flexShrink: 0,
-                      width: 22,
-                      height: 22,
-                      marginTop: 4,
-                      borderRadius: "50%",
-                      backgroundImage: "linear-gradient(135deg, #d99a2b, #e0b354)",
-                      color: "#1a1200",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      fontSize: 11,
-                      fontWeight: 700,
-                    }}
-                  >
-                    {index + 1}
-                  </span>
-                  <Textarea
-                    value={item}
-                    onChange={(_, dataEv) => updateCriticalPathItem(index, dataEv.value)}
-                    resize="vertical"
-                    style={{ flex: 1 }}
-                  />
-                  <Button
-                    appearance="subtle"
-                    size="small"
-                    shape="circular"
-                    title="Remove this requirement"
-                    aria-label="Remove this requirement"
-                    onClick={() => removeCriticalPathItem(index)}
-                  >
-                    ✕
-                  </Button>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              {effectiveRequirements.criticalPath.map((item, index) => (
-                <div key={index} className="genie-fade-in" style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
-                  <span
-                    style={{
-                      flexShrink: 0,
-                      width: 20,
-                      height: 20,
-                      marginTop: 2,
-                      borderRadius: "50%",
-                      backgroundImage: "linear-gradient(135deg, #d99a2b, #e0b354)",
-                      color: "#1a1200",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      fontSize: 10,
-                      fontWeight: 700,
-                    }}
-                  >
-                    {index + 1}
-                  </span>
-                  <Text size={300} style={{ lineHeight: 1.5 }}>
-                    {item}
-                  </Text>
-                </div>
-              ))}
-            </div>
-          )}
-        </SectionCard>
-      ) : null}
-
-
       {effectiveRequirements.groups.map((group) => {
         const collapsed = collapsedGroups.has(group.key);
         return (
@@ -872,15 +705,6 @@ export function RequirementDiscoveryPage(): JSX.Element {
                         resize="vertical"
                         style={{ flex: 1 }}
                       />
-                      <Button
-                        appearance="subtle"
-                        size="small"
-                        title="Add to Implementation Order"
-                        aria-label="Add to Implementation Order"
-                        onClick={() => moveGroupItemToCriticalPath(group.key, index)}
-                      >
-                        Add to Order
-                      </Button>
                       <Button
                         appearance="subtle"
                         size="small"

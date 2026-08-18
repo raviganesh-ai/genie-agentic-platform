@@ -150,8 +150,8 @@ describe("RequirementDiscoveryPage", () => {
     });
   });
 
-  it("adds a must-have to implementation order without removing approved scope", async () => {
-    mockFetchSequence([
+  it("does not render a separate Critical Path section - the ordering is round-tripped invisibly, not shown twice", async () => {
+    const fetchMock = mockFetchSequence([
       { match: "/approvals", response: buildApprovalRequests() },
       {
         match: `/requirements/${FIXTURE_WORKFLOW_RUN_ID}/qualification`,
@@ -166,7 +166,7 @@ describe("RequirementDiscoveryPage", () => {
               agent_id: "requirements-analyst",
               status: "completed",
               output_text:
-                "Must-Have Functional Requirements:\n- [REQ-001] Support SSO login\n- [REQ-002] Export reports as PDF\n\nNice-to-Have Functional Requirements:\n- [REQ-003] Add theme selection\n\nCritical path:\n- [REQ-004] Onboard the pilot customer",
+                "Must-Have Functional Requirements:\n- [REQ-001] Support SSO login\n- [REQ-002] Export reports as PDF\n\nNice-to-Have Functional Requirements:\n- [REQ-003] Add theme selection\n\nCritical path:\n- [REQ-001] Support SSO login\n- [REQ-002] Export reports as PDF",
               error: null,
               started_at: "2026-07-23T10:00:00Z",
               completed_at: "2026-07-23T10:01:00Z",
@@ -174,6 +174,7 @@ describe("RequirementDiscoveryPage", () => {
           ],
         }),
       },
+      { match: "/resume", response: buildWorkflowRunResult({ status: "waiting_for_proceed" }) },
     ]);
 
     renderWithProviders(<RequirementDiscoveryPage />, {
@@ -181,21 +182,24 @@ describe("RequirementDiscoveryPage", () => {
       workflowRunId: FIXTURE_WORKFLOW_RUN_ID,
     });
 
-    const user = userEvent.setup();
-    const editButton = await screen.findByRole("button", { name: /Edit Requirements/i });
-    await user.click(editButton);
+    await screen.findByText(/Support SSO login/i);
+    expect(screen.queryByText(/Implementation Order/i)).not.toBeInTheDocument();
+    expect(screen.getAllByText(/Support SSO login/i)).toHaveLength(1);
 
-    await screen.findByDisplayValue(/REQ-001.*Support SSO login/i);
-    expect(screen.getByDisplayValue(/REQ-003.*Add theme selection/i)).toBeInTheDocument();
-    const moveButtons = screen.getAllByRole("button", { name: /Add to Implementation Order/i });
-    await user.click(moveButtons[0]);
+    const approveButton = await screen.findByRole("button", { name: /Proceed to Architecture/i });
+    await userEvent.setup().click(approveButton);
 
     await waitFor(() => {
-      // One copy remains in approved scope and one is added to ordering.
-      expect(screen.getAllByDisplayValue(/REQ-001.*Support SSO login/i)).toHaveLength(2);
+      const resumeCall = fetchMock.mock.calls.find((call) => String(call[0]).endsWith("/resume"));
+      expect(resumeCall).toBeDefined();
+      const [, resumeInit] = resumeCall as unknown as [string, RequestInit];
+      const body = JSON.parse(resumeInit.body as string);
+      // The critical path text is still round-tripped to the architecture
+      // step's contract, just never rendered as its own duplicate section.
+      expect(body.step_inputs["design-architecture"].variables.approved_requirements).toContain(
+        "Critical path:",
+      );
     });
-    expect(screen.getByDisplayValue(/Onboard the pilot customer/i)).toBeInTheDocument();
-    expect(screen.getByDisplayValue(/REQ-002.*Export reports as PDF/i)).toBeInTheDocument();
   });
 });
 
