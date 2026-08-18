@@ -230,6 +230,9 @@ export function AppShell(): JSX.Element {
 
   useEffect(() => {
     setMaxReachedIndex(currentIndex);
+    // Intentionally reset only when a new run starts, not on every nav
+    // change - currentIndex is captured at that moment, not tracked live.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workflowRunId]);
 
   useEffect(() => {
