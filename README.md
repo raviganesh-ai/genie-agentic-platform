@@ -205,6 +205,8 @@ The prompt is explicit: *"Stay strictly within the 'Critical path:' scope... tre
 
 `call_build_agent` (`app/agents/tools/orchestration_tools.py`) invokes the Build Agent **once per component** (`build-generation-component-v1`), in a fixed bottom-up order: each specialist agent module (alphabetical), then the Orchestrator module, then the UI component. The prompt hard-constrains every component to the architecture's own list: *"Every zone and every agent you generate code for MUST come directly from that exact list below — never invent, add, rename, or merge."* The UI component must implement **only** the input zones named in step 2, using the same deterministic control-mapping rule, styled with Genie's own shell classes (`genie-card`, `genie-zone-title`, `genie-btn-primary`, `genie-dropzone`) and a fixed contract (`{ onSubmit: (message, attachments?) => void }`) — it never renders its own progress/output/agent-status UI, because the shell already does. On a retried build, `previous_build_output` lets the tool skip regenerating any component that already succeeded rather than rebuilding the whole mission from scratch. Users can also request a targeted change to a single already-generated component from Workshop Center (`WorkshopService.regenerate_component`, prompt `build-component-regeneration-v1`) without touching anything else.
 
+Which requirement IDs belong to which component is never left purely to the Build Agent's own judgment. `architecture_parsing.parse_component_requirement_assignments` deterministically extracts the `REQ-###` ids already cited in each specialist/UI bullet's own text (the Architecture Designer prompt requires this), and `call_build_agent` (1) fails closed with a governed error **before generating any component** if an approved requirement is never assigned to any specialist, the Orchestrator, or a UI zone, and (2) passes each component only its own assigned requirement ids via the `{assigned_requirements}` prompt variable — cheaper and more reliable than discovering a coverage gap only after a full build+deploy+test cycle.
+
 ### 4. Two independent agents verify the build against the original requirements — never trusting the builder's own claims
 
 - **Security Assessment Agent** (`security-assessment-v1`) reviews the entire generated artifact against the OWASP Top 10 every time (not just the diff) and is explicitly told to *"form your own independent judgment... do not defer to, assume the correctness of, or be swayed by"* the Build Agent's own claims. Ends with `SECURITY_GATE: PASS|FAIL` plus structured findings.
@@ -229,12 +231,12 @@ Deploy & Launch is deliberately **not** an LLM-narrative workflow step — it is
 | 3 | `deploy-backend-service` | Deploy Backend Service | Builds and deploys the mission's generated backend service |
 | 4 | `sync-frontend-integration` | Update Frontend Integrations | Wires the generated UI to the newly deployed backend/agents |
 | 5 | `deploy-frontend-app` | Deploy Frontend | Deploys the mission's generated UI |
-| 6 | `generate-test-suite` | Generate Functional & Regression Tests | Test Generation Agent produces the real test suite for the deployed build (gated by `has_pytest_discoverable_tests()`, with one corrective retry) |
-| 7 | `execute-test-suite` | Execute Full Fledge Testing | `TestExecutionService` really shells out to `pytest` against the generated tests in a sandboxed subprocess — a genuine pass/fail, never a fabricated success |
+| 6 | `generate-test-suite` | Generate Requirement Acceptance Tests | Test Generation Agent writes real, black-box tests against the deployed prototype's actual `MISSION_BACKEND_URL`/`MISSION_FRONTEND_URL` (no mocks/patches), one test per approved requirement id (gated by `has_pytest_discoverable_tests()` plus a requirement-coverage repair loop) |
+| 7 | `execute-test-suite` | Requirement Fidelity Gate | `TestExecutionService` really shells out to `pytest` against the generated tests and the live deployed prototype — a genuine pass/fail, never a fabricated success. On failure it automatically regenerates and redeploys the prototype and re-runs the gate, up to `GENIE_DEPLOYMENT_FIDELITY_MAX_REPAIR_ATTEMPTS` times (default 3), before failing closed |
 | 8 | `run-security-scan` | Security Scan (Backend & Frontend) | Real security scan of the deployed backend and frontend artifacts |
 | 9 | `launch-mission` | Launch | Mints the customer-facing launch link once every prior step has passed |
 
-Each step's real status (`pending` → `running` → `completed`/`failed`/`skipped`) streams live to the Deploy & Launch page so the human watches actual provisioning happen — never a simulated progress bar.
+Each step's real status (`pending` → `running` → `completed`/`failed`/`skipped`) streams live to the Deploy & Launch page so the human watches actual provisioning happen — never a simulated progress bar. The **Requirement Fidelity Gate** (step 7) is Genie's last line of defense: it never trusts the Build Agent's or Test Generation Agent's own claims of completeness, it only trusts pytest actually passing against the real running prototype.
 
 ---
 
@@ -367,6 +369,7 @@ All backend configuration is via environment variables prefixed `GENIE_` (pydant
 | `GENIE_DEFAULT_LLM` | `gpt-5.1` | Default model deployment name for agents that omit `model_deployment_ref` |
 | `GENIE_DEBUGGING_WORKFLOW_ID` | `debugging-workflow` | Workflow id run on `FailureDetected` |
 | `GENIE_REQUIREMENTS_QUALIFICATION_STEP_ID` | `analyze-requirements` | Workflow step id whose output is checked for an agentic-workflow qualification verdict |
+| `GENIE_DEPLOYMENT_FIDELITY_MAX_REPAIR_ATTEMPTS` | `3` | Max automatic regenerate-and-redeploy attempts the Requirement Fidelity Gate makes before failing closed |
 | `GENIE_KEY_VAULT_URI` | *(none)* | Required in production |
 | `GENIE_ENTRA_TENANT_ID` | *(none)* | Microsoft Entra ID tenant for token validation + login |
 | `GENIE_ENTRA_CLIENT_ID` | *(none)* | App registration (API) client id |
