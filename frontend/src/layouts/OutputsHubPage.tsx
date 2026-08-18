@@ -2,8 +2,7 @@ import { NavLink, Outlet } from "react-router-dom";
 
 const TABS: Array<{ to: string; label: string; end?: boolean }> = [
   { to: "/outputs", label: "Deploy & Launch", end: true },
-  { to: "/outputs/replay", label: "Replay Center" },
-  { to: "/outputs/final", label: "Final Output" },
+  { to: "/outputs/fidelity-gate", label: "Requirement Fidelity Gate" },
 ];
 
 function tabStyle(isActive: boolean): React.CSSProperties {
@@ -18,9 +17,10 @@ function tabStyle(isActive: boolean): React.CSSProperties {
 }
 
 /**
- * Consolidates the two end-of-session pages (governed decision replay and
- * final output/starter kit) under a single "Outputs" nav step, switched via
- * sub-tabs instead of separate top-level steps.
+ * Hosts Deploy & Launch and the Requirement Fidelity Gate under a single
+ * "Outputs" nav step, switched via sub-tabs. The Requirement Fidelity Gate
+ * tab renders as a modal popup over whichever tab was active rather than a
+ * plain page (see RequirementFidelityGatePage).
  */
 export function OutputsHubPage(): JSX.Element {
   return (

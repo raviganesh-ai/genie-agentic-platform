@@ -6,7 +6,6 @@ import type {
   GovernanceEvent,
 } from "@/types/governance";
 import type { DecisionGraph } from "@/types/collaboration";
-import type { SessionReplayResponse } from "@/types/replay";
 import type { ArchitectureSnapshot } from "@/types/architecture";
 import type { RequirementsQualification } from "@/types/requirementsQualification";
 import type { AgentSummary } from "@/types/agents";
@@ -118,29 +117,6 @@ export function buildAgentAssessmentsReport(
       assessed_by_agent_id: "test-generation-agent",
     }),
     ...overrides,
-  };
-}
-
-export function buildSessionReplayResponse(): SessionReplayResponse {
-  return {
-    session_id: FIXTURE_SESSION_ID,
-    governance_events: buildGovernanceEvents(),
-    recommendation_lineage: [],
-    approval_requests: buildApprovalRequests(),
-    approval_decisions: [],
-    approval_audit_trail: [
-      {
-        id: "audit-1",
-        request_id: "approval-1",
-        session_id: FIXTURE_SESSION_ID,
-        trace_id: "trace-1",
-        event: "requested",
-        timestamp: "2026-07-23T10:05:00Z",
-        actor: "architecture-designer",
-        detail: "",
-      },
-    ],
-    decision_graph: buildDecisionGraph(),
   };
 }
 
