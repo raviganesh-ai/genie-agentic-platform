@@ -502,6 +502,21 @@ prompts:
       Orchestrator, then UI), ensuring each piece implements only its
       concrete responsibility from the architecture, no extras.
 
+      Phase 4 - SELF-VERIFICATION (required before you finalize): after
+      writing every agent, the Orchestrator, and the UI, go back through
+      the full list of approved requirement IDs below one by one and
+      confirm each has a real, working, end-to-end implementation in the
+      code you produced - not just a mention in a comment, a stub, or a
+      generic placeholder. If any requirement is thin, partially
+      implemented, or missing, revise the relevant code block(s) now
+      before moving on. Deploy & Launch's downstream test-generation and
+      execution steps hold this build to 100% requirement coverage and
+      100% passing evidence, with only a small, bounded number of
+      automatic repair cycles available if something is still wrong -
+      that repair budget exists for genuine edge cases, not as a
+      substitute for doing a complete, correct job in this first pass.
+      Treat every requirement as mandatory to get right now.
+
       Follow this exact structured build order, bottom-up - each
       specialist agent first (the independent building blocks), then the
       Orchestrator that wires them together, then the UI that sits on top
@@ -716,7 +731,7 @@ prompts:
       - policies
       - excluded_agents
       - user_message
-    version: "5.7.0"
+    version: "5.8.0"
 
   - id: build-generation-component-v1
     name: Build Generation - Single Component
@@ -745,6 +760,15 @@ prompts:
       to its architecture responsibility, preserve exact stated quantities
       and constraints, and include those IDs in a concise `# requirements:`
       or `// requirements:` line in the returned code block.
+
+      Before returning, re-check each requirement ID you assigned to this
+      component against the code you actually wrote and confirm it is a
+      real, working implementation, not a stub, comment-only mention, or
+      generic placeholder. Deploy & Launch's downstream test-generation and
+      execution steps hold the finished mission to 100% requirement
+      coverage with only a small, bounded number of automatic repair
+      cycles - get this component right now rather than relying on that
+      later repair budget to catch avoidable gaps.
 
       Component to generate now: a "{component_kind}" named
       "{component_name}".
@@ -880,7 +904,7 @@ prompts:
       - component_kind
       - component_name
       - user_message
-    version: "1.9.0"
+    version: "1.10.0"
 
   - id: build-component-regeneration-v1
     name: Build Generation - Regenerate Single Component

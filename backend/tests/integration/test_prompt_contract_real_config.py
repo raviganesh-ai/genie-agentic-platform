@@ -117,3 +117,23 @@ def test_all_generation_prompts_preserve_every_approved_requirement_id():
         template = " ".join(registry.get(prompt_id).template.split())
         assert "every approved requirement ID" in template
         assert "Prototype status never authorizes omission" in template
+
+
+def test_build_generation_prompts_require_self_verification_before_finishing():
+    """Regression guard: the build-generation prompts must instruct the
+    Build Agent to check its own requirement coverage and fix gaps before
+    returning, rather than treating Deploy & Launch's bounded automatic
+    repair budget as a substitute for a correct first pass (user directive:
+    "don't make bad quality of code limitation as retry, 3 is enough if
+    the code was generated to meet all the requirement... in the first
+    round itself")."""
+    registry = PromptRegistry.load(_REPO_CONFIG_ROOT / "prompts")
+
+    build_v1 = " ".join(registry.get("build-generation-v1").template.split())
+    assert "SELF-VERIFICATION" in build_v1
+    assert "not as a substitute for doing a complete, correct job in this first pass" in build_v1
+
+    build_component_v1 = " ".join(registry.get("build-generation-component-v1").template.split())
+    assert "Before returning, re-check each requirement ID" in build_component_v1
+    assert "rather than relying on that later repair budget to catch avoidable gaps" in build_component_v1
+
