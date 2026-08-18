@@ -1,10 +1,14 @@
 name: CI
 
+# The repo's actual default branch is "master" (verify with `git branch -a`
+# before ever changing this back to "main" - CI silently never ran on any
+# push/PR until this was fixed, since the previous trigger watched a branch
+# that doesn't exist in this repo).
 on:
   push:
-    branches: [main]
+    branches: [master]
   pull_request:
-    branches: [main]
+    branches: [master]
 
 jobs:
   backend:
@@ -57,3 +61,85 @@ jobs:
 
       - name: Test
         run: npm run test
+
+  # Deploy jobs only run on a real push to master (never on a PR from a
+  # fork, and never unless both CI jobs above already passed) - see
+  # "Continuous deployment" in README.md for the one-time Azure setup
+  # (federated OIDC credential + RBAC) required before these can succeed.
+  deploy-backend:
+    name: Deploy backend (Container Apps)
+    needs: [backend, frontend]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    environment: production
+    concurrency:
+      group: deploy-backend
+      cancel-in-progress: false
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Build and push backend image (ACR)
+        run: |
+          az acr build \
+            --registry "${{ vars.AZURE_ACR_NAME }}" \
+            --image "genie-backend:${{ github.sha }}" \
+            --file backend/Dockerfile \
+            .
+
+      # A floating tag would not trigger a restart on an unchanged image
+      # string - a unique --revision-suffix per run forces a genuine new
+      # revision to be created and the new image to actually be pulled.
+      - name: Roll out new Container App revision
+        run: |
+          az containerapp update \
+            --name "${{ vars.AZURE_CONTAINER_APP_NAME }}" \
+            --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
+            --image "${{ vars.AZURE_ACR_NAME }}.azurecr.io/genie-backend:${{ github.sha }}" \
+            --revision-suffix "gh${{ github.run_number }}"
+
+  deploy-frontend:
+    name: Deploy frontend (Static Web Apps)
+    needs: [backend, frontend]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    environment: production
+    concurrency:
+      group: deploy-frontend
+      cancel-in-progress: false
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+        env:
+          VITE_GENIE_API_BASE_URL: ${{ vars.VITE_GENIE_API_BASE_URL }}
+          VITE_ENTRA_CLIENT_ID: ${{ vars.VITE_ENTRA_CLIENT_ID }}
+          VITE_ENTRA_TENANT_ID: ${{ vars.VITE_ENTRA_TENANT_ID }}
+          VITE_ENTRA_API_SCOPE: ${{ vars.VITE_ENTRA_API_SCOPE }}
+
+      - name: Deploy to Azure Static Web Apps
+        run: npx --yes @azure/static-web-apps-cli@latest deploy ./dist --deployment-token "${{ secrets.SWA_DEPLOYMENT_TOKEN }}" --env production
+

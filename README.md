@@ -21,6 +21,7 @@ Genie is an Azure-native Agentic AI solutioning platform. It ingests transcripts
 - [Deployment strategy](#deployment-strategy)
   - [Deploying into a brand-new Azure subscription](#deploying-into-a-brand-new-azure-subscription)
   - [Deploying application code (backend + frontend)](#deploying-application-code-backend--frontend)
+  - [Continuous deployment (GitHub Actions)](#continuous-deployment-github-actions)
   - [Provisioning Foundry agents](#provisioning-foundry-agents)
 - [Testing](#testing)
 - [Troubleshooting](#troubleshooting)
@@ -592,6 +593,23 @@ All three require `GENIE_AZURE_FOUNDRY_ENDPOINT` / `GENIE_AZURE_FOUNDRY_PROJECT_
 
 4. Update the app registration's SPA redirect URIs to include the deployed Static Web App URL (and `http://localhost:5173` for local dev), and grant admin consent for the API's self-referencing scope (see [Authentication](#authentication)).
 
+### Continuous deployment (GitHub Actions)
+
+`.github/workflows/ci.yml` runs on every push/PR to `master` (the repo's actual default branch — double-check this before ever pointing it at `main`). On a real push to `master`, once both the `backend` and `frontend` CI jobs pass, two deploy jobs run the exact same steps documented above, automatically:
+
+- **`deploy-backend`** — logs into Azure via OIDC federated credential (no stored secret), runs `az acr build` from the repo root, then `az containerapp update --revision-suffix gh<run-number>` so every deploy creates a genuinely new revision (a floating tag would not otherwise trigger a restart).
+- **`deploy-frontend`** — builds the frontend and deploys it with `@azure/static-web-apps-cli` using a stored deployment token.
+
+**One-time setup required before these jobs will succeed** (this repo does not do this for you — it's a deliberate operator step against your own Azure subscription):
+
+1. Create (or reuse) a user-assigned managed identity or app registration, and add a **federated identity credential** trusting this repo's GitHub Actions OIDC issuer for the `master` branch (`az identity federated-credential create` or the Entra admin center — subject `repo:<org>/<repo>:ref:refs/heads/master`).
+2. Grant that identity `AcrPush`/`AcrBuild`-equivalent access on the ACR and `Container Apps Contributor` on the resource group (least privilege, matching the pattern in [Deploying into a brand-new Azure subscription](#deploying-into-a-brand-new-azure-subscription) — never a subscription-wide Owner/Contributor grant).
+3. In the repo's **Settings → Environments → production**, add:
+   - **Secrets**: `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID` (the federated identity from step 1), `SWA_DEPLOYMENT_TOKEN` (from `az staticwebapp secrets list`).
+   - **Variables**: `AZURE_ACR_NAME`, `AZURE_CONTAINER_APP_NAME`, `AZURE_RESOURCE_GROUP`, `VITE_GENIE_API_BASE_URL`, `VITE_ENTRA_CLIENT_ID`, `VITE_ENTRA_TENANT_ID`, `VITE_ENTRA_API_SCOPE` (not secret, but environment-specific).
+
+Until that setup exists, `deploy-backend`/`deploy-frontend` will simply fail at the Azure login / deploy step — the `backend`/`frontend` test jobs are unaffected and still gate every PR.
+
 ---
 
 ## Testing
@@ -619,7 +637,7 @@ All three require `GENIE_AZURE_FOUNDRY_ENDPOINT` / `GENIE_AZURE_FOUNDRY_PROJECT_
 
 ## Known gaps / next phases
 
-- CI (`.github/workflows/ci.yml`) runs backend pytest/ruff and frontend typecheck/lint/vitest on every push/PR to `main`, but there is **no CD/auto-deploy step** — shipping a change to the live Container App / Static Web App is still a manual `az acr build` + `az containerapp update` + `swa deploy` sequence (see [Deploying application code](#deploying-application-code-backend--frontend)).
+- CI/CD (`.github/workflows/ci.yml`) runs backend pytest/ruff and frontend typecheck/lint/vitest on every push/PR to `master`, then auto-deploys the backend Container App and frontend Static Web App on every push to `master` once both pass — see [Continuous deployment](#continuous-deployment-github-actions). This requires a one-time Azure OIDC federated credential + repo secrets/variables setup that has not yet been performed for this environment; until then, the deploy jobs fail at the Azure login step and manual deploys (documented in [Deploying application code](#deploying-application-code-backend--frontend)) remain the only working path.
 - End-to-end Playwright coverage (`e2e/`) is scaffolded but not yet fully built out.
 - Admin consent for the Entra API permission may require a tenant administrator in some tenants — see [Authentication](#authentication).
 - Shared Collaboration Memory currently has no write call sites anywhere in the backend — nothing ever calls `memory_service.shared.write`. The Requirement Discovery Map's main requirements list (which reads from Shared Memory) is therefore likely empty in real usage today; the agentic-workflow qualification check above was deliberately built to read `WorkflowRunResult.step_results` directly instead, so it works independently of this gap.
