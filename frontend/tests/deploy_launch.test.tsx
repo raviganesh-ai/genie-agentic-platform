@@ -20,6 +20,7 @@ function buildPipelineRun(overrides: Partial<DeploymentPipelineRun> = {}): Deplo
     frontend_url: null,
     launch_url: null,
     test_summary: null,
+    fidelity_report: null,
     security_findings_count: null,
     created_at: "2026-07-23T12:00:00Z",
     updated_at: "2026-07-23T12:00:00Z",
@@ -100,6 +101,58 @@ describe("DeployLaunchPage", () => {
 
     await waitFor(() => expect(screen.getByText(/Generate Access Policy & Least Access/i)).toBeInTheDocument());
     expect(screen.getByText(/^Launch$/i)).toBeInTheDocument();
+  });
+
+  it("shows candid requirement coverage and unresolved gaps before launch", async () => {
+    mockFetchSequence([
+      {
+        match: "/deploy-launch/",
+        response: [
+          buildPipelineRun({
+            status: "failed",
+            fidelity_report: {
+              status: "failed",
+              requirements: [
+                {
+                  requirement_id: "REQ-001",
+                  statement: "Process every uploaded document.",
+                  status: "passed",
+                  test_names: ["test_req_001_processes_every_document"],
+                  evidence: "1 passed",
+                },
+                {
+                  requirement_id: "REQ-002",
+                  statement: "Export a signed result.",
+                  status: "missing",
+                  test_names: [],
+                  evidence: "No executable acceptance test references this requirement.",
+                },
+              ],
+              total_requirements: 2,
+              covered_requirements: 1,
+              passed_requirements: 1,
+              coverage_percent: 50,
+              pass_percent: 50,
+              repair_attempts: 3,
+              max_repair_attempts: 3,
+              gaps: ["REQ-002: no executable acceptance test"],
+              execution_summary: "1 passed, 1 uncovered",
+            },
+          }),
+        ],
+      },
+    ]);
+
+    renderWithProviders(<DeployLaunchPage />, {
+      sessionId: FIXTURE_SESSION_ID,
+      workflowRunId: FIXTURE_WORKFLOW_RUN_ID,
+    });
+
+    expect(await screen.findByText("Requirement Fidelity Gate")).toBeInTheDocument();
+    expect(screen.getAllByText("50%")).toHaveLength(2);
+    expect(screen.getByText("REQ-002")).toBeInTheDocument();
+    expect(screen.getByText(/Launch blocked by requirement gaps/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Launch$/i })).not.toBeInTheDocument();
   });
 
   it("shows a gamified 'Genie is working with...' activity banner for the currently running step", async () => {

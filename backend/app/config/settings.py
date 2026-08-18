@@ -155,6 +155,7 @@ class Settings(BaseSettings):
     deployment_container_apps_environment_id: str | None = None
     deployment_storage_account_name: str | None = None
     deployment_location: str | None = None
+    deployment_fidelity_max_repair_attempts: int = 3
     # Local filesystem root the pipeline materializes each mission's generated
     # build under (one subdirectory per pipeline run id) before packaging it
     # for ACR/Storage upload - never a customer-specific path in source.

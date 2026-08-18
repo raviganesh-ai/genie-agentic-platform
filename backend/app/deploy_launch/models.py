@@ -34,6 +34,8 @@ __all__ = [
     "DeploymentStepStatus",
     "MissionIdentityInfo",
     "ProvisionedAgentStatus",
+    "RequirementFidelityItem",
+    "RequirementFidelityReport",
 ]
 
 DeploymentStepId = Literal[
@@ -52,12 +54,12 @@ DeploymentStepId = Literal[
 # in this exact order, each with a meaningful customer-facing name.
 DEPLOYMENT_STEP_ORDER: tuple[DeploymentStepId, ...] = (
     "generate-access-policy",
+    "generate-test-suite",
+    "execute-test-suite",
     "provision-foundry-agents",
     "deploy-backend-service",
     "sync-frontend-integration",
     "deploy-frontend-app",
-    "generate-test-suite",
-    "execute-test-suite",
     "run-security-scan",
     "launch-mission",
 )
@@ -68,14 +70,46 @@ DEPLOYMENT_STEP_NAMES: dict[DeploymentStepId, str] = {
     "deploy-backend-service": "Deploy Backend Service",
     "sync-frontend-integration": "Update Frontend Integrations",
     "deploy-frontend-app": "Deploy Frontend",
-    "generate-test-suite": "Generate Functional & Regression Tests",
-    "execute-test-suite": "Execute Full Fledge Testing",
+    "generate-test-suite": "Generate Requirement Acceptance Tests",
+    "execute-test-suite": "Requirement Fidelity Gate",
     "run-security-scan": "Security Scan (Backend & Frontend)",
     "launch-mission": "Launch",
 }
 
 DeploymentStepStatus = Literal["pending", "running", "completed", "failed", "skipped"]
 DeploymentPipelineStatus = Literal["pending", "running", "completed", "failed"]
+RequirementFidelityStatus = Literal["pending", "testing", "repairing", "passed", "failed"]
+RequirementEvidenceStatus = Literal["pending", "covered", "passed", "failed", "missing"]
+
+
+class RequirementFidelityItem(BaseModel):
+    """Observed coverage and execution evidence for one approved requirement."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    requirement_id: str = Field(pattern=r"^REQ-\d{3,}$")
+    statement: str = Field(min_length=1)
+    status: RequirementEvidenceStatus = "pending"
+    test_names: list[str] = Field(default_factory=list)
+    evidence: str = ""
+
+
+class RequirementFidelityReport(BaseModel):
+    """Deterministic launch gate calculated from approved IDs and real test results."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    status: RequirementFidelityStatus = "pending"
+    requirements: list[RequirementFidelityItem] = Field(default_factory=list)
+    total_requirements: int = Field(ge=0)
+    covered_requirements: int = Field(default=0, ge=0)
+    passed_requirements: int = Field(default=0, ge=0)
+    coverage_percent: float = Field(default=0, ge=0, le=100)
+    pass_percent: float = Field(default=0, ge=0, le=100)
+    repair_attempts: int = Field(default=0, ge=0)
+    max_repair_attempts: int = Field(default=0, ge=0)
+    gaps: list[str] = Field(default_factory=list)
+    execution_summary: str = ""
 
 
 class AgentAccessPolicy(BaseModel):
@@ -173,6 +207,7 @@ class DeploymentPipelineRun(BaseModel):
     frontend_url: str | None = None
     launch_url: str | None = None
     test_summary: str | None = None
+    fidelity_report: RequirementFidelityReport | None = None
     security_findings_count: int | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))

@@ -20,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import os
 import re
+import shutil
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -105,6 +106,8 @@ class TestExecutionService:
             )
 
         tests_dir = build_root / "tests"
+        if tests_dir.exists():
+            shutil.rmtree(tests_dir)
         tests_dir.mkdir(parents=True, exist_ok=True)
         (tests_dir / "__init__.py").write_text("", encoding="utf-8")
         for index, module_text in enumerate(modules):

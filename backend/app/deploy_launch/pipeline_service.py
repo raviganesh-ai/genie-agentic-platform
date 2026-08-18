@@ -12,10 +12,11 @@ approved architecture (``design-architecture``) and generated build
 pipeline's own ``generate-test-suite`` step: it calls the Test Generation
 Agent directly (``AgentOrchestrator.execute_agent`` - the same
 outside-any-workflow-step execution path Workshop's per-component
-"Regenerate" action already uses) against the real, already-deployed
-build, so the generated tests cover what actually got deployed rather than
-a pre-deploy narrative pass. ``execute-test-suite`` then really runs those
-tests and fails the pipeline closed if they don't pass.
+"Regenerate" action already uses) against the approved requirements and
+materialized build. ``execute-test-suite`` runs those tests before Azure
+deployment; failures trigger a bounded fresh build regeneration and retest,
+and the pipeline fails closed if 100% requirement coverage and passing
+evidence are not achieved before the repair budget is exhausted.
 
 Genie's Deploy & Launch stage has exactly one gate: the human clicking
 Start. There is no separate approval-checkpoint request/decide dance -
@@ -87,6 +88,12 @@ from app.models.workflow_models import WorkflowRunResult, WorkflowStepInput
 from app.models.workflow_stream_models import WorkflowStreamEvent, WorkflowStreamEventType
 from app.orchestration.agent_orchestrator import AgentOrchestrator
 from app.orchestration.workflow_event_bus import WorkflowEventBus
+from app.services.requirement_fidelity_service import (
+    create_fidelity_report,
+    missing_requirement_ids,
+    record_fidelity_execution,
+    record_test_coverage,
+)
 from app.services.session_service import SessionService
 from app.services.workshop_service import UnknownWorkflowRunError
 
@@ -1084,6 +1091,14 @@ class DeploymentPipelineStepFailedError(RuntimeError):
     """Raised when a pipeline step's own real result (test run, security scan) fails."""
 
 
+class _RequirementFidelityRepairNeeded(DeploymentPipelineStepFailedError):
+    """Carries observed acceptance-test evidence into one automatic rebuild."""
+
+    def __init__(self, *, summary: str, evidence: str) -> None:
+        super().__init__(summary)
+        self.evidence = evidence
+
+
 @dataclass
 class _RunWorkspace:
     """Filesystem locations materialized for one pipeline run - kept only in memory."""
@@ -1115,6 +1130,7 @@ class DeploymentPipelineService:
         architecture_step_id: str = "design-architecture",
         build_step_id: str = "build-solution",
         requirements_step_id: str = "analyze-requirements",
+        fidelity_max_repair_attempts: int = 3,
         upstream_grace_check_attempts: int = 5,
         upstream_grace_check_interval_seconds: float = 2.0,
     ) -> None:
@@ -1132,12 +1148,14 @@ class DeploymentPipelineService:
         self._architecture_step_id = architecture_step_id
         self._build_step_id = build_step_id
         self._requirements_step_id = requirements_step_id
+        self._fidelity_max_repair_attempts = fidelity_max_repair_attempts
         self._upstream_grace_check_attempts = upstream_grace_check_attempts
         self._upstream_grace_check_interval_seconds = upstream_grace_check_interval_seconds
         self._runs: dict[str, DeploymentPipelineRun] = {}
         self._workspaces: dict[str, _RunWorkspace] = {}
         self._materialized_builds: dict[str, MaterializedBuild] = {}
         self._agent_foundry_names: dict[str, dict[str, str]] = {}
+        self._generated_test_outputs: dict[str, str] = {}
         self._background_tasks: dict[str, asyncio.Task[None]] = {}
 
     def get_run(self, pipeline_run_id: str) -> DeploymentPipelineRun | None:
@@ -1304,23 +1322,56 @@ class DeploymentPipelineService:
         # the same mission (Foundry agent names must be unique).
         mission_slug = f"{_slugify(session.title)}-{pipeline_run.id[:8]}"
 
-        try:
-            await self._execute_steps(
-                pipeline_run=pipeline_run,
-                run=run,
-                mission_slug=mission_slug,
-                mission_title=session.title,
-                backend_root=backend_root,
-                frontend_root=frontend_root,
-                trace_id=trace_id,
-                resume_from_step=resume_from_step,
-            )
-        except Exception:  # noqa: BLE001 - top-level background-task boundary; every
-            # failure must resolve the run's status here since there is no
-            # synchronous caller left to catch/report it (see the docstring above).
-            pipeline_run.status = "failed"
-            pipeline_run.updated_at = datetime.now(UTC)
-            return
+        next_step = resume_from_step
+        while True:
+            try:
+                await self._execute_steps(
+                    pipeline_run=pipeline_run,
+                    run=run,
+                    mission_slug=mission_slug,
+                    mission_title=session.title,
+                    backend_root=backend_root,
+                    frontend_root=frontend_root,
+                    trace_id=trace_id,
+                    resume_from_step=next_step,
+                )
+                break
+            except _RequirementFidelityRepairNeeded as exc:
+                report = pipeline_run.fidelity_report
+                if report is None:
+                    self._fail_run(pipeline_run, error="Requirement fidelity report is unavailable.")
+                    return
+                pipeline_run.fidelity_report = report.model_copy(
+                    update={
+                        "status": "repairing",
+                        "repair_attempts": report.repair_attempts + 1,
+                    }
+                )
+                try:
+                    run = await self._repair_prototype(
+                        run=run,
+                        pipeline_run=pipeline_run,
+                        trace_id=trace_id,
+                        evidence=exc.evidence,
+                    )
+                except Exception as repair_exc:  # noqa: BLE001 - fail-closed repair boundary.
+                    pipeline_run.fidelity_report = pipeline_run.fidelity_report.model_copy(
+                        update={
+                            "status": "failed",
+                            "gaps": [f"Automatic prototype repair failed: {repair_exc}"],
+                        }
+                    )
+                    pipeline_run.status = "failed"
+                    pipeline_run.updated_at = datetime.now(UTC)
+                    return
+                pipeline_run.launch_url = None
+                next_step = "generate-test-suite"
+            except Exception:  # noqa: BLE001 - top-level background-task boundary; every
+                # failure must resolve the run's status here since there is no
+                # synchronous caller left to catch/report it (see the docstring above).
+                pipeline_run.status = "failed"
+                pipeline_run.updated_at = datetime.now(UTC)
+                return
 
         pipeline_run.status = "completed"
         pipeline_run.updated_at = datetime.now(UTC)
@@ -1526,6 +1577,67 @@ class DeploymentPipelineService:
             f"Workflow step '{step_id}' has not completed for run '{run.workflow_run_id}'."
         )
 
+    async def _get_approved_requirements(
+        self, run: WorkflowRunResult, *, trace_id: str
+    ) -> str:
+        architecture_step = next(
+            (result for result in run.step_results if result.step_id == self._architecture_step_id),
+            None,
+        )
+        if architecture_step is not None:
+            approved_requirements = architecture_step.resolved_variables.get(
+                "approved_requirements"
+            )
+            if approved_requirements:
+                return approved_requirements
+        return await self._get_step_output(
+            run, self._requirements_step_id, trace_id=trace_id
+        )
+
+    async def _repair_prototype(
+        self,
+        *,
+        run: WorkflowRunResult,
+        pipeline_run: DeploymentPipelineRun,
+        trace_id: str,
+        evidence: str,
+    ) -> WorkflowRunResult:
+        approved_requirements = await self._get_approved_requirements(run, trace_id=trace_id)
+        instruction = (
+            "Regenerate the prototype to resolve every failing deployed acceptance test below. "
+            "Keep every approved requirement in scope, preserve its REQ id, and fix the actual "
+            "implementation rather than weakening or removing tests.\n\n"
+            f"Approved requirements:\n{approved_requirements}\n\n"
+            f"Observed pytest evidence:\n{evidence[-12_000:]}"
+        )
+        repaired = await self._orchestrator.resume_workflow(
+            workflow_run_id=run.workflow_run_id,
+            session_id=run.session_id,
+            trace_id=trace_id,
+            step_inputs={
+                self._build_step_id: WorkflowStepInput(
+                    step_id=self._build_step_id,
+                    variables={
+                        "user_message": instruction,
+                        "previous_build_output": "",
+                    },
+                )
+            },
+        )
+        build_step = next(
+            (
+                result
+                for result in repaired.step_results
+                if result.step_id == self._build_step_id and result.status == "completed"
+            ),
+            None,
+        )
+        if build_step is None:
+            raise UnknownWorkflowRunError(
+                "Automatic fidelity repair did not produce a completed build-solution step."
+            )
+        return repaired
+
     async def _execute_steps(
         self,
         *,
@@ -1545,7 +1657,7 @@ class DeploymentPipelineService:
         are reset to "not-started" status.
         """
         orchestrator_foundry_name = "orchestrator"
-        test_output_text = ""
+        test_output_text = self._generated_test_outputs.get(pipeline_run.id, "")
 
         # Determine the starting index based on resume_from_step
         start_index = 0
@@ -1555,9 +1667,9 @@ class DeploymentPipelineService:
                 # Reset all steps from the resume point onward to "not-started"
                 for step_id in DEPLOYMENT_STEP_ORDER[start_index:]:
                     step_result = self._step_result(pipeline_run, step_id)
-                    step_result.status = "not-started"
+                    step_result.status = "pending"
                     step_result.error = None
-                    step_result.detail = None
+                    step_result.detail = ""
                     step_result.started_at = None
                     step_result.completed_at = None
             except ValueError:
@@ -1758,9 +1870,34 @@ class DeploymentPipelineService:
                     build_output_text = await self._get_step_output(
                         run, self._build_step_id, trace_id=trace_id
                     )
-                    requirements_text = await self._get_step_output(
-                        run, self._requirements_step_id, trace_id=trace_id
+                    requirements_text = await self._get_approved_requirements(
+                        run, trace_id=trace_id
                     )
+                    report = create_fidelity_report(
+                        requirements_text,
+                        max_repair_attempts=self._fidelity_max_repair_attempts,
+                    )
+                    if pipeline_run.fidelity_report is not None:
+                        report = report.model_copy(
+                            update={
+                                "repair_attempts": pipeline_run.fidelity_report.repair_attempts,
+                            }
+                        )
+                    materialized = materialize_build(build_output_text)
+                    preflight_agent_names = {
+                        name: name for name in materialized.agent_modules
+                    }
+                    preflight_agent_names["orchestrator"] = "orchestrator"
+                    preflight_scaffold = generate_backend_service_scaffold(
+                        mission_title=mission_title,
+                        orchestrator_agent_name="orchestrator",
+                        agent_foundry_names=preflight_agent_names,
+                    )
+                    materialized.write_to_directory(
+                        backend_root,
+                        backend_service_scaffold=preflight_scaffold,
+                    )
+                    self._materialized_builds[pipeline_run.id] = materialized
                     generation_result = await self._orchestrator.execute_agent(
                         agent_id="test-generation-agent",
                         prompt_id="test-generation-v1",
@@ -1797,9 +1934,44 @@ class DeploymentPipelineService:
                             "Test Generation Agent did not produce a pytest-discoverable test function "
                             "after a corrective retry."
                         )
-                    detail = f"Generated {len(modules)} test module(s) against the deployed build."
+                    missing_test_ids = missing_requirement_ids(requirements_text, modules)
+                    if missing_test_ids:
+                        correction_result = await self._orchestrator.execute_agent(
+                            agent_id="test-generation-agent",
+                            prompt_id="test-generation-v1",
+                            variables={
+                                "artifact": build_output_text,
+                                "requirements": requirements_text,
+                                "user_message": (
+                                    "Your prior suite omitted these approved requirement IDs: "
+                                    + ", ".join(missing_test_ids)
+                                    + ". Return a complete replacement suite with each ID inside "
+                                    "an executable Python test block that asserts that requirement's "
+                                    "behavior."
+                                ),
+                            },
+                            session_id=pipeline_run.session_id,
+                            trace_id=pipeline_run.id,
+                        )
+                        test_output_text = correction_result.output_text
+                        modules = extract_test_modules(test_output_text)
+                        missing_test_ids = missing_requirement_ids(requirements_text, modules)
+                    self._generated_test_outputs[pipeline_run.id] = test_output_text
+                    pipeline_run.fidelity_report = record_test_coverage(report, modules)
+                    if not has_pytest_discoverable_tests(modules) or missing_test_ids:
+                        raise DeploymentPipelineStepFailedError(
+                            "Generated test suite does not cover every approved requirement; "
+                            "missing requirement ids: " + ", ".join(missing_test_ids)
+                        )
+                    detail = (
+                        f"Generated {len(modules)} requirement acceptance test module(s) "
+                        "for the isolated pre-deployment build."
+                    )
 
                 elif step_id == "execute-test-suite":
+                    test_output_text = self._generated_test_outputs.get(
+                        pipeline_run.id, test_output_text
+                    )
                     modules = extract_test_modules(test_output_text)
                     step_result.detail = (
                         f"Running {len(modules)} generated test module(s) with pytest against the "
@@ -1813,16 +1985,44 @@ class DeploymentPipelineService:
                     # (e.g. zero test functions were actually collected) - see
                     # TestExecutionResult.success's docstring.
                     if test_result.success:
+                        if pipeline_run.fidelity_report is None:
+                            raise DeploymentPipelineStepFailedError(
+                                "Requirement fidelity report is unavailable after test execution."
+                            )
+                        pipeline_run.fidelity_report = record_fidelity_execution(
+                            pipeline_run.fidelity_report,
+                            success=True,
+                            summary=test_result.summary,
+                        )
                         detail = test_result.summary
                     else:
-                        step_result.status = "failed"
-                        step_result.error = test_result.summary
-                        step_result.completed_at = datetime.now(UTC)
-                        await self._publish(
-                            pipeline_run, step_id=step_id, event_type="step_failed", error=test_result.summary
+                        report = pipeline_run.fidelity_report
+                        if report is None:
+                            raise DeploymentPipelineStepFailedError(
+                                "Requirement fidelity report is unavailable after test execution."
+                            )
+                        final_failure = (
+                            report.repair_attempts >= report.max_repair_attempts
                         )
-                        raise DeploymentPipelineStepFailedError(
-                            f"Generated test suite did not pass: {test_result.summary}"
+                        pipeline_run.fidelity_report = record_fidelity_execution(
+                            report,
+                            success=False,
+                            summary=test_result.summary,
+                            final_failure=final_failure,
+                        )
+                        if final_failure:
+                            raise DeploymentPipelineStepFailedError(
+                                "Requirement fidelity gate failed after "
+                                f"{report.repair_attempts} automatic repair attempt(s): "
+                                f"{test_result.summary}"
+                            )
+                        raise _RequirementFidelityRepairNeeded(
+                            summary=(
+                                "Requirement fidelity tests failed; automatically regenerating "
+                                f"the prototype (attempt {report.repair_attempts + 1} of "
+                                f"{report.max_repair_attempts})."
+                            ),
+                            evidence=test_result.raw_output or test_result.summary,
                         )
 
                 elif step_id == "run-security-scan":
@@ -1842,13 +2042,34 @@ class DeploymentPipelineService:
                     detail = scan_result.summary
 
                 elif step_id == "launch-mission":
+                    report = pipeline_run.fidelity_report
+                    if (
+                        report is None
+                        or report.status != "passed"
+                        or report.coverage_percent != 100
+                        or report.pass_percent != 100
+                    ):
+                        raise DeploymentPipelineStepFailedError(
+                            "Launch blocked: requirement fidelity must have 100% executable "
+                            "coverage and 100% passing evidence."
+                        )
                     pipeline_run.launch_url = pipeline_run.frontend_url
                     detail = f"Mission launched at {pipeline_run.launch_url}."
 
                 else:  # pragma: no cover - DEPLOYMENT_STEP_ORDER is exhaustive
                     detail = ""
 
-            except DeploymentPipelineStepFailedError:
+            except DeploymentPipelineStepFailedError as exc:
+                if step_result.status != "failed":
+                    step_result.status = "failed"
+                    step_result.error = str(exc)
+                    step_result.completed_at = datetime.now(UTC)
+                    await self._publish(
+                        pipeline_run,
+                        step_id=step_id,
+                        event_type="step_failed",
+                        error=str(exc),
+                    )
                 raise
             except Exception as exc:
                 # Catch every failure here (not just the specific, expected
@@ -1942,4 +2163,5 @@ def create_deployment_pipeline_service(
         test_execution_service=TestExecutionService(),
         security_scan_service=SecurityScanService(),
         build_workspace_root=settings.deployment_build_workspace_root,
+        fidelity_max_repair_attempts=settings.deployment_fidelity_max_repair_attempts,
     )

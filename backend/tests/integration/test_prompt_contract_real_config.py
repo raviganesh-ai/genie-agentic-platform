@@ -98,3 +98,22 @@ def test_control_selection_rules_are_explicit_and_consistent_across_ui_prompts()
     assert "never by guesswork or default habit" in build_component_v1
     assert '`<select>`' in build_component_v1
     assert 'type="checkbox">` (multi-select' in build_component_v1
+
+
+def test_all_generation_prompts_preserve_every_approved_requirement_id():
+    registry = PromptRegistry.load(_REPO_CONFIG_ROOT / "prompts")
+
+    extraction = " ".join(registry.get("requirements-extraction-v1").template.split())
+    assert "REQ-001" in extraction
+    assert "Only the user may remove or defer" in extraction
+    assert "implementation order" in extraction
+
+    for prompt_id in (
+        "architecture-recommendation-v1",
+        "build-generation-v1",
+        "build-generation-component-v1",
+        "test-generation-v1",
+    ):
+        template = " ".join(registry.get(prompt_id).template.split())
+        assert "every approved requirement ID" in template
+        assert "Prototype status never authorizes omission" in template

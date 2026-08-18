@@ -102,6 +102,37 @@ def test_backend_service_scaffold_main_py_is_valid_python_and_supports_attachmen
     assert '"--- Attached file: {attachment.name} ---\\n{attachment.content}"' in main_source
 
 
+def test_backend_service_scaffold_main_py_runs_the_real_orchestrator_pipeline():
+    """Regression guard for the "big miss" incident (2026-08-17): the
+    deployed backend proxy must persist uploaded attachments to disk in
+    full and actually invoke this mission's own generated ``OrchestratorAgent``
+    pipeline - never only fold uploads into a single chat turn sent
+    straight to a conversational Foundry agent, which silently drops most
+    of an uploaded requirement package instead of processing it in full.
+    """
+    scaffold = generate_backend_service_scaffold(
+        mission_title="Acme Mission",
+        orchestrator_agent_name="acme-orchestrator",
+        agent_foundry_names={"Requirements Specialist": "acme-requirements-specialist"},
+    )
+    main_source = scaffold["main.py"]
+
+    compile(main_source, "main.py", "exec")
+    # Every uploaded attachment's full content is written to disk (never
+    # truncated/summarized) so the real pipeline can read every requirement.
+    assert "def _persist_attachments(" in main_source
+    assert "FACTORY_WORKING_DIR" in main_source
+    assert "write_text(attachment.content" in main_source
+    # The real generated Orchestrator (orchestrator.py, sibling module) is
+    # imported and actually invoked - not bypassed.
+    assert "from orchestrator import OrchestratorAgent" in main_source
+    assert "await OrchestratorAgent().run(message)" in main_source
+    # A direct conversational reply remains only as a fallback for requests
+    # the real pipeline cannot accept (e.g. free-form chat).
+    assert "_run_orchestrator_pipeline" in main_source
+    assert "_conversational_reply" in main_source
+
+
 def test_generate_agent_config_module_embeds_the_real_agent_foundry_name_mapping():
     module_source = generate_agent_config_module(
         {"Requirements Specialist": "acme-requirements-specialist", "orchestrator": "acme-orchestrator"}

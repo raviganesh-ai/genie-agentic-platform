@@ -13,6 +13,9 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 
+import pytest
+
+from app.agents.foundry.errors import FoundryUnavailableError
 from app.agents.models import (
     AgentDefinition,
     AgentExecutionRequest,
@@ -20,7 +23,11 @@ from app.agents.models import (
     AgentExecutionStreamChunk,
 )
 from app.models.workflow_stream_models import WorkflowStreamEvent
-from app.orchestration.workflow_step_executor import WorkflowStepExecutor, _display_agent_id
+from app.orchestration.workflow_step_executor import (
+    WorkflowStepExecutor,
+    _display_agent_id,
+    _require_complete_requirement_coverage,
+)
 from app.workflows.models import WorkflowStep
 
 
@@ -49,6 +56,23 @@ def test_display_agent_id_falls_back_when_no_tool_name_resolves_to_a_delegation(
     step = _step(["not_a_delegation_tool"])
 
     assert _display_agent_id(step, "genie-orchestrator") == "genie-orchestrator"
+
+
+def test_architecture_coverage_fails_closed_when_one_approved_id_is_omitted() -> None:
+    with pytest.raises(FoundryUnavailableError, match="REQ-002"):
+        _require_complete_requirement_coverage(
+            step_id="design-architecture",
+            variables={"approved_requirements": "[REQ-001] Search. [REQ-002] Export."},
+            output_text="Search Agent covers REQ-001.",
+        )
+
+
+def test_build_coverage_accepts_every_approved_id_across_generated_components() -> None:
+    _require_complete_requirement_coverage(
+        step_id="build-solution",
+        variables={"requirements": "[REQ-001] Search. [REQ-002] Export."},
+        output_text="# requirements: REQ-001\n// requirements: REQ-002",
+    )
 
 
 class _StreamingGateway:

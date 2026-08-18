@@ -30,7 +30,7 @@ from app.deploy_launch.mission_identity_service import NullMissionIdentityServic
 from app.deploy_launch.pipeline_service import DeploymentPipelineService
 from app.deploy_launch.security_scan_service import SecurityScanService
 from app.deploy_launch.test_execution_service import TestExecutionService
-from app.models.workflow_models import WorkflowRunResult, WorkflowStepResult
+from app.models.workflow_models import WorkflowRunResult, WorkflowStepInput, WorkflowStepResult
 from app.orchestration.workflow_event_bus import WorkflowEventBus
 
 _BUILD_OUTPUT = '''
@@ -84,7 +84,7 @@ class _FakeSessionService:
 
 
 class _FakeOrchestrator:
-    def __init__(self, *, test_output_text: str) -> None:
+    def __init__(self, *, test_output_text: str, requirements_output: str = _REQUIREMENTS_OUTPUT) -> None:
         self._test_output_text = test_output_text
         self.execute_agent_calls: list[dict] = []
         self._run = WorkflowRunResult(
@@ -93,7 +93,7 @@ class _FakeOrchestrator:
             session_id="session-1",
             status="completed",
             step_results=[
-                _completed_step("analyze-requirements", "genie-orchestrator", _REQUIREMENTS_OUTPUT),
+                _completed_step("analyze-requirements", "genie-orchestrator", requirements_output),
                 _completed_step("design-architecture", "architecture-designer", _ARCHITECTURE_DOCUMENT),
                 _completed_step("build-solution", "genie-orchestrator", _BUILD_OUTPUT),
             ],
@@ -111,7 +111,7 @@ class _FakeOrchestrator:
         session_id: str | None = None,
         trace_id: str | None = None,
     ) -> AgentExecutionResult:
-        # Simulates Deploy & Launch's real, post-deploy call to the Test
+        # Simulates Deploy & Launch's real, pre-deploy call to the Test
         # Generation Agent (see pipeline_service.py's generate-test-suite
         # step) - never reads a pre-existing workflow step's output, since
         # test-generation no longer exists as a discovery-workflow step.
@@ -119,6 +119,46 @@ class _FakeOrchestrator:
         return AgentExecutionResult(
             agent_id=agent_id, output_text=self._test_output_text, correlation_id="test-correlation-id"
         )
+
+
+class _RepairingFakeOrchestrator(_FakeOrchestrator):
+    def __init__(self, *, test_outputs: list[str], requirements_output: str) -> None:
+        super().__init__(
+            test_output_text=test_outputs[-1],
+            requirements_output=requirements_output,
+        )
+        self._test_outputs = list(test_outputs)
+        self.resume_calls: list[dict[str, WorkflowStepInput]] = []
+
+    async def execute_agent(
+        self,
+        *,
+        agent_id: str,
+        prompt_id: str,
+        variables: dict[str, str],
+        session_id: str | None = None,
+        trace_id: str | None = None,
+    ) -> AgentExecutionResult:
+        self.execute_agent_calls.append(
+            {"agent_id": agent_id, "prompt_id": prompt_id, "variables": variables}
+        )
+        output = self._test_outputs.pop(0) if self._test_outputs else self._test_output_text
+        return AgentExecutionResult(
+            agent_id=agent_id,
+            output_text=output,
+            correlation_id="test-correlation-id",
+        )
+
+    async def resume_workflow(
+        self,
+        *,
+        workflow_run_id: str,
+        session_id: str,
+        trace_id: str,
+        step_inputs: dict[str, WorkflowStepInput],
+    ) -> WorkflowRunResult:
+        self.resume_calls.append(step_inputs)
+        return self._run
 
 
 def _completed_step(step_id: str, agent_id: str, output_text: str) -> WorkflowStepResult:
@@ -274,10 +314,17 @@ def _access_policy_service() -> AccessPolicyService:
 
 
 def _build_service(
-    *, test_output_text: str, tmp_path: Path, backend_deployment_service=None
+    *,
+    test_output_text: str,
+    tmp_path: Path,
+    backend_deployment_service=None,
+    requirements_output: str = _REQUIREMENTS_OUTPUT,
 ) -> DeploymentPipelineService:
     return DeploymentPipelineService(
-        orchestrator=_FakeOrchestrator(test_output_text=test_output_text),  # type: ignore[arg-type]
+        orchestrator=_FakeOrchestrator(
+            test_output_text=test_output_text,
+            requirements_output=requirements_output,
+        ),  # type: ignore[arg-type]
         session_service=_FakeSessionService(),  # type: ignore[arg-type]
         event_bus=WorkflowEventBus(),
         access_policy_service=_access_policy_service(),
@@ -501,6 +548,142 @@ async def test_pipeline_fails_closed_when_generated_tests_fail(tmp_path: Path):
     failed_step = next(step for step in run.steps if step.step_id == "execute-test-suite")
     assert failed_step.status == "failed"
     assert failed_step.error is not None
+
+
+async def test_pipeline_blocks_passing_tests_that_omit_an_approved_requirement(
+    tmp_path: Path,
+) -> None:
+    service = _build_service(
+        requirements_output="[REQ-001] Search documents.\n[REQ-002] Export results.",
+        test_output_text="""
+```python
+# covers REQ-001
+def test_search_documents():
+    assert 1 + 1 == 2
+```
+""",
+        tmp_path=tmp_path,
+    )
+
+    run = await service.start(
+        session_id="session-1",
+        requesting_user_id="user-1",
+        workflow_run_id="run-1",
+    )
+    run = await service.wait_for_run(run.id)
+
+    assert run.status == "failed", [
+        (step.step_id, step.status, step.error) for step in run.steps
+    ]
+    failed_step = next(step for step in run.steps if step.step_id == "generate-test-suite")
+    assert failed_step.status == "failed"
+    assert failed_step.error is not None
+    assert "REQ-002" in failed_step.error
+
+
+async def test_pipeline_automatically_repairs_redeploys_and_retests_before_launch(
+    tmp_path: Path,
+) -> None:
+    requirements = "[REQ-001] Process every document."
+    failing_suite = """
+```python
+# REQ-001
+def test_req_001_processes_every_document():
+    assert 1 == 2
+```
+"""
+    passing_suite = """
+```python
+# REQ-001
+def test_req_001_processes_every_document():
+    assert 1 == 1
+```
+"""
+    orchestrator = _RepairingFakeOrchestrator(
+        test_outputs=[failing_suite, passing_suite],
+        requirements_output=requirements,
+    )
+    service = DeploymentPipelineService(
+        orchestrator=orchestrator,  # type: ignore[arg-type]
+        session_service=_FakeSessionService(),  # type: ignore[arg-type]
+        event_bus=WorkflowEventBus(),
+        access_policy_service=_access_policy_service(),
+        mission_identity_service=NullMissionIdentityService(),
+        mission_agent_provisioning_service=NullMissionAgentProvisioningService(),
+        backend_deployment_service=NullBackendDeploymentService(),
+        frontend_deployment_service=NullFrontendDeploymentService(),
+        test_execution_service=TestExecutionService(timeout_seconds=60),
+        security_scan_service=SecurityScanService(timeout_seconds=60),
+        build_workspace_root=tmp_path,
+        fidelity_max_repair_attempts=3,
+    )
+
+    run = await service.start(
+        session_id="session-1",
+        requesting_user_id="user-1",
+        workflow_run_id="run-1",
+    )
+    run = await service.wait_for_run(run.id)
+
+    assert run.status == "completed"
+    assert run.launch_url is not None
+    assert run.fidelity_report is not None
+    assert run.fidelity_report.status == "passed"
+    assert run.fidelity_report.coverage_percent == 100
+    assert run.fidelity_report.pass_percent == 100
+    assert run.fidelity_report.repair_attempts == 1
+    assert len(orchestrator.resume_calls) == 1
+    repair_input = orchestrator.resume_calls[0]["build-solution"]
+    assert repair_input.variables["previous_build_output"] == ""
+    assert "1 failed" in repair_input.variables["user_message"]
+
+
+async def test_pipeline_fails_closed_after_fidelity_repair_budget_is_exhausted(
+    tmp_path: Path,
+) -> None:
+    requirements = "[REQ-001] Process every document."
+    failing_suite = """
+```python
+# REQ-001
+def test_req_001_processes_every_document():
+    assert 1 == 2
+```
+"""
+    orchestrator = _RepairingFakeOrchestrator(
+        test_outputs=[failing_suite, failing_suite],
+        requirements_output=requirements,
+    )
+    service = DeploymentPipelineService(
+        orchestrator=orchestrator,  # type: ignore[arg-type]
+        session_service=_FakeSessionService(),  # type: ignore[arg-type]
+        event_bus=WorkflowEventBus(),
+        access_policy_service=_access_policy_service(),
+        mission_identity_service=NullMissionIdentityService(),
+        mission_agent_provisioning_service=NullMissionAgentProvisioningService(),
+        backend_deployment_service=NullBackendDeploymentService(),
+        frontend_deployment_service=NullFrontendDeploymentService(),
+        test_execution_service=TestExecutionService(timeout_seconds=60),
+        security_scan_service=SecurityScanService(timeout_seconds=60),
+        build_workspace_root=tmp_path,
+        fidelity_max_repair_attempts=1,
+    )
+
+    run = await service.start(
+        session_id="session-1",
+        requesting_user_id="user-1",
+        workflow_run_id="run-1",
+    )
+    run = await service.wait_for_run(run.id)
+
+    assert run.status == "failed"
+    assert run.launch_url is None
+    assert run.fidelity_report is not None
+    assert run.fidelity_report.status == "failed"
+    assert run.fidelity_report.repair_attempts == 1
+    assert run.fidelity_report.pass_percent == 0
+    assert len(orchestrator.resume_calls) == 1
+    launch_step = next(step for step in run.steps if step.step_id == "launch-mission")
+    assert launch_step.status == "pending"
 
 
 async def test_start_returns_a_visible_running_run_before_any_slow_lookup_happens(tmp_path: Path):

@@ -113,3 +113,35 @@ async def test_resolve_variables_falls_back_when_agent_not_authorized_for_shared
     )
 
     assert resolved["approved_requirements"] == "The in-process fallback."
+
+
+async def test_resolve_variables_reads_exact_variable_from_completed_step(
+    local_settings,
+) -> None:
+    executor = _executor(local_settings)
+    step = WorkflowStep(
+        id="build-solution",
+        agent_id="genie-orchestrator",
+        description="Build the approved solution.",
+        depends_on=["design-architecture"],
+        variable_sources={
+            "requirements": "step-variable:design-architecture:approved_requirements"
+        },
+    )
+
+    resolved = await executor._resolve_variables(
+        step=step,
+        transcript_text="",
+        step_outputs={},
+        step_variables={
+            "design-architecture": {
+                "approved_requirements": "The user's edited and approved requirements."
+            }
+        },
+        step_input=None,
+        agent=_agent(),
+        session_id="session-1",
+        trace_id="trace-1",
+    )
+
+    assert resolved["requirements"] == "The user's edited and approved requirements."

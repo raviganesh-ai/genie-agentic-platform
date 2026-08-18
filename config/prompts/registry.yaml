@@ -33,6 +33,14 @@ prompts:
       because it seems obvious or secondary; if the customer discussed it
       or it is essential to their stated goal, include it.
 
+      Assign every functional and non-functional requirement a stable,
+      unique identifier in source order using `[REQ-001]`, `[REQ-002]`,
+      and so on. Preserve exact stated quantities, named categories,
+      actors, constraints, inputs, outputs, and prohibited behaviors in
+      the requirement text. Only the user may remove or defer a stated
+      requirement during the existing Requirements review; you may
+      recommend priority, but must never silently reduce prototype scope.
+
       REVIEW & CATEGORIZATION PHASE:
       Review your extraction. For EVERY functional requirement, classify
       it as either:
@@ -70,11 +78,12 @@ prompts:
 
       CRITICAL PATH DEFINITION:
       Immediately after the category groups, add a "Critical path (must
-      build first):" section. List ALL "Must-Have Functional
-      Requirements" in logical dependency order - this is the complete
-      scope of work for the initial prototype, the ordered set of
-      features/capabilities that make the solution valuable and viable.
-      Number each item in this list for clarity.
+      build first):" section. Use it only to state implementation order,
+      never to create a smaller prototype boundary. List every approved
+      functional and non-functional requirement by its existing REQ id in
+      logical dependency order. Nice-to-have means lower build priority,
+      not permission to omit it; it remains in scope unless the user
+      removes it during review. Number each item in this list for clarity.
 
       COMPLETENESS CHECK:
       Before outputting your response, ask yourself: "Did the customer
@@ -107,7 +116,7 @@ prompts:
     variables:
       - transcript_excerpt
       - user_message
-    version: "2.0.0"
+    version: "2.1.0"
 
 
   - id: architecture-recommendation-v1
@@ -141,12 +150,14 @@ prompts:
       something for you to re-architect, so do not propose Azure
       infrastructure components here.
 
-      Stay strictly within the "Critical path:" scope listed in the
-      approved requirements below - that is the exact boundary of the
-      prototype to design right now. Do not design for, or add UI
-      screens/agents for, any requirement that falls outside that
-      critical path; treat those as future backlog, out of scope for this
-      design.
+      Prototype status never authorizes omission of an approved
+      requirement. Treat "Critical path:" as implementation order, not a
+      smaller scope boundary. Design for every approved requirement ID,
+      preserving exact stated quantities, categories, actors, constraints,
+      inputs, outputs, and prohibited behaviors. Every approved requirement
+      ID must appear in the responsibility text of at least one UI zone or
+      agent. A requirement is out of scope only when it is absent from the
+      user-approved payload below.
 
       Approved requirements:
       {approved_requirements}
@@ -182,8 +193,8 @@ prompts:
          specialist agents to solve the user's goal, communicate progress
          to the user, and present the final outcome.
 
-      3. SPECIALIST AGENT DESIGN: For each must-have requirement from the
-         Critical path, derive which specialist agent(s) are needed. Each
+      3. SPECIALIST AGENT DESIGN: For each requirement in the approved
+        payload, derive which specialist agent(s) are needed. Each
          agent must serve a distinct, verifiable role from the
          requirements. Do not invent agents for "best practices."
 
@@ -330,7 +341,10 @@ prompts:
       requirements, generate a full test suite: unit tests for each
       agent's core logic, integration tests for each agent-to-agent and
       UI-to-orchestrator interaction, and UI tests for each screen -
-      covering every requirement's critical path.
+      covering every approved requirement ID. Prototype status never
+      authorizes omission of an approved requirement. Preserve and test
+      exact stated quantities, categories, actors, constraints, inputs,
+      outputs, and prohibited behaviors.
 
       Write the Python tests (unit tests and integration tests for the
       agent/orchestrator code) as one or more fenced ```python code
@@ -350,6 +364,10 @@ prompts:
       - do not use `unittest.TestCase` unless the class name starts with
         `Test` and every test method starts with `test_`
       - each ```python block must contain at least one such test function
+      - every approved requirement ID must appear inside at least one
+        executable Python test block, in that requirement's test name or
+        an adjacent comment, and that test must assert its acceptance
+        behavior; IDs mentioned only in narrative text do not count
 
       Separately, write the UI tests (Vitest/React Testing Library for the
       TypeScript/React screen) as their own fenced ```tsx code block. UI
@@ -391,7 +409,7 @@ prompts:
       - artifact
       - requirements
       - user_message
-    version: "1.2.0"
+    version: "1.3.0"
 
   - id: failure-diagnosis-v1
     name: Failure Diagnosis
@@ -454,12 +472,15 @@ prompts:
       DETERMINISTIC BUILD PHASES:
 
       Phase 1 - PRIORITIZATION: Review approved requirements, identify
-      MUST-HAVE requirements from the "Critical path:" section, and ensure
-      each specialist agent you will generate is solving at least one
-      must-have requirement directly. The Orchestrator coordinates these
-      must-haves in sequence.
+      implementation order from the "Critical path:" section, and ensure
+      every approved requirement ID is directly implemented. Prototype
+      status never authorizes omission of an approved requirement. Preserve
+      exact stated quantities, categories, actors, constraints, inputs,
+      outputs, and prohibited behaviors. Include each covered REQ id in a
+      concise `# requirements:` or `// requirements:` line in the code block
+      that implements it; every approved ID must occur in at least one block.
 
-      Phase 2 - STRUCTURE: Map must-have requirements to specialist agents,
+      Phase 2 - STRUCTURE: Map approved requirements to specialist agents,
       then to the UI zones where the user will see those agents working
       (Input Zone → Orchestrator assigns work → Specialist agents execute
       → Output Zone shows results). This map ensures the generated code
@@ -527,7 +548,13 @@ prompts:
       tool, never extra "helper" tools, never unused tool definitions.
       This is this mission's single entry point that invokes specialist
       agents via their own already-provisioned Foundry agent names
-      (looked up via `AGENT_FOUNDRY_NAMES`).
+      (looked up via `AGENT_FOUNDRY_NAMES`). Its public entry point is
+      `async def run(self, ui_message: str)`, called by this mission's own
+      backend proxy with the JSON-encoded string the UI's submit handler
+      composes (see the UI generation instructions below) - always parse
+      it via `config = json.loads(ui_message)` first to obtain every
+      field the user submitted, never assume a plain-text/free-form
+      message.
 
       The Orchestrator's sequencing logic should DEMONSTRATE the "art of
       possibility": clearly show HOW it coordinates specialist agents to
@@ -588,10 +615,14 @@ prompts:
       - event handlers: alphabetical order by name
       - render sections: architecture order exactly, labeled with zone
         name/purpose
-      - a single submit handler that composes one clearly labeled
-        `message` string from every field's current value (e.g. "Run
-        name: <value>\nWorking directory: <value>\n...") and calls the
-        `onSubmit` prop described below exactly once per user action
+      - a single submit handler that composes one JSON-encoded `message`
+        string via `JSON.stringify({{ ...one key per field, using the
+        field's own name }})` - never a human-readable "Key:
+        value\nWorking directory: value\n..." string, since this mission's
+        Orchestrator Agent parses `message` with `json.loads` to run its
+        full deterministic pipeline over every field you submit - and
+        calls the `onSubmit` prop described below exactly once per user
+        action
       - no random IDs, no placeholder content, no extra utilities
       - never call `/invoke/stream` yourself, never render your own
         output/progress/agent-status UI, never talk to any agent directly
@@ -614,9 +645,13 @@ prompts:
       attachments?: {{ name: string, content: string }}[]) => void }}`.
       Read file contents via `File.text()` before calling `onSubmit`
       (never pass a raw `File`). Call `onSubmit` exactly once per user
-      action, with a single well-labeled `message` string built from
-      every field's current value and, only when the mission genuinely
-      needs uploaded file content, an `attachments` array. The instant
+      action, with a single JSON-encoded `message` string (via
+      `JSON.stringify`, one key per field, using the field's own name -
+      never a human-readable "Key: value\n..." string, since this
+      mission's Orchestrator Agent parses `message` with `json.loads` to
+      run its full deterministic pipeline over every field you submit)
+      and, only when the mission genuinely needs uploaded file content,
+      an `attachments` array. The instant
       you call it, the surrounding shell's own Mission Queue creates a
       new live item for this exact submission, streams the Orchestrator's
       real narration into it word-by-word, and shows its final output
@@ -669,7 +704,7 @@ prompts:
       - policies
       - excluded_agents
       - user_message
-    version: "5.6.0"
+    version: "5.7.0"
 
   - id: build-generation-component-v1
     name: Build Generation - Single Component
@@ -692,6 +727,13 @@ prompts:
       generic/boilerplate placeholder unrelated to what this component is
       concretely described as doing in the architecture below.
 
+      Across the generated mission, every approved requirement ID must be
+      implemented. Prototype status never authorizes omission of an approved
+      requirement. For this component, implement all requirement IDs assigned
+      to its architecture responsibility, preserve exact stated quantities
+      and constraints, and include those IDs in a concise `# requirements:`
+      or `// requirements:` line in the returned code block.
+
       Component to generate now: a "{component_kind}" named
       "{component_name}".
 
@@ -713,7 +755,12 @@ prompts:
       tools, no "helper" tools, no unused tool definitions. This is the
       mission's single entry point that invokes specialist agents via
       Foundry agent names (looked up via `AGENT_FOUNDRY_NAMES`). Never
-      hardcode a literal name.
+      hardcode a literal name. Its public entry point is `async def
+      run(self, ui_message: str)`, called by this mission's own backend
+      proxy with the JSON-encoded string the UI's submit handler composes
+      - always parse it via `config = json.loads(ui_message)` first to
+      obtain every field the user submitted, never assume a plain-text/
+      free-form message.
       Include a comment: "Once deployed to Azure AI Foundry, this
       Orchestrator Agent is reachable only through this mission's own
       backend service - never directly from the browser."
@@ -753,9 +800,12 @@ prompts:
       exactly one prop object: `{{ onSubmit: (message: string,
       attachments?: {{ name: string, content: string }}[]) => void }}`.
       Read file contents via `File.text()` before calling `onSubmit`
-      (never pass a raw `File`). Compose one clearly labeled `message`
-      string from every field's current value and call `onSubmit` exactly
-      once per user action - the shell's own Mission Queue then creates a
+      (never pass a raw `File`). Compose one JSON-encoded `message` string
+      via `JSON.stringify` (one key per field, using the field's own name
+      - never a human-readable "Key: value\n..." string, since this
+      mission's Orchestrator Agent parses `message` with `json.loads`) and
+      call `onSubmit` exactly once per user action - the shell's own
+      Mission Queue then creates a
       live item for this submission, streams the Orchestrator's real
       narration into it word-by-word, and shows its output/download link
       automatically. Never call `/invoke/stream` yourself, never render
@@ -818,7 +868,7 @@ prompts:
       - component_kind
       - component_name
       - user_message
-    version: "1.8.0"
+    version: "1.9.0"
 
   - id: build-component-regeneration-v1
     name: Build Generation - Regenerate Single Component

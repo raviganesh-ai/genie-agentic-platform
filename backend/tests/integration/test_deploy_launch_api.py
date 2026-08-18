@@ -127,7 +127,7 @@ class _StubUpstreamWorkflowOrchestrator:
     this pipeline reads ``design-architecture``/``build-solution``/
     ``analyze-requirements`` output from - completing that workflow for
     real through local-mode agents is not practical (see module
-    docstring). Also stubs ``execute_agent`` (the real, post-deploy Test
+    docstring). Also stubs ``execute_agent`` (the real, pre-deploy Test
     Generation Agent call Deploy & Launch's own ``generate-test-suite``
     step now makes - see ``pipeline_service.py``) with a canned passing
     test suite, for the same reason. Everything downstream of this stub is

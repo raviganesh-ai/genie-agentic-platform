@@ -36,10 +36,8 @@ function stripMarker(line: string): string {
 
 /**
  * The analyst's reviewed output (requirements-extraction-v1 prompt) now
- * includes a "Critical path:" heading line ahead of the ordered subset of
- * requirements that must be delivered first. Detected purely by text so
- * that subset can be rendered as its own highlighted "Scope of
- * Prototyping" section instead of an indistinguishable row.
+ * includes a "Critical path:" heading line containing the implementation
+ * order. It never narrows the approved prototype scope.
  */
 function isCriticalPathHeading(line: string): boolean {
   return /^critical path\b/i.test(line.trim());
@@ -63,6 +61,38 @@ interface ParsedRequirements {
   criticalPath: string[];
 }
 
+const REQUIREMENT_ID_PATTERN = /\bREQ-\d{3,}\b/i;
+const REQUIREMENT_GROUP_KEYS = new Set([
+  "must_have",
+  "nice_to_have",
+  "functional",
+  "non_functional",
+  "other",
+]);
+
+function requirementId(item: string): string | null {
+  return item.match(REQUIREMENT_ID_PATTERN)?.[0].toUpperCase() ?? null;
+}
+
+function preserveRequirementId(current: string, next: string): string {
+  const currentId = requirementId(current);
+  if (!currentId || requirementId(next)) return next;
+  return `[${currentId}] ${next}`;
+}
+
+function nextRequirementItem(parsed: ParsedRequirements): string {
+  const ids = [
+    ...parsed.groups.flatMap((group) => group.items),
+    ...parsed.criticalPath,
+  ]
+    .map(requirementId)
+    .filter((id): id is string => id !== null)
+    .map((id) => Number(id.slice(4)))
+    .filter(Number.isFinite);
+  const nextNumber = Math.max(0, ...ids) + 1;
+  return `[REQ-${String(nextNumber).padStart(3, "0")}] `;
+}
+
 /**
  * Category headings the requirements-extraction-v1 prompt is instructed to
  * emit (in this order) ahead of its "Critical path:" section. Detected
@@ -71,6 +101,20 @@ interface ParsedRequirements {
  */
 const CATEGORY_DEFS: { key: string; heading: RegExp; icon: string; accent: string; label: string }[] = [
   { key: "goals", heading: /^goals\s*:?$/i, icon: "🎯", accent: "#3fa66a", label: "Goals" },
+  {
+    key: "must_have",
+    heading: /^must-?have functional requirements\s*:?$/i,
+    icon: "⚙️",
+    accent: "#2f83e0",
+    label: "Must-Have Functional Requirements",
+  },
+  {
+    key: "nice_to_have",
+    heading: /^nice-?to-?have functional requirements\s*:?$/i,
+    icon: "✨",
+    accent: "#17a2b8",
+    label: "Nice-to-Have Functional Requirements",
+  },
   {
     key: "functional",
     heading: /^functional requirements\s*:?$/i,
@@ -93,8 +137,8 @@ const CATEGORY_DEFS: { key: string; heading: RegExp; icon: string; accent: strin
 /**
  * Groups the analyst's reviewed, summarized output (requirements-extraction-v1)
  * into one collapsible section per category heading it was instructed to
- * emit, plus the "Critical path:" subset kept separate so it can be shown
- * as its own "Scope of Prototyping" callout instead of buried inside a
+ * emit, plus the "Critical path:" ordering kept separate so it can be shown
+ * as its own implementation-order callout instead of buried inside a
  * category list. Falls back to a single "Requirements" bucket for any
  * lines that appear before the first recognized heading (e.g. older runs
  * recorded before this grouping existed) so nothing the agent produced is
@@ -190,7 +234,7 @@ export function RequirementDiscoveryPage(): JSX.Element {
   // unpopulated - Shared Memory is never written to) structured records
   // above. Parsed into one collapsible category group per heading the
   // requirements-extraction-v1 prompt is instructed to emit - plus a
-  // separate "Critical path" subset shown as its own Scope of Prototyping
+  // separate "Critical path" ordering shown as its own implementation-order
   // section - so the user can scan, edit, remove, and add requirements at
   // the group level before approving the design-architecture gate.
   const runFetcher = useCallback(
@@ -254,7 +298,16 @@ export function RequirementDiscoveryPage(): JSX.Element {
           ...base,
           groups: base.groups.map((group) =>
             group.key === groupKey
-              ? { ...group, items: group.items.map((item, i) => (i === index ? value : item)) }
+              ? {
+                  ...group,
+                  items: group.items.map((item, i) =>
+                    i === index && REQUIREMENT_GROUP_KEYS.has(groupKey)
+                      ? preserveRequirementId(item, value)
+                      : i === index
+                        ? value
+                        : item,
+                  ),
+                }
               : group,
           ),
         };
@@ -266,11 +319,16 @@ export function RequirementDiscoveryPage(): JSX.Element {
     (groupKey: string, index: number) => {
       setRequirementOverrides((prev) => {
         const base = withOverrides(prev);
+        const group = base.groups.find((candidate) => candidate.key === groupKey);
+        const removedId = group ? requirementId(group.items[index] ?? "") : null;
         return {
           ...base,
           groups: base.groups.map((group) =>
             group.key === groupKey ? { ...group, items: group.items.filter((_, i) => i !== index) } : group,
           ),
+          criticalPath: removedId
+            ? base.criticalPath.filter((item) => requirementId(item) !== removedId)
+            : base.criticalPath,
         };
       });
     },
@@ -283,17 +341,23 @@ export function RequirementDiscoveryPage(): JSX.Element {
         return {
           ...base,
           groups: base.groups.map((group) =>
-            group.key === groupKey ? { ...group, items: [...group.items, ""] } : group,
+            group.key === groupKey
+              ? {
+                  ...group,
+                  items: [
+                    ...group.items,
+                    REQUIREMENT_GROUP_KEYS.has(groupKey) ? nextRequirementItem(base) : "",
+                  ],
+                }
+              : group,
           ),
         };
       });
     },
     [withOverrides],
   );
-  // Lets the user promote a Functional/Non-Functional/etc. item straight
-  // into "Scope of Prototyping" (the Critical Path) instead of having to
-  // delete it here and retype it below - moves, rather than copies, so the
-  // item never ends up listed in both places.
+  // Adds an approved requirement to implementation order without removing
+  // it from its category; Critical Path is sequencing, never scope reduction.
   const moveGroupItemToCriticalPath = useCallback(
     (groupKey: string, index: number) => {
       setRequirementOverrides((prev) => {
@@ -301,12 +365,15 @@ export function RequirementDiscoveryPage(): JSX.Element {
         const group = base.groups.find((candidate) => candidate.key === groupKey);
         const item = group?.items[index];
         if (item === undefined) return base;
+        const itemId = requirementId(item);
+        if (
+          itemId &&
+          base.criticalPath.some((candidate) => requirementId(candidate) === itemId)
+        ) {
+          return base;
+        }
         return {
-          groups: base.groups.map((candidate) =>
-            candidate.key === groupKey
-              ? { ...candidate, items: candidate.items.filter((_, i) => i !== index) }
-              : candidate,
-          ),
+          groups: base.groups,
           criticalPath: [...base.criticalPath, item],
         };
       });
@@ -318,7 +385,12 @@ export function RequirementDiscoveryPage(): JSX.Element {
     (index: number, value: string) => {
       setRequirementOverrides((prev) => {
         const base = withOverrides(prev);
-        return { ...base, criticalPath: base.criticalPath.map((item, i) => (i === index ? value : item)) };
+        return {
+          ...base,
+          criticalPath: base.criticalPath.map((item, i) =>
+            i === index ? preserveRequirementId(item, value) : item,
+          ),
+        };
       });
     },
     [withOverrides],
@@ -332,13 +404,6 @@ export function RequirementDiscoveryPage(): JSX.Element {
     },
     [withOverrides],
   );
-  const addCriticalPathItem = useCallback(() => {
-    setRequirementOverrides((prev) => {
-      const base = withOverrides(prev);
-      return { ...base, criticalPath: [...base.criticalPath, ""] };
-    });
-  }, [withOverrides]);
-
   const toggleGroupCollapsed = useCallback((groupKey: string) => {
     setCollapsedGroups((prev) => {
       const next = new Set(prev);
@@ -508,7 +573,7 @@ export function RequirementDiscoveryPage(): JSX.Element {
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           {effectiveRequirements.criticalPath.length > 0 ? (
             <div
-              title="Critical Path"
+              title="Implementation Order"
               style={{
                 display: "flex",
                 alignItems: "center",
@@ -524,7 +589,7 @@ export function RequirementDiscoveryPage(): JSX.Element {
                 {effectiveRequirements.criticalPath.length}
               </Text>
               <Text size={100} style={{ opacity: 0.7 }}>
-                Critical Path
+                Implementation Order
               </Text>
             </div>
           ) : null}
@@ -632,23 +697,15 @@ export function RequirementDiscoveryPage(): JSX.Element {
           title={
             <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <span style={{ fontSize: 18 }}>🎯</span>
-              <span>Scope of Prototyping</span>
+              <span>Implementation Order</span>
               <Text size={200} style={{ opacity: 0.6, fontWeight: 400 }}>
                 (Critical Path)
               </Text>
             </span>
           }
-          action={
-            editMode ? (
-              <Button appearance="secondary" size="small" onClick={addCriticalPathItem}>
-                + Add item
-              </Button>
-            ) : undefined
-          }
         >
           <Text size={200} style={{ display: "block", marginBottom: 12, opacity: 0.8 }}>
-            These requirements are what the initial prototype will actually build first - everything
-            else depends on them being in place.
+            This orders implementation only. Every approved requirement below remains in prototype scope.
           </Text>
           {editMode ? (
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -818,11 +875,11 @@ export function RequirementDiscoveryPage(): JSX.Element {
                       <Button
                         appearance="subtle"
                         size="small"
-                        title="Move to Scope of Prototyping (Critical Path)"
-                        aria-label="Move to Scope of Prototyping"
+                        title="Add to Implementation Order"
+                        aria-label="Add to Implementation Order"
                         onClick={() => moveGroupItemToCriticalPath(group.key, index)}
                       >
-                        🎯 Move to Scope
+                        Add to Order
                       </Button>
                       <Button
                         appearance="subtle"

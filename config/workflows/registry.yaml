@@ -103,7 +103,11 @@ workflows:
           - analyze-requirements
           - design-architecture
         variable_sources:
-          requirements: step:analyze-requirements
+          # Use the exact human-reviewed text submitted by Requirements'
+          # existing "Proceed to Architecture" action. Falling back to the
+          # analyst's original prose here silently discarded user edits and
+          # let prototype scope diverge from what the user approved.
+          requirements: step-variable:design-architecture:approved_requirements
           architecture: step:design-architecture
           # Self-referential: on a retried attempt (see
           # WorkshopPage.tsx's "Re-run UI & Agent Design" ->

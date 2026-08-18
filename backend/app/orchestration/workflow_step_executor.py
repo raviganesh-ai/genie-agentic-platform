@@ -22,12 +22,14 @@ from app.models.workflow_models import WorkflowStepInput, WorkflowStepResult
 from app.models.workflow_stream_models import WorkflowStreamEvent
 from app.orchestration.workflow_event_bus import WorkflowEventBus
 from app.prompts.registry import PromptRegistry
+from app.services.requirement_fidelity_service import missing_requirement_ids
 from app.workflows.models import WorkflowStep
 
 __all__ = ["MissingMemoryReferenceError", "MissingPromptError", "WorkflowStepExecutor"]
 
 _PREVIEW_MAX_LENGTH = 240
 _DELEGATED_OUTPUT_MARKER = "DELEGATED_OUTPUT_STORED"
+_REQUIREMENT_COVERAGE_VARIABLES = ("approved_requirements", "requirements")
 
 
 def _preview(output_text: str | None) -> str | None:
@@ -63,6 +65,27 @@ def _display_agent_id(step: WorkflowStep, fallback_agent_id: str) -> str:
         if target_agent_id is not None:
             return target_agent_id
     return fallback_agent_id
+
+
+def _require_complete_requirement_coverage(
+    *, step_id: str, variables: dict[str, str], output_text: str
+) -> None:
+    requirements_text = next(
+        (
+            variables[name]
+            for name in _REQUIREMENT_COVERAGE_VARIABLES
+            if variables.get(name)
+        ),
+        None,
+    )
+    if step_id not in {"design-architecture", "build-solution"} or not requirements_text:
+        return
+    missing_ids = missing_requirement_ids(requirements_text, output_text)
+    if missing_ids:
+        raise FoundryUnavailableError(
+            f"Workflow step '{step_id}' omitted approved requirement ids: "
+            + ", ".join(missing_ids)
+        )
 
 
 class MissingPromptError(RuntimeError):
@@ -103,6 +126,7 @@ class WorkflowStepExecutor:
         step_input: WorkflowStepInput | None = None,
         transcript_text: str = "",
         step_outputs: dict[str, str] | None = None,
+        step_variables: dict[str, dict[str, str]] | None = None,
         previous_variables: dict[str, str] | None = None,
         agent_scope_id: str | None = None,
         workflow_run_id: str = "",
@@ -125,6 +149,7 @@ class WorkflowStepExecutor:
             step=step,
             transcript_text=transcript_text,
             step_outputs=step_outputs or {},
+            step_variables=step_variables or {},
             step_input=step_input,
             previous_variables=previous_variables,
             agent=agent,
@@ -191,6 +216,12 @@ class WorkflowStepExecutor:
                     f"Delegated workflow step '{step.id}' returned the delegation marker "
                     "without storing specialist output in shared memory."
                 )
+
+        _require_complete_requirement_coverage(
+            step_id=step.id,
+            variables=variables,
+            output_text=output_text or "",
+        )
 
         return WorkflowStepResult(
             step_id=step.id,
@@ -320,6 +351,7 @@ class WorkflowStepExecutor:
         step: WorkflowStep,
         transcript_text: str,
         step_outputs: dict[str, str],
+        step_variables: dict[str, dict[str, str]] | None = None,
         step_input: WorkflowStepInput | None,
         previous_variables: dict[str, str] | None = None,
         agent: AgentDefinition,
@@ -370,6 +402,13 @@ class WorkflowStepExecutor:
         for variable_name, source in step.variable_sources.items():
             if source == "transcript":
                 resolved[variable_name] = transcript_text
+            elif source.startswith("step-variable:"):
+                _, source_step_id, source_variable_name = source.split(":", maxsplit=2)
+                source_value = (step_variables or {}).get(source_step_id, {}).get(
+                    source_variable_name
+                )
+                if source_value is not None:
+                    resolved[variable_name] = source_value
             elif source.startswith("step:"):
                 source_step_id = source.removeprefix("step:")
                 value = await self._read_step_output(
