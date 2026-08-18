@@ -82,16 +82,31 @@ The orchestrator agent sequences every specialist.
 
 _PASSING_TEST_OUTPUT = """
 ```python
-def test_always_passes():
+# REQ-001
+def test_req_001_always_passes():
     assert 1 + 1 == 2
 ```
 """
 
-_REQUIREMENTS_OUTPUT = "The mission requires a search feature and an orchestrator agent."
+_REQUIREMENTS_OUTPUT = "[REQ-001] The mission requires a search feature and an orchestrator agent."
 
 
 def _bearer_token(user_id: str) -> str:
     return jwt.encode({"sub": user_id}, "unit-test-secret", algorithm="HS256")
+
+
+def _with_deployment_config(settings: Settings) -> Settings:
+    return settings.model_copy(
+        update={
+            "azure_subscription_id": "test-subscription",
+            "azure_foundry_endpoint": "https://example.invalid/foundry",
+            "azure_foundry_project_name": "test-project",
+            "deployment_resource_group": "test-resource-group",
+            "deployment_acr_name": "testacr",
+            "deployment_container_apps_environment_id": "/test/container-apps-environment",
+            "deployment_location": "eastus2",
+        }
+    )
 
 
 @pytest.fixture
@@ -105,6 +120,7 @@ def real_config_local_settings() -> Settings:
         governance_provider="local",
         allow_mock_agents=True,
         allow_local_agents=True,
+        allow_local_token_validation=True,
         use_synthetic_data=True,
         config_root=_REPO_CONFIG_ROOT,
     )
@@ -161,7 +177,7 @@ class _StubUpstreamWorkflowOrchestrator:
 
 
 async def test_start_requires_authentication(local_settings) -> None:
-    app = create_app(settings=local_settings)
+    app = create_app(settings=_with_deployment_config(local_settings))
 
     async with app.router.lifespan_context(app):
         transport = ASGITransport(app=app)
@@ -173,7 +189,7 @@ async def test_start_requires_authentication(local_settings) -> None:
 
 
 async def test_start_requires_a_session_owned_by_the_caller(local_settings) -> None:
-    app = create_app(settings=local_settings)
+    app = create_app(settings=_with_deployment_config(local_settings))
     headers = {"Authorization": f"Bearer {_bearer_token('user-1')}"}
 
     async with app.router.lifespan_context(app):
@@ -188,7 +204,7 @@ async def test_start_requires_a_session_owned_by_the_caller(local_settings) -> N
 
 
 async def test_list_deployments_requires_a_session_owned_by_the_caller(local_settings) -> None:
-    app = create_app(settings=local_settings)
+    app = create_app(settings=_with_deployment_config(local_settings))
     headers = {"Authorization": f"Bearer {_bearer_token('user-1')}"}
 
     async with app.router.lifespan_context(app):
@@ -203,7 +219,7 @@ async def test_list_deployments_requires_a_session_owned_by_the_caller(local_set
 async def test_full_pipeline_runs_through_the_real_http_api(
     real_config_local_settings: Settings, tmp_path: Path
 ) -> None:
-    app = create_app(settings=real_config_local_settings)
+    app = create_app(settings=_with_deployment_config(real_config_local_settings))
     headers = {"Authorization": f"Bearer {_bearer_token('user-1')}"}
     mission_title = "Acme Customer Portal"
 

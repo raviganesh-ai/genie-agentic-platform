@@ -278,14 +278,13 @@ def create_mission_identity_service(
     subscription_id: str,
     resource_group_name: str,
 ) -> MissionIdentityService | NullMissionIdentityService:
-    """Factory choosing the real or Null mission identity provisioning service.
-
-    Uses the real ``MissionIdentityService`` when Azure credentials are
-    available (via DefaultAzureCredential), otherwise the Null implementation.
-    """
+    """Builds real Azure identity provisioning or fails closed."""
 
     if not settings.azure_subscription_id:
-        return NullMissionIdentityService()
+        raise MissionIdentityProvisioningError(
+            "azure_subscription_id must be configured; local/fake mission identity "
+            "provisioning is not permitted."
+        )
     return MissionIdentityService(
         settings=settings,
         subscription_id=subscription_id,

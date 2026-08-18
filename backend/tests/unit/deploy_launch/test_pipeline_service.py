@@ -61,18 +61,20 @@ The Requirements Specialist agent extracts raw requirements.
 The orchestrator agent sequences every specialist.
 """
 
-_REQUIREMENTS_OUTPUT = "The mission requires a search feature and an orchestrator agent."
+_REQUIREMENTS_OUTPUT = "[REQ-001] The mission requires a search feature and an orchestrator agent."
 
 _PASSING_TEST_OUTPUT = """
 ```python
-def test_always_passes():
+# REQ-001
+def test_req_001_always_passes():
     assert 1 + 1 == 2
 ```
 """
 
 _FAILING_TEST_OUTPUT = """
 ```python
-def test_always_fails():
+# REQ-001
+def test_req_001_always_fails():
     assert 1 == 2
 ```
 """

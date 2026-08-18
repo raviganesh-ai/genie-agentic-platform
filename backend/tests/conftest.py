@@ -111,8 +111,26 @@ def local_settings(valid_config_root: Path) -> Settings:
         governance_provider="local",
         allow_mock_agents=True,
         allow_local_agents=True,
+        allow_local_token_validation=True,
         use_synthetic_data=True,
         config_root=valid_config_root,
+    )
+
+
+@pytest.fixture
+def app_local_settings(local_settings: Settings) -> Settings:
+    """Local agent/auth settings with real deployment-provider construction."""
+
+    return local_settings.model_copy(
+        update={
+            "azure_subscription_id": "test-subscription",
+            "azure_foundry_endpoint": "https://example.invalid/foundry",
+            "azure_foundry_project_name": "test-project",
+            "deployment_resource_group": "test-resource-group",
+            "deployment_acr_name": "testacr",
+            "deployment_container_apps_environment_id": "/test/container-apps-environment",
+            "deployment_location": "eastus2",
+        }
     )
 
 

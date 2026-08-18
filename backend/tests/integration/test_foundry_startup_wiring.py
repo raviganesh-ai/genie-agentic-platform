@@ -17,9 +17,9 @@ from app.services.foundry_agent_lifecycle_service import FoundryAgentLifecycleSe
 
 
 def test_foundry_inventory_and_lifecycle_services_are_available_after_local_startup(
-    local_settings,
+    app_local_settings,
 ):
-    app = create_app(settings=local_settings)
+    app = create_app(settings=app_local_settings)
 
     with TestClient(app) as client:
         ready = client.get("/health/ready")
@@ -30,8 +30,8 @@ def test_foundry_inventory_and_lifecycle_services_are_available_after_local_star
         assert app.state.foundry_synchronization_service is None
 
 
-async def test_enabled_agents_are_seeded_into_inventory_on_startup(local_settings):
-    app = create_app(settings=local_settings)
+async def test_enabled_agents_are_seeded_into_inventory_on_startup(app_local_settings):
+    app = create_app(settings=app_local_settings)
 
     with TestClient(app):
         records = await app.state.foundry_inventory_service.list()

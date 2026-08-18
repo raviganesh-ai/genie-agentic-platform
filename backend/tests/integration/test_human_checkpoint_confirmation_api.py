@@ -19,8 +19,8 @@ def _bearer_token(user_id: str) -> str:
     return jwt.encode({"sub": user_id}, "unit-test-secret", algorithm="HS256")
 
 
-def test_confirm_checkpoint_records_a_governance_event_attributed_to_the_caller(local_settings) -> None:
-    app = create_app(settings=local_settings)
+def test_confirm_checkpoint_records_a_governance_event_attributed_to_the_caller(app_local_settings) -> None:
+    app = create_app(settings=app_local_settings)
     headers = {"Authorization": f"Bearer {_bearer_token('user-1')}"}
 
     with TestClient(app) as client:
@@ -53,10 +53,10 @@ def test_confirm_checkpoint_records_a_governance_event_attributed_to_the_caller(
         assert any(e["id"] == event["id"] for e in events_resp.json())
 
 
-def test_confirm_checkpoint_ignores_any_client_supplied_confirmed_by(local_settings) -> None:
+def test_confirm_checkpoint_ignores_any_client_supplied_confirmed_by(app_local_settings) -> None:
     """``confirmed_by`` always comes from the authenticated user - the request body has no such field."""
 
-    app = create_app(settings=local_settings)
+    app = create_app(settings=app_local_settings)
     headers = {"Authorization": f"Bearer {_bearer_token('user-2')}"}
 
     with TestClient(app) as client:
@@ -76,8 +76,8 @@ def test_confirm_checkpoint_ignores_any_client_supplied_confirmed_by(local_setti
         assert confirm_resp.status_code == 422  # extra="forbid" rejects the unknown field
 
 
-def test_confirm_checkpoint_requires_a_valid_session(local_settings) -> None:
-    app = create_app(settings=local_settings)
+def test_confirm_checkpoint_requires_a_valid_session(app_local_settings) -> None:
+    app = create_app(settings=app_local_settings)
     headers = {"Authorization": f"Bearer {_bearer_token('user-1')}"}
 
     with TestClient(app) as client:

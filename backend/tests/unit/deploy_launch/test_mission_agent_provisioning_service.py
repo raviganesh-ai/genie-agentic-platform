@@ -3,8 +3,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+import pytest
+
 from app.config.settings import Settings
 from app.deploy_launch.mission_agent_provisioning_service import (
+    MissionAgentProvisioningError,
     MissionAgentProvisioningService,
     NullMissionAgentProvisioningService,
     _extract_agent_instructions,
@@ -30,10 +33,9 @@ def _settings(**overrides: object) -> Settings:
     return Settings(**overrides)  # type: ignore[call-arg]
 
 
-def test_local_mode_without_config_returns_null_service():
-    service = create_mission_agent_provisioning_service(settings=_settings())
-
-    assert isinstance(service, NullMissionAgentProvisioningService)
+def test_missing_foundry_config_fails_closed_instead_of_selecting_null_service():
+    with pytest.raises(MissionAgentProvisioningError, match="fake mission agent provisioning"):
+        create_mission_agent_provisioning_service(settings=_settings())
 
 
 async def test_null_service_provision_returns_placeholder_names():

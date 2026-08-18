@@ -197,10 +197,9 @@ class BackendDeploymentService:
                 "azure-mgmt-authorization / azure-mgmt-msi / azure-identity are not installed."
             ) from exc
 
-        try:
-            resource_group, identity_name = _extract_resource_group_and_identity_name(identity_resource_id)
-        except BackendDeploymentError:
-            raise
+        resource_group, identity_name = _extract_resource_group_and_identity_name(
+            identity_resource_id
+        )
 
         credential = DefaultAzureCredential()
         try:
@@ -485,9 +484,7 @@ class NullBackendDeploymentService:
 def create_backend_deployment_service(
     *, settings: Settings
 ) -> BackendDeploymentService | NullBackendDeploymentService:
-    """Fail-closed factory: uses the real service once all required settings
-    are configured, otherwise a no-op stand-in.
-    """
+    """Builds the real service or fails closed when Azure is incomplete."""
 
     required = (
         settings.azure_subscription_id,
@@ -499,26 +496,20 @@ def create_backend_deployment_service(
         settings.azure_foundry_project_name,
     )
 
-    def _build_real() -> BackendDeploymentService:
-        if not all(required):
-            raise BackendDeploymentError(
-                "azure_subscription_id, deployment_resource_group, "
-                "deployment_acr_name, deployment_container_apps_environment_id, "
-                "deployment_location, azure_foundry_endpoint, and "
-                "azure_foundry_project_name must all be configured to deploy a "
-                "mission's backend service."
-            )
-        return BackendDeploymentService(
-            subscription_id=settings.azure_subscription_id,  # type: ignore[arg-type]
-            resource_group=settings.deployment_resource_group,  # type: ignore[arg-type]
-            acr_name=settings.deployment_acr_name,  # type: ignore[arg-type]
-            container_apps_environment_id=settings.deployment_container_apps_environment_id,  # type: ignore[arg-type]
-            location=settings.deployment_location,  # type: ignore[arg-type]
-            foundry_endpoint=settings.azure_foundry_endpoint,  # type: ignore[arg-type]
-            foundry_project_name=settings.azure_foundry_project_name,  # type: ignore[arg-type]
+    if not all(required):
+        raise BackendDeploymentError(
+            "azure_subscription_id, deployment_resource_group, "
+            "deployment_acr_name, deployment_container_apps_environment_id, "
+            "deployment_location, azure_foundry_endpoint, and "
+            "azure_foundry_project_name must all be configured; local/fake "
+            "backend deployment is not permitted."
         )
-
-    if all(required):
-        return _build_real()
-
-    return NullBackendDeploymentService()
+    return BackendDeploymentService(
+        subscription_id=settings.azure_subscription_id,  # type: ignore[arg-type]
+        resource_group=settings.deployment_resource_group,  # type: ignore[arg-type]
+        acr_name=settings.deployment_acr_name,  # type: ignore[arg-type]
+        container_apps_environment_id=settings.deployment_container_apps_environment_id,  # type: ignore[arg-type]
+        location=settings.deployment_location,  # type: ignore[arg-type]
+        foundry_endpoint=settings.azure_foundry_endpoint,  # type: ignore[arg-type]
+        foundry_project_name=settings.azure_foundry_project_name,  # type: ignore[arg-type]
+    )

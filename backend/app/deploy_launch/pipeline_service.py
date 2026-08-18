@@ -90,7 +90,6 @@ from app.orchestration.agent_orchestrator import AgentOrchestrator
 from app.orchestration.workflow_event_bus import WorkflowEventBus
 from app.services.requirement_fidelity_service import (
     create_fidelity_report,
-    missing_requirement_ids,
     record_fidelity_execution,
     record_test_coverage,
 )
@@ -1859,9 +1858,9 @@ class DeploymentPipelineService:
                     detail = f"Frontend deployed at {frontend_result.frontend_url}."
 
                 elif step_id == "generate-test-suite":
-                    # Generated for real, right here, against the real
-                    # deployed build (not read back from an upstream
-                    # workflow step) - Deploy & Launch is deliberately NOT
+                    # Generated for real, right here, against the approved
+                    # requirements and materialized pre-deployment build.
+                    # Deploy & Launch is deliberately NOT
                     # a workflow step (see module docstring), so this calls
                     # the Test Generation Agent directly via
                     # AgentOrchestrator.execute_agent, the same
@@ -1882,6 +1881,13 @@ class DeploymentPipelineService:
                             update={
                                 "repair_attempts": pipeline_run.fidelity_report.repair_attempts,
                             }
+                        )
+                    if report.total_requirements == 0:
+                        pipeline_run.fidelity_report = report
+                        raise DeploymentPipelineStepFailedError(
+                            "Requirement fidelity cannot run because the approved baseline "
+                            "contains no REQ IDs. Re-run Requirement Discovery and approve "
+                            "the resulting requirements before deployment."
                         )
                     materialized = materialize_build(build_output_text)
                     preflight_agent_names = {
@@ -1934,7 +1940,12 @@ class DeploymentPipelineService:
                             "Test Generation Agent did not produce a pytest-discoverable test function "
                             "after a corrective retry."
                         )
-                    missing_test_ids = missing_requirement_ids(requirements_text, modules)
+                    report = record_test_coverage(report, modules)
+                    missing_test_ids = [
+                        item.requirement_id
+                        for item in report.requirements
+                        if item.status == "missing"
+                    ]
                     if missing_test_ids:
                         correction_result = await self._orchestrator.execute_agent(
                             agent_id="test-generation-agent",
@@ -1945,9 +1956,10 @@ class DeploymentPipelineService:
                                 "user_message": (
                                     "Your prior suite omitted these approved requirement IDs: "
                                     + ", ".join(missing_test_ids)
-                                    + ". Return a complete replacement suite with each ID inside "
-                                    "an executable Python test block that asserts that requirement's "
-                                    "behavior."
+                                    + ". Return a complete replacement suite. Every executable "
+                                    "test function name must include its normalized requirement ID "
+                                    "(for example, REQ-001 must use test_req_001_<behavior>) and "
+                                    "must assert that requirement's real behavior."
                                 ),
                             },
                             session_id=pipeline_run.session_id,
@@ -1955,9 +1967,14 @@ class DeploymentPipelineService:
                         )
                         test_output_text = correction_result.output_text
                         modules = extract_test_modules(test_output_text)
-                        missing_test_ids = missing_requirement_ids(requirements_text, modules)
+                        report = record_test_coverage(report, modules)
+                        missing_test_ids = [
+                            item.requirement_id
+                            for item in report.requirements
+                            if item.status == "missing"
+                        ]
                     self._generated_test_outputs[pipeline_run.id] = test_output_text
-                    pipeline_run.fidelity_report = record_test_coverage(report, modules)
+                    pipeline_run.fidelity_report = report
                     if not has_pytest_discoverable_tests(modules) or missing_test_ids:
                         raise DeploymentPipelineStepFailedError(
                             "Generated test suite does not cover every approved requirement; "
@@ -1975,7 +1992,7 @@ class DeploymentPipelineService:
                     modules = extract_test_modules(test_output_text)
                     step_result.detail = (
                         f"Running {len(modules)} generated test module(s) with pytest against the "
-                        "deployed backend build (up to 2 minutes)..."
+                        "isolated pre-deployment build (up to 2 minutes)..."
                     )
                     test_result = await self._test_execution_service.run_tests(
                         build_root=backend_root, test_output_text=test_output_text
@@ -1984,32 +2001,25 @@ class DeploymentPipelineService:
                     # ``success`` fails closed even when pytest itself exits 0
                     # (e.g. zero test functions were actually collected) - see
                     # TestExecutionResult.success's docstring.
-                    if test_result.success:
-                        if pipeline_run.fidelity_report is None:
-                            raise DeploymentPipelineStepFailedError(
-                                "Requirement fidelity report is unavailable after test execution."
-                            )
-                        pipeline_run.fidelity_report = record_fidelity_execution(
-                            pipeline_run.fidelity_report,
-                            success=True,
-                            summary=test_result.summary,
+                    report = pipeline_run.fidelity_report
+                    if report is None:
+                        raise DeploymentPipelineStepFailedError(
+                            "Requirement fidelity report is unavailable after test execution."
                         )
+                    final_failure = report.repair_attempts >= report.max_repair_attempts
+                    pipeline_run.fidelity_report = record_fidelity_execution(
+                        report,
+                        success=test_result.success,
+                        summary=test_result.summary,
+                        passed_test_names=test_result.passed_test_names,
+                        failed_test_names=test_result.failed_test_names,
+                        errored_test_names=test_result.errored_test_names,
+                        skipped_test_names=test_result.skipped_test_names,
+                        final_failure=final_failure,
+                    )
+                    if pipeline_run.fidelity_report.status == "passed":
                         detail = test_result.summary
                     else:
-                        report = pipeline_run.fidelity_report
-                        if report is None:
-                            raise DeploymentPipelineStepFailedError(
-                                "Requirement fidelity report is unavailable after test execution."
-                            )
-                        final_failure = (
-                            report.repair_attempts >= report.max_repair_attempts
-                        )
-                        pipeline_run.fidelity_report = record_fidelity_execution(
-                            report,
-                            success=False,
-                            summary=test_result.summary,
-                            final_failure=final_failure,
-                        )
                         if final_failure:
                             raise DeploymentPipelineStepFailedError(
                                 "Requirement fidelity gate failed after "
@@ -2018,7 +2028,7 @@ class DeploymentPipelineService:
                             )
                         raise _RequirementFidelityRepairNeeded(
                             summary=(
-                                "Requirement fidelity tests failed; automatically regenerating "
+                                "Requirement fidelity evidence failed; automatically regenerating "
                                 f"the prototype (attempt {report.repair_attempts + 1} of "
                                 f"{report.max_repair_attempts})."
                             ),

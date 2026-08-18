@@ -22,6 +22,7 @@ import os
 import re
 import shutil
 import sys
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Final
@@ -75,6 +76,10 @@ class TestExecutionResult:
     errors: int = 0
     summary: str = ""
     raw_output: str = field(default="", repr=False)
+    passed_test_names: tuple[str, ...] = ()
+    failed_test_names: tuple[str, ...] = ()
+    errored_test_names: tuple[str, ...] = ()
+    skipped_test_names: tuple[str, ...] = ()
 
     @property
     def success(self) -> bool:
@@ -117,12 +122,14 @@ class TestExecutionService:
         if sys.platform == "win32":
             env["SYSTEMROOT"] = os.environ.get("SYSTEMROOT", "")
 
+        junit_path = tests_dir / "pytest-results.xml"
         process = await asyncio.create_subprocess_exec(
             sys.executable,
             "-m",
             "pytest",
             str(tests_dir),
             "-q",
+            f"--junitxml={junit_path}",
             cwd=str(build_root),
             env=env,
             stdout=asyncio.subprocess.PIPE,
@@ -142,9 +149,54 @@ class TestExecutionService:
             )
 
         raw_output = stdout.decode("utf-8", errors="replace")
-        return self._summarize(raw_output=raw_output, exit_code=process.returncode)
+        outcomes = self._read_junit_outcomes(junit_path)
+        return self._summarize(
+            raw_output=raw_output,
+            exit_code=process.returncode,
+            **outcomes,
+        )
 
-    def _summarize(self, *, raw_output: str, exit_code: int | None) -> TestExecutionResult:
+    @staticmethod
+    def _read_junit_outcomes(junit_path: Path) -> dict[str, tuple[str, ...]]:
+        outcomes: dict[str, list[str]] = {
+            "passed_test_names": [],
+            "failed_test_names": [],
+            "errored_test_names": [],
+            "skipped_test_names": [],
+        }
+        if not junit_path.exists():
+            return {name: tuple(values) for name, values in outcomes.items()}
+        try:
+            root = ET.parse(junit_path).getroot()
+        except ET.ParseError:
+            return {name: tuple(values) for name, values in outcomes.items()}
+        finally:
+            junit_path.unlink(missing_ok=True)
+
+        for test_case in root.iter("testcase"):
+            test_name = test_case.attrib.get("name", "").strip()
+            if not test_name:
+                continue
+            if test_case.find("failure") is not None:
+                outcomes["failed_test_names"].append(test_name)
+            elif test_case.find("error") is not None:
+                outcomes["errored_test_names"].append(test_name)
+            elif test_case.find("skipped") is not None:
+                outcomes["skipped_test_names"].append(test_name)
+            else:
+                outcomes["passed_test_names"].append(test_name)
+        return {name: tuple(values) for name, values in outcomes.items()}
+
+    def _summarize(
+        self,
+        *,
+        raw_output: str,
+        exit_code: int | None,
+        passed_test_names: tuple[str, ...] = (),
+        failed_test_names: tuple[str, ...] = (),
+        errored_test_names: tuple[str, ...] = (),
+        skipped_test_names: tuple[str, ...] = (),
+    ) -> TestExecutionResult:
         """Parses one completed pytest subprocess invocation's output.
 
         Split out from ``run_tests`` so this parsing logic - in particular,
@@ -200,4 +252,8 @@ class TestExecutionService:
             errors=errors,
             summary=summary,
             raw_output=raw_output,
+            passed_test_names=passed_test_names,
+            failed_test_names=failed_test_names,
+            errored_test_names=errored_test_names,
+            skipped_test_names=skipped_test_names,
         )

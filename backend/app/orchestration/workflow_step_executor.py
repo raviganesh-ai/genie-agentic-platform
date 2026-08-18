@@ -29,6 +29,7 @@ __all__ = ["MissingMemoryReferenceError", "MissingPromptError", "WorkflowStepExe
 
 _PREVIEW_MAX_LENGTH = 240
 _DELEGATED_OUTPUT_MARKER = "DELEGATED_OUTPUT_STORED"
+_COMPONENT_FAILURE_MARKER = "GENERATION FAILED"
 _REQUIREMENT_COVERAGE_VARIABLES = ("approved_requirements", "requirements")
 
 
@@ -80,6 +81,11 @@ def _require_complete_requirement_coverage(
     )
     if step_id not in {"design-architecture", "build-solution"} or not requirements_text:
         return
+    if step_id == "build-solution" and _COMPONENT_FAILURE_MARKER in output_text:
+        raise FoundryUnavailableError(
+            "Workflow step 'build-solution' contains a failed generated component; "
+            "partial placeholder artifacts cannot proceed to deployment."
+        )
     missing_ids = missing_requirement_ids(requirements_text, output_text)
     if missing_ids:
         raise FoundryUnavailableError(

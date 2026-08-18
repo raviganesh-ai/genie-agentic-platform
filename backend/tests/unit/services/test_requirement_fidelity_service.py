@@ -67,15 +67,55 @@ def test_fidelity_execution_only_reaches_one_hundred_percent_after_real_pass() -
     )
 
     repairing = record_fidelity_execution(
-        report, success=False, summary="1 failed", final_failure=False
+        report,
+        success=False,
+        summary="1 failed",
+        failed_test_names=["test_req_001"],
+        final_failure=False,
     )
     passed = record_fidelity_execution(
-        report, success=True, summary="1 passed", final_failure=False
+        report,
+        success=True,
+        summary="1 passed",
+        passed_test_names=["test_req_001"],
+        final_failure=False,
     )
 
     assert repairing.status == "repairing"
     assert repairing.pass_percent == 0
-    assert repairing.requirements[0].evidence == "1 failed"
+    assert repairing.requirements[0].evidence == "failed: test_req_001"
     assert passed.status == "passed"
     assert passed.pass_percent == 100
     assert passed.requirements[0].status == "passed"
+
+
+def test_comment_only_requirement_mention_is_not_executable_coverage() -> None:
+    report = create_fidelity_report("[REQ-001] Process every document.", max_repair_attempts=3)
+
+    report = record_test_coverage(
+        report,
+        ["# REQ-001\ndef test_process_every_document():\n    assert process_all()"],
+    )
+
+    assert report.coverage_percent == 0
+    assert report.requirements[0].status == "missing"
+
+
+def test_zero_id_baseline_and_unobserved_test_results_fail_closed() -> None:
+    empty_report = create_fidelity_report(
+        "Process every document.", max_repair_attempts=3
+    )
+    empty_result = record_fidelity_execution(
+        empty_report, success=True, summary="1 passed", passed_test_names=["test_something"]
+    )
+    report = create_fidelity_report("[REQ-001] Process every document.", max_repair_attempts=3)
+    report = record_test_coverage(
+        report,
+        ["def test_req_001_process_every_document():\n    assert process_all()"],
+    )
+    unobserved = record_fidelity_execution(report, success=True, summary="1 passed")
+
+    assert empty_result.status != "passed"
+    assert empty_result.pass_percent == 0
+    assert unobserved.status == "repairing"
+    assert "no JUnit result" in unobserved.requirements[0].evidence

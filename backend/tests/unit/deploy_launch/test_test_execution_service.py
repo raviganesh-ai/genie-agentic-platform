@@ -104,6 +104,8 @@ async def test_run_tests_actually_executes_generated_pytest_module(tmp_path: Pat
     assert result.passed == 1
     assert result.failed == 0
     assert result.success is True
+    assert result.passed_test_names == ("test_always_passes",)
+    assert result.failed_test_names == ()
     assert (tmp_path / "tests" / "test_generated_0.py").exists()
 
 
@@ -115,6 +117,7 @@ async def test_run_tests_reports_real_failures_not_fabricated_success(tmp_path: 
     assert result.ran is True
     assert result.failed == 1
     assert result.success is False
+    assert result.failed_test_names == ("test_always_fails",)
 
 
 async def test_run_tests_treats_mixed_pass_and_fail_modules_correctly(tmp_path: Path):
@@ -127,6 +130,8 @@ async def test_run_tests_treats_mixed_pass_and_fail_modules_correctly(tmp_path: 
     assert result.passed == 1
     assert result.failed == 1
     assert result.success is False
+    assert result.passed_test_names == ("test_always_passes",)
+    assert result.failed_test_names == ("test_always_fails",)
 
 
 async def test_run_tests_does_not_treat_zero_collected_tests_as_success(tmp_path: Path):

@@ -364,10 +364,11 @@ prompts:
       - do not use `unittest.TestCase` unless the class name starts with
         `Test` and every test method starts with `test_`
       - each ```python block must contain at least one such test function
-      - every approved requirement ID must appear inside at least one
-        executable Python test block, in that requirement's test name or
-        an adjacent comment, and that test must assert its acceptance
-        behavior; IDs mentioned only in narrative text do not count
+      - every approved requirement ID must have at least one executable
+        Python test whose FUNCTION NAME contains the normalized ID: for
+        example, REQ-001 requires `test_req_001_<behavior>`. That test must
+        assert the requirement's real acceptance behavior. Comments,
+        docstrings, and narrative mentions never count as coverage.
 
       Separately, write the UI tests (Vitest/React Testing Library for the
       TypeScript/React screen) as their own fenced ```tsx code block. UI
@@ -409,7 +410,7 @@ prompts:
       - artifact
       - requirements
       - user_message
-    version: "1.3.0"
+    version: "1.4.0"
 
   - id: failure-diagnosis-v1
     name: Failure Diagnosis

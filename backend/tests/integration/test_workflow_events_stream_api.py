@@ -22,8 +22,8 @@ def _bearer_token(user_id: str) -> str:
     return jwt.encode({"sub": user_id}, "unit-test-secret", algorithm="HS256")
 
 
-async def test_stream_requires_authentication(local_settings) -> None:
-    app = create_app(settings=local_settings)
+async def test_stream_requires_authentication(app_local_settings) -> None:
+    app = create_app(settings=app_local_settings)
 
     async with app.router.lifespan_context(app):
         transport = ASGITransport(app=app)
@@ -32,8 +32,8 @@ async def test_stream_requires_authentication(local_settings) -> None:
             assert resp.status_code == 401
 
 
-async def test_stream_requires_a_session_owned_by_the_caller(local_settings) -> None:
-    app = create_app(settings=local_settings)
+async def test_stream_requires_a_session_owned_by_the_caller(app_local_settings) -> None:
+    app = create_app(settings=app_local_settings)
     headers = {"Authorization": f"Bearer {_bearer_token('user-1')}"}
 
     async with app.router.lifespan_context(app):

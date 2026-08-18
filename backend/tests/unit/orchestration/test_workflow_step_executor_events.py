@@ -75,6 +75,15 @@ def test_build_coverage_accepts_every_approved_id_across_generated_components() 
     )
 
 
+def test_build_coverage_rejects_failed_component_placeholder() -> None:
+    with pytest.raises(FoundryUnavailableError, match="placeholder artifacts"):
+        _require_complete_requirement_coverage(
+            step_id="build-solution",
+            variables={"requirements": "[REQ-001] Search."},
+            output_text="# requirements: REQ-001\n# GENERATION FAILED: Foundry unavailable",
+        )
+
+
 class _StreamingGateway:
     """Replays a fixed sequence of chunks for `execute_stream`, regardless
     of the request - stands in for genie-orchestrator's own Foundry run,

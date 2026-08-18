@@ -67,9 +67,11 @@ def create_fidelity_report(
         for requirement_id, statement in _requirement_statements(requirements_text)
     ]
     return RequirementFidelityReport(
+        status="pending" if requirements else "failed",
         requirements=requirements,
         total_requirements=len(requirements),
         max_repair_attempts=max_repair_attempts,
+        gaps=[] if requirements else ["No approved REQ IDs are available for validation."],
     )
 
 
@@ -77,11 +79,8 @@ def _test_names_for_requirement(requirement_id: str, modules: Iterable[str]) -> 
     normalized_id = requirement_id.lower().replace("-", "_")
     names: list[str] = []
     for module in modules:
-        if requirement_id not in extract_requirement_ids(module):
-            continue
         module_names = _TEST_FUNCTION_PATTERN.findall(module)
-        matching_names = [name for name in module_names if normalized_id in name.lower()]
-        names.extend(matching_names or module_names)
+        names.extend(name for name in module_names if normalized_id in name.lower())
     return list(dict.fromkeys(names))
 
 
@@ -89,21 +88,22 @@ def record_test_coverage(
     report: RequirementFidelityReport, modules: Iterable[str]
 ) -> RequirementFidelityReport:
     module_list = list(modules)
-    covered_ids = set(extract_requirement_ids("\n".join(module_list)))
-    requirements = [
-        item.model_copy(
-            update={
-                "status": "covered" if item.requirement_id in covered_ids else "missing",
-                "test_names": _test_names_for_requirement(item.requirement_id, module_list),
-                "evidence": (
-                    "Executable acceptance test generated."
-                    if item.requirement_id in covered_ids
-                    else "No executable acceptance test references this requirement."
-                ),
-            }
+    requirements: list[RequirementFidelityItem] = []
+    for item in report.requirements:
+        test_names = _test_names_for_requirement(item.requirement_id, module_list)
+        requirements.append(
+            item.model_copy(
+                update={
+                    "status": "covered" if test_names else "missing",
+                    "test_names": test_names,
+                    "evidence": (
+                        "Executable acceptance test generated."
+                        if test_names
+                        else "No executable acceptance test name contains this requirement ID."
+                    ),
+                }
+            )
         )
-        for item in report.requirements
-    ]
     covered = sum(item.status == "covered" for item in requirements)
     total = report.total_requirements
     gaps = [
@@ -113,11 +113,15 @@ def record_test_coverage(
     ]
     return report.model_copy(
         update={
-            "status": "testing" if covered == total else "failed",
+            "status": "testing" if total > 0 and covered == total else "failed",
             "requirements": requirements,
             "covered_requirements": covered,
-            "coverage_percent": 100.0 if total == 0 else round(covered * 100 / total, 1),
-            "gaps": gaps,
+            "coverage_percent": 0.0 if total == 0 else round(covered * 100 / total, 1),
+            "gaps": (
+                gaps
+                if total > 0
+                else ["No approved REQ IDs are available for validation."]
+            ),
         }
     )
 
@@ -127,28 +131,65 @@ def record_fidelity_execution(
     *,
     success: bool,
     summary: str,
+    passed_test_names: Iterable[str] = (),
+    failed_test_names: Iterable[str] = (),
+    errored_test_names: Iterable[str] = (),
+    skipped_test_names: Iterable[str] = (),
     final_failure: bool = False,
 ) -> RequirementFidelityReport:
-    requirements = [
-        item.model_copy(
-            update={
-                "status": "passed" if success else "failed",
-                "evidence": summary,
-            }
+    passed_names = set(passed_test_names)
+    failed_names = set(failed_test_names)
+    errored_names = set(errored_test_names)
+    skipped_names = set(skipped_test_names)
+    requirements: list[RequirementFidelityItem] = []
+    gaps: list[str] = []
+    for item in report.requirements:
+        expected_names = set(item.test_names)
+        failed = sorted(expected_names & failed_names)
+        errored = sorted(expected_names & errored_names)
+        skipped = sorted(expected_names & skipped_names)
+        unobserved = sorted(
+            expected_names - passed_names - failed_names - errored_names - skipped_names
         )
-        for item in report.requirements
-    ]
-    passed = report.total_requirements if success else 0
-    gaps = [] if success else [
-        f"{item.requirement_id}: deployed acceptance suite failed"
-        for item in report.requirements
-    ]
+        item_passed = bool(expected_names) and expected_names <= passed_names
+        if item_passed:
+            evidence = "Passed: " + ", ".join(sorted(expected_names))
+            status = "passed"
+        else:
+            details = []
+            if failed:
+                details.append("failed: " + ", ".join(failed))
+            if errored:
+                details.append("errored: " + ", ".join(errored))
+            if skipped:
+                details.append("skipped: " + ", ".join(skipped))
+            if unobserved:
+                details.append("no JUnit result: " + ", ".join(unobserved))
+            if not expected_names:
+                details.append("no named acceptance test")
+            evidence = "; ".join(details)
+            status = "failed"
+            gaps.append(f"{item.requirement_id}: {evidence}")
+        requirements.append(item.model_copy(update={"status": status, "evidence": evidence}))
+
+    passed = sum(item.status == "passed" for item in requirements)
+    all_requirements_passed = (
+        success and report.total_requirements > 0 and passed == report.total_requirements
+    )
     return report.model_copy(
         update={
-            "status": "passed" if success else ("failed" if final_failure else "repairing"),
+            "status": (
+                "passed"
+                if all_requirements_passed
+                else ("failed" if final_failure else "repairing")
+            ),
             "requirements": requirements,
             "passed_requirements": passed,
-            "pass_percent": 100.0 if success or report.total_requirements == 0 else 0.0,
+            "pass_percent": (
+                0.0
+                if report.total_requirements == 0
+                else round(passed * 100 / report.total_requirements, 1)
+            ),
             "gaps": gaps,
             "execution_summary": summary,
         }

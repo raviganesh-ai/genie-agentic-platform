@@ -284,7 +284,11 @@ def create_container_app_frontend_deployment_service(
         settings.deployment_location,
     )
     if not all(required):
-        return NullContainerAppFrontendDeploymentService()
+        raise ContainerAppFrontendDeploymentError(
+            "azure_subscription_id, deployment_resource_group, deployment_acr_name, "
+            "deployment_container_apps_environment_id, and deployment_location must "
+            "all be configured; local/fake frontend deployment is not permitted."
+        )
     return ContainerAppFrontendDeploymentService(
         subscription_id=settings.azure_subscription_id,  # type: ignore[arg-type]
         resource_group=settings.deployment_resource_group,  # type: ignore[arg-type]

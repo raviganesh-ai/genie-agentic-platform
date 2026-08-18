@@ -202,16 +202,15 @@ class NullMissionAgentProvisioningService:
 def create_mission_agent_provisioning_service(
     *, settings: Settings
 ) -> MissionAgentProvisioningService | NullMissionAgentProvisioningService:
-    """Factory choosing the real or Null mission agent provisioning service.
-
-    Uses the real ``MissionAgentProvisioningService`` when Azure AI Foundry
-    is configured, otherwise the Null implementation.
-    """
+    """Builds real Foundry provisioning or fails closed."""
 
     has_config = bool(settings.azure_foundry_endpoint and settings.azure_foundry_project_name)
 
     if not has_config:
-        return NullMissionAgentProvisioningService()
+        raise MissionAgentProvisioningError(
+            "azure_foundry_endpoint and azure_foundry_project_name must be configured; "
+            "local/fake mission agent provisioning is not permitted."
+        )
 
     project_service = FoundryProjectService(
         endpoint=settings.azure_foundry_endpoint or "",
