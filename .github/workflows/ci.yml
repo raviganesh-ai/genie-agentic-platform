@@ -72,6 +72,10 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
     environment: production
+    # Safety net: if a step ever hangs (e.g. a CLI retrying on missing/
+    # invalid credentials) this bounds the wasted runner minutes instead of
+    # running until the default 6h job timeout.
+    timeout-minutes: 15
     concurrency:
       group: deploy-backend
       cancel-in-progress: false
@@ -80,6 +84,20 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
+
+      # Fail fast with a clear message when the required Azure OIDC secrets
+      # have not been configured yet, instead of letting azure/login@v2 (or
+      # a later az CLI call) fail/hang with a confusing error.
+      - name: Check required secrets
+        run: |
+          missing=()
+          [ -z "${{ secrets.AZURE_CLIENT_ID }}" ] && missing+=("AZURE_CLIENT_ID")
+          [ -z "${{ secrets.AZURE_TENANT_ID }}" ] && missing+=("AZURE_TENANT_ID")
+          [ -z "${{ secrets.AZURE_SUBSCRIPTION_ID }}" ] && missing+=("AZURE_SUBSCRIPTION_ID")
+          if [ ${#missing[@]} -ne 0 ]; then
+            echo "::error::Missing required secrets for deploy-backend: ${missing[*]}. See README.md 'Continuous deployment' section for one-time Azure OIDC setup."
+            exit 1
+          fi
 
       - name: Azure login (OIDC)
         uses: azure/login@v2
@@ -113,6 +131,10 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
     environment: production
+    # Safety net: the swa CLI has been observed to hang (rather than fail
+    # fast) when given an empty/invalid deployment token, so bound the
+    # wasted runner minutes instead of running until the default 6h limit.
+    timeout-minutes: 15
     concurrency:
       group: deploy-frontend
       cancel-in-progress: false
@@ -121,6 +143,16 @@ jobs:
         working-directory: frontend
     steps:
       - uses: actions/checkout@v4
+
+      # Fail fast with a clear message when the deployment token has not
+      # been configured yet, instead of letting the swa CLI hang on an
+      # empty token (observed to not fail fast in practice).
+      - name: Check required secrets
+        run: |
+          if [ -z "${{ secrets.SWA_DEPLOYMENT_TOKEN }}" ]; then
+            echo "::error::Missing required secret SWA_DEPLOYMENT_TOKEN. See README.md 'Continuous deployment' section for one-time Azure setup."
+            exit 1
+          fi
 
       - name: Set up Node
         uses: actions/setup-node@v4
@@ -141,5 +173,6 @@ jobs:
           VITE_ENTRA_API_SCOPE: ${{ vars.VITE_ENTRA_API_SCOPE }}
 
       - name: Deploy to Azure Static Web Apps
+        timeout-minutes: 5
         run: npx --yes @azure/static-web-apps-cli@latest deploy ./dist --deployment-token "${{ secrets.SWA_DEPLOYMENT_TOKEN }}" --env production
 
