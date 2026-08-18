@@ -600,15 +600,17 @@ All three require `GENIE_AZURE_FOUNDRY_ENDPOINT` / `GENIE_AZURE_FOUNDRY_PROJECT_
 - **`deploy-backend`** — logs into Azure via OIDC federated credential (no stored secret), runs `az acr build` from the repo root, then `az containerapp update --revision-suffix gh<run-number>` so every deploy creates a genuinely new revision (a floating tag would not otherwise trigger a restart).
 - **`deploy-frontend`** — builds the frontend and deploys it with `@azure/static-web-apps-cli` using a stored deployment token.
 
-**One-time setup required before these jobs will succeed** (this repo does not do this for you — it's a deliberate operator step against your own Azure subscription):
+**One-time setup** (already performed for this environment — documented here so it can be reproduced on a new subscription/repo):
 
-1. Create (or reuse) a user-assigned managed identity or app registration, and add a **federated identity credential** trusting this repo's GitHub Actions OIDC issuer for the `master` branch (`az identity federated-credential create` or the Entra admin center — subject `repo:<org>/<repo>:ref:refs/heads/master`).
-2. Grant that identity `AcrPush`/`AcrBuild`-equivalent access on the ACR and `Container Apps Contributor` on the resource group (least privilege, matching the pattern in [Deploying into a brand-new Azure subscription](#deploying-into-a-brand-new-azure-subscription) — never a subscription-wide Owner/Contributor grant).
-3. In the repo's **Settings → Environments → production**, add:
-   - **Secrets**: `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID` (the federated identity from step 1), `SWA_DEPLOYMENT_TOKEN` (from `az staticwebapp secrets list`).
+1. A dedicated app registration (`genie-github-actions-deploy`, no client secret) holds a **federated identity credential** trusting this repo's GitHub Actions OIDC issuer, scoped to the `production` GitHub Environment (subject `repo:<org>/<repo>:environment:production` — narrower than a branch-based subject, since it also requires the workflow job to declare `environment: production`).
+2. That identity's service principal holds exactly two least-privilege, resource-scoped RBAC roles (never a subscription- or resource-group-wide Owner/Contributor grant):
+   - **Container Registry Tasks Contributor**, scoped to just the ACR resource — covers `az acr build`'s scheduleRun/upload actions without granting registry data-plane push/pull.
+   - **Container Apps Contributor**, scoped to just the `genie-backend` Container App resource — covers `az containerapp update`.
+3. The repo's **Settings → Secrets and variables → Actions** has:
+   - **Secrets**: `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID` (identify the federated app registration above — not credentials by themselves, since no secret/certificate exists for this app), `SWA_DEPLOYMENT_TOKEN` (from `az staticwebapp secrets list`).
    - **Variables**: `AZURE_ACR_NAME`, `AZURE_CONTAINER_APP_NAME`, `AZURE_RESOURCE_GROUP`, `VITE_GENIE_API_BASE_URL`, `VITE_ENTRA_CLIENT_ID`, `VITE_ENTRA_TENANT_ID`, `VITE_ENTRA_API_SCOPE` (not secret, but environment-specific).
 
-Until that setup exists, `deploy-backend`/`deploy-frontend` will simply fail at the Azure login / deploy step — the `backend`/`frontend` test jobs are unaffected and still gate every PR.
+If this identity/RBAC/secrets setup is ever missing or revoked, `deploy-backend`/`deploy-frontend` fail fast (within seconds, at an explicit "Check required secrets" step) rather than hanging — the `backend`/`frontend` test jobs are unaffected either way and still gate every PR.
 
 ---
 
@@ -637,7 +639,7 @@ Until that setup exists, `deploy-backend`/`deploy-frontend` will simply fail at 
 
 ## Known gaps / next phases
 
-- CI/CD (`.github/workflows/ci.yml`) runs backend pytest/ruff and frontend typecheck/lint/vitest on every push/PR to `master`, then auto-deploys the backend Container App and frontend Static Web App on every push to `master` once both pass — see [Continuous deployment](#continuous-deployment-github-actions). This requires a one-time Azure OIDC federated credential + repo secrets/variables setup that has not yet been performed for this environment; until then, the deploy jobs fail at the Azure login step and manual deploys (documented in [Deploying application code](#deploying-application-code-backend--frontend)) remain the only working path.
+- CI/CD (`.github/workflows/ci.yml`) runs backend pytest/ruff and frontend typecheck/lint/vitest on every push/PR to `master`, then auto-deploys the backend Container App and frontend Static Web App on every push to `master` once both pass — see [Continuous deployment](#continuous-deployment-github-actions). The one-time Azure OIDC federated credential + least-privilege RBAC + repo secrets/variables setup has been performed for this environment; manual deploys (documented in [Deploying application code](#deploying-application-code-backend--frontend)) remain available as a fallback.
 - End-to-end Playwright coverage (`e2e/`) is scaffolded but not yet fully built out.
 - Admin consent for the Entra API permission may require a tenant administrator in some tenants — see [Authentication](#authentication).
 - Shared Collaboration Memory currently has no write call sites anywhere in the backend — nothing ever calls `memory_service.shared.write`. The Requirement Discovery Map's main requirements list (which reads from Shared Memory) is therefore likely empty in real usage today; the agentic-workflow qualification check above was deliberately built to read `WorkflowRunResult.step_results` directly instead, so it works independently of this gap.
