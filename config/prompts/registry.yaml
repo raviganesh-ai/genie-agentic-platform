@@ -81,9 +81,16 @@ prompts:
       build first):" section. Use it only to state implementation order,
       never to create a smaller prototype boundary. List every approved
       functional and non-functional requirement by its existing REQ id in
-      logical dependency order. Nice-to-have means lower build priority,
-      not permission to omit it; it remains in scope unless the user
-      removes it during review. Number each item in this list for clarity.
+      logical dependency order. For each item, reuse the EXACT SAME
+      requirement text you already wrote for it in its category list
+      above, verbatim - do not rewrite, shorten, re-summarize, or
+      paraphrase it into different wording. The critical path is a
+      re-ordering of the requirements you already defined, not a second,
+      independently worded description of them; the requirement text and
+      its scope must read identically in both places. Nice-to-have means
+      lower build priority, not permission to omit it; it remains in
+      scope unless the user removes it during review. Number each item in
+      this list for clarity.
 
       COMPLETENESS CHECK:
       Before outputting your response, ask yourself: "Did the customer
@@ -116,7 +123,7 @@ prompts:
     variables:
       - transcript_excerpt
       - user_message
-    version: "2.1.0"
+    version: "2.2.0"
 
 
   - id: architecture-recommendation-v1
