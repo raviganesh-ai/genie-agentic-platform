@@ -1950,7 +1950,13 @@ class DeploymentPipelineService:
                         for item in report.requirements
                         if item.status == "missing"
                     ]
-                    if missing_test_ids:
+                    # Large approved-requirement sets can exceed what the agent
+                    # covers in a single completion; give it the same repair
+                    # budget used later for whole-prototype fidelity repairs
+                    # instead of giving up after exactly one corrective retry.
+                    coverage_retry = 0
+                    while missing_test_ids and coverage_retry < self._fidelity_max_repair_attempts:
+                        coverage_retry += 1
                         correction_result = await self._orchestrator.execute_agent(
                             agent_id="test-generation-agent",
                             prompt_id="test-generation-v1",
