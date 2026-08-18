@@ -177,6 +177,54 @@ async def test_run_agent_suppresses_its_own_step_delta_echo_for_a_delegated_step
     event_types = [event.event_type for event in event_bus.events]
     assert event_types == ["step_started", "step_completed"]
     assert all(event.agent_id == "build-agent" for event in event_bus.events)
+    # A delegated step's own step_completed must never preview
+    # genie-orchestrator's raw output_text - it is always either a verbatim
+    # echo already shown via the delegated call's own step_delta events, or
+    # (see the dedicated marker test below) the internal delegation
+    # sentinel, neither of which belongs in a user-facing activity banner.
+    assert event_bus.events[-1].output_preview is None
+
+
+async def test_run_agent_suppresses_the_delegation_marker_from_a_delegated_steps_completed_preview() -> (
+    None
+):
+    """When the specialist's real output was too large to inline and was
+    stored to shared memory instead, genie-orchestrator's own raw
+    output_text is literally the internal `_DELEGATED_OUTPUT_MARKER`
+    sentinel (`"DELEGATED_OUTPUT_STORED"`) - this must never leak into the
+    step_completed event's preview shown to users."""
+
+    event_bus = _RecordingEventBus()
+    gateway = _StreamingGateway(
+        [
+            AgentExecutionStreamChunk(
+                result=AgentExecutionResult(
+                    agent_id="genie-orchestrator",
+                    output_text="DELEGATED_OUTPUT_STORED",
+                    correlation_id="run-1:design-architecture",
+                )
+            ),
+        ]
+    )
+    executor = WorkflowStepExecutor(
+        agent_registry=None,
+        prompt_registry=None,
+        agent_gateway=gateway,
+        governance_service=None,
+        event_bus=event_bus,
+    )
+    step = _step(["call_architecture_designer"])
+
+    await executor._run_agent(
+        request=_request("design-architecture"),
+        session_id="session-1",
+        workflow_run_id="run-1",
+        step=step,
+        agent=_orchestrator_agent(),
+    )
+
+    completed_event = next(e for e in event_bus.events if e.event_type == "step_completed")
+    assert completed_event.output_preview is None
 
 
 async def test_run_agent_still_publishes_step_delta_for_a_non_delegated_step() -> None:
@@ -221,3 +269,6 @@ async def test_run_agent_still_publishes_step_delta_for_a_non_delegated_step() -
 
     event_types = [event.event_type for event in event_bus.events]
     assert event_types == ["step_started", "step_delta", "step_completed"]
+    # Non-delegated steps have no other publisher for their content, so
+    # their own step_completed preview is still shown.
+    assert event_bus.events[-1].output_preview == "chunk-1"

@@ -338,6 +338,16 @@ class WorkflowStepExecutor:
             )
             raise RuntimeError(reason)
 
+        # For a delegated step, genie-orchestrator's own raw output_text is
+        # never useful to preview here: it is either a verbatim echo of
+        # content the delegated tool call's own step_delta events already
+        # showed in full, or (when the specialist's real output was too
+        # large to inline and was stored to shared memory instead) literally
+        # the internal _DELEGATED_OUTPUT_MARKER sentinel string - showing
+        # either as this step's "completed" preview is either redundant or
+        # a confusing internal-implementation-detail leak into the user
+        # facing activity banner (e.g. "... completed: DELEGATED_OUTPUT_STORED").
+        completed_preview = None if is_delegated else _preview(result.output_text)
         await self._event_bus.publish(
             WorkflowStreamEvent(
                 event_type="step_completed",
@@ -345,7 +355,7 @@ class WorkflowStepExecutor:
                 workflow_run_id=workflow_run_id,
                 step_id=step.id,
                 agent_id=display_agent_id,
-                output_preview=_preview(result.output_text),
+                output_preview=completed_preview,
             )
         )
         return result
