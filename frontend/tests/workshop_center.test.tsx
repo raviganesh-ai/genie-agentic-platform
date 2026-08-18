@@ -315,6 +315,16 @@ describe("WorkshopPage", () => {
           ).toBeInTheDocument(),
         );
 
+        // Wait for the step_started event to actually be reflected in
+        // rendered state (not just for the banner's default text, which
+        // shows identically before the event has been processed too) -
+        // otherwise advancing the timer below can race the mock SSE
+        // stream's own microtask-driven delivery and flake under CI's
+        // heavier scheduling contention.
+        await vi.waitFor(() =>
+          expect(screen.getByText(/build-agent \(build solution\) started/i)).toBeInTheDocument(),
+        );
+
         await vi.advanceTimersByTimeAsync(300_000);
 
         expect(screen.queryByText(/hasn't started yet/i)).not.toBeInTheDocument();
