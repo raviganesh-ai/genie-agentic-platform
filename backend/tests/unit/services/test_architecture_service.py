@@ -15,6 +15,7 @@ the true producing specialist from each step's ``allowed_tool_names`` via
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from types import SimpleNamespace
 
 import pytest
 
@@ -59,6 +60,24 @@ class _FakeOrchestrator:
 
     async def get_workflow_run(self, workflow_run_id: str) -> WorkflowRunResult | None:
         return self._run if workflow_run_id == self._run.workflow_run_id else None
+
+
+class _FakeSharedMemory:
+    """Minimal SharedMemoryStore.read double: returns a single record
+    carrying {"output_text": ...} for each pre-seeded key, mirroring what
+    orchestration_tools's _delegate really writes for a delegated step the
+    instant its real generation finishes - well before genie-orchestrator's
+    own official WorkflowStepResult exists."""
+
+    def __init__(self, records_by_key: dict[str, str]) -> None:
+        self._records_by_key = records_by_key
+
+    async def read(
+        self, *, requesting_agent, session_id: str, trace_id: str, key: str | None = None
+    ):
+        if key is not None and key in self._records_by_key:
+            return [SimpleNamespace(content={"output_text": self._records_by_key[key]})]
+        return []
 
 
 def _agent(agent_id: str, *, capabilities: list[str]) -> AgentDefinition:
@@ -171,3 +190,40 @@ async def test_get_architecture_excludes_steps_with_no_architecture_delegation(
     )
 
     assert snapshot.components == []
+
+
+async def test_get_architecture_falls_back_to_shared_memory_before_official_completion(
+    agent_registry: AgentRegistry, workflow: WorkflowDefinition
+) -> None:
+    """design-architecture has NO entry at all yet in run.step_results (the
+    common case right after its live step_completed SSE event fires, well
+    before genie-orchestrator's own slower echo-completion turn resolves
+    the official WorkflowStepResult) - the real specialist output already
+    written to Shared Collaboration Memory must still surface immediately."""
+
+    run = WorkflowRunResult(
+        workflow_run_id="run-1",
+        workflow_id=workflow.id,
+        session_id="session-1",
+        status="running",
+        waves=[["analyze-requirements"], ["design-architecture"]],
+        step_results=[
+            _step_result("analyze-requirements", output_text="Extracted requirements."),
+        ],
+    )
+    orchestrator = _FakeOrchestrator(run=run, workflow=workflow, agent_registry=agent_registry)
+    orchestrator.memory_service = SimpleNamespace(
+        shared=_FakeSharedMemory({"design-architecture": "Recommended Azure architecture."})
+    )
+    session_service = create_session_service(orchestrator=orchestrator)  # type: ignore[arg-type]
+    session = await session_service.create_session(owner_user_id="user-1", title="t")
+    service = ArchitectureService(orchestrator=orchestrator, session_service=session_service)  # type: ignore[arg-type]
+
+    snapshot = await service.get_architecture(
+        session_id=session.id, requesting_user_id="user-1", workflow_run_id="run-1"
+    )
+
+    assert [component.step_id for component in snapshot.components] == ["design-architecture"]
+    component = snapshot.components[0]
+    assert component.recommended_by == "architecture-designer"
+    assert component.content == "Recommended Azure architecture."

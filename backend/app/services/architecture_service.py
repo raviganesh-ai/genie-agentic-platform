@@ -25,10 +25,12 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.agents.gateway import get_enabled_agent
 from app.agents.registry import AgentRegistry
 from app.agents.tools.orchestration_tools import resolve_delegate_agent_id
 from app.models.decision_graph import DecisionGraph
 from app.models.reanalysis_models import ReanalysisResult
+from app.models.workflow_models import WorkflowStepResult
 from app.orchestration.agent_orchestrator import AgentOrchestrator
 from app.services.session_service import SessionService
 from app.services.workshop_service import UnknownWorkflowRunError
@@ -108,22 +110,24 @@ class ArchitectureService:
         if run is None:
             raise UnknownWorkflowRunError(f"Unknown workflow run id '{workflow_run_id}'.")
 
-        steps_by_id = {step.id: step for step in self._orchestrator.workflow_registry.get(run.workflow_id).steps}
+        workflow_steps = self._orchestrator.workflow_registry.get(run.workflow_id).steps
+        results_by_step_id = {result.step_id: result for result in run.step_results}
         components: list[ArchitectureComponent] = []
-        for result in run.step_results:
-            if result.status != "completed":
-                continue
-            recommended_by = _architecture_agent_id_for_step(
-                steps_by_id.get(result.step_id), self._orchestrator.agent_registry
-            )
+        # Iterates every CONFIGURED workflow step (not just ones already in
+        # run.step_results) so a delegated step's real content can show up
+        # via the Shared Memory fallback below even before it has an entry
+        # there at all - not just before that entry flips to "completed".
+        for step in workflow_steps:
+            recommended_by = _architecture_agent_id_for_step(step, self._orchestrator.agent_registry)
             if recommended_by is None:
                 continue
+            content = await self._read_step_output(
+                session_id=run.session_id, step_id=step.id, results_by_step_id=results_by_step_id
+            )
+            if content is None:
+                continue
             components.append(
-                ArchitectureComponent(
-                    step_id=result.step_id,
-                    recommended_by=recommended_by,
-                    content=result.output_text or "",
-                )
+                ArchitectureComponent(step_id=step.id, recommended_by=recommended_by, content=content)
             )
 
         return ArchitectureSnapshot(
@@ -132,6 +136,50 @@ class ArchitectureService:
             components=components,
             decision_graph=self._orchestrator.decision_graph_service.get_graph(session_id),
         )
+
+    async def _read_step_output(
+        self,
+        *,
+        session_id: str,
+        step_id: str,
+        results_by_step_id: dict[str, WorkflowStepResult],
+    ) -> str | None:
+        """Returns ``step_id``'s real output text, or ``None`` if not available yet.
+
+        Prefers the official ``WorkflowStepResult`` (``status == "completed"``)
+        when present, but falls back to reading the delegated specialist's
+        real output straight out of Shared Collaboration Memory (written by
+        ``orchestration_tools._delegate`` the instant that specialist's own
+        generation finishes) - well before genie-orchestrator's own separate,
+        slower echo-completion turn resolves this step's official result (see
+        the KNOWN INEFFICIENCY notes on the orchestrator echo pattern).
+        Without this fallback, Architecture Studio can show zero components
+        indefinitely: the frontend's one-shot refresh (triggered by the live
+        step_completed SSE event, which fires the instant the delegated call
+        returns) can easily land before the OFFICIAL step result exists, and
+        no further event ever arrives to trigger a retry.
+        """
+
+        result = results_by_step_id.get(step_id)
+        if result is not None and result.status == "completed":
+            return result.output_text or ""
+
+        agent_registry = getattr(self._orchestrator, "agent_registry", None)
+        memory_service = getattr(self._orchestrator, "memory_service", None)
+        if agent_registry is None or memory_service is None:
+            return None
+
+        requesting_agent = get_enabled_agent(agent_registry, "genie-orchestrator")
+        records = await memory_service.shared.read(
+            requesting_agent=requesting_agent,
+            session_id=session_id,
+            trace_id=f"architecture-snapshot:{session_id}",
+            key=step_id,
+        )
+        if not records:
+            return None
+        output_text = records[0].content.get("output_text")
+        return output_text if isinstance(output_text, str) and output_text else None
 
     async def request_alternative(
         self,
