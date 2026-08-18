@@ -34,12 +34,16 @@ from app.agents.gateway import AgentGateway, get_enabled_agent
 from app.agents.models import AgentExecutionRequest, AgentExecutionResult
 from app.agents.registry import AgentRegistry
 from app.agents.tool_execution import AgentToolRegistry, ToolCallContext, ToolExecutionError
-from app.agents.tools.architecture_parsing import parse_architecture_build_plan
+from app.agents.tools.architecture_parsing import (
+    parse_architecture_build_plan,
+    parse_component_requirement_assignments,
+)
 from app.governance.governance_service import GovernanceService
 from app.memory.memory_models import SharedMemoryClassification
 from app.memory.memory_service import MemoryService
 from app.models.workflow_stream_models import WorkflowStreamEvent
 from app.orchestration.workflow_event_bus import WorkflowEventBus
+from app.services.requirement_fidelity_service import missing_requirement_ids
 
 __all__ = ["register_orchestrator_delegation_tools", "resolve_delegate_agent_id"]
 
@@ -402,7 +406,27 @@ async def _generate_build_by_component(
     regenerated - so retrying (e.g. "Re-run UI & Agent Design") only ever
     (re)generates the component(s) that actually still need it, never the
     whole build from scratch.
+
+    Fails closed BEFORE any component is generated when the architecture
+    document itself does not mention every approved requirement ID in some
+    specialist/orchestrator/UI responsibility bullet (see
+    ``parse_component_requirement_assignments``) - a design gap that would
+    otherwise only surface much later, after a full build+deploy+test
+    cycle, via the Requirement Fidelity Gate.
     """
+
+    unassigned_requirement_ids = missing_requirement_ids(
+        base_variables.get("requirements", ""), base_variables.get("architecture", "")
+    )
+    if unassigned_requirement_ids:
+        raise ToolExecutionError(
+            "Architecture design does not assign the following approved requirement "
+            "ID(s) to any specialist agent, the Orchestrator, or a UI zone: "
+            f"{', '.join(unassigned_requirement_ids)}. Revise the architecture on "
+            "Architecture Studio so each one is explicitly covered before building - "
+            "this must be caught here, before any code is generated, rather than "
+            "relying on Deploy & Launch's repair budget to catch it later."
+        )
 
     plan = parse_architecture_build_plan(base_variables.get("architecture", ""))
     if plan is None:
@@ -433,6 +457,9 @@ async def _generate_build_by_component(
     components.append(("orchestrator", plan.orchestrator_agent_name))
     components.append(("ui", "ui"))
 
+    requirement_assignments = parse_component_requirement_assignments(
+        base_variables.get("architecture", "")
+    )
     reusable_components = _extract_reusable_components(base_variables.get("previous_build_output", ""))
 
     async def _publish_delta(delta: str) -> None:
@@ -475,10 +502,18 @@ async def _generate_build_by_component(
             pieces.append(reused_piece)
             continue
 
+        assigned_ids = requirement_assignments.get(label_name.strip().lower(), ())
+        assigned_requirements = (
+            ", ".join(assigned_ids)
+            if assigned_ids
+            else "None explicitly assigned - implement whatever this component's own "
+            "architecture responsibility above requires."
+        )
         component_variables = {
             **base_variables,
             "component_kind": component_kind,
             "component_name": component_name,
+            "assigned_requirements": assigned_requirements,
         }
         request = AgentExecutionRequest(
             agent_id=delegation.target_agent_id,

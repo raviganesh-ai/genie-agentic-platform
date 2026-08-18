@@ -761,6 +761,14 @@ prompts:
       and constraints, and include those IDs in a concise `# requirements:`
       or `// requirements:` line in the returned code block.
 
+      Requirement ID(s) deterministically assigned to THIS component by the
+      architecture design below (extracted from its own responsibility
+      bullet, not left to your own judgment): {assigned_requirements}. These
+      take priority over your own reading of the architecture - implement
+      every one of them fully in this component; never skip one because of
+      prototype status, and never implement a requirement ID assigned to a
+      different component instead.
+
       Before returning, re-check each requirement ID you assigned to this
       component against the code you actually wrote and confirm it is a
       real, working implementation, not a stub, comment-only mention, or
@@ -904,7 +912,8 @@ prompts:
       - component_kind
       - component_name
       - user_message
-    version: "1.10.0"
+      - assigned_requirements
+    version: "1.11.0"
 
   - id: build-component-regeneration-v1
     name: Build Generation - Regenerate Single Component

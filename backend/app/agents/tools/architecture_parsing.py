@@ -16,10 +16,19 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-__all__ = ["ArchitectureBuildPlan", "parse_architecture_build_plan"]
+from app.services.requirement_fidelity_service import extract_requirement_ids
+
+__all__ = [
+    "ArchitectureBuildPlan",
+    "parse_architecture_build_plan",
+    "parse_component_requirement_assignments",
+]
 
 _SECTION_PATTERN = re.compile(
     r"##\s*Multi-Agent Workflow(.*?)(?=\n##\s|\Z)", re.DOTALL | re.IGNORECASE
+)
+_UI_SECTION_PATTERN = re.compile(
+    r"##\s*Single-Page UI Design(.*?)(?=\n##\s|\Z)", re.DOTALL | re.IGNORECASE
 )
 _BULLET_PATTERN = re.compile(r"^\s*(?:[-*]\s+)?\*\*(.+?)\*\*\s*:", re.MULTILINE)
 
@@ -65,3 +74,70 @@ def parse_architecture_build_plan(architecture_document: str) -> ArchitectureBui
     return ArchitectureBuildPlan(
         specialist_agent_names=specialists, orchestrator_agent_name=orchestrator_name
     )
+
+
+def _bullet_spans(section_text: str) -> list[tuple[str, str]]:
+    """Returns ``(name, own_text)`` for every "**Name**: ..." bullet in
+    ``section_text``, where ``own_text`` is that bullet's own prose only -
+    from just after its "**Name**:" label to the start of the next bullet
+    (or the end of the section) - so a requirement ID mentioned in one
+    bullet is never misattributed to a neighboring one.
+    """
+
+    matches = list(_BULLET_PATTERN.finditer(section_text))
+    spans: list[tuple[str, str]] = []
+    for index, match in enumerate(matches):
+        start = match.end()
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(section_text)
+        spans.append((match.group(1).strip(), section_text[start:end]))
+    return spans
+
+
+def parse_component_requirement_assignments(
+    architecture_document: str,
+) -> dict[str, tuple[str, ...]]:
+    """Deterministically maps each build component's own lowercased label to
+    the approved requirement IDs its own architecture bullet actually
+    mentions - never LLM-invented or re-inferred by the Build Agent at
+    generation time.
+
+    ``architecture-recommendation-v1`` already requires every approved
+    requirement ID to literally appear in the responsibility text of at
+    least one specialist/orchestrator bullet or UI zone bullet, so this is
+    a pure extraction (via ``extract_requirement_ids``, the same REQ-###
+    pattern the Requirement Fidelity Gate uses) over each bullet's own
+    span, not a new prompt contract.
+
+    Each specialist/orchestrator agent name (lowercased, matching
+    ``ArchitectureBuildPlan``'s labels) maps to the IDs mentioned in its
+    own "## Multi-Agent Workflow" bullet. Every UI zone's IDs are unioned
+    under the single key ``"ui"`` (matching ``build-generation-component-v1``'s
+    ``component_kind == "ui"`` - the UI is always generated as one
+    component regardless of how many input zones the architecture
+    describes). A component with no bullet, or whose bullet mentions no
+    IDs (e.g. the Orchestrator, which coordinates rather than implements
+    a specific requirement), is simply absent from the returned mapping -
+    callers must treat a missing key as "no requirements assigned", not
+    as a parsing failure.
+    """
+
+    assignments: dict[str, tuple[str, ...]] = {}
+
+    workflow_match = _SECTION_PATTERN.search(architecture_document)
+    workflow_text = workflow_match.group(1) if workflow_match else ""
+    for name, own_text in _bullet_spans(workflow_text):
+        requirement_ids = extract_requirement_ids(own_text)
+        if requirement_ids:
+            assignments[name.strip().lower()] = requirement_ids
+
+    ui_match = _UI_SECTION_PATTERN.search(architecture_document)
+    ui_text = ui_match.group(1) if ui_match else ""
+    ui_ids: list[str] = []
+    for _, own_text in _bullet_spans(ui_text):
+        for requirement_id in extract_requirement_ids(own_text):
+            if requirement_id not in ui_ids:
+                ui_ids.append(requirement_id)
+    if ui_ids:
+        assignments["ui"] = tuple(ui_ids)
+
+    return assignments

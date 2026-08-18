@@ -1,7 +1,10 @@
 """Unit tests for `parse_architecture_build_plan`."""
 from __future__ import annotations
 
-from app.agents.tools.architecture_parsing import parse_architecture_build_plan
+from app.agents.tools.architecture_parsing import (
+    parse_architecture_build_plan,
+    parse_component_requirement_assignments,
+)
 
 _ARCHITECTURE_DOCUMENT = """
 ## UI Design
@@ -78,3 +81,41 @@ def test_returns_none_when_orchestrator_is_the_only_bullet():
 """
 
     assert parse_architecture_build_plan(document) is None
+
+
+def test_requirement_assignments_are_extracted_per_bullets_own_text():
+    document = """
+## Single-Page UI Design
+
+- **Kickoff Screen**: lets the user pick a category (REQ-001) and upload
+  an evidence file (REQ-003).
+
+## Multi-Agent Workflow
+
+- **Ticket Classifier Agent**: classifies the incoming issue by category
+  (REQ-001, REQ-002).
+- **Resolution Drafter Agent**: drafts a resolution (REQ-004).
+- **Support Triage Orchestrator Agent**: the single entry point,
+  sequences the classifier then the drafter.
+"""
+
+    assignments = parse_component_requirement_assignments(document)
+
+    assert assignments["ticket classifier agent"] == ("REQ-001", "REQ-002")
+    assert assignments["resolution drafter agent"] == ("REQ-004",)
+    assert assignments["ui"] == ("REQ-001", "REQ-003")
+    # The Orchestrator's own bullet mentions no requirement IDs - it
+    # coordinates the specialists above rather than implementing a
+    # specific requirement itself, so it is simply absent, not an error.
+    assert "support triage orchestrator agent" not in assignments
+
+
+def test_requirement_assignments_is_empty_when_no_ids_appear_anywhere():
+    document = """
+## Multi-Agent Workflow
+
+- **Billing Agent**: handles billing questions with no cited requirement.
+"""
+
+    assert parse_component_requirement_assignments(document) == {}
+

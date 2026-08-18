@@ -136,4 +136,6 @@ def test_build_generation_prompts_require_self_verification_before_finishing():
     build_component_v1 = " ".join(registry.get("build-generation-component-v1").template.split())
     assert "Before returning, re-check each requirement ID" in build_component_v1
     assert "rather than relying on that later repair budget to catch avoidable gaps" in build_component_v1
+    assert "assigned_requirements" in build_component_v1
+    assert "deterministically assigned to THIS component" in build_component_v1
 

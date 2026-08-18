@@ -659,3 +659,105 @@ async def test_call_build_agent_reuses_previously_succeeded_components_on_retry(
     assert "drafter code (retry)" in output_text
     assert "GENERATION FAILED" not in output_text
 
+
+_ARCHITECTURE_WITH_REQUIREMENT_ASSIGNMENTS = """
+## Single-Page UI Design
+
+- **Kickoff Screen**: lets the user pick a category (REQ-001) and upload
+  an evidence file (REQ-003).
+
+## Multi-Agent Workflow
+
+- **Ticket Classifier Agent**: classifies the incoming issue by category
+  (REQ-001, REQ-002).
+- **Resolution Drafter Agent**: drafts a resolution based on the category
+  (REQ-004).
+- **Support Triage Orchestrator Agent**: the single entry point,
+  sequences the classifier then the drafter.
+"""
+
+
+async def test_call_build_agent_fails_closed_when_architecture_omits_a_requirement():
+    """If the approved requirements name a requirement ID the architecture
+    document never assigns to any specialist, the Orchestrator, or a UI
+    zone, this must fail BEFORE any component is generated - catching the
+    gap for free instead of relying on a full build+deploy+test cycle and
+    the Requirement Fidelity Gate's repair budget to discover it later."""
+
+    registry = AgentToolRegistry()
+    gateway = _StreamingAgentGateway()
+    governance_service = _RecordingGovernanceService()
+    register_orchestrator_delegation_tools(
+        registry, agent_gateway=gateway, governance_service=governance_service
+    )
+    context = ToolCallContext(
+        agent=_orchestrator_agent(),
+        session_id="session-1",
+        trace_id="run-1:build-solution",
+    )
+
+    with pytest.raises(ToolExecutionError, match="REQ-005"):
+        await registry.execute(
+            agent_id="genie-orchestrator",
+            tool_name="call_build_agent",
+            arguments={
+                "requirements": "REQ-001: pick a category. REQ-005: send a confirmation email.",
+                "architecture": _ARCHITECTURE_WITH_REQUIREMENT_ASSIGNMENTS,
+                "policies": "",
+                "user_message": "",
+            },
+            context=context,
+        )
+
+    # No component was generated once the gap was detected.
+    assert gateway.requests == []
+
+
+async def test_call_build_agent_passes_each_components_own_assigned_requirement_ids():
+    """Each component call must carry only the requirement IDs its own
+    architecture bullet mentions (deterministically extracted, not left to
+    the model to re-infer from the full requirements list every time)."""
+
+    registry = AgentToolRegistry()
+    gateway = _StreamingAgentGateway(
+        texts_by_component={
+            "Ticket Classifier Agent": "```python\n# agent: Ticket Classifier Agent\nclassifier code\n```",
+            "Resolution Drafter Agent": "```python\n# agent: Resolution Drafter Agent\ndrafter code\n```",
+            "Support Triage Orchestrator Agent": "```python\n# agent: orchestrator\norchestrator code\n```",
+            "ui": "```tsx\n// agent: ui\nui code\n```",
+        }
+    )
+    governance_service = _RecordingGovernanceService()
+    register_orchestrator_delegation_tools(
+        registry, agent_gateway=gateway, governance_service=governance_service
+    )
+    context = ToolCallContext(
+        agent=_orchestrator_agent(),
+        session_id="session-1",
+        trace_id="run-1:build-solution",
+    )
+
+    await registry.execute(
+        agent_id="genie-orchestrator",
+        tool_name="call_build_agent",
+        arguments={
+            "requirements": "REQ-001: pick a category. REQ-002: classify. "
+            "REQ-003: upload evidence. REQ-004: draft a resolution.",
+            "architecture": _ARCHITECTURE_WITH_REQUIREMENT_ASSIGNMENTS,
+            "policies": "",
+            "user_message": "",
+        },
+        context=context,
+    )
+
+    assigned_by_component = {
+        request.variables["component_name"]: request.variables["assigned_requirements"]
+        for request in gateway.requests
+    }
+    assert assigned_by_component["Ticket Classifier Agent"] == "REQ-001, REQ-002"
+    assert assigned_by_component["Resolution Drafter Agent"] == "REQ-004"
+    assert assigned_by_component["ui"] == "REQ-001, REQ-003"
+    # The Orchestrator's own bullet cites no requirement ID - it coordinates
+    # the specialists rather than implementing one itself.
+    assert "None explicitly assigned" in assigned_by_component["Support Triage Orchestrator Agent"]
+
