@@ -1,4 +1,5 @@
 """Unit tests for TestExecutionService (real sandboxed pytest execution)."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -9,6 +10,7 @@ from app.deploy_launch.test_execution_service import (
     TestExecutionService,
     extract_test_modules,
     has_pytest_discoverable_tests,
+    validate_real_action_tests,
 )
 
 _PASSING_TEST = """
@@ -224,3 +226,26 @@ async def test_run_tests_subprocess_does_not_leak_ambient_environment_secrets(
     assert result.success is True
     assert result.passed == 1
 
+
+def test_real_action_policy_rejects_mocks_and_tests_without_deployed_urls() -> None:
+    assert validate_real_action_tests(
+        [("from unittest.mock import patch\ndef test_req_001():\n    assert patch('app.run')")]
+    ) == (
+        "Acceptance tests contain a mock, patch, or interception library.",
+        "Acceptance tests do not reference MISSION_BACKEND_URL or MISSION_FRONTEND_URL.",
+    )
+
+
+def test_real_action_policy_accepts_black_box_test_using_deployed_url() -> None:
+    reasons = validate_real_action_tests(
+        [
+            (
+                "import os\nimport httpx\n"
+                "def test_req_001_live_health():\n"
+                "    response = httpx.get(os.environ['MISSION_BACKEND_URL'] + '/health')\n"
+                "    assert response.status_code == 200"
+            )
+        ]
+    )
+
+    assert reasons == ()

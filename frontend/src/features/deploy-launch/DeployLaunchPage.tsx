@@ -60,8 +60,8 @@ const STEP_WORKING_LABELS: Record<DeploymentStepId, string> = {
   "deploy-backend-service": "Genie is working with the Orchestrator to deploy your backend service...",
   "sync-frontend-integration": "Genie is wiring your frontend to the newly deployed backend...",
   "deploy-frontend-app": "Genie is publishing your frontend application...",
-  "generate-test-suite": "Genie is deriving acceptance tests from every approved requirement...",
-  "execute-test-suite": "Genie is verifying 100% requirement fidelity before deployment...",
+  "generate-test-suite": "Genie is deriving live acceptance tests from every approved requirement...",
+  "execute-test-suite": "Genie is exercising the real deployed prototype before launch...",
   "run-security-scan": "Genie is scanning your backend and frontend for security issues...",
   "launch-mission": "Genie is minting your customer-facing launch link...",
 };

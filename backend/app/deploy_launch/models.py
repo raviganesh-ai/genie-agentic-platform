@@ -15,6 +15,7 @@ providers Genie's own infrastructure needs registered - a Phase 10
 concern). This package deploys one customer *mission's generated build*,
 long after Genie itself is already running.
 """
+
 from __future__ import annotations
 
 from datetime import UTC, datetime
@@ -54,12 +55,12 @@ DeploymentStepId = Literal[
 # in this exact order, each with a meaningful customer-facing name.
 DEPLOYMENT_STEP_ORDER: tuple[DeploymentStepId, ...] = (
     "generate-access-policy",
-    "generate-test-suite",
-    "execute-test-suite",
     "provision-foundry-agents",
     "deploy-backend-service",
     "sync-frontend-integration",
     "deploy-frontend-app",
+    "generate-test-suite",
+    "execute-test-suite",
     "run-security-scan",
     "launch-mission",
 )
@@ -137,8 +138,12 @@ class MissionIdentityInfo(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    identity_name: str = Field(min_length=1, description="Azure resource name of the managed identity")
-    identity_principal_id: str = Field(min_length=1, description="Azure AD principal ID (object ID)")
+    identity_name: str = Field(
+        min_length=1, description="Azure resource name of the managed identity"
+    )
+    identity_principal_id: str = Field(
+        min_length=1, description="Azure AD principal ID (object ID)"
+    )
     identity_client_id: str = Field(min_length=1, description="Managed identity client ID (app ID)")
     identity_resource_id: str = Field(min_length=1, description="Full Azure resource ID")
     assigned_at: datetime = Field(default_factory=lambda: datetime.now(UTC))

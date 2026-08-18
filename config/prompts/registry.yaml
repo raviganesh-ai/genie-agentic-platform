@@ -369,6 +369,10 @@ prompts:
         example, REQ-001 requires `test_req_001_<behavior>`. That test must
         assert the requirement's real acceptance behavior. Comments,
         docstrings, and narrative mentions never count as coverage.
+      - acceptance tests must exercise the real deployed prototype through
+        `MISSION_BACKEND_URL` and/or `MISSION_FRONTEND_URL` environment
+        variables. Never use mocks, patches, monkeypatch, response
+        interceptors, fabricated responses, or static/literal assertions.
 
       Separately, write the UI tests (Vitest/React Testing Library for the
       TypeScript/React screen) as their own fenced ```tsx code block. UI
@@ -410,7 +414,7 @@ prompts:
       - artifact
       - requirements
       - user_message
-    version: "1.4.0"
+    version: "1.5.0"
 
   - id: failure-diagnosis-v1
     name: Failure Diagnosis

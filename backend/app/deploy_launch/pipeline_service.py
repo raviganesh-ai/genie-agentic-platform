@@ -13,10 +13,11 @@ pipeline's own ``generate-test-suite`` step: it calls the Test Generation
 Agent directly (``AgentOrchestrator.execute_agent`` - the same
 outside-any-workflow-step execution path Workshop's per-component
 "Regenerate" action already uses) against the approved requirements and
-materialized build. ``execute-test-suite`` runs those tests before Azure
-deployment; failures trigger a bounded fresh build regeneration and retest,
-and the pipeline fails closed if 100% requirement coverage and passing
-evidence are not achieved before the repair budget is exhausted.
+real deployed mission URLs. ``execute-test-suite`` exercises that deployed
+prototype before Launch; failures trigger a bounded fresh build regeneration,
+redeployment, and retest, and the pipeline fails closed if 100% requirement
+coverage and passing evidence are not achieved before the repair budget is
+exhausted.
 
 Genie's Deploy & Launch stage has exactly one gate: the human clicking
 Start. There is no separate approval-checkpoint request/decide dance -
@@ -33,6 +34,7 @@ observe progress by polling ``get_run``/``list_runs_for_session`` (or the
 live ``WorkflowEventBus`` stream) - never by relying on ``start()`` itself
 to have finished the work.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -83,6 +85,7 @@ from app.deploy_launch.test_execution_service import (
     TestExecutionService,
     extract_test_modules,
     has_pytest_discoverable_tests,
+    validate_real_action_tests,
 )
 from app.models.workflow_models import WorkflowRunResult, WorkflowStepInput
 from app.models.workflow_stream_models import WorkflowStreamEvent, WorkflowStreamEventType
@@ -108,6 +111,7 @@ _PIPELINE_AGENT_ID: Final = "deploy-launch-pipeline"
 def _slugify(value: str) -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", value.strip().lower()).strip("-")
     return slug or "mission"
+
 
 _FRONTEND_INDEX_HTML_TEMPLATE = """<!doctype html>
 <html lang="en">
@@ -1261,7 +1265,9 @@ class DeploymentPipelineService:
             )
         )
         self._background_tasks[pipeline_run.id] = task
-        task.add_done_callback(lambda _task, _id=pipeline_run.id: self._background_tasks.pop(_id, None))
+        task.add_done_callback(
+            lambda _task, _id=pipeline_run.id: self._background_tasks.pop(_id, None)
+        )
 
         return pipeline_run
 
@@ -1296,7 +1302,7 @@ class DeploymentPipelineService:
         exception is never re-raised anywhere (there is no caller left to
         catch it), so every failure must already have been recorded on the
         run/step themselves before this returns.
-        
+
         If ``resume_from_step`` is provided, only steps from that point onward
         are executed, allowing recovery from a failed step without re-running
         prior completed steps."""
@@ -1338,7 +1344,9 @@ class DeploymentPipelineService:
             except _RequirementFidelityRepairNeeded as exc:
                 report = pipeline_run.fidelity_report
                 if report is None:
-                    self._fail_run(pipeline_run, error="Requirement fidelity report is unavailable.")
+                    self._fail_run(
+                        pipeline_run, error="Requirement fidelity report is unavailable."
+                    )
                     return
                 pipeline_run.fidelity_report = report.model_copy(
                     update={
@@ -1364,7 +1372,7 @@ class DeploymentPipelineService:
                     pipeline_run.updated_at = datetime.now(UTC)
                     return
                 pipeline_run.launch_url = None
-                next_step = "generate-test-suite"
+                next_step = "provision-foundry-agents"
             except Exception:  # noqa: BLE001 - top-level background-task boundary; every
                 # failure must resolve the run's status here since there is no
                 # synchronous caller left to catch/report it (see the docstring above).
@@ -1517,7 +1525,10 @@ class DeploymentPipelineService:
         # falling back to a real resume.
         for attempt in range(self._upstream_grace_check_attempts):
             if all(
-                [await self._step_completed(run, step_id, trace_id=trace_id) for step_id in required_step_ids]
+                [
+                    await self._step_completed(run, step_id, trace_id=trace_id)
+                    for step_id in required_step_ids
+                ]
             ):
                 return run
             if attempt < self._upstream_grace_check_attempts - 1:
@@ -1550,7 +1561,8 @@ class DeploymentPipelineService:
         # very first pipeline step records an actionable message pointing at
         # the real blocker (the resumed run's own `status`/`detail`).
         resumed_completed = [
-            await self._step_completed(resumed, step_id, trace_id=trace_id) for step_id in required_step_ids
+            await self._step_completed(resumed, step_id, trace_id=trace_id)
+            for step_id in required_step_ids
         ]
         if not all(resumed_completed):
             raise UnknownWorkflowRunError(
@@ -1576,9 +1588,7 @@ class DeploymentPipelineService:
             f"Workflow step '{step_id}' has not completed for run '{run.workflow_run_id}'."
         )
 
-    async def _get_approved_requirements(
-        self, run: WorkflowRunResult, *, trace_id: str
-    ) -> str:
+    async def _get_approved_requirements(self, run: WorkflowRunResult, *, trace_id: str) -> str:
         architecture_step = next(
             (result for result in run.step_results if result.step_id == self._architecture_step_id),
             None,
@@ -1589,9 +1599,7 @@ class DeploymentPipelineService:
             )
             if approved_requirements:
                 return approved_requirements
-        return await self._get_step_output(
-            run, self._requirements_step_id, trace_id=trace_id
-        )
+        return await self._get_step_output(run, self._requirements_step_id, trace_id=trace_id)
 
     async def _repair_prototype(
         self,
@@ -1650,7 +1658,7 @@ class DeploymentPipelineService:
         resume_from_step: str | None = None,
     ) -> None:
         """Executes the deployment pipeline steps in order.
-        
+
         If ``resume_from_step`` is provided, only executes from that step onward,
         skipping already-completed prior steps. All steps after the resume point
         are reset to "not-started" status.
@@ -1712,7 +1720,9 @@ class DeploymentPipelineService:
                         ProvisionedAgentStatus(agent_name=name, status="running")
                         for name in agent_names
                     ]
-                    step_result.detail = f"Deploying agent 1 of {len(agent_names)} to Azure AI Foundry..."
+                    step_result.detail = (
+                        f"Deploying agent 1 of {len(agent_names)} to Azure AI Foundry..."
+                    )
 
                     async def _on_agent_provisioned(
                         record: ProvisionedMissionAgent,
@@ -1782,7 +1792,8 @@ class DeploymentPipelineService:
 
                     mission_identity_resource_id = (
                         pipeline_run.access_policy.mission_identity.identity_resource_id
-                        if pipeline_run.access_policy and pipeline_run.access_policy.mission_identity
+                        if pipeline_run.access_policy
+                        and pipeline_run.access_policy.mission_identity
                         else None
                     )
                     backend_result = await self._backend_deployment_service.deploy(
@@ -1804,7 +1815,9 @@ class DeploymentPipelineService:
                         materialized.ui_component or "", encoding="utf-8"
                     )
                     (frontend_root / "index.html").write_text(
-                        _FRONTEND_INDEX_HTML_TEMPLATE.format(mission_title=html.escape(mission_title)),
+                        _FRONTEND_INDEX_HTML_TEMPLATE.format(
+                            mission_title=html.escape(mission_title)
+                        ),
                         encoding="utf-8",
                     )
                     (frontend_root / "package.json").write_text(
@@ -1889,28 +1902,19 @@ class DeploymentPipelineService:
                             "contains no REQ IDs. Re-run Requirement Discovery and approve "
                             "the resulting requirements before deployment."
                         )
-                    materialized = materialize_build(build_output_text)
-                    preflight_agent_names = {
-                        name: name for name in materialized.agent_modules
-                    }
-                    preflight_agent_names["orchestrator"] = "orchestrator"
-                    preflight_scaffold = generate_backend_service_scaffold(
-                        mission_title=mission_title,
-                        orchestrator_agent_name="orchestrator",
-                        agent_foundry_names=preflight_agent_names,
-                    )
-                    materialized.write_to_directory(
-                        backend_root,
-                        backend_service_scaffold=preflight_scaffold,
-                    )
-                    self._materialized_builds[pipeline_run.id] = materialized
                     generation_result = await self._orchestrator.execute_agent(
                         agent_id="test-generation-agent",
                         prompt_id="test-generation-v1",
                         variables={
                             "artifact": build_output_text,
                             "requirements": requirements_text,
-                            "user_message": "",
+                            "user_message": (
+                                "Generate black-box acceptance tests against the real deployed "
+                                "prototype. Read its URLs only from MISSION_BACKEND_URL and "
+                                "MISSION_FRONTEND_URL environment variables. Exercise real HTTP "
+                                "behavior. Do not use mocks, patches, monkeypatch, response "
+                                "interceptors, fabricated responses, or static assertions."
+                            ),
                         },
                         session_id=pipeline_run.session_id,
                         trace_id=pipeline_run.id,
@@ -1980,9 +1984,16 @@ class DeploymentPipelineService:
                             "Generated test suite does not cover every approved requirement; "
                             "missing requirement ids: " + ", ".join(missing_test_ids)
                         )
+                    if pipeline_run.backend_url and pipeline_run.backend_url.startswith("https://"):
+                        real_action_errors = validate_real_action_tests(modules)
+                        if real_action_errors:
+                            raise DeploymentPipelineStepFailedError(
+                                "Generated acceptance tests are not real-action tests: "
+                                + " ".join(real_action_errors)
+                            )
                     detail = (
                         f"Generated {len(modules)} requirement acceptance test module(s) "
-                        "for the isolated pre-deployment build."
+                        "for the real deployed prototype."
                     )
 
                 elif step_id == "execute-test-suite":
@@ -1992,10 +2003,15 @@ class DeploymentPipelineService:
                     modules = extract_test_modules(test_output_text)
                     step_result.detail = (
                         f"Running {len(modules)} generated test module(s) with pytest against the "
-                        "isolated pre-deployment build (up to 2 minutes)..."
+                        "real deployed prototype (up to 2 minutes)..."
                     )
                     test_result = await self._test_execution_service.run_tests(
-                        build_root=backend_root, test_output_text=test_output_text
+                        build_root=backend_root,
+                        test_output_text=test_output_text,
+                        runtime_environment={
+                            "MISSION_BACKEND_URL": pipeline_run.backend_url or "",
+                            "MISSION_FRONTEND_URL": pipeline_run.frontend_url or "",
+                        },
                     )
                     pipeline_run.test_summary = test_result.summary
                     # ``success`` fails closed even when pytest itself exits 0
@@ -2044,7 +2060,10 @@ class DeploymentPipelineService:
                         step_result.error = scan_result.summary
                         step_result.completed_at = datetime.now(UTC)
                         await self._publish(
-                            pipeline_run, step_id=step_id, event_type="step_failed", error=scan_result.summary
+                            pipeline_run,
+                            step_id=step_id,
+                            event_type="step_failed",
+                            error=scan_result.summary,
                         )
                         raise DeploymentPipelineStepFailedError(
                             f"Security scan found blocking findings: {scan_result.summary}"
@@ -2103,7 +2122,9 @@ class DeploymentPipelineService:
                 step_result.status = "failed"
                 step_result.error = str(exc)
                 step_result.completed_at = datetime.now(UTC)
-                await self._publish(pipeline_run, step_id=step_id, event_type="step_failed", error=str(exc))
+                await self._publish(
+                    pipeline_run, step_id=step_id, event_type="step_failed", error=str(exc)
+                )
                 raise
 
             step_result.status = "completed"
@@ -2113,7 +2134,9 @@ class DeploymentPipelineService:
                 pipeline_run, step_id=step_id, event_type="step_completed", output_preview=detail
             )
 
-    def _step_result(self, pipeline_run: DeploymentPipelineRun, step_id: DeploymentStepId) -> DeploymentStepResult:
+    def _step_result(
+        self, pipeline_run: DeploymentPipelineRun, step_id: DeploymentStepId
+    ) -> DeploymentStepResult:
         return next(step for step in pipeline_run.steps if step.step_id == step_id)
 
     async def _publish(

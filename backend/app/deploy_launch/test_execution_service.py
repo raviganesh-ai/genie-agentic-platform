@@ -15,6 +15,7 @@ through), a bounded timeout, and its own dedicated working directory, so an
 untrusted/LLM-generated test suite can never read this process's secrets
 or escape its sandbox directory.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -42,6 +43,10 @@ _PYTEST_FUNCTION_PATTERN: Final = re.compile(r"^\s*def\s+test_[A-Za-z0-9_]+\s*\(
 _PYTEST_CLASS_PATTERN: Final = re.compile(r"^\s*class\s+Test[A-Za-z0-9_]*\s*[(:]", re.MULTILINE)
 _PYTEST_RAN_MARKER: Final = re.compile(r"in \d+\.\d+s")
 _DEFAULT_TIMEOUT_SECONDS: Final = 120
+_TEST_DOUBLE_PATTERN: Final = re.compile(
+    r"\b(?:unittest\.mock|MagicMock|Mock\s*\(|patch\s*\(|monkeypatch\b|respx\b|responses\b)"
+)
+_RUNTIME_URL_NAMES: Final = ("MISSION_BACKEND_URL", "MISSION_FRONTEND_URL")
 
 
 def extract_test_modules(output_text: str) -> list[str]:
@@ -61,6 +66,20 @@ def has_pytest_discoverable_tests(modules: list[str]) -> bool:
         _PYTEST_FUNCTION_PATTERN.search(module) or _PYTEST_CLASS_PATTERN.search(module)
         for module in modules
     )
+
+
+def validate_real_action_tests(modules: list[str]) -> tuple[str, ...]:
+    """Returns fail-closed reasons when live acceptance tests use doubles or no live URL."""
+
+    combined = "\n".join(modules)
+    reasons: list[str] = []
+    if _TEST_DOUBLE_PATTERN.search(combined):
+        reasons.append("Acceptance tests contain a mock, patch, or interception library.")
+    if not any(name in combined for name in _RUNTIME_URL_NAMES):
+        reasons.append(
+            "Acceptance tests do not reference MISSION_BACKEND_URL or MISSION_FRONTEND_URL."
+        )
+    return tuple(reasons)
 
 
 @dataclass(frozen=True)
@@ -100,7 +119,13 @@ class TestExecutionService:
     def __init__(self, *, timeout_seconds: int = _DEFAULT_TIMEOUT_SECONDS) -> None:
         self._timeout_seconds = timeout_seconds
 
-    async def run_tests(self, *, build_root: Path, test_output_text: str) -> TestExecutionResult:
+    async def run_tests(
+        self,
+        *,
+        build_root: Path,
+        test_output_text: str,
+        runtime_environment: dict[str, str] | None = None,
+    ) -> TestExecutionResult:
         """Writes ``test_output_text``'s fenced test modules into ``build_root``/tests
         and actually executes them with pytest in a sandboxed subprocess."""
 
@@ -121,6 +146,7 @@ class TestExecutionService:
         env = {"PATH": os.environ.get("PATH", "")}
         if sys.platform == "win32":
             env["SYSTEMROOT"] = os.environ.get("SYSTEMROOT", "")
+        env.update(runtime_environment or {})
 
         junit_path = tests_dir / "pytest-results.xml"
         process = await asyncio.create_subprocess_exec(
@@ -136,9 +162,7 @@ class TestExecutionService:
             stderr=asyncio.subprocess.STDOUT,
         )
         try:
-            stdout, _ = await asyncio.wait_for(
-                process.communicate(), timeout=self._timeout_seconds
-            )
+            stdout, _ = await asyncio.wait_for(process.communicate(), timeout=self._timeout_seconds)
         except TimeoutError:
             # A hanging generated test must never be left running as an
             # orphaned subprocess after this reports back to the caller.

@@ -14,12 +14,12 @@ export type DeploymentStepId =
 /** Ordered pipeline - mirrors `DEPLOYMENT_STEP_ORDER`/`DEPLOYMENT_STEP_NAMES`. */
 export const DEPLOYMENT_STEP_ORDER: DeploymentStepId[] = [
   "generate-access-policy",
-  "generate-test-suite",
-  "execute-test-suite",
   "provision-foundry-agents",
   "deploy-backend-service",
   "sync-frontend-integration",
   "deploy-frontend-app",
+  "generate-test-suite",
+  "execute-test-suite",
   "run-security-scan",
   "launch-mission",
 ];
