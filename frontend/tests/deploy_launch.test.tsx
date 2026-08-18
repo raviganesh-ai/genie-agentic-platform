@@ -149,7 +149,10 @@ describe("DeployLaunchPage", () => {
     });
 
     expect(await screen.findByText("Requirement Fidelity Gate")).toBeInTheDocument();
-    expect(screen.getAllByText("50%")).toHaveLength(2);
+    // Use findAllByText (retries) rather than getAllByText (synchronous) -
+    // the coverage/pass percent metrics can render a tick after the
+    // section title under CI's heavier scheduling contention.
+    expect(await screen.findAllByText("50%")).toHaveLength(2);
     expect(screen.getByText("REQ-002")).toBeInTheDocument();
     expect(screen.getByText(/Launch blocked by requirement gaps/i)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^Launch$/i })).not.toBeInTheDocument();
