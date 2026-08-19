@@ -685,18 +685,28 @@ prompts:
       single generic catch-all textarea when the architecture describes
       concrete, enumerable, or bounded fields.
 
-      FILE UPLOAD VALIDATION - never require, validate, or gate the submit
+      FILE UPLOAD VALIDATION - Genie generates prototypes, so an upload
+      zone must accept the general TYPE of file, never one exact literal
+      file, name, or path. Never require, validate, or gate the submit
       button on an uploaded file's exact literal NAME (e.g. rejecting or
       refusing to run unless `file.name === "some_specific_name.json"`).
       A requirement or business document that mentions an example file
-      name describes what one real user's file might be called, not a
-      strict filename contract - a real user's file will almost never be
-      named exactly that, and rejecting it makes the prototype untestable.
-      Accept any file the user provides (checked only by extension/MIME
-      type when the mission genuinely needs a specific format, never by
-      exact name) and read its actual content via `File.text()`. Disable
-      the submit button only when the upload is genuinely missing/empty,
-      never because the chosen file's name differs from an example name.
+      name (e.g. "blind_mqm_n30_package.json") describes what one real
+      user's file might be called, never a strict filename contract - copy
+      that literal example name into a label/placeholder/dropzone message
+      is exactly as wrong as validating against it, because a real user's
+      own file will almost never be named that, and both make the
+      prototype impossible to test. Instead: identify the general file
+      TYPE the mission needs (its format/extension - JSON, CSV, PDF,
+      image, etc.) from the requirement, describe the upload zone by that
+      type in every visible label/instruction (e.g. "Upload the challenge
+      package (.json file)", never "Upload blind_mqm_n30_package.json"),
+      and set the `<input type="file">`'s `accept` attribute to that
+      type's extension/MIME list so the file picker itself only surfaces
+      matching files. Accept any file of that type the user provides and
+      read its actual content via `File.text()`. Disable the submit
+      button only when the upload is genuinely missing/empty, never
+      because the chosen file's name differs from an example name.
 
       REQUIRED VS OPTIONAL - never leave the user guessing which fields
       they must fill in: append a literal " *" to the `<label>`/`<legend>`
@@ -823,7 +833,7 @@ prompts:
       - policies
       - excluded_agents
       - user_message
-    version: "5.13.2"
+    version: "5.13.3"
 
   - id: build-generation-component-v1
     name: Build Generation - Single Component
@@ -961,18 +971,28 @@ prompts:
       when the architecture describes concrete, enumerable, or bounded
       fields. Never call any agent directly.
 
-      FILE UPLOAD VALIDATION - never require, validate, or gate the submit
+      FILE UPLOAD VALIDATION - Genie generates prototypes, so an upload
+      zone must accept the general TYPE of file, never one exact literal
+      file, name, or path. Never require, validate, or gate the submit
       button on an uploaded file's exact literal NAME (e.g. rejecting or
       refusing to run unless `file.name === "some_specific_name.json"`).
       A requirement or business document that mentions an example file
-      name describes what one real user's file might be called, not a
-      strict filename contract - a real user's file will almost never be
-      named exactly that, and rejecting it makes the prototype untestable.
-      Accept any file the user provides (checked only by extension/MIME
-      type when the mission genuinely needs a specific format, never by
-      exact name) and read its actual content via `File.text()`. Disable
-      the submit button only when the upload is genuinely missing/empty,
-      never because the chosen file's name differs from an example name.
+      name (e.g. "blind_mqm_n30_package.json") describes what one real
+      user's file might be called, never a strict filename contract - copy
+      that literal example name into a label/placeholder/dropzone message
+      is exactly as wrong as validating against it, because a real user's
+      own file will almost never be named that, and both make the
+      prototype impossible to test. Instead: identify the general file
+      TYPE the mission needs (its format/extension - JSON, CSV, PDF,
+      image, etc.) from the requirement, describe the upload zone by that
+      type in every visible label/instruction (e.g. "Upload the challenge
+      package (.json file)", never "Upload blind_mqm_n30_package.json"),
+      and set the `<input type="file">`'s `accept` attribute to that
+      type's extension/MIME list so the file picker itself only surfaces
+      matching files. Accept any file of that type the user provides and
+      read its actual content via `File.text()`. Disable the submit
+      button only when the upload is genuinely missing/empty, never
+      because the chosen file's name differs from an example name.
 
       REQUIRED VS OPTIONAL - never leave the user guessing which fields
       they must fill in: append a literal " *" to the `<label>`/`<legend>`
@@ -1074,7 +1094,7 @@ prompts:
       - component_name
       - user_message
       - assigned_requirements
-    version: "1.16.2"
+    version: "1.16.3"
 
   - id: build-component-regeneration-v1
     name: Build Generation - Regenerate Single Component

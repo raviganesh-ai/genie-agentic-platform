@@ -106,6 +106,27 @@ def test_control_selection_rules_are_explicit_and_consistent_across_ui_prompts()
     assert 'type="checkbox">` (multi-select' in build_component_v1
 
 
+def test_ui_prompts_forbid_binding_file_uploads_to_one_exact_literal_name():
+    """Regression guard for a live "blind MQM n30" mission whose generated
+    Mission Input form required a file uploaded exactly named
+    "blind_mqm_n30_package.json" - the requirement's own example filename
+    was taken as a strict validation contract, so any real file a tester
+    actually had was rejected and the submit button stayed disabled
+    forever, making the prototype untestable. Both UI-generation prompts
+    must instruct the Build Agent to describe/accept an uploaded file by
+    its general TYPE (extension/MIME), never by one exact literal name, in
+    both validation logic and visible label/help copy.
+    """
+    registry = PromptRegistry.load(_REPO_CONFIG_ROOT / "prompts")
+
+    for prompt_id in ("build-generation-v1", "build-generation-component-v1"):
+        template = " ".join(registry.get(prompt_id).template.split())
+        assert "FILE UPLOAD VALIDATION" in template
+        assert "never one exact literal file, name, or path" in template
+        assert "never a strict filename contract" in template
+        assert "accept` attribute to that type's extension/MIME list" in template
+
+
 def test_all_generation_prompts_preserve_every_approved_requirement_id():
     registry = PromptRegistry.load(_REPO_CONFIG_ROOT / "prompts")
 
