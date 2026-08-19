@@ -605,7 +605,8 @@ prompts:
       This is this mission's single entry point that invokes specialist
       agents via their own already-provisioned Foundry agent names
       (looked up via `AGENT_FOUNDRY_NAMES`). Its public entry point is
-      `async def run(self, ui_message: str)`, called by this mission's own
+      `async def run(self, ui_message: str, on_progress: Callable[[str],
+      Awaitable[None]] | None = None)`, called by this mission's own
       backend proxy with the JSON-encoded string the UI's submit handler
       composes (see the UI generation instructions below) - always parse
       it via `config = json.loads(ui_message)` first to obtain every
@@ -619,6 +620,22 @@ prompts:
       a short human-readable "summary" string describing what happened.
       An output artifact location (if any) is one more field alongside
       the real results, never a substitute for them.
+
+      LIVE HAND-OFF NARRATION - `on_progress` is how the mission UI's
+      Agent Pipeline panel actually lights up node by node WHILE the
+      pipeline runs, instead of jumping straight from all-pending to
+      all-complete only once the whole run has already finished (the
+      panel detects which node is active by matching each specialist
+      agent's own exact display name inside the narration text streamed
+      so far). Immediately before calling each specialist agent's
+      `FunctionTool` in sequence, if `on_progress` is not `None`, `await`
+      it with a short string containing that agent's name EXACTLY as it
+      appears in the "## Multi-Agent Workflow" section (e.g. "Handing off
+      to <Agent name>..."), and again right after that call returns (e.g.
+      "<Agent name> completed."). Never skip this for any agent, never
+      paraphrase/abbreviate an agent's name in the narration, and never
+      call `on_progress` for the Orchestrator itself (it is not one of
+      the specialist nodes shown in that panel).
 
       UPLOADED FILE ACCESS - never hardcode or assume one specific literal
       file name for an uploaded attachment: this mission's backend proxy
@@ -833,7 +850,7 @@ prompts:
       - policies
       - excluded_agents
       - user_message
-    version: "5.13.3"
+    version: "5.14.0"
 
   - id: build-generation-component-v1
     name: Build Generation - Single Component
@@ -912,7 +929,8 @@ prompts:
       mission's single entry point that invokes specialist agents via
       Foundry agent names (looked up via `AGENT_FOUNDRY_NAMES`). Never
       hardcode a literal name. Its public entry point is `async def
-      run(self, ui_message: str)`, called by this mission's own backend
+      run(self, ui_message: str, on_progress: Callable[[str],
+      Awaitable[None]] | None = None)`, called by this mission's own backend
       proxy with the JSON-encoded string the UI's submit handler composes
       - always parse it via `config = json.loads(ui_message)` first to
       obtain every field the user submitted, never assume a plain-text/
@@ -925,6 +943,20 @@ prompts:
       produces) plus a short human-readable "summary" string describing
       what happened. An output artifact location (if any) is one more
       field alongside the real results, never a substitute for them.
+      LIVE HAND-OFF NARRATION - `on_progress` is how the mission UI's
+      Agent Pipeline panel actually lights up node by node WHILE the
+      pipeline runs, instead of jumping straight from all-pending to
+      all-complete only once the whole run has already finished (the
+      panel detects which node is active by matching each specialist
+      agent's own exact display name inside the narration text streamed
+      so far). Immediately before calling each specialist agent's
+      `FunctionTool` in sequence, if `on_progress` is not `None`, `await`
+      it with a short string containing that agent's name EXACTLY as it
+      appears in the "## Multi-Agent Workflow" section (e.g. "Handing off
+      to <Agent name>..."), and again right after that call returns (e.g.
+      "<Agent name> completed."). Never skip this for any agent, never
+      paraphrase/abbreviate an agent's name in the narration, and never
+      call `on_progress` for the Orchestrator itself.
       UPLOADED FILE ACCESS - never hardcode or assume one specific literal
       file name for an uploaded attachment: this mission's backend proxy
       persists every uploaded file's full content to `FACTORY_WORKING_DIR`
@@ -1094,7 +1126,7 @@ prompts:
       - component_name
       - user_message
       - assigned_requirements
-    version: "1.16.3"
+    version: "1.17.0"
 
   - id: build-component-regeneration-v1
     name: Build Generation - Regenerate Single Component

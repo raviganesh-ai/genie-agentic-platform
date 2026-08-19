@@ -127,6 +127,29 @@ def test_ui_prompts_forbid_binding_file_uploads_to_one_exact_literal_name():
         assert "accept` attribute to that type's extension/MIME list" in template
 
 
+def test_orchestrator_prompts_require_live_on_progress_hand_off_narration():
+    """Regression guard: a live "blind MQM" mission's Agent Pipeline panel
+    never visibly animated - the generated Orchestrator's `run()` awaited
+    the entire multi-agent pipeline in one blocking call and only returned
+    its final result at the very end, so the mission UI received zero
+    signal while real work was happening and the panel just flashed from
+    all-pending to all-complete once everything was already done. Both
+    orchestrator-generation prompts must require an `on_progress` callback
+    parameter that is awaited with each specialist agent's own exact name
+    immediately before and after that agent is called, so the deployed
+    backend (see app.deploy_launch.code_materializer._stream_agent_response)
+    can relay real hand-off narration to the browser AS IT HAPPENS.
+    """
+    registry = PromptRegistry.load(_REPO_CONFIG_ROOT / "prompts")
+
+    for prompt_id in ("build-generation-v1", "build-generation-component-v1"):
+        template = " ".join(registry.get(prompt_id).template.split())
+        assert "on_progress: Callable[[str], Awaitable[None]] | None = None" in template
+        assert "LIVE HAND-OFF NARRATION" in template
+        assert "exactly as it appears in the" in template.lower() or "EXACTLY as it appears in the" in template
+        assert "never call `on_progress` for the orchestrator itself" in template.lower()
+
+
 def test_all_generation_prompts_preserve_every_approved_requirement_id():
     registry = PromptRegistry.load(_REPO_CONFIG_ROOT / "prompts")
 

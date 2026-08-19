@@ -176,10 +176,11 @@ Orchestrator Agent itself is never reachable directly from the browser.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from pathlib import Path
 
 from agent_framework.foundry import FoundryAgent
@@ -271,8 +272,17 @@ def _compose_message(request: InvokeRequest) -> str:
     return "\\n\\n".join([*sections, request.message])
 
 
-async def _run_orchestrator_pipeline(message: str) -> str | None:
+async def _run_orchestrator_pipeline(
+    message: str, *, on_progress: Callable[[str], Awaitable[None]] | None = None
+) -> str | None:
     """Runs this mission's real, deterministic Orchestrator pipeline.
+
+    ``on_progress``, when given, is forwarded to ``OrchestratorAgent.run``
+    so each specialist hand-off can be narrated to the caller AS IT
+    HAPPENS rather than only once the entire pipeline has finished (see
+    ``_stream_agent_response`` below, which is what makes the mission UI's
+    live Agent Pipeline animation actually light up node by node instead
+    of jumping straight from all-pending to all-complete).
 
     Returns the pipeline's own structured result as JSON text, or ``None``
     when this mission's Orchestrator cannot accept the submitted request
@@ -286,6 +296,11 @@ async def _run_orchestrator_pipeline(message: str) -> str | None:
     except ImportError:
         return None
     try:
+        result = await OrchestratorAgent().run(message, on_progress=on_progress)
+    except TypeError:
+        # An orchestrator generated before the on_progress contract (or one
+        # that never calls it) will not accept the keyword - run it without
+        # progress narration rather than failing the whole request.
         result = await OrchestratorAgent().run(message)
     except Exception:
         # The Orchestrator is generated code whose exact failure modes
@@ -341,16 +356,43 @@ async def _stream_agent_response(request: InvokeRequest) -> AsyncIterator[str]:
     ``{{"done": true, "output_text": "<full response>"}}`` once finished -
     lets the mission UI show the Orchestrator genuinely working in real
     time instead of waiting on one long blocking call. When this mission's
-    real, deterministic Orchestrator pipeline runs, its full result is
-    emitted as a single delta immediately followed by the done event (the
-    pipeline itself has no incremental token stream to relay).
+    real, deterministic Orchestrator pipeline runs, it is started as a
+    background task and its own ``on_progress`` hand-off narration
+    (e.g. "Handing off to <Agent Name>...") is relayed as its own delta
+    event THE MOMENT each specialist agent starts/finishes - never
+    buffered until the whole pipeline completes - so the mission UI's live
+    Agent Pipeline visualization can actually light up node by node while
+    real work is happening, not just flash from all-pending to
+    all-complete once the entire run is already done.
     """
     _check_attachment_size(request.attachments)
     _persist_attachments(request.attachments)
 
-    pipeline_output = await _run_orchestrator_pipeline(request.message)
+    progress_queue: asyncio.Queue[str | None] = asyncio.Queue()
+
+    async def _on_progress(narration: str) -> None:
+        await progress_queue.put(narration)
+
+    pipeline_result: dict[str, str | None] = {{"output": None}}
+
+    async def _run_pipeline() -> None:
+        try:
+            pipeline_result["output"] = await _run_orchestrator_pipeline(
+                request.message, on_progress=_on_progress
+            )
+        finally:
+            await progress_queue.put(None)
+
+    pipeline_task = asyncio.create_task(_run_pipeline())
+    while True:
+        narration = await progress_queue.get()
+        if narration is None:
+            break
+        yield "data: " + json.dumps(dict(delta=narration)) + "\\n\\n"
+    await pipeline_task
+
+    pipeline_output = pipeline_result["output"]
     if pipeline_output is not None:
-        yield "data: " + json.dumps(dict(delta=pipeline_output)) + "\\n\\n"
         yield "data: " + json.dumps(dict(done=True, output_text=pipeline_output)) + "\\n\\n"
         return
 
