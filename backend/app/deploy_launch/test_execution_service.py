@@ -42,6 +42,18 @@ _ERRORS_PATTERN: Final = re.compile(r"(\d+) error(?:s)?")
 _PYTEST_FUNCTION_PATTERN: Final = re.compile(r"^\s*def\s+test_[A-Za-z0-9_]+\s*\(", re.MULTILINE)
 _PYTEST_CLASS_PATTERN: Final = re.compile(r"^\s*class\s+Test[A-Za-z0-9_]*\s*[(:]", re.MULTILINE)
 _PYTEST_RAN_MARKER: Final = re.compile(r"in \d+\.\d+s")
+# Captures a module's own test function names so a module-level collection
+# error (see _MODULE_COLLECTION_ERROR_NAME below) can be attributed back to
+# the specific tests it would have contained.
+_TEST_FUNCTION_NAME_PATTERN: Final = re.compile(
+    r"^\s*(?:async\s+)?def\s+(test_[A-Za-z0-9_]+)\s*\(", re.MULTILINE
+)
+# pytest reports a module-level collection failure (bad import, syntax
+# error) as ONE synthetic <testcase> named after the FILE itself (e.g.
+# "test_generated_0", or "tests.test_generated_0" since run_tests() makes
+# "tests" a real package via __init__.py) - never the real test function(s)
+# that file was supposed to contain.
+_MODULE_COLLECTION_ERROR_NAME: Final = re.compile(r"(?:^|\.)test_generated_(\d+)$")
 _DEFAULT_TIMEOUT_SECONDS: Final = 120
 _TEST_DOUBLE_PATTERN: Final = re.compile(
     r"\b(?:unittest\.mock|MagicMock|Mock\s*\(|patch\s*\(|monkeypatch\b|respx\b|responses\b)"
@@ -179,7 +191,7 @@ class TestExecutionService:
             )
 
         raw_output = stdout.decode("utf-8", errors="replace")
-        outcomes = self._read_junit_outcomes(junit_path)
+        outcomes = self._read_junit_outcomes(junit_path, modules)
         return self._summarize(
             raw_output=raw_output,
             exit_code=process.returncode,
@@ -187,7 +199,7 @@ class TestExecutionService:
         )
 
     @staticmethod
-    def _read_junit_outcomes(junit_path: Path) -> dict[str, tuple[str, ...]]:
+    def _read_junit_outcomes(junit_path: Path, modules: list[str]) -> dict[str, tuple[str, ...]]:
         outcomes: dict[str, list[str]] = {
             "passed_test_names": [],
             "failed_test_names": [],
@@ -207,6 +219,19 @@ class TestExecutionService:
             test_name = test_case.attrib.get("name", "").strip()
             if not test_name:
                 continue
+            collection_error_match = _MODULE_COLLECTION_ERROR_NAME.search(test_name)
+            if collection_error_match and test_case.find("error") is not None:
+                # Without this, every requirement covered by this one broken
+                # module would wrongly read as "no JUnit result" (as if its
+                # test simply never ran) instead of the real, actionable
+                # "errored" outcome - because pytest never reports the real
+                # test function names for a module that failed to collect.
+                module_index = int(collection_error_match.group(1))
+                if 0 <= module_index < len(modules):
+                    outcomes["errored_test_names"].extend(
+                        _TEST_FUNCTION_NAME_PATTERN.findall(modules[module_index])
+                    )
+                    continue
             if test_case.find("failure") is not None:
                 outcomes["failed_test_names"].append(test_name)
             elif test_case.find("error") is not None:

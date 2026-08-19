@@ -255,6 +255,13 @@ async def test_run_tests_one_modules_collection_error_does_not_blank_out_the_oth
 
     assert result.ran is True
     assert result.passed_test_names == ("test_always_passes",)
+    # pytest reports a module collection failure as ONE synthetic testcase
+    # named after the FILE (e.g. "test_generated_0"), never the real
+    # `test_req_001_uses_an_uninstalled_package` function inside it - without
+    # mapping it back, the Requirement Fidelity Gate misreports this as "no
+    # JUnit result" (looks like the test never ran) instead of the real,
+    # actionable "errored" outcome.
+    assert result.errored_test_names == ("test_req_001_uses_an_uninstalled_package",)
 
 
 def test_real_action_policy_rejects_mocks_and_tests_without_deployed_urls() -> None:
