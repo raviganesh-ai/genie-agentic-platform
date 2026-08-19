@@ -673,6 +673,19 @@ prompts:
       CODE STRUCTURE - no noise:
       - imports: alphabetically sorted, React first, then third-party
       - state hooks (useState, useContext): grouped at top, one per field
+      - every derived/computed `const` (for example, a combined object you
+        pass into a `useCallback`/`useMemo` dependency array or use inside
+        a handler) MUST be declared textually ABOVE every hook or handler
+        that references it - JavaScript's temporal dead zone means a
+        `const` referenced before its own declaration line throws a real
+        `ReferenceError: Cannot access '<name>' before initialization` on
+        the component's very first render (a real, observed cause of a
+        generated prototype's UI failing to load at all), even though
+        nothing looks wrong reading the reference in isolation. Never
+        write a comment like "declared below to satisfy the dependency
+        array" - reorder the declarations instead so every name is fully
+        initialized before anything else in the same component references
+        it.
       - event handlers: alphabetical order by name
       - render sections: architecture order exactly, labeled with zone
         name/purpose
@@ -765,7 +778,7 @@ prompts:
       - policies
       - excluded_agents
       - user_message
-    version: "5.11.0"
+    version: "5.12.0"
 
   - id: build-generation-component-v1
     name: Build Generation - Single Component
@@ -902,6 +915,17 @@ prompts:
       (not just a post-submit error) the moment a required field is left
       empty after the user has interacted with the form.
 
+      DECLARATION ORDER - every derived/computed `const` (for example, a
+      combined object you pass into a `useCallback`/`useMemo` dependency
+      array or use inside a handler) MUST be declared textually ABOVE
+      every hook or handler that references it. JavaScript's temporal
+      dead zone means a `const` referenced before its own declaration
+      line throws a real `ReferenceError: Cannot access '<name>' before
+      initialization` on the component's very first render - a real,
+      observed cause of a generated prototype's UI failing to load at
+      all. Never write a comment like "declared below to satisfy the
+      dependency array" - reorder the declarations instead.
+
       COMPONENT CONTRACT - your default-exported component receives
       exactly one prop object: `{{ onSubmit: (message: string,
       attachments?: {{ name: string, content: string }}[]) => void }}`.
@@ -975,7 +999,7 @@ prompts:
       - component_name
       - user_message
       - assigned_requirements
-    version: "1.14.0"
+    version: "1.15.0"
 
   - id: build-component-regeneration-v1
     name: Build Generation - Regenerate Single Component
