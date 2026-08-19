@@ -597,7 +597,15 @@ prompts:
       composes (see the UI generation instructions below) - always parse
       it via `config = json.loads(ui_message)` first to obtain every
       field the user submitted, never assume a plain-text/free-form
-      message.
+      message. `run()` must return a JSON-serializable `dict` (never a
+      bare string, file path, or None) - this return value becomes the
+      ENTIRE end-user-visible output shown in this mission's own Mission
+      Queue, so it must contain the concrete results the specialist
+      agents actually produced (counts, verdicts, scores, decisions -
+      whatever this mission's business problem genuinely produces) plus
+      a short human-readable "summary" string describing what happened.
+      An output artifact location (if any) is one more field alongside
+      the real results, never a substitute for them.
 
       The Orchestrator's sequencing logic should DEMONSTRATE the "art of
       possibility": clearly show HOW it coordinates specialist agents to
@@ -747,7 +755,7 @@ prompts:
       - policies
       - excluded_agents
       - user_message
-    version: "5.9.0"
+    version: "5.10.0"
 
   - id: build-generation-component-v1
     name: Build Generation - Single Component
@@ -830,7 +838,15 @@ prompts:
       proxy with the JSON-encoded string the UI's submit handler composes
       - always parse it via `config = json.loads(ui_message)` first to
       obtain every field the user submitted, never assume a plain-text/
-      free-form message.
+      free-form message. `run()` must return a JSON-serializable `dict`
+      (never a bare string, file path, or None) - this return value
+      becomes the ENTIRE end-user-visible output shown in this mission's
+      own Mission Queue, so it must contain the concrete results the
+      specialist agents actually produced (counts, verdicts, scores,
+      decisions - whatever this mission's business problem genuinely
+      produces) plus a short human-readable "summary" string describing
+      what happened. An output artifact location (if any) is one more
+      field alongside the real results, never a substitute for them.
       Include a comment: "Once deployed to Azure AI Foundry, this
       Orchestrator Agent is reachable only through this mission's own
       backend service - never directly from the browser."
@@ -939,7 +955,7 @@ prompts:
       - component_name
       - user_message
       - assigned_requirements
-    version: "1.12.0"
+    version: "1.13.0"
 
   - id: build-component-regeneration-v1
     name: Build Generation - Regenerate Single Component
