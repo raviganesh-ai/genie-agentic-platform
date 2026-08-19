@@ -12,11 +12,12 @@ structural pause with no ApprovalService involved at all - see
 ``_enforce_human_proceed_gate``, used by Genie's own Requirements ->
 Architecture -> Code mission stages). Contains no agent reasoning: every
 step's actual execution is delegated to ``WorkflowStepExecutor`` ->
-``AgentGateway`` (``AzureAgentGateway`` in production). A step that fails
-with a retryable ``FoundryUnavailableError`` is automatically retried a
-few times (see ``_execute_step_with_automatic_retries``/``_MAX_STEP_RETRIES``)
-before being surfaced as a "failed" step eligible for the existing MANUAL
-retry path (a caller resuming this same ``workflow_run_id``).
+``AgentGateway`` (``AzureAgentGateway`` in production). A step runs exactly
+once per call - any ``FoundryUnavailableError`` (a real outage, a content
+fidelity rejection, ...) surfaces immediately as a "failed" step rather
+than silently retrying in a loop, and remains eligible for the existing
+MANUAL retry path (a caller resuming this same ``workflow_run_id``) - see
+``_execute_step_with_automatic_retries``/``_MAX_STEP_RETRIES``.
 """
 from __future__ import annotations
 
@@ -38,16 +39,15 @@ from app.workflows.registry import WorkflowRegistry
 
 __all__ = ["ApprovalCapabilityMissingError", "UnknownWorkflowError", "WorkflowRuntime"]
 
-# A step that fails with a retryable ``FoundryUnavailableError`` (a transient
-# Foundry-side hiccup - model hallucination, malformed tool call, a real
-# outage, ...) is automatically retried this many times (in addition to the
-# original attempt - i.e. up to 4 attempts total) before being surfaced to
-# the caller as a genuinely "failed" step. Only once every automatic attempt
-# has failed does the run become eligible for the existing MANUAL retry path
-# (resume_workflow), which lets a human fix whatever underlying issue caused
-# every automatic attempt to fail (bad input, a real prolonged outage, ...)
-# before trying again.
-_MAX_STEP_RETRIES = 3
+# Kept at 0 (no automatic retries): a step that fails - including a
+# retryable-shaped ``FoundryUnavailableError`` (real outage, content
+# fidelity rejection, ...) - surfaces immediately as a genuinely "failed"
+# step instead of silently re-running the whole step (and its delegated
+# specialist call) several times in a row, which previously looked like
+# the mission was "stuck looping" with no feedback for minutes. The
+# failure remains eligible for the existing MANUAL retry path
+# (resume_workflow), which lets a human decide whether to retry at all.
+_MAX_STEP_RETRIES = 0
 
 
 class UnknownWorkflowError(RuntimeError):
@@ -363,16 +363,16 @@ class WorkflowRuntime:
         workflow_run_id: str,
     ) -> WorkflowStepResult:
         """Executes ``step``, automatically retrying up to ``_MAX_STEP_RETRIES``
-        additional times when it fails with a retryable ``FoundryUnavailableError``.
+        additional times (currently 0 - see that constant) when it fails
+        with a retryable-shaped ``FoundryUnavailableError``.
 
-        A transient Foundry-side hiccup (model hallucination, malformed tool
-        call, a brief outage, ...) often succeeds on a bare re-attempt with no
-        other change - so every earlier attempt's failure is swallowed here,
-        and only the LAST attempt's exception (if every attempt failed) is
-        ever surfaced to the caller, which stores it as a "failed" step
-        eligible for the existing MANUAL retry path (resume_workflow). Any
-        OTHER exception type is never retried - it propagates on the very
-        first attempt exactly as it did before automatic retries existed.
+        With ``_MAX_STEP_RETRIES`` at 0 this is a single attempt: any
+        ``FoundryUnavailableError`` propagates immediately and is stored as
+        a "failed" step eligible for the existing MANUAL retry path
+        (resume_workflow) rather than being silently retried in place. Any
+        OTHER exception type was never retried either - it propagates on
+        the very first attempt exactly as it did before automatic retries
+        existed.
         """
 
         for attempt in range(1, _MAX_STEP_RETRIES + 2):
