@@ -269,9 +269,12 @@ prompts:
       design a zone that shows agent status/handoffs or displays output -
       the single page is this one input surface; the shell composes the
       submitted values into the Orchestrator's run automatically. Write
-      each zone in 2-3 sentences:
+      each zone in 2-3 sentences, always closing with the literal
+      requirement id(s) it fulfills in parentheses (e.g. "(fulfills
+      REQ-001, REQ-002)") - never only describe the requirement in prose
+      without also citing its exact REQ-XXX id:
       "**<Zone name>**: <what concrete fields/controls it has, what each
-      one means for the run, and which requirement(s) it fulfills>"
+      one means for the run> (fulfills REQ-XXX[, REQ-XXX...])"
 
       "## Multi-Agent Workflow" - decide how many specialist agents this
       solution needs and what each one is responsible for, based solely
@@ -283,15 +286,19 @@ prompts:
       sequencing, and handing off to every other specialist agent in the
       list; no other agent may receive input directly from the UI.
       Exactly one top-level bullet per agent you decide is needed, as a single
-      flowing sentence: describe its responsibility, the requirement(s) it
-      fulfills, and which other agents it hands off to or receives from
-      (keep each description to 2-3 sentences maximum). Never break an
+      flowing sentence: describe its responsibility, which other agents it
+      hands off to or receives from (keep each description to 2-3 sentences
+      maximum), and close with the literal requirement id(s) it fulfills in
+      parentheses (e.g. "(fulfills REQ-001, REQ-003)") - never only describe
+      the requirement in prose without also citing its exact REQ-XXX id, and
+      make sure every approved requirement id appears on at least one agent's
+      bullet across the whole list. Never break an
       agent's responsibility into separate sub-bullets for Inputs/Outputs/
       Handoffs - the list must contain nothing but exactly one bullet per agent.
     variables:
       - approved_requirements
       - user_message
-    version: "4.2.0"
+    version: "4.3.0"
 
   - id: security-assessment-v1
     name: Security Assessment
