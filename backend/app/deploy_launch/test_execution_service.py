@@ -156,6 +156,12 @@ class TestExecutionService:
             str(tests_dir),
             "-q",
             f"--junitxml={junit_path}",
+            # Without this, pytest's default behavior is to run NO tests at
+            # all when ANY generated module fails to collect (e.g. one
+            # module imports a package that isn't installed) - silently
+            # turning one bad module into "no JUnit result" for every
+            # requirement, not just the ones covered by that module.
+            "--continue-on-collection-errors",
             cwd=str(build_root),
             env=env,
             stdout=asyncio.subprocess.PIPE,

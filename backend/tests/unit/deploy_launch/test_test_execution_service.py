@@ -62,6 +62,16 @@ def test_no_ambient_secret_is_visible():
 ```
 """
 
+_COLLECTION_ERROR_TEST = """
+```python
+import a_package_that_is_not_installed
+
+
+def test_req_001_uses_an_uninstalled_package():
+    assert True
+```
+"""
+
 
 def test_extract_test_modules_returns_each_fenced_block():
     modules = extract_test_modules(_PASSING_TEST + _FAILING_TEST)
@@ -225,6 +235,26 @@ async def test_run_tests_subprocess_does_not_leak_ambient_environment_secrets(
 
     assert result.success is True
     assert result.passed == 1
+
+
+async def test_run_tests_one_modules_collection_error_does_not_blank_out_the_others(
+    tmp_path: Path,
+):
+    """Regression test: a generated test module that fails to import (e.g.
+    it uses a package that isn't installed in this pipeline's execution
+    environment) must not zero out every OTHER module's real results -
+    pytest's default behavior is to run NO tests at all when ANY module has
+    a collection error, which used to misreport every requirement as
+    having no observed JUnit result whatsoever, not just the broken one."""
+
+    service = TestExecutionService(timeout_seconds=60)
+
+    result = await service.run_tests(
+        build_root=tmp_path, test_output_text=_COLLECTION_ERROR_TEST + _PASSING_TEST
+    )
+
+    assert result.ran is True
+    assert result.passed_test_names == ("test_always_passes",)
 
 
 def test_real_action_policy_rejects_mocks_and_tests_without_deployed_urls() -> None:

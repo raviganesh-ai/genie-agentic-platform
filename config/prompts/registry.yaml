@@ -387,6 +387,13 @@ prompts:
         `MISSION_BACKEND_URL` and/or `MISSION_FRONTEND_URL` environment
         variables. Never use mocks, patches, monkeypatch, response
         interceptors, fabricated responses, or static/literal assertions.
+      - make real HTTP calls with `httpx` only (already installed in this
+        pipeline's execution environment). Never `import requests` or any
+        other third-party HTTP client - it is not installed there, so the
+        import fails at collection time, and by default pytest then runs
+        ZERO tests for the entire suite (not just that one module),
+        misreporting every single requirement as having no observed
+        result at all.
 
       Separately, write the UI tests (Vitest/React Testing Library for the
       TypeScript/React screen) as their own fenced ```tsx code block. UI
@@ -428,7 +435,7 @@ prompts:
       - artifact
       - requirements
       - user_message
-    version: "1.5.0"
+    version: "1.6.0"
 
   - id: failure-diagnosis-v1
     name: Failure Diagnosis

@@ -985,6 +985,33 @@ async def test_retry_from_a_failed_step_reuses_the_same_run_and_its_prior_artifa
     assert [run.id for run in service.list_runs_for_session("session-1")] == [first_attempt.id]
 
 
+async def test_retry_with_no_matching_failed_run_restarts_from_the_first_step(tmp_path: Path):
+    """Regression test: if a caller asks to resume a specific step (e.g. a
+    "Retry" click) but no matching in-memory failed run exists for that
+    session/workflow - most realistically because this process restarted
+    and lost every in-memory run/workspace/generated-test-output - honoring
+    that resume point against a brand-new pipeline_run would silently skip
+    every earlier step without them ever having actually run on this new
+    object (e.g. jumping straight to "execute-test-suite" with no generated
+    tests, producing a false "Running 0 generated test module(s)" /
+    "fidelity report unavailable" failure). It must instead fail safe and
+    restart the fresh run from the very first step."""
+    service = _build_service(test_output_text=_PASSING_TEST_OUTPUT, tmp_path=tmp_path)
+
+    run = await service.start(
+        session_id="session-1",
+        requesting_user_id="user-1",
+        workflow_run_id="run-1",
+        resume_from_step="execute-test-suite",
+    )
+    run = await service.wait_for_run(run.id)
+
+    assert run.status == "completed"
+    assert all(step.status == "completed" for step in run.steps)
+    assert run.fidelity_report is not None
+    assert run.fidelity_report.status == "passed"
+
+
 def test_frontend_main_tsx_renders_a_gamified_multi_input_mission_queue():
     """The deterministic mission shell must never regress back to a plain
     single-textbox/single-response "document" UI: every generated mission

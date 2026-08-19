@@ -1261,6 +1261,20 @@ class DeploymentPipelineService:
             backend_root = workspace.backend_root
             frontend_root = workspace.frontend_root
         else:
+            # A caller asked to resume a specific step (e.g. a "Retry" click
+            # against a previously failed run) but no matching in-memory
+            # failed run was found - most likely this process restarted and
+            # lost every in-memory run/workspace/generated-test-output since
+            # the original failure (see parked-stage-persistence memory:
+            # these are plain dicts, not durably persisted). Honoring
+            # resume_from_step against a brand-new pipeline_run would skip
+            # every earlier step without them ever having actually run on
+            # this object - e.g. jumping straight to "execute-test-suite"
+            # with no generated tests produces a false "Running 0 generated
+            # test module(s)" / "fidelity report unavailable" failure
+            # instead of an honest restart. Fail safe: always start this
+            # fresh run from the very first step instead.
+            resume_from_step = None
             pipeline_run = DeploymentPipelineRun(
                 id=str(uuid4()),
                 session_id=session_id,
