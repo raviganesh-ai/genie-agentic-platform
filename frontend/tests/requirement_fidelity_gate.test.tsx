@@ -27,7 +27,7 @@ function buildPipelineRun(overrides: Partial<DeploymentPipelineRun> = {}): Deplo
 }
 
 describe("RequirementFidelityGatePage", () => {
-  it("renders as a modal popup showing the real requirement coverage/passing evidence for the latest run", async () => {
+  it("renders inline (no popup) showing the real requirement coverage/passing evidence for the latest run", async () => {
     mockFetchSequence([
       {
         match: "/deploy-launch/",
@@ -72,8 +72,8 @@ describe("RequirementFidelityGatePage", () => {
       workflowRunId: FIXTURE_WORKFLOW_RUN_ID,
     });
 
-    expect(await screen.findByRole("dialog")).toBeInTheDocument();
-    expect(screen.getByText("REQ-002")).toBeInTheDocument();
+    expect(await screen.findByText("REQ-002")).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(screen.getByText(/Launch blocked by requirement gaps/i)).toBeInTheDocument();
   });
 

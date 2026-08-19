@@ -42,8 +42,9 @@ async def run() -> None:
 
 ```python
 # agent: orchestrator
-async def run() -> None:
-    pass
+class OrchestratorAgent:
+    async def run(self, ui_message: str) -> None:
+        pass
 ```
 
 ```tsx
@@ -688,6 +689,132 @@ def test_req_001_processes_every_document():
     assert launch_step.status == "pending"
 
 
+class _FakeHttpsBackendDeploymentService:
+    """Returns a real https:// backend_url so the generate-test-suite step's
+    real-action check (never active for the http://localhost Null service)
+    actually runs."""
+
+    async def deploy(
+        self,
+        *,
+        mission_slug: str,
+        build_root: Path,
+        mission_identity_resource_id: str | None = None,
+        on_progress=None,
+    ) -> BackendDeploymentResult:
+        return BackendDeploymentResult(
+            image_tag=f"acr/{mission_slug}:dev",
+            backend_url=f"https://{mission_slug}-backend.example.com",
+        )
+
+
+async def test_pipeline_retries_test_generation_when_it_uses_mocks_then_succeeds(
+    tmp_path: Path,
+) -> None:
+    requirements = "[REQ-001] Process every document."
+    mock_based_suite = """
+```python
+# REQ-001
+from unittest.mock import MagicMock
+
+def test_req_001_processes_every_document():
+    client = MagicMock()
+    assert client is not None
+```
+"""
+    real_action_suite = """
+```python
+# REQ-001
+import os
+
+def test_req_001_processes_every_document():
+    backend_url = os.environ.get("MISSION_BACKEND_URL", "")
+    assert backend_url != ""
+```
+"""
+    orchestrator = _RepairingFakeOrchestrator(
+        test_outputs=[mock_based_suite, real_action_suite],
+        requirements_output=requirements,
+    )
+    service = DeploymentPipelineService(
+        orchestrator=orchestrator,  # type: ignore[arg-type]
+        session_service=_FakeSessionService(),  # type: ignore[arg-type]
+        event_bus=WorkflowEventBus(),
+        access_policy_service=_access_policy_service(),
+        mission_identity_service=NullMissionIdentityService(),
+        mission_agent_provisioning_service=NullMissionAgentProvisioningService(),
+        backend_deployment_service=_FakeHttpsBackendDeploymentService(),
+        frontend_deployment_service=NullFrontendDeploymentService(),
+        test_execution_service=TestExecutionService(timeout_seconds=60),
+        security_scan_service=SecurityScanService(timeout_seconds=60),
+        build_workspace_root=tmp_path,
+        fidelity_max_repair_attempts=3,
+    )
+
+    run = await service.start(
+        session_id="session-1", requesting_user_id="user-1", workflow_run_id="run-1"
+    )
+    run = await service.wait_for_run(run.id)
+
+    assert run.status == "completed", [
+        (step.step_id, step.status, step.error) for step in run.steps
+    ]
+    test_generation_calls = [
+        call for call in orchestrator.execute_agent_calls if call["agent_id"] == "test-generation-agent"
+    ]
+    assert len(test_generation_calls) == 2
+    assert "mock" in test_generation_calls[1]["variables"]["user_message"].lower()
+
+
+async def test_pipeline_fails_closed_when_test_generation_keeps_using_mocks(
+    tmp_path: Path,
+) -> None:
+    requirements = "[REQ-001] Process every document."
+    mock_based_suite = """
+```python
+# REQ-001
+from unittest.mock import MagicMock
+
+def test_req_001_processes_every_document():
+    client = MagicMock()
+    assert client is not None
+```
+"""
+    orchestrator = _RepairingFakeOrchestrator(
+        test_outputs=[mock_based_suite, mock_based_suite],
+        requirements_output=requirements,
+    )
+    service = DeploymentPipelineService(
+        orchestrator=orchestrator,  # type: ignore[arg-type]
+        session_service=_FakeSessionService(),  # type: ignore[arg-type]
+        event_bus=WorkflowEventBus(),
+        access_policy_service=_access_policy_service(),
+        mission_identity_service=NullMissionIdentityService(),
+        mission_agent_provisioning_service=NullMissionAgentProvisioningService(),
+        backend_deployment_service=_FakeHttpsBackendDeploymentService(),
+        frontend_deployment_service=NullFrontendDeploymentService(),
+        test_execution_service=TestExecutionService(timeout_seconds=60),
+        security_scan_service=SecurityScanService(timeout_seconds=60),
+        build_workspace_root=tmp_path,
+        fidelity_max_repair_attempts=1,
+    )
+
+    run = await service.start(
+        session_id="session-1", requesting_user_id="user-1", workflow_run_id="run-1"
+    )
+    run = await service.wait_for_run(run.id)
+
+    assert run.status == "failed"
+    failed_step = next(step for step in run.steps if step.step_id == "generate-test-suite")
+    assert failed_step.status == "failed"
+    assert failed_step.error is not None
+    assert "not real-action tests" in failed_step.error
+    test_generation_calls = [
+        call for call in orchestrator.execute_agent_calls if call["agent_id"] == "test-generation-agent"
+    ]
+    assert len(test_generation_calls) == 2
+
+
 async def test_start_returns_a_visible_running_run_before_any_slow_lookup_happens(tmp_path: Path):
     """start() must create and store the run (status "running", every step
     "pending") BEFORE resolving the session/workflow run - so a poller
@@ -869,6 +996,7 @@ def test_frontend_main_tsx_gives_custom_ui_an_onsubmit_contract_and_animated_pip
     assert ".genie-pipeline-node-active {" in _FRONTEND_STYLES_CSS
     assert ".genie-pipeline-node-complete {" in _FRONTEND_STYLES_CSS
     assert ".genie-pipeline-connector-active {" in _FRONTEND_STYLES_CSS
-    assert "@keyframes genie-pipeline-flow {" in _FRONTEND_STYLES_CSS
+    assert "@keyframes genie-pipeline-node-pulse {" in _FRONTEND_STYLES_CSS
+    assert "@keyframes genie-pipeline-particle-travel {" in _FRONTEND_STYLES_CSS
     assert ".genie-quick-request-summary {" in _FRONTEND_STYLES_CSS
 

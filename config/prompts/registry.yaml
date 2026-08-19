@@ -569,8 +569,17 @@ prompts:
 
       (2) Generate EXACTLY ONE orchestrator agent code block - no more.
       Python 3.12 on the Microsoft Agent Framework (`agent_framework`).
-      Must contain one `agent_framework.FunctionTool` delegation tool per
-      specialist agent from (1), in the EXACT count and names, GENERATED
+      Define this module's single top-level class as exactly `class
+      OrchestratorAgent:` - never any other name (`FactoryOrchestratorAgent`,
+      `Orchestrator`, `MissionOrchestratorAgent`, etc. are NOT acceptable).
+      This mission's own generated backend proxy (`main.py`) always does
+      `from orchestrator import OrchestratorAgent` and calls
+      `OrchestratorAgent().run(ui_message)` directly by this exact literal
+      name; any other class name makes the real pipeline silently
+      unreachable and forces the backend to fall back to a generic
+      conversational reply instead of running this mission's real business
+      logic. Must contain one `agent_framework.FunctionTool` delegation tool
+      per specialist agent from (1), in the EXACT count and names, GENERATED
       IN ALPHABETICAL ORDER BY AGENT NAME. Never a made-up orchestration
       tool, never extra "helper" tools, never unused tool definitions.
       This is this mission's single entry point that invokes specialist
@@ -731,7 +740,7 @@ prompts:
       - policies
       - excluded_agents
       - user_message
-    version: "5.8.0"
+    version: "5.9.0"
 
   - id: build-generation-component-v1
     name: Build Generation - Single Component
@@ -793,7 +802,17 @@ prompts:
       {component_name}`.
 
       If component_kind is "orchestrator": Produce one Python 3.12 module
-      on the Microsoft Agent Framework. Must contain one `agent_framework
+      on the Microsoft Agent Framework. Define this module's single
+      top-level class as exactly `class OrchestratorAgent:` - never any
+      other name (`FactoryOrchestratorAgent`, `Orchestrator`,
+      `MissionOrchestratorAgent`, etc. are NOT acceptable). This mission's
+      own generated backend proxy (`main.py`) always does `from
+      orchestrator import OrchestratorAgent` and calls
+      `OrchestratorAgent().run(ui_message)` directly by this exact literal
+      name; any other class name makes the real pipeline silently
+      unreachable and forces the backend to fall back to a generic
+      conversational reply instead of running this mission's real business
+      logic. Must contain one `agent_framework
       .FunctionTool` delegation tool per specialist agent literally named
       in the "## Multi-Agent Workflow" section - ONLY those agents, no extra
       tools, no "helper" tools, no unused tool definitions. This is the
@@ -913,7 +932,7 @@ prompts:
       - component_name
       - user_message
       - assigned_requirements
-    version: "1.11.0"
+    version: "1.12.0"
 
   - id: build-component-regeneration-v1
     name: Build Generation - Regenerate Single Component

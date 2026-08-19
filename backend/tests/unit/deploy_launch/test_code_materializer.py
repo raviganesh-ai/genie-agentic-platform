@@ -23,8 +23,9 @@ async def run() -> None:
 
 ```python
 # agent: orchestrator
-async def run() -> None:
-    pass
+class OrchestratorAgent:
+    async def run(self, ui_message: str) -> None:
+        pass
 ```
 
 ```tsx
@@ -42,7 +43,7 @@ def test_materialize_build_parses_all_three_pieces():
     assert "Requirements Specialist" in build.agent_modules
     assert "async def run" in build.agent_modules["Requirements Specialist"]
     assert build.orchestrator_module is not None
-    assert "async def run" in build.orchestrator_module
+    assert "class OrchestratorAgent" in build.orchestrator_module
     assert build.ui_component is not None
     assert "MissionApp" in build.ui_component
 
@@ -50,6 +51,22 @@ def test_materialize_build_parses_all_three_pieces():
 def test_materialize_build_raises_when_no_code_blocks_found():
     with pytest.raises(MaterializedCodeError):
         materialize_build("no code here at all")
+
+
+def test_materialize_build_raises_when_orchestrator_class_is_misnamed():
+    # main.py's deterministic scaffold always does
+    # 'from orchestrator import OrchestratorAgent' - any other class name
+    # would silently deploy a mission whose real pipeline is unreachable.
+    misnamed_output = '''
+```python
+# agent: orchestrator
+class FactoryOrchestratorAgent:
+    async def run(self, ui_message: str) -> None:
+        pass
+```
+'''
+    with pytest.raises(MaterializedCodeError, match="OrchestratorAgent"):
+        materialize_build(misnamed_output)
 
 
 def test_write_to_directory_creates_expected_files(tmp_path: Path):

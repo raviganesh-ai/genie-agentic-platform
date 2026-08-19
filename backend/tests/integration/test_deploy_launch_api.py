@@ -61,8 +61,9 @@ async def run() -> None:
 
 ```python
 # agent: orchestrator
-async def run() -> None:
-    pass
+class OrchestratorAgent:
+    async def run(self, ui_message: str) -> None:
+        pass
 ```
 
 ```tsx

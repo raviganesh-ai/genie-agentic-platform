@@ -10,7 +10,6 @@ import { LoadingState } from "@/components/LoadingState";
 import { ErrorState } from "@/components/ErrorState";
 import { SectionCard } from "@/components/SectionCard";
 import { AgentActivityAnimation } from "@/components/AgentActivityAnimation";
-import { RequirementFidelityDashboard } from "@/components/RequirementFidelityDashboard";
 import { useWorkflowEventStream } from "@/hooks/useWorkflowEventStream";
 import { DEPLOYMENT_STEP_ORDER, DEPLOYMENT_STEP_NAMES } from "@/types/deployLaunch";
 import type {
@@ -643,7 +642,29 @@ export function DeployLaunchPage(): JSX.Element {
         ) : null}
 
         {activeRun?.fidelity_report ? (
-          <RequirementFidelityDashboard report={activeRun.fidelity_report} />
+          <SectionCard
+            title="Requirement Fidelity Gate"
+            action={
+              <Badge
+                shape="rounded"
+                style={{
+                  backgroundColor:
+                    activeRun.fidelity_report.status === "passed"
+                      ? "#3fa66a"
+                      : activeRun.fidelity_report.status === "failed"
+                        ? "#d1495b"
+                        : "#2f83e0",
+                  color: "#0b0f14",
+                }}
+              >
+                {activeRun.fidelity_report.pass_percent}% passed
+              </Badge>
+            }
+          >
+            <Text size={200} style={{ opacity: 0.7 }}>
+              See the Requirement Fidelity Gate tab for full per-requirement evidence.
+            </Text>
+          </SectionCard>
         ) : null}
 
         <SectionCard
@@ -704,19 +725,6 @@ export function DeployLaunchPage(): JSX.Element {
 
         {activeRun ? (
           <>
-            {activeRun.access_policy ? (
-              <SectionCard title="🔐 Least-Access Policy">
-                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                  {activeRun.access_policy.agents.map((agent) => (
-                    <Text key={agent.agent_id} size={300}>
-                      <b>{agent.agent_id}</b> ({agent.role}) — tools: {agent.allowed_tools.join(", ") || "none"};
-                      memory: {agent.memory_access.join(", ") || "none"}
-                    </Text>
-                  ))}
-                </div>
-              </SectionCard>
-            ) : null}
-
             {activeRun.status === "completed" && activeRun.launch_url ? (
               <SectionCard title="🎉 Mission Launched!" highlight>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>

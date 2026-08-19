@@ -592,11 +592,17 @@ input:focus, textarea:focus, select:focus {
   flex-shrink: 0;
 }
 
+@keyframes genie-pipeline-node-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(47, 131, 224, 0.5); }
+  50% { box-shadow: 0 0 0 7px rgba(47, 131, 224, 0); }
+}
+
 .genie-pipeline-node-active {
   border-color: #2f83e0;
   background-color: rgba(47, 131, 224, 0.18);
   color: #6ba3ea;
-  transform: scale(1.05);
+  transform: scale(1.08);
+  animation: genie-pipeline-node-pulse 1.4s ease-in-out infinite;
 }
 
 .genie-pipeline-node-active .genie-pipeline-node-dot {
@@ -614,24 +620,42 @@ input:focus, textarea:focus, select:focus {
   background-color: #3fa66a;
 }
 
-@keyframes genie-pipeline-flow {
-  0% { background-position: 0% 0%; }
-  100% { background-position: 200% 0%; }
-}
-
 .genie-pipeline-connector {
-  width: 28px;
-  height: 2px;
+  position: relative;
+  width: 32px;
+  height: 3px;
   margin: 0 4px;
   border-radius: 2px;
   background-color: #232b35;
   flex-shrink: 0;
+  overflow: visible;
+  transition: background-color 200ms ease;
 }
 
 .genie-pipeline-connector-active {
-  background-image: linear-gradient(90deg, #2f83e0 0%, #6ba3ea 30%, #232b35 30%, #232b35 100%);
-  background-size: 250% 100%;
-  animation: genie-pipeline-flow 1.4s linear infinite;
+  background-color: #2f83e0;
+  box-shadow: 0 0 8px rgba(47, 131, 224, 0.45);
+}
+
+@keyframes genie-pipeline-particle-travel {
+  0% { left: -4px; opacity: 0; }
+  12% { opacity: 1; }
+  88% { opacity: 1; }
+  100% { left: calc(100% - 4px); opacity: 0; }
+}
+
+.genie-pipeline-connector-active::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: -4px;
+  width: 8px;
+  height: 8px;
+  margin-top: -4px;
+  border-radius: 50%;
+  background-color: #9cc4f2;
+  box-shadow: 0 0 8px 2px rgba(107, 163, 234, 0.85);
+  animation: genie-pipeline-particle-travel 1.1s linear infinite;
 }
 
 .genie-quick-request {
@@ -880,8 +904,8 @@ function MissionConsole() {
 
     return <main className="genie-shell genie-fade-in">
         <header className="genie-hero">
-            <p className="genie-hero-kicker"><span className="genie-live-dot" /> {missionTitle}</p>
-            <h1>Mission Control</h1>
+            <p className="genie-hero-kicker"><span className="genie-live-dot" /> Mission Control</p>
+            <h1>{missionTitle}</h1>
             <p>Give the agents one or more things to work on - type a request, or drag in files - and watch each one processed live, end to end.</p>
         </header>
         {missionAgents.length > 0 ? (
@@ -1992,6 +2016,41 @@ class DeploymentPipelineService:
                         )
                     if pipeline_run.backend_url and pipeline_run.backend_url.startswith("https://"):
                         real_action_errors = validate_real_action_tests(modules)
+                        real_action_retry = 0
+                        while (
+                            real_action_errors
+                            and real_action_retry < self._fidelity_max_repair_attempts
+                        ):
+                            real_action_retry += 1
+                            correction_result = await self._orchestrator.execute_agent(
+                                agent_id="test-generation-agent",
+                                prompt_id="test-generation-v1",
+                                variables={
+                                    "artifact": build_output_text,
+                                    "requirements": requirements_text,
+                                    "user_message": (
+                                        "Your prior suite failed this fail-closed check: "
+                                        + " ".join(real_action_errors)
+                                        + " Return a complete replacement suite. Every Python "
+                                        "test must exercise the real deployed prototype over "
+                                        "real HTTP using MISSION_BACKEND_URL and/or "
+                                        "MISSION_FRONTEND_URL from the environment - never "
+                                        "unittest.mock, MagicMock, patch(), monkeypatch, respx, "
+                                        "responses, or any other interception library."
+                                    ),
+                                },
+                                session_id=pipeline_run.session_id,
+                                trace_id=pipeline_run.id,
+                            )
+                            test_output_text = correction_result.output_text
+                            modules = extract_test_modules(test_output_text)
+                            if not has_pytest_discoverable_tests(modules):
+                                real_action_errors = validate_real_action_tests(modules)
+                                continue
+                            report = record_test_coverage(report, modules)
+                            self._generated_test_outputs[pipeline_run.id] = test_output_text
+                            pipeline_run.fidelity_report = report
+                            real_action_errors = validate_real_action_tests(modules)
                         if real_action_errors:
                             raise DeploymentPipelineStepFailedError(
                                 "Generated acceptance tests are not real-action tests: "

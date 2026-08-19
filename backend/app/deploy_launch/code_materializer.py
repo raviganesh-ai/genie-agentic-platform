@@ -39,6 +39,17 @@ _UI_MARKER_PATTERN: Final = re.compile(r"^//\s*agent:\s*ui\s*$", re.IGNORECASE)
 
 _ORCHESTRATOR_MARKER: Final = "orchestrator"
 
+# The generated backend proxy's main.py always does
+# ``from orchestrator import OrchestratorAgent`` (see _MAIN_PY_TEMPLATE
+# below) - this exact literal class name is the contract between the
+# LLM-generated orchestrator module and that deterministic scaffold. A
+# differently named class (e.g. ``FactoryOrchestratorAgent``) makes the
+# import silently fail closed inside main.py's own broad except, so the
+# deployed mission would forever fall back to a generic conversational
+# reply instead of ever running its real business logic - fail this
+# earlier, at build time, with an actionable error instead.
+_ORCHESTRATOR_CLASS_PATTERN: Final = re.compile(r"^class\s+OrchestratorAgent\b", re.MULTILINE)
+
 
 class MaterializedCodeError(RuntimeError):
     """Raised when the Build Agent's output does not contain a materializable build."""
@@ -128,6 +139,15 @@ def materialize_build(output_text: str) -> MaterializedBuild:
         raise MaterializedCodeError(
             "No materializable agent, orchestrator, or UI code block was found in "
             "the build-solution step's output."
+        )
+
+    if orchestrator_module is not None and not _ORCHESTRATOR_CLASS_PATTERN.search(orchestrator_module):
+        raise MaterializedCodeError(
+            "The generated orchestrator module does not define a top-level "
+            "'class OrchestratorAgent' - this mission's backend proxy always "
+            "does 'from orchestrator import OrchestratorAgent', so any other "
+            "class name would silently fall back to a generic conversational "
+            "reply instead of running this mission's real pipeline."
         )
 
     return MaterializedBuild(
