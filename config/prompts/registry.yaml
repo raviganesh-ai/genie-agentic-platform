@@ -685,6 +685,19 @@ prompts:
       single generic catch-all textarea when the architecture describes
       concrete, enumerable, or bounded fields.
 
+      FILE UPLOAD VALIDATION - never require, validate, or gate the submit
+      button on an uploaded file's exact literal NAME (e.g. rejecting or
+      refusing to run unless `file.name === "some_specific_name.json"`).
+      A requirement or business document that mentions an example file
+      name describes what one real user's file might be called, not a
+      strict filename contract - a real user's file will almost never be
+      named exactly that, and rejecting it makes the prototype untestable.
+      Accept any file the user provides (checked only by extension/MIME
+      type when the mission genuinely needs a specific format, never by
+      exact name) and read its actual content via `File.text()`. Disable
+      the submit button only when the upload is genuinely missing/empty,
+      never because the chosen file's name differs from an example name.
+
       REQUIRED VS OPTIONAL - never leave the user guessing which fields
       they must fill in: append a literal " *" to the `<label>`/`<legend>`
       text of every field that is genuinely required for this mission to
@@ -810,7 +823,7 @@ prompts:
       - policies
       - excluded_agents
       - user_message
-    version: "5.13.1"
+    version: "5.13.2"
 
   - id: build-generation-component-v1
     name: Build Generation - Single Component
@@ -948,6 +961,19 @@ prompts:
       when the architecture describes concrete, enumerable, or bounded
       fields. Never call any agent directly.
 
+      FILE UPLOAD VALIDATION - never require, validate, or gate the submit
+      button on an uploaded file's exact literal NAME (e.g. rejecting or
+      refusing to run unless `file.name === "some_specific_name.json"`).
+      A requirement or business document that mentions an example file
+      name describes what one real user's file might be called, not a
+      strict filename contract - a real user's file will almost never be
+      named exactly that, and rejecting it makes the prototype untestable.
+      Accept any file the user provides (checked only by extension/MIME
+      type when the mission genuinely needs a specific format, never by
+      exact name) and read its actual content via `File.text()`. Disable
+      the submit button only when the upload is genuinely missing/empty,
+      never because the chosen file's name differs from an example name.
+
       REQUIRED VS OPTIONAL - never leave the user guessing which fields
       they must fill in: append a literal " *" to the `<label>`/`<legend>`
       text of every field that is genuinely required for this mission to
@@ -1048,7 +1074,7 @@ prompts:
       - component_name
       - user_message
       - assigned_requirements
-    version: "1.16.1"
+    version: "1.16.2"
 
   - id: build-component-regeneration-v1
     name: Build Generation - Regenerate Single Component
