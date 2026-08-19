@@ -119,6 +119,7 @@ _FRONTEND_INDEX_HTML_TEMPLATE = """<!doctype html>
   <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>{mission_title}</title>
+    <link rel="icon" href="data:,">
   <script src="runtime-config.js"></script>
 </head>
 <body>
@@ -1978,6 +1979,13 @@ class DeploymentPipelineService:
                     # covers in a single completion; give it the same repair
                     # budget used later for whole-prototype fidelity repairs
                     # instead of giving up after exactly one corrective retry.
+                    # Each retry only asks for the STILL-missing IDs and its
+                    # new modules are ACCUMULATED alongside every earlier
+                    # completion's modules (never discarded) - a "complete
+                    # replacement suite" re-ask made large gaps unrecoverable
+                    # because every retry had to re-cover already-covered
+                    # requirements too within the same completion-length
+                    # budget that produced the gap in the first place.
                     coverage_retry = 0
                     while missing_test_ids and coverage_retry < self._fidelity_max_repair_attempts:
                         coverage_retry += 1
@@ -1990,7 +1998,9 @@ class DeploymentPipelineService:
                                 "user_message": (
                                     "Your prior suite omitted these approved requirement IDs: "
                                     + ", ".join(missing_test_ids)
-                                    + ". Return a complete replacement suite. Every executable "
+                                    + ". Return ONLY new test module(s) covering these still-"
+                                    "missing requirement IDs - do not repeat tests for "
+                                    "requirement IDs you already covered. Every executable "
                                     "test function name must include its normalized requirement ID "
                                     "(for example, REQ-001 must use test_req_001_<behavior>) and "
                                     "must assert that requirement's real behavior."
@@ -1999,7 +2009,7 @@ class DeploymentPipelineService:
                             session_id=pipeline_run.session_id,
                             trace_id=pipeline_run.id,
                         )
-                        test_output_text = correction_result.output_text
+                        test_output_text = test_output_text + "\n\n" + correction_result.output_text
                         modules = extract_test_modules(test_output_text)
                         report = record_test_coverage(report, modules)
                         missing_test_ids = [
@@ -2055,6 +2065,20 @@ class DeploymentPipelineService:
                             raise DeploymentPipelineStepFailedError(
                                 "Generated acceptance tests are not real-action tests: "
                                 + " ".join(real_action_errors)
+                            )
+                        # The real-action repair loop replaces the whole suite on
+                        # every attempt to purge mocks/patches, which can regress
+                        # the requirement coverage the earlier loop secured -
+                        # re-verify it here rather than silently shipping a gap.
+                        final_missing_ids = [
+                            item.requirement_id
+                            for item in report.requirements
+                            if item.status == "missing"
+                        ]
+                        if final_missing_ids:
+                            raise DeploymentPipelineStepFailedError(
+                                "Generated test suite does not cover every approved requirement; "
+                                "missing requirement ids: " + ", ".join(final_missing_ids)
                             )
                     detail = (
                         f"Generated {len(modules)} requirement acceptance test module(s) "

@@ -584,6 +584,61 @@ def test_search_documents():
     assert "REQ-002" in failed_step.error
 
 
+async def test_pipeline_accumulates_test_coverage_across_repair_retries(
+    tmp_path: Path,
+) -> None:
+    """Each coverage-repair retry only asks for the still-missing IDs; their
+    modules must be ACCUMULATED alongside earlier completions, never
+    replace them - otherwise large requirement sets can never converge
+    (a live 39-requirement mission stayed 26 IDs short even after every
+    repair attempt, because each retry discarded already-covered tests)."""
+    requirements = "[REQ-001] Process every document.\n[REQ-002] Export a report."
+    first_suite = """
+```python
+# REQ-001
+def test_req_001_processes_every_document():
+    assert 1 == 1
+```
+"""
+    second_suite = """
+```python
+# REQ-002
+def test_req_002_exports_a_report():
+    assert 1 == 1
+```
+"""
+    orchestrator = _RepairingFakeOrchestrator(
+        test_outputs=[first_suite, second_suite],
+        requirements_output=requirements,
+    )
+    service = DeploymentPipelineService(
+        orchestrator=orchestrator,  # type: ignore[arg-type]
+        session_service=_FakeSessionService(),  # type: ignore[arg-type]
+        event_bus=WorkflowEventBus(),
+        access_policy_service=_access_policy_service(),
+        mission_identity_service=NullMissionIdentityService(),
+        mission_agent_provisioning_service=NullMissionAgentProvisioningService(),
+        backend_deployment_service=NullBackendDeploymentService(),
+        frontend_deployment_service=NullFrontendDeploymentService(),
+        test_execution_service=TestExecutionService(timeout_seconds=60),
+        security_scan_service=SecurityScanService(timeout_seconds=60),
+        build_workspace_root=tmp_path,
+        fidelity_max_repair_attempts=3,
+    )
+
+    run = await service.start(
+        session_id="session-1", requesting_user_id="user-1", workflow_run_id="run-1"
+    )
+    run = await service.wait_for_run(run.id)
+
+    assert run.status == "completed", [
+        (step.step_id, step.status, step.error) for step in run.steps
+    ]
+    assert run.fidelity_report is not None
+    assert run.fidelity_report.coverage_percent == 100
+
+
+
 async def test_pipeline_automatically_repairs_redeploys_and_retests_before_launch(
     tmp_path: Path,
 ) -> None:
