@@ -655,6 +655,26 @@ prompts:
       end-user watching this in real-time that multiple intelligent agents
       are collaborating to achieve their business goal.
 
+      COVERAGE VALIDATION - a must-have requirement sometimes enumerates a
+      specific, finite list of items the mission must evaluate/cover (for
+      example "the seven target languages: Korean, German, Spanish,
+      Italian, French, Simplified Chinese, and Japanese", or a named list
+      of regions, categories, or document types). Silently evaluating
+      whatever a subset of that list happens to be present in one
+      particular uploaded file - or an unrequested item outside that list
+      - and returning it as if the run succeeded in full is misleading:
+      the end user cannot tell, from the output alone, that most of the
+      required scope was never actually covered. When the approved
+      requirements name such an enumerated list, the Orchestrator's
+      returned `dict` must include the requirement's own full list (e.g.
+      `"required_items"`), what was actually found/processed from the
+      uploaded input (e.g. `"covered_items"`), and the difference in both
+      directions (e.g. `"missing_items"`, `"unexpected_items"`) - derived
+      by actually inspecting the uploaded input's own fields (never
+      guessed or hardcoded), so a partial or off-scope run is visible in
+      the result and its "summary" line, instead of silently reported as
+      a plain success.
+
       CODE STRUCTURE - no noise:
       - imports: alphabetically sorted, stdlib first, third-party next
       - FunctionTool definitions: sorted alphabetically by tool name
@@ -850,7 +870,7 @@ prompts:
       - policies
       - excluded_agents
       - user_message
-    version: "5.14.0"
+    version: "5.15.0"
 
   - id: build-generation-component-v1
     name: Build Generation - Single Component
@@ -968,6 +988,19 @@ prompts:
       or content, never by one hardcoded expected name). Code like
       `open("/data/candidate_a.txt")` breaks the first time a real user
       uploads a file with a different name.
+      COVERAGE VALIDATION - a must-have requirement sometimes enumerates a
+      specific, finite list of items the mission must evaluate/cover (for
+      example "the seven target languages: Korean, German, Spanish,
+      Italian, French, Simplified Chinese, and Japanese", or a named list
+      of regions, categories, or document types). When the approved
+      requirements name such a list, `run()`'s returned `dict` must
+      include the requirement's own full list (`"required_items"`), what
+      was actually found/processed from the uploaded input
+      (`"covered_items"`), and the difference in both directions
+      (`"missing_items"`, `"unexpected_items"`) - derived by actually
+      inspecting the uploaded input's own fields, never guessed or
+      hardcoded - so a partial or off-scope run is visible in the result
+      instead of silently reported as a plain success.
       Include a comment: "Once deployed to Azure AI Foundry, this
       Orchestrator Agent is reachable only through this mission's own
       backend service - never directly from the browser."
@@ -1126,7 +1159,7 @@ prompts:
       - component_name
       - user_message
       - assigned_requirements
-    version: "1.17.0"
+    version: "1.18.0"
 
   - id: build-component-regeneration-v1
     name: Build Generation - Regenerate Single Component

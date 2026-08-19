@@ -150,6 +150,31 @@ def test_orchestrator_prompts_require_live_on_progress_hand_off_narration():
         assert "never call `on_progress` for the orchestrator itself" in template.lower()
 
 
+def test_orchestrator_prompts_require_reporting_coverage_gaps_against_enumerated_requirements():
+    """Regression guard for a live REQ-025 "seven target languages" mission
+    (Korean, German, Spanish, Italian, French, Simplified Chinese,
+    Japanese): a real test run's uploaded package only actually contained
+    Spanish and Polish documents (Polish is not even one of the seven
+    required languages), yet the mission's output reported the run as a
+    plain success with no indication that 5 of 7 required languages were
+    never evaluated and one out-of-scope language was. Both
+    orchestrator-generation prompts must require the returned result to
+    report required vs. covered vs. missing/unexpected items whenever the
+    approved requirements enumerate a specific finite list to cover, so
+    partial/off-scope coverage is visible in the output instead of
+    silently indistinguishable from full success.
+    """
+    registry = PromptRegistry.load(_REPO_CONFIG_ROOT / "prompts")
+
+    for prompt_id in ("build-generation-v1", "build-generation-component-v1"):
+        template = " ".join(registry.get(prompt_id).template.split())
+        assert "COVERAGE VALIDATION" in template
+        assert '"required_items"' in template
+        assert '"covered_items"' in template
+        assert '"missing_items"' in template
+        assert '"unexpected_items"' in template
+
+
 def test_all_generation_prompts_preserve_every_approved_requirement_id():
     registry = PromptRegistry.load(_REPO_CONFIG_ROOT / "prompts")
 
