@@ -660,6 +660,16 @@ prompts:
       single generic catch-all textarea when the architecture describes
       concrete, enumerable, or bounded fields.
 
+      REQUIRED VS OPTIONAL - never leave the user guessing which fields
+      they must fill in: append a literal " *" to the `<label>`/`<legend>`
+      text of every field that is genuinely required for this mission to
+      run, and append " (optional)" to every field that is not. Add one
+      short legend line near the top of the form (e.g. "* required")
+      explaining the marker. Disable the submit button until every
+      required field has a valid value, and show a field-level hint
+      (not just a post-submit error) the moment a required field is left
+      empty after the user has interacted with the form.
+
       CODE STRUCTURE - no noise:
       - imports: alphabetically sorted, React first, then third-party
       - state hooks (useState, useContext): grouped at top, one per field
@@ -755,7 +765,7 @@ prompts:
       - policies
       - excluded_agents
       - user_message
-    version: "5.10.0"
+    version: "5.11.0"
 
   - id: build-generation-component-v1
     name: Build Generation - Single Component
@@ -882,6 +892,16 @@ prompts:
       when the architecture describes concrete, enumerable, or bounded
       fields. Never call any agent directly.
 
+      REQUIRED VS OPTIONAL - never leave the user guessing which fields
+      they must fill in: append a literal " *" to the `<label>`/`<legend>`
+      text of every field that is genuinely required for this mission to
+      run, and append " (optional)" to every field that is not. Add one
+      short legend line near the top of the form (e.g. "* required")
+      explaining the marker. Disable the submit button until every
+      required field has a valid value, and show a field-level hint
+      (not just a post-submit error) the moment a required field is left
+      empty after the user has interacted with the form.
+
       COMPONENT CONTRACT - your default-exported component receives
       exactly one prop object: `{{ onSubmit: (message: string,
       attachments?: {{ name: string, content: string }}[]) => void }}`.
@@ -955,7 +975,7 @@ prompts:
       - component_name
       - user_message
       - assigned_requirements
-    version: "1.13.0"
+    version: "1.14.0"
 
   - id: build-component-regeneration-v1
     name: Build Generation - Regenerate Single Component
