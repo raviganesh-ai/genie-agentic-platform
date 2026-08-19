@@ -3,18 +3,24 @@
 Loads the real repo config/prompts/registry.yaml (not a tmp_path fixture,
 mirroring the pattern in tests/integration/test_foundry_agent_catalog_config.py)
 and asserts the architecture-recommendation-v1 template still contains the
-explicit instruction that each agent gets exactly one flowing-sentence
+explicit instruction that each agent gets exactly one "**Name**:"-prefixed
 bullet, never broken out into separate Fulfills/Inputs/Outputs/Handoffs
-sub-bullets.
+sub-bullets and never a bare sentence with no bold name/colon.
 
 This exists because the Architecture Designer agent previously drifted
 into emitting per-agent sub-bullets, which produced diagram/checkbox
 noise in the Architecture Studio UI (one node per label instead of one
 per agent - see frontend/src/utils/textArtifacts.ts's DETAIL_FIELD_LABEL
-handling for the corresponding UI-side defense). If this prompt is ever
-edited in a way that removes or weakens that instruction, this test
-fails immediately instead of the regression silently reappearing in
-production output.
+handling for the corresponding UI-side defense). A separate, later
+regression let bullets omit the bold name/colon entirely (e.g. "- Package
+Loader & Security Scanner Agent loads and parses..."), which the UI's
+`splitIntoNamedSections` couldn't parse into cards at all, collapsing the
+whole "Multi-Agent Workflow" section back into one unreadable prose blob
+(frontend/src/utils/textArtifacts.ts gained a best-effort fallback parser
+for that shape, but the prompt should still ask for the bold/colon format
+by default). If this prompt is ever edited in a way that removes or
+weakens either instruction, this test fails immediately instead of the
+regression silently reappearing in production output.
 """
 from __future__ import annotations
 
@@ -32,7 +38,7 @@ def test_architecture_recommendation_prompt_forbids_per_agent_sub_bullets():
     template = prompt.template
 
     assert "one top-level bullet" in template
-    assert "single flowing sentence" in template
+    assert '"**<Agent name>**:' in template
     assert "Never break an agent's responsibility" in template
     assert "nothing but exactly one bullet per agent" in template
 

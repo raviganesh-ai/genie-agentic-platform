@@ -58,7 +58,15 @@ export function splitIntoNamedSections(text: string): ParsedSection[] {
       ? null
       : (line.match(/^#{1,4}\s+(.+)$/) ??
         line.match(/^\*\*(.+?)\*\*:?\s*(.*)$/) ??
-        line.match(/^(?:[-*]|\d+[.)])\s+\*?\*?([^:\n]{2,70}?)\*?\*?:\s*(.*)$/));
+        line.match(/^(?:[-*]|\d+[.)])\s+\*?\*?([^:\n]{2,70}?)\*?\*?:\s*(.*)$/) ??
+        // Falls back to inferring the title from a leading capitalized
+        // "<... > Agent" phrase when the bullet has no colon at all - e.g.
+        // "- Package Loader & Security Scanner Agent loads and parses..."
+        // (a real, observed Multi-Agent Workflow format the prompt doesn't
+        // strictly require a colon for). Without this, every such bullet
+        // fails to parse into its own section and the whole list falls
+        // back to one raw prose blob instead of a card per agent.
+        line.match(/^(?:[-*]|\d+[.)])\s+((?:(?:[A-Z][\w'/().-]*|&)\s+){1,8}Agent)\s+(?=[a-z])(.*)$/));
 
     // Even an unindented line can still just be a detail field describing
     // the previous bullet (an agent not indenting "Fulfills:"/"Inputs:"/

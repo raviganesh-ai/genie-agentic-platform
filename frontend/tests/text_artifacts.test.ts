@@ -74,4 +74,31 @@ describe("splitIntoNamedSections", () => {
 
     expect(sections.map((section) => section.title)).toEqual(["First", "Second"]);
   });
+
+  it("infers the agent name from a bullet with no bold markers or colon at all", () => {
+    // Real, observed Architecture Designer output: the "## Multi-Agent
+    // Workflow" prompt doesn't strictly enforce the "**Name**: ..." format,
+    // so bullets sometimes read as a plain flowing sentence starting with
+    // the agent's own name. Without this fallback, every such bullet fails
+    // to parse and the whole list falls back to one unreadable prose blob
+    // instead of a card per agent (the reported "lots of verbiage" bug).
+    const text = [
+      "- Package Loader & Security Scanner Agent loads and parses the supplied " +
+        "package strictly from the uploaded file handle (fulfills REQ-001, REQ-003).",
+      "- Requirements Extractor Agent consumes the parsed packet and " +
+        "deterministically derives explicit requirements (fulfills REQ-002).",
+      "- Corpus Profiler Agent builds corpus_profile.json by profiling the " +
+        "document corpus (fulfills REQ-004).",
+    ].join("\n\n");
+
+    const sections = splitIntoNamedSections(text);
+
+    expect(sections.map((section) => section.title)).toEqual([
+      "Package Loader & Security Scanner Agent",
+      "Requirements Extractor Agent",
+      "Corpus Profiler Agent",
+    ]);
+    expect(sections[0].body).toContain("loads and parses the supplied package");
+    expect(sections[1].body).toContain("consumes the parsed packet");
+  });
 });

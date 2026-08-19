@@ -285,12 +285,18 @@ prompts:
       interaction from the UI and is responsible for coordinating,
       sequencing, and handing off to every other specialist agent in the
       list; no other agent may receive input directly from the UI.
-      Exactly one top-level bullet per agent you decide is needed, as a single
-      flowing sentence: describe its responsibility, which other agents it
-      hands off to or receives from (keep each description to 2-3 sentences
-      maximum), and close with the literal requirement id(s) it fulfills in
-      parentheses (e.g. "(fulfills REQ-001, REQ-003)") - never only describe
-      the requirement in prose without also citing its exact REQ-XXX id, and
+      Exactly one top-level bullet per agent you decide is needed, in
+      EXACTLY this format: "**<Agent name>**: <responsibility, which other
+      agents it hands off to or receives from - keep to 2-3 sentences
+      maximum> (fulfills REQ-XXX[, REQ-XXX...])" - the bold agent name
+      followed by a colon is REQUIRED on every bullet (matching the "##
+      Single-Page UI Design" zone format above), never a bare sentence
+      starting with the agent's name with no bold markers or colon - the
+      UI that renders this list parses each bullet into its own card by
+      that exact "**Name**:" boundary, and a bullet without it collapses
+      the entire list back into one unreadable block of prose. Never only
+      describe the requirement in prose without also citing its exact
+      REQ-XXX id, and
       make sure every approved requirement id appears on at least one agent's
       bullet across the whole list. Never break an
       agent's responsibility into separate sub-bullets for Inputs/Outputs/
@@ -298,7 +304,7 @@ prompts:
     variables:
       - approved_requirements
       - user_message
-    version: "4.3.0"
+    version: "4.4.0"
 
   - id: security-assessment-v1
     name: Security Assessment
