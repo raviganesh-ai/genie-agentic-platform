@@ -744,7 +744,14 @@ prompts:
       mission's Orchestrator Agent parses `message` with `json.loads` to
       run its full deterministic pipeline over every field you submit)
       and, only when the mission genuinely needs uploaded file content,
-      an `attachments` array. The instant
+      an `attachments` array. `attachments` is NEVER an ambient or global
+      value - it does not exist until you build it yourself, typically by
+      collecting read `File.text()` results into your own local `const`
+      or `useState` array before your submit handler references it; a
+      call like `onSubmit(message, attachments)` where `attachments` was
+      never declared anywhere in your own component throws a real,
+      observed `ReferenceError: attachments is not defined` that crashes
+      this mission's entire input form on first render. The instant
       you call it, the surrounding shell's own Mission Queue creates a
       new live item for this exact submission, streams the Orchestrator's
       real narration into it word-by-word, and shows its final output
@@ -797,7 +804,7 @@ prompts:
       - policies
       - excluded_agents
       - user_message
-    version: "5.13.0"
+    version: "5.13.1"
 
   - id: build-generation-component-v1
     name: Build Generation - Single Component
@@ -960,7 +967,13 @@ prompts:
       exactly one prop object: `{{ onSubmit: (message: string,
       attachments?: {{ name: string, content: string }}[]) => void }}`.
       Read file contents via `File.text()` before calling `onSubmit`
-      (never pass a raw `File`). Compose one JSON-encoded `message` string
+      (never pass a raw `File`). `attachments` is NEVER an ambient or
+      global value - it does not exist until you build it yourself (a
+      local `const` or `useState` array of collected `File.text()`
+      results); referencing an undeclared `attachments` name throws a
+      real, observed `ReferenceError: attachments is not defined` that
+      crashes this mission's entire input form on first render. Compose
+      one JSON-encoded `message` string
       via `JSON.stringify` (one key per field, using the field's own name
       - never a human-readable "Key: value\n..." string, since this
       mission's Orchestrator Agent parses `message` with `json.loads`) and
@@ -1029,7 +1042,7 @@ prompts:
       - component_name
       - user_message
       - assigned_requirements
-    version: "1.16.0"
+    version: "1.16.1"
 
   - id: build-component-regeneration-v1
     name: Build Generation - Regenerate Single Component

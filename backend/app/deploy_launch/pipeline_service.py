@@ -696,6 +696,35 @@ type MissionAppProps = {
     missionAgents: string[];
 };
 type GeneratedComponent = React.ComponentType<Partial<MissionAppProps>>;
+
+// The Build Agent's generated component is untrusted, LLM-authored code -
+// a real runtime bug in it (for example a `ReferenceError` from a variable
+// it forgot to declare) must never blank out the entire Mission Control
+// page. This boundary confines that failure to just the Mission Input
+// zone, so the Quick Request fallback and the rest of the shell stay usable.
+class MissionInputBoundary extends React.Component<{ children: React.ReactNode }, { failed: boolean }> {
+    constructor(props: { children: React.ReactNode }) {
+        super(props);
+        this.state = { failed: false };
+    }
+    static getDerivedStateFromError() {
+        return { failed: true };
+    }
+    componentDidCatch(error: unknown) {
+        console.error("Mission Input custom UI crashed:", error);
+    }
+    render() {
+        if (this.state.failed) {
+            return (
+                <p className="genie-error" role="alert">
+                    This mission's custom input form hit an error and could not load.
+                    Use "Quick request" below to send a message or file directly instead.
+                </p>
+            );
+        }
+        return this.props.children;
+    }
+}
 const moduleValue = GeneratedModule as unknown as {
     default?: GeneratedComponent;
     App?: GeneratedComponent;
@@ -946,7 +975,9 @@ function MissionConsole() {
         {GeneratedMissionApp ? (
             <section className="genie-card genie-fade-in">
                 <h2 className="genie-zone-title">Mission Input</h2>
-                <GeneratedMissionApp onSubmit={submitFromCustomUI} missionAgents={missionAgents} />
+                <MissionInputBoundary>
+                    <GeneratedMissionApp onSubmit={submitFromCustomUI} missionAgents={missionAgents} />
+                </MissionInputBoundary>
             </section>
         ) : null}
         {GeneratedMissionApp ? (

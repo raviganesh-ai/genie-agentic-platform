@@ -1082,3 +1082,23 @@ def test_frontend_main_tsx_gives_custom_ui_an_onsubmit_contract_and_animated_pip
     assert "@keyframes genie-pipeline-particle-travel {" in _FRONTEND_STYLES_CSS
     assert ".genie-quick-request-summary {" in _FRONTEND_STYLES_CSS
 
+
+def test_frontend_main_tsx_confines_a_generated_ui_crash_to_an_error_boundary():
+    """Regression guard: the Build Agent's generated component is untrusted
+    LLM-authored code and can have real runtime bugs (e.g. a ReferenceError
+    from an undeclared variable). Without an error boundary, React unmounts
+    the entire Mission Control page on such a crash - this asserts the
+    generated component is wrapped so only its own zone fails, leaving the
+    Quick Request fallback and the rest of the shell usable."""
+    from app.deploy_launch.pipeline_service import _FRONTEND_MAIN_TSX
+
+    assert "class MissionInputBoundary extends React.Component<" in _FRONTEND_MAIN_TSX
+    assert "static getDerivedStateFromError() {" in _FRONTEND_MAIN_TSX
+    assert "componentDidCatch(error: unknown) {" in _FRONTEND_MAIN_TSX
+    assert (
+        "<MissionInputBoundary>\n"
+        "                    <GeneratedMissionApp onSubmit={submitFromCustomUI} "
+        "missionAgents={missionAgents} />\n"
+        "                </MissionInputBoundary>"
+    ) in _FRONTEND_MAIN_TSX
+
