@@ -4,11 +4,16 @@ name: CI
 # before ever changing this back to "main" - CI silently never ran on any
 # push/PR until this was fixed, since the previous trigger watched a branch
 # that doesn't exist in this repo).
+#
+# "dev" is the working branch for in-progress phases of work - included here
+# so backend/frontend tests run on every push, but deploy-backend/
+# deploy-frontend below stay gated to `refs/heads/master` only (see their
+# own `if:` conditions), so pushing to dev never auto-deploys.
 on:
   push:
-    branches: [master]
+    branches: [master, dev]
   pull_request:
-    branches: [master]
+    branches: [master, dev]
 
 jobs:
   backend:
