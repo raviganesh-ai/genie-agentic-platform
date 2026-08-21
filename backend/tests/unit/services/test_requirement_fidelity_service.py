@@ -178,3 +178,45 @@ def test_parametrized_test_case_names_are_matched_to_their_bare_def_name() -> No
     assert one_failing.requirements[0].status == "failed"
     assert "failed: test_req_025_language_coverage[japanese]" in one_failing.requirements[0].evidence
     assert "no JUnit result" not in one_failing.requirements[0].evidence
+
+
+def test_test_name_matching_tolerates_a_dropped_leading_zero() -> None:
+    """Regression test for a real bug where the Test Generation Agent wrote
+    ``test_req_16_...`` (no leading zero) for a requirement whose approved id
+    is ``REQ-016``, causing an exact/substring match against ``req_016`` to
+    permanently report that requirement as having no executable test at all,
+    even though a real, correctly-behaved test for it existed."""
+
+    report = create_fidelity_report(
+        "[REQ-016] Reassign an unresolved ticket to another agent.", max_repair_attempts=3
+    )
+
+    report = record_test_coverage(
+        report,
+        ["def test_req_16_reassigns_unresolved_ticket():\n    assert reassign()"],
+    )
+
+    assert report.requirements[0].status == "covered"
+    assert report.requirements[0].test_names == ["test_req_16_reassigns_unresolved_ticket"]
+
+
+def test_test_name_matching_does_not_collide_with_a_similar_numeric_id() -> None:
+    """A dropped-zero-tolerant match must still respect digit boundaries -
+    REQ-016's test must never be confused with REQ-160's, and vice versa."""
+
+    report = create_fidelity_report(
+        "[REQ-016] First requirement.\n[REQ-160] Second, unrelated requirement.",
+        max_repair_attempts=3,
+    )
+
+    report = record_test_coverage(
+        report,
+        [
+            "def test_req_016_first_behavior():\n    assert first()",
+            "def test_req_160_second_behavior():\n    assert second()",
+        ],
+    )
+
+    by_id = {item.requirement_id: item for item in report.requirements}
+    assert by_id["REQ-016"].test_names == ["test_req_016_first_behavior"]
+    assert by_id["REQ-160"].test_names == ["test_req_160_second_behavior"]

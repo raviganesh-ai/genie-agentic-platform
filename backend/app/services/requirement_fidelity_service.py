@@ -16,6 +16,7 @@ __all__ = [
 ]
 
 _REQUIREMENT_ID_PATTERN: Final = re.compile(r"\bREQ-\d{3,}\b", re.IGNORECASE)
+_REQUIREMENT_ID_DIGITS_PATTERN: Final = re.compile(r"^REQ-(\d+)$", re.IGNORECASE)
 _TEST_FUNCTION_PATTERN: Final = re.compile(
     r"\b(?:async\s+)?def\s+(test_[A-Za-z0-9_]+)\s*\(", re.IGNORECASE
 )
@@ -75,12 +76,26 @@ def create_fidelity_report(
     )
 
 
+def _requirement_name_pattern(requirement_id: str) -> re.Pattern[str]:
+    """Builds a name-matching pattern that tolerates a generated test function
+    dropping a requirement id's leading zero(s) - e.g. writing
+    ``test_req_16_...`` for ``REQ-016`` - while still requiring a real digit
+    boundary on both sides so it can never match an unrelated id (a plain
+    substring check would wrongly match ``REQ-016`` against a test written
+    for ``REQ-0160``, and would wrongly miss ``REQ-016`` against a test that
+    dropped its leading zero to ``test_req_16_...``)."""
+    match = _REQUIREMENT_ID_DIGITS_PATTERN.match(requirement_id)
+    digits = match.group(1) if match else requirement_id.rsplit("-", 1)[-1]
+    significant = digits.lstrip("0") or "0"
+    return re.compile(rf"(?<!\d)req_0*{re.escape(significant)}(?!\d)", re.IGNORECASE)
+
+
 def _test_names_for_requirement(requirement_id: str, modules: Iterable[str]) -> list[str]:
-    normalized_id = requirement_id.lower().replace("-", "_")
+    pattern = _requirement_name_pattern(requirement_id)
     names: list[str] = []
     for module in modules:
         module_names = _TEST_FUNCTION_PATTERN.findall(module)
-        names.extend(name for name in module_names if normalized_id in name.lower())
+        names.extend(name for name in module_names if pattern.search(name))
     return list(dict.fromkeys(names))
 
 
