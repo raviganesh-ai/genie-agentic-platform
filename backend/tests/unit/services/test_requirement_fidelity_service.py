@@ -119,3 +119,62 @@ def test_zero_id_baseline_and_unobserved_test_results_fail_closed() -> None:
     assert empty_result.pass_percent == 0
     assert unobserved.status == "repairing"
     assert "no JUnit result" in unobserved.requirements[0].evidence
+
+
+def test_parametrized_test_case_names_are_matched_to_their_bare_def_name() -> None:
+    """pytest's JUnit XML reports a ``@pytest.mark.parametrize``-decorated
+    test's real case names as ``"<def name>[<param id>]"`` - never the bare
+    ``def`` name alone. Regression test for a real bug where every requirement
+    covered by a parametrized test (a natural way to test "cover these N
+    languages/items") always showed "no JUnit result found", even though
+    every parametrized case actually ran and passed."""
+
+    report = create_fidelity_report(
+        "[REQ-025] Evaluate all seven target languages.", max_repair_attempts=3
+    )
+    report = record_test_coverage(
+        report,
+        [
+            "@pytest.mark.parametrize('language', LANGUAGES)\ndef test_req_025_language_coverage(language):\n    assert covers(language)"
+        ],
+    )
+
+    all_passed = record_fidelity_execution(
+        report,
+        success=True,
+        summary="7 passed",
+        passed_test_names=[
+            "test_req_025_language_coverage[korean]",
+            "test_req_025_language_coverage[german]",
+            "test_req_025_language_coverage[spanish]",
+            "test_req_025_language_coverage[italian]",
+            "test_req_025_language_coverage[french]",
+            "test_req_025_language_coverage[simplified_chinese]",
+            "test_req_025_language_coverage[japanese]",
+        ],
+    )
+
+    assert all_passed.status == "passed"
+    assert all_passed.pass_percent == 100
+    assert all_passed.requirements[0].status == "passed"
+
+    one_failing = record_fidelity_execution(
+        report,
+        success=False,
+        summary="6 passed, 1 failed",
+        passed_test_names=[
+            "test_req_025_language_coverage[korean]",
+            "test_req_025_language_coverage[german]",
+            "test_req_025_language_coverage[spanish]",
+            "test_req_025_language_coverage[italian]",
+            "test_req_025_language_coverage[french]",
+            "test_req_025_language_coverage[simplified_chinese]",
+        ],
+        failed_test_names=["test_req_025_language_coverage[japanese]"],
+        final_failure=False,
+    )
+
+    assert one_failing.status == "repairing"
+    assert one_failing.requirements[0].status == "failed"
+    assert "failed: test_req_025_language_coverage[japanese]" in one_failing.requirements[0].evidence
+    assert "no JUnit result" not in one_failing.requirements[0].evidence

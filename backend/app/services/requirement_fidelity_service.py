@@ -126,6 +126,22 @@ def record_test_coverage(
     )
 
 
+def _observed_names_for(expected_name: str, observed_names: set[str]) -> set[str]:
+    """Returns every observed JUnit test-case name that corresponds to
+    ``expected_name`` - either an exact match, or (for a
+    ``@pytest.mark.parametrize``-decorated test) any of its bracketed case
+    instances, e.g. ``test_foo[korean]``. pytest's JUnit XML always reports
+    a parametrized test's real case name as ``"<def name>[<param id>]"``,
+    never the bare ``def`` name alone - matching by exact equality would
+    wrongly report every passing parametrized test as having no JUnit
+    result at all, even though it actually ran and passed."""
+
+    prefix = expected_name + "["
+    return {
+        name for name in observed_names if name == expected_name or name.startswith(prefix)
+    }
+
+
 def record_fidelity_execution(
     report: RequirementFidelityReport,
     *,
@@ -141,17 +157,27 @@ def record_fidelity_execution(
     failed_names = set(failed_test_names)
     errored_names = set(errored_test_names)
     skipped_names = set(skipped_test_names)
+    all_observed_names = passed_names | failed_names | errored_names | skipped_names
     requirements: list[RequirementFidelityItem] = []
     gaps: list[str] = []
     for item in report.requirements:
         expected_names = set(item.test_names)
-        failed = sorted(expected_names & failed_names)
-        errored = sorted(expected_names & errored_names)
-        skipped = sorted(expected_names & skipped_names)
-        unobserved = sorted(
-            expected_names - passed_names - failed_names - errored_names - skipped_names
-        )
-        item_passed = bool(expected_names) and expected_names <= passed_names
+        failed: list[str] = []
+        errored: list[str] = []
+        skipped: list[str] = []
+        unobserved: list[str] = []
+        item_passed = bool(expected_names)
+        for expected_name in sorted(expected_names):
+            instances = _observed_names_for(expected_name, all_observed_names)
+            if not instances:
+                unobserved.append(expected_name)
+                item_passed = False
+                continue
+            if not instances <= passed_names:
+                item_passed = False
+            failed.extend(sorted(instances & failed_names))
+            errored.extend(sorted(instances & errored_names))
+            skipped.extend(sorted(instances & skipped_names))
         if item_passed:
             evidence = "Passed: " + ", ".join(sorted(expected_names))
             status = "passed"
