@@ -35,6 +35,12 @@ dependencies = [
     # "No module named pytest", misreported as "the generated test suite
     # has no runnable test function(s)".
     "pytest>=8.2,<9.0",
+    # Also not dev-only: EntraTokenValidator/LocalDevTokenValidator (see
+    # app/security/token_validator.py) import this directly at request time
+    # in production. It previously only worked by luck via msal's transitive
+    # dependency on pyjwt (pulled in through azure-identity) - declare it
+    # explicitly so it can't silently disappear on an unrelated dependency bump.
+    "pyjwt[crypto]>=2.8,<3.0",
 ]
 
 [project.optional-dependencies]
@@ -42,7 +48,6 @@ dev = [
     "pytest-asyncio>=0.23,<1.0",
     "httpx>=0.27,<1.0",
     "ruff>=0.5,<1.0",
-    "pyjwt[crypto]>=2.8,<3.0",
 ]
 
 [build-system]

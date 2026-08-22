@@ -375,10 +375,10 @@ All backend configuration is via environment variables prefixed `GENIE_` (pydant
 | `GENIE_REQUIREMENTS_QUALIFICATION_STEP_ID` | `analyze-requirements` | Workflow step id whose output is checked for an agentic-workflow qualification verdict |
 | `GENIE_DEPLOYMENT_FIDELITY_MAX_REPAIR_ATTEMPTS` | `3` | Max automatic regenerate-and-redeploy attempts the Requirement Fidelity Gate makes before failing closed |
 | `GENIE_KEY_VAULT_URI` | *(none)* | Required in production |
+| `GENIE_ENTRA_AUTHORITY` | *(none)* | Microsoft Entra ID authority, e.g. `https://login.microsoftonline.com` |
 | `GENIE_ENTRA_TENANT_ID` | *(none)* | Microsoft Entra ID tenant for token validation + login |
 | `GENIE_ENTRA_CLIENT_ID` | *(none)* | App registration (API) client id |
-| `GENIE_MISE_ENDPOINT` | *(none)* | MISE v2 sidecar base URL; required in production |
-| `GENIE_MISE_TIMEOUT_SECONDS` | `5` | Fail-closed timeout for inbound MISE validation |
+| `GENIE_ALLOW_LOCAL_TOKEN_VALIDATION` | `false` | Allows `LocalDevTokenValidator` (unverified-signature JWT decode) when Entra isn't configured; must be `false` in production |
 | `GENIE_CORS_ALLOWED_ORIGINS` | *(empty)* | Comma-separated browser origins allowed to call the API (e.g. the deployed frontend's URL) |
 | `GENIE_CONFIG_ROOT` | `config` | Root directory for agents/prompts/workflows/policies |
 | `AZURE_CLIENT_ID` | *(none)* | **Required** when running under a Container App / VM with a **user-assigned** managed identity — tells `DefaultAzureCredential` which identity to use |
@@ -398,7 +398,7 @@ Frontend (`frontend/.env.production` / `.env.development`, Vite `VITE_` prefix):
 
 Genie uses **Microsoft Entra ID** end to end:
 
-- **Backend**: `MiseTokenValidator` forwards each bearer token and its original request context to the colocated MISE v2 container. Production requires `GENIE_MISE_ENDPOINT` and fails closed with `503` if MISE is unavailable. `LocalDevTokenValidator` activates only when `GENIE_ALLOW_LOCAL_AGENTS=true` and MISE is not configured (never in production).
+- **Backend**: `EntraTokenValidator` (see `backend/app/security/token_validator.py`) validates each bearer token directly against the tenant's Microsoft Entra ID OpenID metadata and JWKS (RS256 signature, issuer, audience, `exp`/`iat`) — no sidecar or intermediary service is involved. It activates once `GENIE_ENTRA_AUTHORITY`, `GENIE_ENTRA_TENANT_ID`, and `GENIE_ENTRA_CLIENT_ID` are all set. `LocalDevTokenValidator` (unverified-signature JWT decode) is the only fallback, and only when `GENIE_ALLOW_LOCAL_TOKEN_VALIDATION=true` and Entra isn't configured — never in production. `create_token_validator()` fails closed otherwise.
 - **Frontend**: MSAL (`@azure/msal-browser`) drives an automatic redirect sign-in flow — on load, the app silently acquires a token if a session exists, or redirects to the Microsoft sign-in page if not, then redirects back with no manual steps. Silent token refresh runs on a 5-minute timer via `acquireTokenSilent`, falling back to `acquireTokenRedirect` on `InteractionRequiredAuthError`. If the three `VITE_ENTRA_*` variables aren't set, the app transparently falls back to the pre-existing manual token-entry seam (`setAccessToken()`), so local/backend-only development never requires an Entra app registration.
 - **App registration**: a single Azure AD application acts as both the SPA client and the API it calls (self-referencing `access_as_user` OAuth2 permission scope). Grant admin consent for this scope in **Entra admin center → App registrations → API permissions → Grant admin consent** so users aren't prompted individually; if consent can't be granted centrally, users will see a one-time interactive consent prompt on first sign-in instead.
 
