@@ -47,6 +47,14 @@ class WorkflowExecutionService:
         # weak references to tasks, so without this a run could be garbage
         # collected mid-execution.
         self._background_tasks: set[asyncio.Task[None]] = set()
+        # Which workflow_run_ids currently have a background execution still
+        # in flight - guards resume_workflow_background against a duplicate
+        # resume for the same run (e.g. a user re-clicking Approve after
+        # navigating back before the first attempt has settled) racing a
+        # second concurrent WorkflowRuntime.run_workflow call against the
+        # same run id, whose interleaved on_progress writes would otherwise
+        # clobber each other non-deterministically.
+        self._in_flight_run_ids: set[str] = set()
 
     async def start_workflow(
         self,
@@ -155,11 +163,22 @@ class WorkflowExecutionService:
     ) -> WorkflowRunResult:
         """Resumes a paused run detached from the caller's request.
 
-        Same rationale as ``start_workflow_background``.
+        Same rationale as ``start_workflow_background``. A duplicate resume
+        for a run id that already has a background execution in flight is a
+        no-op that just returns the current (already ``running``) snapshot,
+        rather than spawning a second concurrent ``run_workflow`` call - see
+        ``_in_flight_run_ids``.
         """
         previous = await self._repository.get(workflow_run_id=workflow_run_id)
         if previous is None:
             raise UnknownWorkflowRunError(f"No workflow run '{workflow_run_id}' found to resume.")
+
+        if workflow_run_id in self._in_flight_run_ids:
+            logger.info(
+                "Ignoring duplicate resume for workflow run %s; a prior resume is still executing.",
+                workflow_run_id,
+            )
+            return previous
 
         accepted = previous.model_copy(
             update={
@@ -188,6 +207,7 @@ class WorkflowExecutionService:
         *,
         accepted: WorkflowRunResult,
     ) -> None:
+        self._in_flight_run_ids.add(accepted.workflow_run_id)
         task = asyncio.create_task(self._execute_detached(coro, accepted=accepted))
         self._background_tasks.add(task)
         task.add_done_callback(self._background_tasks.discard)
@@ -221,6 +241,8 @@ class WorkflowExecutionService:
             )
         else:
             await self._repository.put(result)
+        finally:
+            self._in_flight_run_ids.discard(accepted.workflow_run_id)
 
     async def list_runs_for_session(self, session_id: str) -> list[WorkflowRunResult]:
         return await self._repository.list_for_session(session_id=session_id)
