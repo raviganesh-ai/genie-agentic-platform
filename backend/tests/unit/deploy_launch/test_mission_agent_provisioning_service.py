@@ -122,7 +122,7 @@ async def test_provision_truncates_a_long_agent_name_to_stay_within_63_character
     )
 
     await service.provision(
-        mission_slug="derekpoc-c753ba86",
+        mission_slug="sample-mission-c753ba86",
         agent_names=[
             "Customer Relationship Management and Escalation Handling Specialist Agent"
         ],
@@ -134,4 +134,4 @@ async def test_provision_truncates_a_long_agent_name_to_stay_within_63_character
     assert len(created_name) <= 63
     assert created_name[0].isalnum()
     assert created_name[-1].isalnum()
-    assert created_name.startswith("derekpoc-c753ba86-")
+    assert created_name.startswith("sample-mission-c753ba86-")
