@@ -384,11 +384,22 @@ prompts:
       - do not use `unittest.TestCase` unless the class name starts with
         `Test` and every test method starts with `test_`
       - each ```python block must contain at least one such test function
+      - every test function MUST be immediately preceded by its own comment
+        line in exactly this form: `# REQ-XXX` (copy the id character-for-
+        character from the approved requirements below - never reformat,
+        reorder, or drop any digit, including leading zeros). Put one such
+        comment line for each requirement id that test covers. Blank lines
+        and decorator lines (for example `@pytest.mark.parametrize(...)`)
+        may appear between the comment and the `def` line; nothing else may.
+        This comment is the authoritative coverage signal checked by the
+        pipeline - it is required in addition to, not instead of, naming the
+        function after the requirement (for example `test_req_001_<behavior>`
+        for REQ-001).
       - every approved requirement ID must have at least one executable
-        Python test whose FUNCTION NAME contains the normalized ID: for
-        example, REQ-001 requires `test_req_001_<behavior>`. That test must
-        assert the requirement's real acceptance behavior. Comments,
-        docstrings, and narrative mentions never count as coverage.
+        Python test tagged with that exact requirement ID as described
+        above. That test must assert the requirement's real acceptance
+        behavior. Comments, docstrings, and narrative mentions elsewhere
+        never count as coverage.
       - acceptance tests must exercise the real deployed prototype through
         `MISSION_BACKEND_URL` and/or `MISSION_FRONTEND_URL` environment
         variables. Never use mocks, patches, monkeypatch, response
@@ -441,7 +452,7 @@ prompts:
       - artifact
       - requirements
       - user_message
-    version: "1.6.0"
+    version: "1.7.0"
 
   - id: failure-diagnosis-v1
     name: Failure Diagnosis

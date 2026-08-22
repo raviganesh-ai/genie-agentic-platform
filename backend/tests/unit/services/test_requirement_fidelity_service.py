@@ -94,7 +94,11 @@ def test_comment_only_requirement_mention_is_not_executable_coverage() -> None:
 
     report = record_test_coverage(
         report,
-        ["# REQ-001\ndef test_process_every_document():\n    assert process_all()"],
+        [
+            "def test_process_every_document():\n    # narrative mention of REQ-001 "
+            + "inside the body does not count - only a comment directly above the def, "
+            + "or the id in the def's own name, counts as coverage.\n    assert process_all()"
+        ],
     )
 
     assert report.coverage_percent == 0
@@ -220,3 +224,57 @@ def test_test_name_matching_does_not_collide_with_a_similar_numeric_id() -> None
     by_id = {item.requirement_id: item for item in report.requirements}
     assert by_id["REQ-016"].test_names == ["test_req_016_first_behavior"]
     assert by_id["REQ-160"].test_names == ["test_req_160_second_behavior"]
+
+
+def test_tag_comment_covers_a_requirement_regardless_of_function_name() -> None:
+    """The ``# REQ-xxx`` tag comment directly above a test is the primary,
+    authoritative coverage signal - it must credit a requirement even when
+    the test function's own name has nothing to do with that id at all,
+    since asking an agent to correctly transform an id into a valid,
+    zero-padded Python identifier has repeatedly proven fragile."""
+
+    report = create_fidelity_report(
+        "[REQ-050] Escalate a ticket after three failed retries.", max_repair_attempts=3
+    )
+
+    report = record_test_coverage(
+        report,
+        ["# REQ-050\ndef test_escalation_flow():\n    assert escalate()"],
+    )
+
+    assert report.requirements[0].status == "covered"
+    assert report.requirements[0].test_names == ["test_escalation_flow"]
+
+
+def test_tag_comment_survives_blank_lines_and_decorators_but_not_other_code() -> None:
+    report = create_fidelity_report(
+        "[REQ-060] First.\n[REQ-061] Second, untagged.", max_repair_attempts=3
+    )
+
+    report = record_test_coverage(
+        report,
+        [
+            "# REQ-060\n\n@pytest.mark.parametrize('n', [1, 2])\ndef test_first(n):\n    assert "
+            + "first(n)\n\nx = 1  # not a tag - this line must clear any pending tag\n# REQ-061\n"
+            + "x = 2\ndef test_second():\n    assert second()"
+        ],
+    )
+
+    by_id = {item.requirement_id: item for item in report.requirements}
+    assert by_id["REQ-060"].test_names == ["test_first"]
+    assert by_id["REQ-061"].status == "missing"
+
+
+def test_one_tag_comment_block_covers_multiple_requirement_ids() -> None:
+    report = create_fidelity_report(
+        "[REQ-070] First.\n[REQ-071] Second.", max_repair_attempts=3
+    )
+
+    report = record_test_coverage(
+        report,
+        ["# REQ-070\n# REQ-071\ndef test_combined_behavior():\n    assert combined()"],
+    )
+
+    by_id = {item.requirement_id: item for item in report.requirements}
+    assert by_id["REQ-070"].test_names == ["test_combined_behavior"]
+    assert by_id["REQ-071"].test_names == ["test_combined_behavior"]

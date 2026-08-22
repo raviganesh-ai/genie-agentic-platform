@@ -90,10 +90,52 @@ def _requirement_name_pattern(requirement_id: str) -> re.Pattern[str]:
     return re.compile(rf"(?<!\d)req_0*{re.escape(significant)}(?!\d)", re.IGNORECASE)
 
 
+def _tagged_test_names(module: str) -> dict[str, list[str]]:
+    """Maps each requirement id declared in a ``# REQ-xxx`` comment directly
+    above a test function to that function's name.
+
+    This is the primary, authoritative coverage signal - it only requires
+    the agent to copy an id verbatim into a comment (the exact string it was
+    already given in the approved requirements), never to correctly
+    transform it into a valid, zero-padded Python identifier. Encoding the id
+    into the function name (checked separately by ``_requirement_name_pattern``
+    as a fallback) has repeatedly proven fragile: pytest reports a
+    parametrized test's real name with a bracketed suffix, and an agent can
+    drop a requirement id's leading zero when forming an identifier - both
+    are real bugs this repo hit. A pending tag survives blank lines and
+    decorator lines (e.g. ``@pytest.mark.parametrize(...)``) between the
+    comment and the ``def`` it labels, but is cleared by any other line so a
+    tag can never leak onto an unrelated, later function.
+    """
+
+    tags_by_id: dict[str, list[str]] = {}
+    pending_ids: list[str] = []
+    for line in module.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith("#"):
+            for match in _REQUIREMENT_ID_PATTERN.finditer(stripped):
+                requirement_id = match.group(0).upper()
+                if requirement_id not in pending_ids:
+                    pending_ids.append(requirement_id)
+            continue
+        if stripped.startswith("@"):
+            continue
+        def_match = _TEST_FUNCTION_PATTERN.search(line)
+        if def_match and pending_ids:
+            test_name = def_match.group(1)
+            for requirement_id in pending_ids:
+                tags_by_id.setdefault(requirement_id, []).append(test_name)
+        pending_ids = []
+    return tags_by_id
+
+
 def _test_names_for_requirement(requirement_id: str, modules: Iterable[str]) -> list[str]:
     pattern = _requirement_name_pattern(requirement_id)
     names: list[str] = []
     for module in modules:
+        names.extend(_tagged_test_names(module).get(requirement_id, ()))
         module_names = _TEST_FUNCTION_PATTERN.findall(module)
         names.extend(name for name in module_names if pattern.search(name))
     return list(dict.fromkeys(names))
