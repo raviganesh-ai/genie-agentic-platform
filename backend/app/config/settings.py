@@ -161,6 +161,16 @@ class Settings(BaseSettings):
     deployment_storage_account_name: str | None = None
     deployment_location: str | None = None
     deployment_fidelity_max_repair_attempts: int = 3
+    # How long the Requirement Fidelity Gate's real pytest subprocess is
+    # allowed to run before being killed. This suite executes real black-box
+    # HTTP acceptance tests against a live deployed mission prototype (one
+    # test per approved requirement) - not fast in-process unit tests - so it
+    # scales with the number of approved requirements. A too-short timeout
+    # kills the whole pytest process before it can write any JUnit XML at
+    # all, which discards every real pass/fail outcome and misreports every
+    # single requirement as if its test didn't exist, rather than surfacing
+    # the real "the suite didn't finish in time" cause.
+    deployment_test_execution_timeout_seconds: int = 300
     # Local filesystem root the pipeline materializes each mission's generated
     # build under (one subdirectory per pipeline run id) before packaging it
     # for ACR/Storage upload - never a customer-specific path in source.

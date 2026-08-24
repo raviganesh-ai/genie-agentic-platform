@@ -111,6 +111,13 @@ class TestExecutionResult:
     failed_test_names: tuple[str, ...] = ()
     errored_test_names: tuple[str, ...] = ()
     skipped_test_names: tuple[str, ...] = ()
+    # True only when the pytest subprocess itself was killed for exceeding
+    # ``timeout_seconds`` before it could finish (and, therefore, before it
+    # could write any JUnit XML at all). Distinct from every other failure
+    # mode: the requirement fidelity layer must not describe this as "no
+    # JUnit result" for every requirement (which reads as a test-name
+    # mismatch bug) - it genuinely never got a chance to run to completion.
+    timed_out: bool = False
 
     @property
     def success(self) -> bool:
@@ -130,6 +137,10 @@ class TestExecutionService:
 
     def __init__(self, *, timeout_seconds: int = _DEFAULT_TIMEOUT_SECONDS) -> None:
         self._timeout_seconds = timeout_seconds
+
+    @property
+    def timeout_seconds(self) -> int:
+        return self._timeout_seconds
 
     async def run_tests(
         self,
@@ -187,7 +198,9 @@ class TestExecutionService:
             process.kill()
             await process.wait()
             return TestExecutionResult(
-                ran=True, summary=f"Test execution timed out after {self._timeout_seconds}s."
+                ran=True,
+                timed_out=True,
+                summary=f"Test execution timed out after {self._timeout_seconds}s.",
             )
 
         raw_output = stdout.decode("utf-8", errors="replace")

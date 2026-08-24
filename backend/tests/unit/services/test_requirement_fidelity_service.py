@@ -125,6 +125,38 @@ def test_zero_id_baseline_and_unobserved_test_results_fail_closed() -> None:
     assert "no JUnit result" in unobserved.requirements[0].evidence
 
 
+def test_execution_incomplete_reports_a_timeout_not_a_name_mismatch_for_every_requirement() -> None:
+    """When the pytest subprocess itself is killed for exceeding the
+    execution timeout, nothing is observed for ANY requirement - but that
+    must never be reported as "no JUnit result" per requirement (which reads
+    as the test-name-matching bug this file has already fixed three times).
+    The real, actionable cause is that the suite never finished running."""
+
+    report = create_fidelity_report(
+        "[REQ-001] First. [REQ-002] Second.", max_repair_attempts=3
+    )
+    report = record_test_coverage(
+        report,
+        [
+            "# REQ-001\ndef test_req_001():\n    assert first()",
+            "# REQ-002\ndef test_req_002():\n    assert second()",
+        ],
+    )
+
+    timed_out = record_fidelity_execution(
+        report,
+        success=False,
+        summary="Test execution timed out after 300s.",
+        execution_incomplete=True,
+    )
+
+    assert timed_out.status == "repairing"
+    for item in timed_out.requirements:
+        assert item.status == "failed"
+        assert item.evidence == "Test execution did not finish: Test execution timed out after 300s."
+        assert "no JUnit result" not in item.evidence
+
+
 def test_parametrized_test_case_names_are_matched_to_their_bare_def_name() -> None:
     """pytest's JUnit XML reports a ``@pytest.mark.parametrize``-decorated
     test's real case names as ``"<def name>[<param id>]"`` - never the bare

@@ -2135,9 +2135,10 @@ class DeploymentPipelineService:
                         pipeline_run.id, test_output_text
                     )
                     modules = extract_test_modules(test_output_text)
+                    timeout_minutes = max(1, round(self._test_execution_service.timeout_seconds / 60))
                     step_result.detail = (
                         f"Running {len(modules)} generated test module(s) with pytest against the "
-                        "real deployed prototype (up to 2 minutes)..."
+                        f"real deployed prototype (up to {timeout_minutes} minute(s))..."
                     )
                     test_result = await self._test_execution_service.run_tests(
                         build_root=backend_root,
@@ -2166,6 +2167,7 @@ class DeploymentPipelineService:
                         errored_test_names=test_result.errored_test_names,
                         skipped_test_names=test_result.skipped_test_names,
                         final_failure=final_failure,
+                        execution_incomplete=test_result.timed_out,
                     )
                     if pipeline_run.fidelity_report.status == "passed":
                         detail = test_result.summary
@@ -2327,7 +2329,9 @@ def create_deployment_pipeline_service(
         mission_agent_provisioning_service=mission_agent_provisioning_service,
         backend_deployment_service=backend_deployment_service,
         frontend_deployment_service=frontend_deployment_service,
-        test_execution_service=TestExecutionService(),
+        test_execution_service=TestExecutionService(
+            timeout_seconds=settings.deployment_test_execution_timeout_seconds
+        ),
         security_scan_service=SecurityScanService(),
         build_workspace_root=settings.deployment_build_workspace_root,
         fidelity_max_repair_attempts=settings.deployment_fidelity_max_repair_attempts,

@@ -180,6 +180,7 @@ async def test_run_tests_times_out_on_a_hanging_generated_test(tmp_path: Path):
 
     assert result.ran is True
     assert result.success is False
+    assert result.timed_out is True
     assert "timed out" in result.summary
 
 

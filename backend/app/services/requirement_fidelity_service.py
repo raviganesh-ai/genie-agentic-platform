@@ -209,6 +209,7 @@ def record_fidelity_execution(
     errored_test_names: Iterable[str] = (),
     skipped_test_names: Iterable[str] = (),
     final_failure: bool = False,
+    execution_incomplete: bool = False,
 ) -> RequirementFidelityReport:
     passed_names = set(passed_test_names)
     failed_names = set(failed_test_names)
@@ -238,6 +239,18 @@ def record_fidelity_execution(
         if item_passed:
             evidence = "Passed: " + ", ".join(sorted(expected_names))
             status = "passed"
+        elif execution_incomplete and not all_observed_names:
+            # The pytest subprocess itself never finished (e.g. it was killed
+            # for exceeding the execution timeout) - nothing at all was
+            # observed for ANY requirement, not just this one. Reporting
+            # "no JUnit result: <name>" per requirement here would read as a
+            # test-name-matching bug (the class of bug this file has already
+            # fixed three times - parametrize brackets, dropped leading
+            # zeros, fragile name matching), when the real, actionable cause
+            # is that the whole suite never ran to completion.
+            evidence = f"Test execution did not finish: {summary}"
+            status = "failed"
+            gaps.append(f"{item.requirement_id}: {evidence}")
         else:
             details = []
             if failed:
