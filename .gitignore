@@ -8,6 +8,10 @@ __pycache__/
 venv/
 *.egg-info/
 
+# .NET
+**/bin/
+**/obj/
+
 # Environment files (never commit secrets)
 .env
 *.env.local

@@ -399,7 +399,8 @@ Frontend (`frontend/.env.production` / `.env.development`, Vite `VITE_` prefix):
 
 Genie uses **Microsoft Entra ID** end to end:
 
-- **Backend**: `EntraTokenValidator` (see `backend/app/security/token_validator.py`) validates each bearer token directly against the tenant's Microsoft Entra ID OpenID metadata and JWKS (RS256 signature, issuer, audience, `exp`/`iat`) — no sidecar or intermediary service is involved. It activates once `GENIE_ENTRA_AUTHORITY`, `GENIE_ENTRA_TENANT_ID`, and `GENIE_ENTRA_CLIENT_ID` are all set. `LocalDevTokenValidator` (unverified-signature JWT decode) is the only fallback, and only when `GENIE_ALLOW_LOCAL_TOKEN_VALIDATION=true` and Entra isn't configured — never in production. `create_token_validator()` fails closed otherwise.
+- **Authentication gateway**: every external API request first reaches the .NET 8 gateway in `gateway/Genie.AuthenticationGateway`. The gateway uses `Microsoft.Identity.ServiceEssentials.AspNetCore` (MISE) to validate Entra bearer tokens, allows both delegated user and application access tokens for the configured API audiences, and proxies accepted requests to `http://localhost:8000`. Public Container App ingress targets gateway port `8080`; FastAPI port `8000` is reachable only inside the replica. Liveness/readiness probes and configured CORS preflight requests are anonymous; all API routes require authentication.
+- **Backend defense in depth**: `EntraTokenValidator` (see `backend/app/security/token_validator.py`) validates the bearer token again against the tenant's Microsoft Entra ID OpenID metadata and JWKS (RS256 signature, issuer, audience, `exp`/`iat`). The gateway preserves the original `Authorization` header when proxying. Validation activates once `GENIE_ENTRA_AUTHORITY`, `GENIE_ENTRA_TENANT_ID`, and `GENIE_ENTRA_CLIENT_ID` are all set. `LocalDevTokenValidator` is available only when `GENIE_ALLOW_LOCAL_TOKEN_VALIDATION=true` and Entra isn't configured — never in production. `create_token_validator()` fails closed otherwise.
 - **Frontend**: MSAL (`@azure/msal-browser`) drives an automatic redirect sign-in flow — on load, the app silently acquires a token if a session exists, or redirects to the Microsoft sign-in page if not, then redirects back with no manual steps. Silent token refresh runs on a 5-minute timer via `acquireTokenSilent`, falling back to `acquireTokenRedirect` on `InteractionRequiredAuthError`. If the three `VITE_ENTRA_*` variables aren't set, the app transparently falls back to the pre-existing manual token-entry seam (`setAccessToken()`), so local/backend-only development never requires an Entra app registration.
 - **App registration**: a single Azure AD application acts as both the SPA client and the API it calls (self-referencing `access_as_user` OAuth2 permission scope). Grant admin consent for this scope in **Entra admin center → App registrations → API permissions → Grant admin consent** so users aren't prompted individually; if consent can't be granted centrally, users will see a one-time interactive consent prompt on first sign-in instead.
 
@@ -407,7 +408,7 @@ Genie uses **Microsoft Entra ID** end to end:
 
 ## Deployment strategy
 
-Genie ships as: (1) Bicep infrastructure-as-code that provisions every foundational Azure resource into a brand-new subscription, (2) a containerized FastAPI backend deployed to Azure Container Apps, and (3) a static React frontend deployed to Azure Static Web Apps. Deployment is split into readiness validation → infrastructure provisioning → agent provisioning → application deployment, matching the repo's fail-closed philosophy: nothing proceeds until the previous step is verified.
+Genie ships as: (1) Bicep infrastructure-as-code that provisions every foundational Azure resource into a brand-new subscription, (2) a .NET 8 MISE gateway and private FastAPI container deployed together in every Azure Container Apps replica, and (3) a static React frontend deployed to Azure Static Web Apps. Deployment is split into readiness validation → infrastructure provisioning → agent provisioning → application deployment, matching the repo's fail-closed philosophy: nothing proceeds until the previous step is verified.
 
 ### Deploying into a brand-new Azure subscription
 
@@ -525,56 +526,54 @@ All three require `GENIE_AZURE_FOUNDRY_ENDPOINT` / `GENIE_AZURE_FOUNDRY_PROJECT_
 
 ### Deploying application code (backend + frontend)
 
-**Backend (Azure Container Apps)**
+**Backend and authentication gateway (Azure Container Apps)**
 
-1. Build and push the container image to an Azure Container Registry:
+1. Configure a MicrosoftIT Azure DevOps PAT with **Packaging Read** access as `AZURE_DEVOPS_TOKEN`. MISE `2.5.3` is distributed through the restricted `PS-GCM-FieldExperiencePlatform` feed, not NuGet.org. Never write the PAT into `NuGet.config`, a Docker layer, logs, or command output.
+
+2. Build and push both immutable images to Azure Container Registry. Pass the feed credential as a secret build argument:
 
    ```powershell
-   az acr build --registry <acr-name> --image genie-backend:latest --file backend/Dockerfile <source>
+   az acr build --registry <acr-name> --image genie-backend:<commit> `
+     --file backend/Dockerfile <source>
+   az acr build --registry <acr-name> --image genie-auth-gateway:<commit> `
+     --file gateway/Dockerfile --secret-build-arg AZURE_DEVOPS_TOKEN=$env:AZURE_DEVOPS_TOKEN <source>
    ```
 
    `<source>` can be a local directory (`.`) or a git URL (`https://github.com/<org>/<repo>.git#<branch>`, optionally with an embedded token for a private repo: `https://<token>@github.com/...`) — use whichever works reliably in your build environment.
 
-2. Create (first time) or update (subsequent deploys) the Container App:
+3. Create the Container App initially with the FastAPI container and its existing managed-identity configuration. Before exposing it to users, atomically install the gateway, update both images, and move ingress to port `8080`:
 
    ```powershell
-   az containerapp create `
-     --name genie-backend --resource-group <rg> --environment <container-apps-environment-id> `
-     --image <acr-name>.azurecr.io/genie-backend:latest --target-port 8000 --ingress external `
-     --user-assigned <managed-identity-resource-id> `
-     --registry-server <acr-name>.azurecr.io --registry-identity <managed-identity-resource-id> `
-     --env-vars <see Configuration reference above>
-   ```
-
-   For a MISE-enabled backend, update the backend image and sidecar atomically:
-
-   ```powershell
-   ./scripts/deploy_mise_sidecar.ps1 `
+   ./scripts/deploy_authentication_gateway.ps1 `
      -SubscriptionId <subscription-id> `
      -ResourceGroup <rg> `
      -ContainerAppName genie-backend `
-     -AcrName <acr-name> `
      -TenantId <tenant-id> `
      -ClientId <api-client-id> `
-     -BackendImage <acr-name>.azurecr.io/genie-backend:<tag>
+     -BackendImage <acr-name>.azurecr.io/genie-backend:<commit> `
+     -GatewayImage <acr-name>.azurecr.io/genie-auth-gateway:<commit> `
+     -AllowedOrigin https://<static-web-app-host> `
+     -RevisionSuffix <unique-suffix>
    ```
 
-   The script synchronizes the pinned restricted image through an ACR cache rule,
-   configures the exact tenant, ClientId, audience, and bearer-token inbound
-   policy, updates the backend to use `http://localhost:8080`, and waits for a
-   healthy revision. It fails before changing the Container App when the
-   operator lacks access to the restricted MISE image. Do not deploy the new
-   backend image separately: it intentionally refuses to start without MISE.
+   The script preserves the existing FastAPI environment, secrets, probes, and
+   resources; removes the obsolete validation-sidecar setting; adds exactly one
+   gateway container per replica; and changes external ingress from `8000` to
+   `8080` in the same ARM patch. It waits for the new revision, verifies gateway
+   readiness, and confirms that an unauthenticated API request returns `401`.
+   Roll back by running the same script with the previous backend and gateway
+   image tags and a new revision suffix. Never roll back ingress to port `8000`.
 
    > If you're using a **user-assigned** managed identity, retain
    > `AZURE_CLIENT_ID=<identity-client-id>` or `DefaultAzureCredential` cannot
    > resolve which identity to use and the container will crash-loop.
 
-3. Verify:
+4. Verify:
 
    ```powershell
    curl https://<container-app-fqdn>/health/live
    curl https://<container-app-fqdn>/health/ready
+  curl -i https://<container-app-fqdn>/sessions  # must return 401
    ```
 
 **Frontend (Azure Static Web Apps)**
@@ -599,9 +598,10 @@ All three require `GENIE_AZURE_FOUNDRY_ENDPOINT` / `GENIE_AZURE_FOUNDRY_PROJECT_
 
 ### Continuous deployment (GitHub Actions)
 
-`.github/workflows/ci.yml` runs on every push/PR to `master` (the repo's actual default branch — double-check this before ever pointing it at `main`). On a real push to `master`, once both the `backend` and `frontend` CI jobs pass, two deploy jobs run the exact same steps documented above, automatically:
+`.github/workflows/ci.yml` runs on every push/PR to `master` (the repo's actual default branch — double-check this before ever pointing it at `main`). On a real push to `master`, once the `backend`, `frontend`, and `gateway` CI jobs pass, two deploy jobs run the exact same steps documented above, automatically:
 
-- **`deploy-backend`** — logs into Azure via OIDC federated credential (no stored secret), runs `az acr build` from the repo root, then `az containerapp update --revision-suffix gh<run-number>` so every deploy creates a genuinely new revision (a floating tag would not otherwise trigger a restart).
+- **`gateway`** — restores MISE from the authenticated MicrosoftIT feed, builds the .NET 8 gateway, and runs its host-level security tests.
+- **`deploy-backend`** — logs into Azure via OIDC federated credential (no client secret), builds commit-pinned FastAPI and gateway images, then runs `deploy_authentication_gateway.ps1` so both containers and ingress are updated atomically in one revision.
 - **`deploy-frontend`** — builds the frontend and deploys it with `@azure/static-web-apps-cli` using a stored deployment token.
 
 **One-time setup** (already performed for this environment — documented here so it can be reproduced on a new subscription/repo):
@@ -609,10 +609,10 @@ All three require `GENIE_AZURE_FOUNDRY_ENDPOINT` / `GENIE_AZURE_FOUNDRY_PROJECT_
 1. A dedicated app registration (`genie-github-actions-deploy`, no client secret) holds a **federated identity credential** trusting this repo's GitHub Actions OIDC issuer, scoped to the `production` GitHub Environment — narrower than a branch-based subject, since it also requires the workflow job to declare `environment: production`. **Important**: the subject must match GitHub's *actual* token claim exactly, which is `repo:<org>/<repo>:environment:<env>` only if the org/repo have never been renamed — if either has been renamed, GitHub appends numeric IDs instead (`repo:<org>@<orgId>/<repo>@<repoId>:environment:<env>`). Get the exact value from a failed `azure/login@v2` run's log line `Federated token details: ... subject claim - ...` if login fails with `AADSTS700213`.
 2. That identity's service principal holds exactly two least-privilege, resource-scoped RBAC roles (never a subscription- or resource-group-wide Owner/Contributor grant):
    - **Container Registry Tasks Contributor**, scoped to just the ACR resource — covers `az acr build`'s scheduleRun/upload actions without granting registry data-plane push/pull.
-   - **Container Apps Contributor**, scoped to just the `genie-backend` Container App resource — covers `az containerapp update`.
+  - **Container Apps Contributor**, scoped to just the `genie-backend` Container App resource — covers the atomic ARM patch.
 3. The repo's **Settings → Secrets and variables → Actions** has:
-   - **Secrets**: `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID` (identify the federated app registration above — not credentials by themselves, since no secret/certificate exists for this app), `SWA_DEPLOYMENT_TOKEN` (from `az staticwebapp secrets list`).
-   - **Variables**: `AZURE_ACR_NAME`, `AZURE_CONTAINER_APP_NAME`, `AZURE_RESOURCE_GROUP`, `VITE_GENIE_API_BASE_URL`, `VITE_ENTRA_CLIENT_ID`, `VITE_ENTRA_TENANT_ID`, `VITE_ENTRA_API_SCOPE` (not secret, but environment-specific).
+  - **Secrets**: `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID` (identify the federated deployment app — not credentials by themselves), `AZURE_DEVOPS_TOKEN` (MicrosoftIT PAT with Packaging Read only), and `SWA_DEPLOYMENT_TOKEN`.
+  - **Variables**: `AZURE_ACR_NAME`, `AZURE_CONTAINER_APP_NAME`, `AZURE_RESOURCE_GROUP`, `GENIE_GATEWAY_ALLOWED_ORIGIN` (the exact Static Web App origin), `VITE_GENIE_API_BASE_URL`, `VITE_ENTRA_CLIENT_ID`, `VITE_ENTRA_TENANT_ID`, `VITE_ENTRA_API_SCOPE`.
 
 If this identity/RBAC/secrets setup is ever missing or revoked, `deploy-backend`/`deploy-frontend` fail fast (within seconds, at an explicit "Check required secrets" step) rather than hanging — the `backend`/`frontend` test jobs are unaffected either way and still gate every PR.
 
@@ -627,6 +627,7 @@ If this identity/RBAC/secrets setup is ever missing or revoked, `deploy-backend`
 | Frontend component tests | `npm run test` (Vitest) | Includes static-scan tests guarding against hardcoded demo data and direct Foundry access |
 | Frontend type check | `npm run typecheck` | |
 | Frontend lint | `npm run lint` | `--max-warnings=0` |
+| Authentication gateway | `dotnet test gateway/Genie.AuthenticationGateway.Tests/Genie.AuthenticationGateway.Tests.csproj` | Requires `AZURE_DEVOPS_TOKEN` with MicrosoftIT Packaging Read access |
 | End-to-end | Playwright (`e2e/`) | Scaffolding present; expand per feature as needed |
 
 ---
@@ -644,6 +645,13 @@ If this identity/RBAC/secrets setup is ever missing or revoked, `deploy-backend`
 ## Deploy log
 
 Every deploy to production (backend Container App and/or frontend Static Web App) is recorded here — commit, what changed, and why. Update this section as part of the same commit that ships the fix/feature, before pushing to `master` triggers [Continuous deployment](#continuous-deployment-github-actions).
+
+### 2026-08-31 — MISE authentication gateway and private FastAPI ingress
+
+- **What changed**: added a .NET 8 ASP.NET Core gateway using `Microsoft.Identity.ServiceEssentials.AspNetCore` `2.5.3` and YARP, host-level authentication/CORS/readiness tests, and an atomic Container App rollout that deploys one gateway per replica and moves external ingress from FastAPI port `8000` to gateway port `8080`. FastAPI retains its existing Entra token validation as defense in depth.
+- **Security boundary**: liveness/readiness and configured browser preflight are anonymous; every API request requires a valid user or application access token for the configured Genie API audience. The original bearer token is forwarded to FastAPI. MISE feed credentials are supplied only through GitHub Actions secrets and ACR secret build arguments.
+- **Deployment**: CI/CD builds both commit-pinned images and applies them with `scripts/deploy_authentication_gateway.ps1`. Deployment remains blocked until the repository has `AZURE_DEVOPS_TOKEN` with MicrosoftIT Packaging Read access; the workflow fails closed when it is absent.
+- **Post-deploy evidence**: record the ready revision, UTC authenticated-request window, correlation ID, response status, and MCAPS SFI telemetry confirmation in `docs/MISE_SFI_VERIFICATION.md`.
 
 ### 2026-08-21 — Requirement Fidelity Gate: fix false "no JUnit result" for parametrized acceptance tests
 
@@ -673,7 +681,7 @@ Every deploy to production (backend Container App and/or frontend Static Web App
 
 ## Known gaps / next phases
 
-- CI/CD (`.github/workflows/ci.yml`) runs backend pytest/ruff and frontend typecheck/lint/vitest on every push/PR to `master`, then auto-deploys the backend Container App and frontend Static Web App on every push to `master` once both pass — see [Continuous deployment](#continuous-deployment-github-actions). The one-time Azure OIDC federated credential + least-privilege RBAC + repo secrets/variables setup has been performed for this environment; manual deploys (documented in [Deploying application code](#deploying-application-code-backend--frontend)) remain available as a fallback.
+- CI/CD (`.github/workflows/ci.yml`) runs backend pytest/ruff, frontend typecheck/lint/vitest, and gateway build/tests on every push/PR to `master`, then auto-deploys the gateway-protected Container App and Static Web App on pushes once all pass. The MISE build/deploy remains fail-closed until `AZURE_DEVOPS_TOKEN` is configured with MicrosoftIT Packaging Read access.
 - End-to-end Playwright coverage (`e2e/`) is scaffolded but not yet fully built out.
 - Admin consent for the Entra API permission may require a tenant administrator in some tenants — see [Authentication](#authentication).
 - Shared Collaboration Memory currently has no write call sites anywhere in the backend — nothing ever calls `memory_service.shared.write`. The Requirement Discovery Map's main requirements list (which reads from Shared Memory) is therefore likely empty in real usage today; the agentic-workflow qualification check above was deliberately built to read `WorkflowRunResult.step_results` directly instead, so it works independently of this gap.

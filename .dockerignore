@@ -5,6 +5,8 @@
 **/.ruff_cache/
 **/.venv/
 **/venv/
+**/bin/
+**/obj/
 backend/tests/
 backend/.env
 **/.env
