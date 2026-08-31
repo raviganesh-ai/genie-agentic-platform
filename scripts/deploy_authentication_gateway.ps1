@@ -148,7 +148,7 @@ $patch = @{
     }
 }
 
-$patchFile = Join-Path $env:TEMP "genie-gateway-$([guid]::NewGuid().ToString('N')).json"
+$patchFile = Join-Path ([System.IO.Path]::GetTempPath()) "genie-gateway-$([guid]::NewGuid().ToString('N')).json"
 try {
     $patch | ConvertTo-Json -Depth 100 | Set-Content -Path $patchFile -Encoding utf8
     & az rest `
