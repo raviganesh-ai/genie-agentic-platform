@@ -94,7 +94,6 @@ Remove-ContainerEnvironmentVariable -Container $backend -Name "GENIE_MISE_ENDPOI
 $gateway = [pscustomobject]@{
     name = $GatewayContainerName
     image = $GatewayImage
-    imageType = "ContainerImage"
     resources = [pscustomobject]@{
         cpu = 0.5
         memory = "1Gi"
