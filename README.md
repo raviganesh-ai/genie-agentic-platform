@@ -528,7 +528,7 @@ All three require `GENIE_AZURE_FOUNDRY_ENDPOINT` / `GENIE_AZURE_FOUNDRY_PROJECT_
 
 **Backend and authentication gateway (Azure Container Apps)**
 
-1. Configure a MicrosoftIT Azure DevOps PAT with **Packaging Read** access as `AZURE_DEVOPS_TOKEN`. MISE `2.5.3` is distributed through the restricted `PS-GCM-FieldExperiencePlatform` feed, not NuGet.org. Never write the PAT into `NuGet.config`, a Docker layer, logs, or command output.
+1. Configure a MicrosoftIT Azure DevOps PAT with **Packaging Read** access as `AZURE_DEVOPS_TOKEN`. MISE `2.5.3` is distributed through the restricted `PS-GCM-FieldExperiencePlatform` feed, while public .NET dependencies resolve through Microsoft's `packagefeedproxy.microsoft.io` proxy. Never write the PAT into `NuGet.config`, a Docker layer, logs, or command output.
 
 2. Build and push both immutable images to Azure Container Registry. Pass the feed credential as a secret build argument:
 
