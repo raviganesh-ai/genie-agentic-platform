@@ -23,7 +23,7 @@ After the CI/CD deployment succeeds, record the ready revision and run:
   -RequestCount 5
 ```
 
-The script acquires a short-lived access token with the current Azure CLI identity, keeps the token out of output and disk, and prints only timestamps, correlation IDs, and response statuses. Attach the resulting non-secret evidence and the ready Container App revision to the request below.
+The script acquires a short-lived token when the current Azure CLI client is preauthorized for the Genie API. Otherwise, pass a token from an approved interactive flow as a `SecureString` with `-AccessToken`; never place it in source, shell history, output, or a plain-text parameter. The production SPA's signed-in MSAL session can also generate the requests without exposing token material. Attach only timestamps, correlation IDs, response statuses, and the ready Container App revision to the request below.
 
 ## Request to MCAPS SFI Compliance
 

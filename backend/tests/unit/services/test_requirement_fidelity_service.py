@@ -57,6 +57,62 @@ def test_req_001_processes_every_document():
     assert report.gaps == ["REQ-002: no executable acceptance test"]
 
 
+def test_ninety_percent_coverage_passes_when_every_executable_test_passes() -> None:
+    requirements = "\n".join(
+        f"[REQ-{number:03d}] Requirement {number}." for number in range(1, 11)
+    )
+    modules = [
+        f"# REQ-{number:03d}\ndef test_req_{number:03d}():\n    assert True"
+        for number in range(1, 10)
+    ]
+    report = record_test_coverage(
+        create_fidelity_report(requirements, max_repair_attempts=3),
+        modules,
+        minimum_coverage_percent=90,
+    )
+
+    result = record_fidelity_execution(
+        report,
+        success=True,
+        summary="9 passed",
+        passed_test_names=[f"test_req_{number:03d}" for number in range(1, 10)],
+        minimum_coverage_percent=90,
+    )
+
+    assert report.status == "testing"
+    assert report.coverage_percent == 90
+    assert result.status == "passed"
+    assert result.pass_percent == 100
+    assert result.gaps == ["REQ-010: no executable acceptance test"]
+
+
+def test_coverage_below_threshold_does_not_pass_fidelity_execution() -> None:
+    requirements = "\n".join(
+        f"[REQ-{number:03d}] Requirement {number}." for number in range(1, 11)
+    )
+    modules = [
+        f"# REQ-{number:03d}\ndef test_req_{number:03d}():\n    assert True"
+        for number in range(1, 9)
+    ]
+    report = record_test_coverage(
+        create_fidelity_report(requirements, max_repair_attempts=3),
+        modules,
+        minimum_coverage_percent=90,
+    )
+
+    result = record_fidelity_execution(
+        report,
+        success=True,
+        summary="8 passed",
+        passed_test_names=[f"test_req_{number:03d}" for number in range(1, 9)],
+        minimum_coverage_percent=90,
+    )
+
+    assert report.status == "failed"
+    assert report.coverage_percent == 80
+    assert result.status == "repairing"
+
+
 def test_fidelity_execution_only_reaches_one_hundred_percent_after_real_pass() -> None:
     report = create_fidelity_report(
         "[REQ-001] Process every document.", max_repair_attempts=3

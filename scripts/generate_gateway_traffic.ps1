@@ -16,22 +16,29 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$ClientId,
 
+    [SecureString]$AccessToken,
+
     [ValidateRange(1, 20)]
     [int]$RequestCount = 5
 )
 
 $ErrorActionPreference = "Stop"
-$token = $null
+$tokenText = $null
+$secureToken = $AccessToken
 $evidence = @()
 
 try {
-    $token = & az account get-access-token `
-        --resource "api://$ClientId" `
-        --query accessToken `
-        --only-show-errors `
-        -o tsv
-    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($token)) {
-        throw "Azure CLI could not acquire a Genie API access token."
+    if ($null -eq $secureToken) {
+        $tokenText = & az account get-access-token `
+            --resource "api://$ClientId" `
+            --query accessToken `
+            --only-show-errors `
+            -o tsv
+        if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($tokenText)) {
+            throw "Supply -AccessToken as a SecureString or use an Azure CLI identity preauthorized for the Genie API."
+        }
+        $secureToken = ConvertTo-SecureString $tokenText -AsPlainText -Force
+        $tokenText = $null
     }
 
     $sessionsUri = "$($ApiBaseUrl.TrimEnd('/'))/sessions"
@@ -43,7 +50,7 @@ try {
                 -Method Get `
                 -Uri $sessionsUri `
                 -Authentication Bearer `
-                -Token (ConvertTo-SecureString $token -AsPlainText -Force) `
+                -Token $secureToken `
                 -Headers @{ "X-Correlation-Id" = $correlationId } `
                 -TimeoutSec 60
             $statusCode = [int]$response.StatusCode
@@ -61,7 +68,8 @@ try {
     }
 }
 finally {
-    $token = $null
+    $tokenText = $null
+    $secureToken = $null
 }
 
 $failed = @($evidence | Where-Object { $_.statusCode -lt 200 -or $_.statusCode -ge 300 })

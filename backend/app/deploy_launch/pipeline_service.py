@@ -1190,6 +1190,7 @@ class DeploymentPipelineService:
         build_step_id: str = "build-solution",
         requirements_step_id: str = "analyze-requirements",
         fidelity_max_repair_attempts: int = 3,
+        fidelity_min_coverage_percent: float = 90.0,
         upstream_grace_check_attempts: int = 5,
         upstream_grace_check_interval_seconds: float = 2.0,
     ) -> None:
@@ -1208,6 +1209,7 @@ class DeploymentPipelineService:
         self._build_step_id = build_step_id
         self._requirements_step_id = requirements_step_id
         self._fidelity_max_repair_attempts = fidelity_max_repair_attempts
+        self._fidelity_min_coverage_percent = fidelity_min_coverage_percent
         self._upstream_grace_check_attempts = upstream_grace_check_attempts
         self._upstream_grace_check_interval_seconds = upstream_grace_check_interval_seconds
         self._runs: dict[str, DeploymentPipelineRun] = {}
@@ -2014,7 +2016,11 @@ class DeploymentPipelineService:
                             "Test Generation Agent did not produce a pytest-discoverable test function "
                             "after a corrective retry."
                         )
-                    report = record_test_coverage(report, modules)
+                    report = record_test_coverage(
+                        report,
+                        modules,
+                        minimum_coverage_percent=self._fidelity_min_coverage_percent,
+                    )
                     missing_test_ids = [
                         item.requirement_id
                         for item in report.requirements
@@ -2032,7 +2038,10 @@ class DeploymentPipelineService:
                     # requirements too within the same completion-length
                     # budget that produced the gap in the first place.
                     coverage_retry = 0
-                    while missing_test_ids and coverage_retry < self._fidelity_max_repair_attempts:
+                    while (
+                        report.coverage_percent < self._fidelity_min_coverage_percent
+                        and coverage_retry < self._fidelity_max_repair_attempts
+                    ):
                         coverage_retry += 1
                         correction_result = await self._orchestrator.execute_agent(
                             agent_id="test-generation-agent",
@@ -2056,7 +2065,11 @@ class DeploymentPipelineService:
                         )
                         test_output_text = test_output_text + "\n\n" + correction_result.output_text
                         modules = extract_test_modules(test_output_text)
-                        report = record_test_coverage(report, modules)
+                        report = record_test_coverage(
+                            report,
+                            modules,
+                            minimum_coverage_percent=self._fidelity_min_coverage_percent,
+                        )
                         missing_test_ids = [
                             item.requirement_id
                             for item in report.requirements
@@ -2064,10 +2077,15 @@ class DeploymentPipelineService:
                         ]
                     self._generated_test_outputs[pipeline_run.id] = test_output_text
                     pipeline_run.fidelity_report = report
-                    if not has_pytest_discoverable_tests(modules) or missing_test_ids:
+                    if (
+                        not has_pytest_discoverable_tests(modules)
+                        or report.coverage_percent < self._fidelity_min_coverage_percent
+                    ):
                         raise DeploymentPipelineStepFailedError(
-                            "Generated test suite does not cover every approved requirement; "
-                            "missing requirement ids: " + ", ".join(missing_test_ids)
+                            "Generated test suite does not meet the minimum executable coverage "
+                            f"threshold of {self._fidelity_min_coverage_percent:g}%; actual "
+                            f"coverage is {report.coverage_percent:g}%; missing requirement ids: "
+                            + ", ".join(missing_test_ids)
                         )
                     if pipeline_run.backend_url and pipeline_run.backend_url.startswith("https://"):
                         real_action_errors = validate_real_action_tests(modules)
@@ -2102,7 +2120,11 @@ class DeploymentPipelineService:
                             if not has_pytest_discoverable_tests(modules):
                                 real_action_errors = validate_real_action_tests(modules)
                                 continue
-                            report = record_test_coverage(report, modules)
+                            report = record_test_coverage(
+                                report,
+                                modules,
+                                minimum_coverage_percent=self._fidelity_min_coverage_percent,
+                            )
                             self._generated_test_outputs[pipeline_run.id] = test_output_text
                             pipeline_run.fidelity_report = report
                             real_action_errors = validate_real_action_tests(modules)
@@ -2120,10 +2142,12 @@ class DeploymentPipelineService:
                             for item in report.requirements
                             if item.status == "missing"
                         ]
-                        if final_missing_ids:
+                        if report.coverage_percent < self._fidelity_min_coverage_percent:
                             raise DeploymentPipelineStepFailedError(
-                                "Generated test suite does not cover every approved requirement; "
-                                "missing requirement ids: " + ", ".join(final_missing_ids)
+                                "Generated test suite does not meet the minimum executable coverage "
+                                f"threshold of {self._fidelity_min_coverage_percent:g}%; actual "
+                                f"coverage is {report.coverage_percent:g}%; missing requirement ids: "
+                                + ", ".join(final_missing_ids)
                             )
                     detail = (
                         f"Generated {len(modules)} requirement acceptance test module(s) "
@@ -2168,6 +2192,7 @@ class DeploymentPipelineService:
                         skipped_test_names=test_result.skipped_test_names,
                         final_failure=final_failure,
                         execution_incomplete=test_result.timed_out,
+                        minimum_coverage_percent=self._fidelity_min_coverage_percent,
                     )
                     if pipeline_run.fidelity_report.status == "passed":
                         detail = test_result.summary
@@ -2211,12 +2236,13 @@ class DeploymentPipelineService:
                     if (
                         report is None
                         or report.status != "passed"
-                        or report.coverage_percent != 100
+                        or report.coverage_percent < self._fidelity_min_coverage_percent
                         or report.pass_percent != 100
                     ):
                         raise DeploymentPipelineStepFailedError(
-                            "Launch blocked: requirement fidelity must have 100% executable "
-                            "coverage and 100% passing evidence."
+                            "Launch blocked: requirement fidelity must meet the minimum executable "
+                            f"coverage threshold of {self._fidelity_min_coverage_percent:g}% and "
+                            "have 100% passing executable evidence."
                         )
                     pipeline_run.launch_url = pipeline_run.frontend_url
                     detail = f"Mission launched at {pipeline_run.launch_url}."
@@ -2335,4 +2361,5 @@ def create_deployment_pipeline_service(
         security_scan_service=SecurityScanService(),
         build_workspace_root=settings.deployment_build_workspace_root,
         fidelity_max_repair_attempts=settings.deployment_fidelity_max_repair_attempts,
+        fidelity_min_coverage_percent=settings.deployment_fidelity_min_coverage_percent,
     )

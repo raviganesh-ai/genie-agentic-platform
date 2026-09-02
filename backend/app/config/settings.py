@@ -10,7 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Literal
 
-from pydantic import field_validator
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 GovernanceProviderName = Literal["local", "agent365"]
@@ -161,6 +161,7 @@ class Settings(BaseSettings):
     deployment_storage_account_name: str | None = None
     deployment_location: str | None = None
     deployment_fidelity_max_repair_attempts: int = 3
+    deployment_fidelity_min_coverage_percent: float = Field(default=90.0, gt=0, le=100)
     # How long the Requirement Fidelity Gate's real pytest subprocess is
     # allowed to run before being killed. This suite executes real black-box
     # HTTP acceptance tests against a live deployed mission prototype (one

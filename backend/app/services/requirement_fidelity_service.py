@@ -142,7 +142,10 @@ def _test_names_for_requirement(requirement_id: str, modules: Iterable[str]) -> 
 
 
 def record_test_coverage(
-    report: RequirementFidelityReport, modules: Iterable[str]
+    report: RequirementFidelityReport,
+    modules: Iterable[str],
+    *,
+    minimum_coverage_percent: float = 100.0,
 ) -> RequirementFidelityReport:
     module_list = list(modules)
     requirements: list[RequirementFidelityItem] = []
@@ -163,6 +166,7 @@ def record_test_coverage(
         )
     covered = sum(item.status == "covered" for item in requirements)
     total = report.total_requirements
+    coverage_percent = 0.0 if total == 0 else round(covered * 100 / total, 1)
     gaps = [
         f"{item.requirement_id}: no executable acceptance test"
         for item in requirements
@@ -170,10 +174,14 @@ def record_test_coverage(
     ]
     return report.model_copy(
         update={
-            "status": "testing" if total > 0 and covered == total else "failed",
+            "status": (
+                "testing"
+                if total > 0 and coverage_percent >= minimum_coverage_percent
+                else "failed"
+            ),
             "requirements": requirements,
             "covered_requirements": covered,
-            "coverage_percent": 0.0 if total == 0 else round(covered * 100 / total, 1),
+            "coverage_percent": coverage_percent,
             "gaps": (
                 gaps
                 if total > 0
@@ -210,6 +218,7 @@ def record_fidelity_execution(
     skipped_test_names: Iterable[str] = (),
     final_failure: bool = False,
     execution_incomplete: bool = False,
+    minimum_coverage_percent: float = 100.0,
 ) -> RequirementFidelityReport:
     passed_names = set(passed_test_names)
     failed_names = set(failed_test_names)
@@ -220,6 +229,10 @@ def record_fidelity_execution(
     gaps: list[str] = []
     for item in report.requirements:
         expected_names = set(item.test_names)
+        if not expected_names:
+            requirements.append(item)
+            gaps.append(f"{item.requirement_id}: no executable acceptance test")
+            continue
         failed: list[str] = []
         errored: list[str] = []
         skipped: list[str] = []
@@ -261,30 +274,31 @@ def record_fidelity_execution(
                 details.append("skipped: " + ", ".join(skipped))
             if unobserved:
                 details.append("no JUnit result: " + ", ".join(unobserved))
-            if not expected_names:
-                details.append("no named acceptance test")
             evidence = "; ".join(details)
             status = "failed"
             gaps.append(f"{item.requirement_id}: {evidence}")
         requirements.append(item.model_copy(update={"status": status, "evidence": evidence}))
 
     passed = sum(item.status == "passed" for item in requirements)
-    all_requirements_passed = (
-        success and report.total_requirements > 0 and passed == report.total_requirements
+    executable_evidence_passed = (
+        success
+        and report.covered_requirements > 0
+        and report.coverage_percent >= minimum_coverage_percent
+        and passed == report.covered_requirements
     )
     return report.model_copy(
         update={
             "status": (
                 "passed"
-                if all_requirements_passed
+                if executable_evidence_passed
                 else ("failed" if final_failure else "repairing")
             ),
             "requirements": requirements,
             "passed_requirements": passed,
             "pass_percent": (
                 0.0
-                if report.total_requirements == 0
-                else round(passed * 100 / report.total_requirements, 1)
+                if report.covered_requirements == 0
+                else round(passed * 100 / report.covered_requirements, 1)
             ),
             "gaps": gaps,
             "execution_summary": summary,

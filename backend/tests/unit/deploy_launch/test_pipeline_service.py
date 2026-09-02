@@ -584,6 +584,57 @@ def test_search_documents():
     assert "REQ-002" in failed_step.error
 
 
+async def test_pipeline_launches_at_ninety_percent_and_preserves_requirement_gaps(
+    tmp_path: Path,
+) -> None:
+    requirements = "\n".join(
+        f"[REQ-{number:03d}] Requirement {number}." for number in range(1, 11)
+    )
+    covered_suite = "\n".join(
+        "```python\n"
+        f"# REQ-{number:03d}\n"
+        f"def test_req_{number:03d}():\n"
+        "    assert True\n"
+        "```"
+        for number in range(1, 10)
+    )
+    orchestrator = _RepairingFakeOrchestrator(
+        test_outputs=[covered_suite],
+        requirements_output=requirements,
+    )
+    service = DeploymentPipelineService(
+        orchestrator=orchestrator,  # type: ignore[arg-type]
+        session_service=_FakeSessionService(),  # type: ignore[arg-type]
+        event_bus=WorkflowEventBus(),
+        access_policy_service=_access_policy_service(),
+        mission_identity_service=NullMissionIdentityService(),
+        mission_agent_provisioning_service=NullMissionAgentProvisioningService(),
+        backend_deployment_service=NullBackendDeploymentService(),
+        frontend_deployment_service=NullFrontendDeploymentService(),
+        test_execution_service=TestExecutionService(timeout_seconds=60),
+        security_scan_service=SecurityScanService(timeout_seconds=60),
+        build_workspace_root=tmp_path,
+        fidelity_max_repair_attempts=1,
+        fidelity_min_coverage_percent=90,
+    )
+
+    run = await service.start(
+        session_id="session-1", requesting_user_id="user-1", workflow_run_id="run-1"
+    )
+    run = await service.wait_for_run(run.id)
+
+    assert run.status == "completed", [
+        (step.step_id, step.status, step.error) for step in run.steps
+    ]
+    assert run.launch_url is not None
+    assert run.fidelity_report is not None
+    assert run.fidelity_report.status == "passed"
+    assert run.fidelity_report.coverage_percent == 90
+    assert run.fidelity_report.pass_percent == 100
+    assert run.fidelity_report.gaps == ["REQ-010: no executable acceptance test"]
+    assert len(orchestrator.execute_agent_calls) == 1
+
+
 async def test_pipeline_accumulates_test_coverage_across_repair_retries(
     tmp_path: Path,
 ) -> None:
