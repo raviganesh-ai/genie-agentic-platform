@@ -90,6 +90,7 @@ def test_write_to_directory_includes_backend_service_scaffold(tmp_path: Path):
         mission_title="Acme Mission",
         orchestrator_agent_name="acme-orchestrator",
         agent_foundry_names={"Requirements Specialist": "acme-requirements-specialist"},
+        authentication_required=True,
     )
 
     build.write_to_directory(tmp_path, backend_service_scaffold=scaffold)
@@ -98,11 +99,42 @@ def test_write_to_directory_includes_backend_service_scaffold(tmp_path: Path):
     assert (tmp_path / "Dockerfile").exists()
     assert (tmp_path / "requirements.txt").exists()
     assert (tmp_path / "agent_config.py").exists()
+    assert (tmp_path / "token_validation.py").exists()
     main_source = (tmp_path / "main.py").read_text(encoding="utf-8")
     assert "acme-orchestrator" in main_source
-    assert "CORSMiddleware" in main_source
+    assert "authenticate_request" in main_source
+    assert "CORSMiddleware" not in main_source
+    assert '@app.get("/health/ready")' in main_source
     assert "FOUNDRY_ORCHESTRATOR_AGENT_VERSION" in main_source
     assert "acme-requirements-specialist" in (tmp_path / "agent_config.py").read_text(encoding="utf-8")
+    token_validation_source = (tmp_path / "token_validation.py").read_text(encoding="utf-8")
+    compile(token_validation_source, "token_validation.py", "exec")
+    assert 'audience=[_client_id, f"api://{_client_id}"]' in token_validation_source
+    assert '"Prototype.Invoke" not in roles' in token_validation_source
+    assert '"access_as_user" not in str(claims.get("scp", "")).split()' in token_validation_source
+    assert 'status_code=401' in token_validation_source
+    requirements = (tmp_path / "requirements.txt").read_text(encoding="utf-8")
+    assert "httpx>=0.27,<1.0" in requirements
+    assert "pyjwt[crypto]>=2.10,<3.0" in requirements
+
+
+def test_backend_scaffold_bakes_authentication_mode_without_runtime_override():
+    protected = generate_backend_service_scaffold(
+        mission_title="Protected Mission",
+        orchestrator_agent_name="orchestrator",
+        agent_foundry_names={},
+        authentication_required=True,
+    )["main.py"]
+    local = generate_backend_service_scaffold(
+        mission_title="Local Mission",
+        orchestrator_agent_name="orchestrator",
+        agent_foundry_names={},
+        authentication_required=False,
+    )["main.py"]
+
+    assert "if True:\n    from token_validation import authenticate_request" in protected
+    assert "if False:\n    from token_validation import authenticate_request" in local
+    assert "PROTOTYPE_MISE_ENABLED" not in protected + local
 
 
 def test_backend_service_scaffold_main_py_is_valid_python_and_supports_attachments():
@@ -193,6 +225,9 @@ def test_stream_agent_response_relays_on_progress_narration_as_it_happens(monkey
 
     fake_orchestrator_module.OrchestratorAgent = _FakeOrchestratorAgent
     monkeypatch.setitem(sys.modules, "orchestrator", fake_orchestrator_module)
+    fake_token_validation_module = types.ModuleType("token_validation")
+    fake_token_validation_module.authenticate_request = object()
+    monkeypatch.setitem(sys.modules, "token_validation", fake_token_validation_module)
 
     generated_module = types.ModuleType("acme_main")
     monkeypatch.setitem(sys.modules, "acme_main", generated_module)

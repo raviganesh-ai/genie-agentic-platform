@@ -420,6 +420,12 @@ prompts:
         `MISSION_BACKEND_URL` and/or `MISSION_FRONTEND_URL` environment
         variables. Never use mocks, patches, monkeypatch, response
         interceptors, fabricated responses, or static/literal assertions.
+      - backend requests through `MISSION_BACKEND_URL` are authenticated by
+        Genie's trusted acceptance-test proxy. Never read, request, print,
+        log, persist, or synthesize credentials or an Authorization header;
+        generated test processes deliberately receive no access token.
+        `MISSION_UNAUTHENTICATED_BACKEND_URL` is available only for explicit
+        401/403 boundary assertions and must never be used for normal API calls.
       - make real HTTP calls with `httpx` only (already installed in this
         pipeline's execution environment). Never `import requests` or any
         other third-party HTTP client - it is not installed there, so the
@@ -468,7 +474,7 @@ prompts:
       - artifact
       - requirements
       - user_message
-    version: "1.7.0"
+    version: "1.8.0"
 
   - id: failure-diagnosis-v1
     name: Failure Diagnosis

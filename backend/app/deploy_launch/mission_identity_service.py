@@ -29,11 +29,15 @@ them roles. Never invents Azure APIs - only uses documented
 """
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import Protocol
+from uuid import NAMESPACE_URL, uuid5
 
 from azure.identity import DefaultAzureCredential
+from azure.identity.aio import ManagedIdentityCredential
 from azure.mgmt.authorization import AuthorizationManagementClient
 from azure.mgmt.msi import ManagedServiceIdentityClient
 from azure.mgmt.msi.models import Identity
@@ -41,12 +45,14 @@ from azure.mgmt.msi.models import Identity
 from app.config.settings import Settings
 
 __all__ = [
+    "AsyncTokenCredential",
     "MissionIdentityProvisioningError",
     "MissionIdentityService",
     "NullMissionIdentityService",
     "ProvisionedMissionIdentity",
     "RoleAssignment",
     "create_mission_identity_service",
+    "create_user_assigned_token_credential",
 ]
 
 # Agent-role mapping: real RBAC role definition ids (built-in Azure roles).
@@ -64,6 +70,24 @@ _ROLE_IDS = {
 
 class MissionIdentityProvisioningError(RuntimeError):
     """Raised when a mission's managed identity or RBAC roles cannot be provisioned."""
+
+
+class _AccessToken(Protocol):
+    token: str
+
+
+class AsyncTokenCredential(Protocol):
+    """Minimal async token contract exposed outside the Azure identity access layer."""
+
+    async def get_token(self, *scopes: str) -> _AccessToken: ...
+
+    async def close(self) -> None: ...
+
+
+def create_user_assigned_token_credential(*, client_id: str) -> AsyncTokenCredential:
+    """Constructs the one configured user-assigned identity credential."""
+
+    return ManagedIdentityCredential(client_id=client_id)
 
 
 @dataclass(frozen=True)
@@ -146,7 +170,7 @@ class MissionIdentityService:
         try:
             # Step 1: Create the user-assigned managed identity.
             identity_resource = Identity(
-                location="eastus2",  # TODO: externalize region per settings
+                location=self._settings.deployment_location,
                 tags={"genie-mission-id": mission_id},
             )
             identity = msi_client.user_assigned_identities.create_or_update(
@@ -184,7 +208,9 @@ class MissionIdentityService:
                     continue
 
                 role_def_id = _ROLE_IDS[role_key]
-                assignment_name = f"{identity_name}-{role_key}"
+                assignment_name = str(
+                    uuid5(NAMESPACE_URL, f"{resource_id}:{principal_id}:{role_def_id}")
+                )
 
                 try:
                     assignment = authz_client.role_assignments.create(
@@ -209,12 +235,15 @@ class MissionIdentityService:
                     # If any role assignment fails, roll back the identity and
                     # all successful assignments, then fail closed.
                     try:
-                        msi_client.user_assigned_identities.delete(
-                            resource_group_name=self._resource_group_name,
-                            resource_name=identity_name,
+                        await self.delete(
+                            identity_name=identity_name,
+                            principal_id=principal_id,
                         )
-                    except Exception:  # noqa: BLE001, S110
-                        pass
+                    except Exception as cleanup_exc:  # noqa: BLE001 - Azure SDK errors vary.
+                        raise MissionIdentityProvisioningError(
+                            f"Failed to assign RBAC role '{role_key}' for mission "
+                            f"'{mission_id}', and rollback failed: {cleanup_exc}"
+                        ) from exc
                     raise MissionIdentityProvisioningError(
                         f"Failed to assign RBAC role '{role_key}' for mission '{mission_id}': {exc}"
                     ) from exc
@@ -234,6 +263,42 @@ class MissionIdentityService:
         except Exception as exc:
             raise MissionIdentityProvisioningError(
                 f"Failed to provision mission identity for '{mission_id}': {exc}"
+            ) from exc
+
+    async def delete(self, *, identity_name: str, principal_id: str) -> None:
+        """Deletes one abandoned mission identity and its scoped RBAC assignments."""
+
+        try:
+            authorization_client = AuthorizationManagementClient(
+                self._credential, self._subscription_id
+            )
+            assignments = authorization_client.role_assignments.list_for_subscription(
+                filter=f"principalId eq '{principal_id}'"
+            )
+            for assignment in assignments:
+                assignment_id = getattr(assignment, "id", None)
+                if assignment_id:
+                    try:
+                        authorization_client.role_assignments.delete_by_id(assignment_id)
+                    except Exception as exc:
+                        if getattr(exc, "status_code", None) != 404:
+                            raise
+
+            identity_client = ManagedServiceIdentityClient(
+                self._credential, self._subscription_id
+            )
+            poller = identity_client.user_assigned_identities.delete(
+                resource_group_name=self._resource_group_name,
+                resource_name=identity_name,
+            )
+            result = getattr(poller, "result", None)
+            if callable(result):
+                await asyncio.to_thread(result)
+        except Exception as exc:
+            if getattr(exc, "status_code", None) == 404:
+                return
+            raise MissionIdentityProvisioningError(
+                f"Failed to delete mission identity '{identity_name}': {exc}"
             ) from exc
 
 
@@ -270,6 +335,9 @@ class NullMissionIdentityService:
             await on_identity_provisioned(record)
 
         return record
+
+    async def delete(self, *, identity_name: str, principal_id: str) -> None:
+        del identity_name, principal_id
 
 
 def create_mission_identity_service(

@@ -52,6 +52,9 @@ from app.deploy_launch.mission_agent_provisioning_service import (
 )
 from app.deploy_launch.mission_identity_service import create_mission_identity_service
 from app.deploy_launch.pipeline_service import create_deployment_pipeline_service
+from app.deploy_launch.prototype_authentication_service import (
+    create_prototype_authentication_service,
+)
 from app.governance.replay_service import ReplayService
 from app.governance.traceability_service import TraceabilityService
 from app.orchestration.agent_orchestrator import create_agent_orchestrator
@@ -240,6 +243,10 @@ def create_app(
             approval_service=orchestrator.approval_service,
             governance_service=orchestrator.governance_service,
         )
+        prototype_authentication_service = create_prototype_authentication_service(
+            settings=resolved_settings
+        )
+        app.state.prototype_authentication_service = prototype_authentication_service
         app.state.deployment_pipeline_service = create_deployment_pipeline_service(
             settings=resolved_settings,
             orchestrator=orchestrator,
@@ -251,6 +258,14 @@ def create_app(
                     settings=resolved_settings,
                     subscription_id=resolved_settings.azure_subscription_id or "unknown",
                     resource_group_name=resolved_settings.deployment_resource_group or "unknown",
+                ),
+                acr_id=(
+                    f"/subscriptions/{resolved_settings.azure_subscription_id}/resourceGroups/"
+                    f"{resolved_settings.deployment_resource_group}/providers/"
+                    f"Microsoft.ContainerRegistry/registries/"
+                    f"{resolved_settings.deployment_acr_name}"
+                    if resolved_settings.prototype_mise_enabled
+                    else None
                 ),
             ),
             mission_identity_service=create_mission_identity_service(
@@ -265,6 +280,7 @@ def create_app(
             frontend_deployment_service=create_container_app_frontend_deployment_service(
                 settings=resolved_settings
             ),
+            prototype_authentication_service=prototype_authentication_service,
         )
 
         app.state.ready = True
@@ -276,6 +292,7 @@ def create_app(
             yield
         finally:
             app.state.ready = False
+            await app.state.prototype_authentication_service.close()
             await app.state.token_validator.close()
 
     app = FastAPI(

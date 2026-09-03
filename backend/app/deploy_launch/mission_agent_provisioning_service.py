@@ -174,6 +174,28 @@ class MissionAgentProvisioningService:
         except Exception:  # noqa: BLE001, S110 - best-effort cleanup during rollback
             pass
 
+    async def delete(self, *, foundry_agent_names: list[str]) -> None:
+        """Deletes all Foundry agents owned by an abandoned prototype run."""
+
+        try:
+            client = self._project_service.get_api_client()
+        except Exception as exc:
+            raise MissionAgentProvisioningError(
+                f"Failed to initialize mission-agent cleanup: {exc}"
+            ) from exc
+        failures: list[str] = []
+        for foundry_agent_name in foundry_agent_names:
+            try:
+                client.delete_agent(foundry_agent_name)
+            except Exception as exc:  # noqa: BLE001 - SDK errors have no stable base.
+                if getattr(exc, "status_code", None) == 404:
+                    continue
+                failures.append(f"{foundry_agent_name}: {exc}")
+        if failures:
+            raise MissionAgentProvisioningError(
+                "Failed to delete mission agents: " + "; ".join(failures)
+            )
+
 
 class NullMissionAgentProvisioningService:
     """Local-mode stand-in: returns fake agent names, makes no Azure calls."""
@@ -197,6 +219,9 @@ class NullMissionAgentProvisioningService:
             if on_agent_provisioned is not None:
                 await on_agent_provisioned(record)
         return provisioned
+
+    async def delete(self, *, foundry_agent_names: list[str]) -> None:
+        del foundry_agent_names
 
 
 def create_mission_agent_provisioning_service(

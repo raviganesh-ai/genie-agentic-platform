@@ -5,8 +5,9 @@ Exposes the real, nine-step Deploy & Launch pipeline
 ``POST .../start`` (executes every step as soon as the human clicks
 Start - the one gate this stage has), ``GET .../{pipeline_run_id}`` (poll
 one run's current status), ``GET .../`` (list every run for this
-session), and ``GET .../{pipeline_run_id}/download`` (a zip of the materialized backend
-build plus the generated least-access policy document). Live per-step
+session), ``GET .../{pipeline_run_id}/download`` (a zip of the materialized backend
+build plus the generated least-access policy document), and ``DELETE
+.../{pipeline_run_id}`` (tear down a terminal run's owned prototype resources). Live per-step
 progress is available via the existing
 ``GET /sessions/{session_id}/workflow-events/stream`` SSE route - this
 pipeline publishes to the same ``WorkflowEventBus``.
@@ -17,13 +18,16 @@ import io
 import zipfile
 from pathlib import Path
 
-from fastapi import APIRouter, Depends
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.api.dependencies import get_deployment_pipeline_service, get_session_service
 from app.deploy_launch.models import DeploymentPipelineRun
-from app.deploy_launch.pipeline_service import DeploymentPipelineService
+from app.deploy_launch.pipeline_service import (
+    DeploymentPipelineService,
+    DeploymentPipelineStepFailedError,
+)
 from app.security.auth_models import AuthenticatedUser
 from app.security.dependencies import get_current_user
 from app.services.session_service import SessionNotFoundError, SessionService
@@ -108,6 +112,29 @@ async def get_deployment(
     return _get_owned_run(
         session_id=session_id, pipeline_run_id=pipeline_run_id, pipeline_service=pipeline_service
     )
+
+
+@router.delete("/{pipeline_run_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def abandon_deployment(
+    session_id: str,
+    pipeline_run_id: str,
+    user: AuthenticatedUser = Depends(get_current_user),
+    session_service: SessionService = Depends(get_session_service),
+    pipeline_service: DeploymentPipelineService = Depends(get_deployment_pipeline_service),
+) -> Response:
+    session = await session_service.get_session(
+        session_id=session_id, requesting_user_id=user.user_id
+    )
+    _get_owned_run(
+        session_id=session_id, pipeline_run_id=pipeline_run_id, pipeline_service=pipeline_service
+    )
+    try:
+        await pipeline_service.abandon(
+            pipeline_run_id=pipeline_run_id, mission_title=session.title
+        )
+    except DeploymentPipelineStepFailedError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get("/{pipeline_run_id}/download")

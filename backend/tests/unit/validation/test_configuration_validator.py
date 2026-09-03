@@ -90,3 +90,31 @@ def test_missing_deployment_config_does_not_fail_in_development(local_settings):
     assert local_settings.deployment_resource_group is None
     result = ConfigurationValidator().validate(local_settings)
     assert result.passed
+
+
+def test_production_fails_closed_when_prototype_mise_is_disabled(
+    foundry_configured_settings,
+):
+    broken = foundry_configured_settings.model_copy(
+        update={"prototype_mise_enabled": False}
+    )
+
+    result = ConfigurationValidator().validate(broken)
+
+    assert not result.passed
+    assert any(
+        "prototype_mise_enabled must be true" in issue.message
+        for issue in result.issues
+    )
+
+
+def test_prototype_mise_fails_closed_when_required_settings_are_missing(local_settings):
+    broken = local_settings.model_copy(update={"prototype_mise_enabled": True})
+
+    result = ConfigurationValidator().validate(broken)
+
+    assert not result.passed
+    messages = {issue.message for issue in result.issues}
+    assert any("prototype_mise_gateway_image" in message for message in messages)
+    assert any("entra_tenant_id" in message for message in messages)
+    assert any("prototype_mise_test_principal_client_id" in message for message in messages)

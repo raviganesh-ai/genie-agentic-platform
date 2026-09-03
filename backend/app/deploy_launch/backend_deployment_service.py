@@ -46,6 +46,9 @@ from urllib.parse import urlparse
 from uuid import NAMESPACE_URL, uuid5
 
 from app.config.settings import Settings
+from app.deploy_launch.prototype_authentication_service import (
+    PrototypeAuthenticationConfiguration,
+)
 
 # Invoked with a short human-readable message right before each real,
 # potentially slow sub-phase of ``deploy()`` (source upload, remote ACR
@@ -125,6 +128,7 @@ class BackendDeploymentService:
         location: str,
         foundry_endpoint: str,
         foundry_project_name: str,
+        prototype_gateway_image: str | None = None,
     ) -> None:
         self._subscription_id = subscription_id
         self._resource_group = resource_group
@@ -133,6 +137,7 @@ class BackendDeploymentService:
         self._location = location
         self._foundry_endpoint = foundry_endpoint
         self._foundry_project_name = foundry_project_name
+        self._prototype_gateway_image = prototype_gateway_image
 
     def _acr_client(self) -> Any:
         """Client pinned to the ``2019-06-01-preview`` API version - the version
@@ -184,6 +189,22 @@ class BackendDeploymentService:
             return ContainerAppsAPIClient(DefaultAzureCredential(), self._subscription_id)
         except Exception as exc:
             raise BackendDeploymentError(f"Failed to construct Container Apps client: {exc}") from exc
+
+    async def delete(self, *, mission_slug: str) -> None:
+        """Deletes the Container App that owns the backend and MISE gateway."""
+
+        app_name = f"genie-{mission_slug}-backend"
+        try:
+            poller = self._container_apps_client().container_apps.begin_delete(
+                self._resource_group, app_name
+            )
+            await asyncio.to_thread(poller.result)
+        except Exception as exc:
+            if getattr(exc, "status_code", None) == 404:
+                return
+            raise BackendDeploymentError(
+                f"Failed to delete backend Container App '{app_name}': {exc}"
+            ) from exc
 
     def _configure_mission_identity(self, identity_resource_id: str) -> str:
         """Returns the mission identity client id after granting Foundry invocation access."""
@@ -245,6 +266,7 @@ class BackendDeploymentService:
         mission_slug: str,
         build_root: Path,
         mission_identity_resource_id: str | None = None,
+        prototype_authentication: PrototypeAuthenticationConfiguration | None = None,
         on_progress: DeploymentProgressCallback | None = None,
     ) -> BackendDeploymentResult:
         """Builds ``build_root`` (must contain its own ``Dockerfile``) in ACR and
@@ -270,6 +292,18 @@ class BackendDeploymentService:
         if not dockerfile.exists():
             raise BackendDeploymentError(
                 f"No Dockerfile found in materialized build directory '{build_root}'."
+            )
+        if self._prototype_gateway_image and prototype_authentication is None:
+            raise BackendDeploymentError(
+                "Prototype MISE is enabled but no prototype authentication configuration was supplied."
+            )
+        if prototype_authentication is not None and not self._prototype_gateway_image:
+            raise BackendDeploymentError(
+                "Prototype authentication was supplied but prototype_mise_gateway_image is missing."
+            )
+        if prototype_authentication is not None and not mission_identity_resource_id:
+            raise BackendDeploymentError(
+                "Protected prototype deployment requires its mission user-assigned identity."
             )
 
         acr_client = self._acr_client()
@@ -369,16 +403,21 @@ class BackendDeploymentService:
         except Exception as exc:
             raise BackendDeploymentError(f"Failed to build backend image in ACR: {exc}") from exc
 
-        try:
-            await _report("Reading Azure Container Registry credentials...")
-            credentials_client = self._acr_credentials_client()
-            credentials = credentials_client.registries.list_credentials(
-                self._resource_group, self._acr_name
-            )
-            registry_username = credentials.username
-            registry_password = credentials.passwords[0].value
-        except Exception as exc:
-            raise BackendDeploymentError(f"Failed to read ACR admin credentials: {exc}") from exc
+        registry_username: str | None = None
+        registry_password: str | None = None
+        if prototype_authentication is None:
+            try:
+                await _report("Reading Azure Container Registry credentials...")
+                credentials_client = self._acr_credentials_client()
+                credentials = credentials_client.registries.list_credentials(
+                    self._resource_group, self._acr_name
+                )
+                registry_username = credentials.username
+                registry_password = credentials.passwords[0].value
+            except Exception as exc:
+                raise BackendDeploymentError(
+                    f"Failed to read ACR admin credentials: {exc}"
+                ) from exc
 
         container_apps_client = self._container_apps_client()
         try:
@@ -386,6 +425,8 @@ class BackendDeploymentService:
                 Configuration,
                 Container,
                 ContainerApp,
+                ContainerAppProbe,
+                ContainerAppProbeHttpGet,
                 EnvironmentVar,
                 Ingress,
                 ManagedServiceIdentity,
@@ -396,7 +437,6 @@ class BackendDeploymentService:
             )
 
             app_name = f"genie-{mission_slug}-backend"
-            secret_name = "acr-password"
             # The mission backend's own generated main.py (see
             # ``code_materializer._MAIN_PY_TEMPLATE``) reads
             # os.environ["FOUNDRY_ENDPOINT"]/os.environ["FOUNDRY_PROJECT_NAME"] at
@@ -408,6 +448,20 @@ class BackendDeploymentService:
                 EnvironmentVar(name="FOUNDRY_PROJECT_NAME", value=self._foundry_project_name),
                 EnvironmentVar(name="FOUNDRY_ORCHESTRATOR_AGENT_VERSION", value="1"),
             ]
+            if prototype_authentication is not None:
+                env_vars.extend(
+                    [
+                        EnvironmentVar(
+                            name="ENTRA_AUTHORITY", value="https://login.microsoftonline.com"
+                        ),
+                        EnvironmentVar(
+                            name="ENTRA_TENANT_ID", value=prototype_authentication.tenant_id
+                        ),
+                        EnvironmentVar(
+                            name="ENTRA_CLIENT_ID", value=prototype_authentication.client_id
+                        ),
+                    ]
+                )
             
             # Build the Container App envelope with mission-specific managed identity.
             # If mission_identity_resource_id is provided, assign the user-assigned
@@ -426,26 +480,93 @@ class BackendDeploymentService:
                     type="UserAssigned",
                     user_assigned_identities={mission_identity_resource_id: UserAssignedIdentity()},
                 )
+
+            registry_credentials = RegistryCredentials(
+                server=f"{self._acr_name}.azurecr.io",
+                identity=(
+                    mission_identity_resource_id
+                    if prototype_authentication is not None
+                    else None
+                ),
+                username=registry_username,
+                password_secret_ref=(
+                    "acr-password" if registry_password is not None else None
+                ),
+            )
+            registry_secrets = (
+                [Secret(name="acr-password", value=registry_password)]
+                if registry_password is not None
+                else []
+            )
             
+            containers = [Container(name="backend", image=image_tag, env=env_vars)]
+            ingress_target_port = 8000
+            if prototype_authentication is not None:
+                gateway_env = [
+                    EnvironmentVar(name="ASPNETCORE_HTTP_PORTS", value="8080"),
+                    EnvironmentVar(
+                        name="AzureAd__Instance", value="https://login.microsoftonline.com/"
+                    ),
+                    EnvironmentVar(
+                        name="AzureAd__TenantId", value=prototype_authentication.tenant_id
+                    ),
+                    EnvironmentVar(
+                        name="AzureAd__ClientId", value=prototype_authentication.client_id
+                    ),
+                    EnvironmentVar(
+                        name="AzureAd__Audiences__0", value=prototype_authentication.client_id
+                    ),
+                    EnvironmentVar(
+                        name="AzureAd__Audiences__1",
+                        value=f"api://{prototype_authentication.client_id}",
+                    ),
+                    EnvironmentVar(name="Backend__Destination", value="http://localhost:8000"),
+                    EnvironmentVar(
+                        name="Cors__AllowedOrigins__0", value="https://prototype.invalid"
+                    ),
+                ]
+                containers.append(
+                    Container(
+                        name="prototype-auth-gateway",
+                        image=self._prototype_gateway_image,
+                        env=gateway_env,
+                        probes=[
+                            ContainerAppProbe(
+                                type="Liveness",
+                                http_get=ContainerAppProbeHttpGet(
+                                    path="/health/live", port=8080, scheme="HTTP"
+                                ),
+                                initial_delay_seconds=10,
+                                period_seconds=30,
+                                timeout_seconds=5,
+                                failure_threshold=3,
+                            ),
+                            ContainerAppProbe(
+                                type="Readiness",
+                                http_get=ContainerAppProbeHttpGet(
+                                    path="/health/ready", port=8080, scheme="HTTP"
+                                ),
+                                initial_delay_seconds=10,
+                                period_seconds=10,
+                                timeout_seconds=5,
+                                failure_threshold=6,
+                            ),
+                        ],
+                    )
+                )
+                ingress_target_port = 8080
+
             envelope = ContainerApp(
                 location=self._location,
                 managed_environment_id=self._container_apps_environment_id,
                 identity=identity_config,
                 configuration=Configuration(
-                    ingress=Ingress(external=True, target_port=8000),
-                    registries=[
-                        RegistryCredentials(
-                            server=f"{self._acr_name}.azurecr.io",
-                            username=registry_username,
-                            password_secret_ref=secret_name,
-                        )
-                    ],
-                    secrets=[Secret(name=secret_name, value=registry_password)],
+                    ingress=Ingress(external=True, target_port=ingress_target_port),
+                    registries=[registry_credentials],
+                    secrets=registry_secrets,
                 ),
                 template=Template(
-                    containers=[
-                        Container(name="backend", image=image_tag, env=env_vars),
-                    ]
+                    containers=containers
                 ),
             )
             await _report("Creating/updating the Azure Container App revision...")
@@ -460,6 +581,58 @@ class BackendDeploymentService:
         backend_url = f"https://{fqdn}" if fqdn else ""
         return BackendDeploymentResult(image_tag=image_tag, backend_url=backend_url)
 
+    async def configure_gateway_frontend_origin(
+        self, *, mission_slug: str, frontend_origin: str
+    ) -> None:
+        """Replaces the bootstrap-deny origin with the prototype's exact deployed SPA origin."""
+
+        if not self._prototype_gateway_image:
+            return
+        if not frontend_origin.startswith("https://"):
+            raise BackendDeploymentError("Prototype gateway CORS origin must use HTTPS.")
+        client = self._container_apps_client()
+        app_name = f"genie-{mission_slug}-backend"
+        try:
+            app = await asyncio.to_thread(
+                client.container_apps.get, self._resource_group, app_name
+            )
+            gateway = next(
+                (
+                    container
+                    for container in app.template.containers
+                    if container.name == "prototype-auth-gateway"
+                ),
+                None,
+            )
+            if gateway is None:
+                raise BackendDeploymentError(
+                    f"Prototype Container App '{app_name}' has no MISE gateway container."
+                )
+            origin_updated = False
+            for environment_variable in gateway.env or []:
+                if environment_variable.name == "Cors__AllowedOrigins__0":
+                    environment_variable.value = frontend_origin.rstrip("/")
+                    origin_updated = True
+                    break
+            if not origin_updated:
+                raise BackendDeploymentError(
+                    "Prototype MISE gateway has no configured CORS origin slot."
+                )
+            if app.configuration.ingress.target_port != 8080:
+                raise BackendDeploymentError(
+                    "Prototype external ingress does not target the MISE gateway."
+                )
+            poller = client.container_apps.begin_create_or_update(
+                self._resource_group, app_name, app
+            )
+            await asyncio.to_thread(poller.result)
+        except BackendDeploymentError:
+            raise
+        except Exception as exc:
+            raise BackendDeploymentError(
+                f"Failed to configure prototype gateway CORS origin: {exc}"
+            ) from exc
+
 
 class NullBackendDeploymentService:
     """Local/test double: real behavior end-to-end minus any actual Azure calls."""
@@ -470,15 +643,24 @@ class NullBackendDeploymentService:
         mission_slug: str,
         build_root: Path,
         mission_identity_resource_id: str | None = None,
+        prototype_authentication: PrototypeAuthenticationConfiguration | None = None,
         on_progress: DeploymentProgressCallback | None = None,
     ) -> BackendDeploymentResult:
-        del build_root, mission_identity_resource_id
+        del build_root, mission_identity_resource_id, prototype_authentication
         if on_progress is not None:
             await on_progress("Deploying backend service (local mode, no real Azure calls)...")
         return BackendDeploymentResult(
             image_tag=f"local/{mission_slug}:dev",
             backend_url=f"http://localhost/missions/{mission_slug}/backend",
         )
+
+    async def configure_gateway_frontend_origin(
+        self, *, mission_slug: str, frontend_origin: str
+    ) -> None:
+        del mission_slug, frontend_origin
+
+    async def delete(self, *, mission_slug: str) -> None:
+        del mission_slug
 
 
 def create_backend_deployment_service(
@@ -512,4 +694,7 @@ def create_backend_deployment_service(
         location=settings.deployment_location,  # type: ignore[arg-type]
         foundry_endpoint=settings.azure_foundry_endpoint,  # type: ignore[arg-type]
         foundry_project_name=settings.azure_foundry_project_name,  # type: ignore[arg-type]
+        prototype_gateway_image=(
+            settings.prototype_mise_gateway_image if settings.prototype_mise_enabled else None
+        ),
     )

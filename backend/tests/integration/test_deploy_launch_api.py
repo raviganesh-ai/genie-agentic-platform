@@ -317,3 +317,12 @@ async def test_full_pipeline_runs_through_the_real_http_api(
             # Portal") must be reflected, and the old generic prefix must not.
             assert "local-acme-customer-portal-" in agent_config_source
             assert "local-mission-" not in agent_config_source
+
+            delete_resp = await client.delete(
+                f"/sessions/{session_id}/deploy-launch/{run_id}", headers=headers
+            )
+            assert delete_resp.status_code == 204
+            missing_resp = await client.get(
+                f"/sessions/{session_id}/deploy-launch/{run_id}", headers=headers
+            )
+            assert missing_resp.status_code == 404

@@ -32,6 +32,8 @@ class ConfigurationValidator:
             errors.append("default_llm must not be empty.")
 
         if settings.environment == "production":
+            if not settings.prototype_mise_enabled:
+                errors.append("prototype_mise_enabled must be true in production.")
             # Deploy & Launch's backend/frontend deployment factories silently
             # fall back to Null*DeploymentService stand-ins (fake "localhost"
             # URLs, no real Azure resources touched) whenever these are unset -
@@ -50,6 +52,19 @@ class ConfigurationValidator:
                 )
             if not settings.deployment_location:
                 errors.append("deployment_location is required in production.")
+
+        if settings.prototype_mise_enabled:
+            if not settings.prototype_mise_gateway_image:
+                errors.append(
+                    "prototype_mise_gateway_image is required when prototype MISE is enabled."
+                )
+            if not settings.entra_tenant_id:
+                errors.append("entra_tenant_id is required when prototype MISE is enabled.")
+            if not settings.prototype_mise_test_principal_client_id:
+                errors.append(
+                    "prototype_mise_test_principal_client_id is required when prototype MISE "
+                    "is enabled."
+                )
 
         if errors:
             return ValidationResult.fail(self.name, errors)

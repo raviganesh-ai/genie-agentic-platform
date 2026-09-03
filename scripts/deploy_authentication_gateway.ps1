@@ -64,6 +64,19 @@ function Remove-ContainerEnvironmentVariable {
     $Container.env = @($Container.env | Where-Object { $_.name -ne $Name })
 }
 
+function Set-ContainerEnvironmentVariable {
+    param(
+        [Parameter(Mandatory = $true)]$Container,
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)][string]$Value
+    )
+
+    Remove-ContainerEnvironmentVariable -Container $Container -Name $Name
+    $Container.env = @($Container.env) + @(
+        [pscustomobject]@{ name = $Name; value = $Value }
+    )
+}
+
 foreach ($requiredValue in @{
     TenantId = $TenantId
     ClientId = $ClientId
@@ -90,6 +103,17 @@ if ($backend.Count -ne 1) {
 $backend = $backend[0]
 $backend.image = $BackendImage
 Remove-ContainerEnvironmentVariable -Container $backend -Name "GENIE_MISE_ENDPOINT"
+$backendIdentityClientIds = @($backend.env | Where-Object {
+    $_.name -eq "AZURE_CLIENT_ID" -and -not [string]::IsNullOrWhiteSpace($_.value)
+})
+if ($backendIdentityClientIds.Count -ne 1) {
+    throw "Expected exactly one non-empty AZURE_CLIENT_ID on '$BackendContainerName'; found $($backendIdentityClientIds.Count)."
+}
+$backendIdentityClientId = $backendIdentityClientIds[0].value
+Set-ContainerEnvironmentVariable -Container $backend -Name "GENIE_PROTOTYPE_MISE_ENABLED" -Value "true"
+Set-ContainerEnvironmentVariable -Container $backend -Name "GENIE_PROTOTYPE_MISE_GATEWAY_IMAGE" -Value $GatewayImage
+Set-ContainerEnvironmentVariable -Container $backend -Name "GENIE_PROTOTYPE_MISE_TEST_PRINCIPAL_CLIENT_ID" -Value $backendIdentityClientId
+Set-ContainerEnvironmentVariable -Container $backend -Name "GENIE_ENTRA_TENANT_ID" -Value $TenantId
 
 $gateway = [pscustomobject]@{
     name = $GatewayContainerName

@@ -194,6 +194,16 @@ def test_all_generation_prompts_preserve_every_approved_requirement_id():
         assert "Prototype status never authorizes omission" in template
 
 
+def test_acceptance_test_prompt_uses_trusted_auth_proxy_without_disclosing_token():
+    registry = PromptRegistry.load(_REPO_CONFIG_ROOT / "prompts")
+
+    template = " ".join(registry.get("test-generation-v1").template.split())
+
+    assert "trusted acceptance-test proxy" in template
+    assert "receive no access token" in template
+    assert "MISSION_UNAUTHENTICATED_BACKEND_URL" in template
+
+
 def test_build_generation_prompts_require_self_verification_before_finishing():
     """Regression guard: the build-generation prompts must instruct the
     Build Agent to check its own requirement coverage and fix gaps before

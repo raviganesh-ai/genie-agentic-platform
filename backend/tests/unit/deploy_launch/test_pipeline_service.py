@@ -28,7 +28,14 @@ from app.deploy_launch.mission_agent_provisioning_service import (
 )
 from app.deploy_launch.mission_identity_service import NullMissionIdentityService
 from app.deploy_launch.pipeline_service import DeploymentPipelineService
-from app.deploy_launch.security_scan_service import SecurityScanService
+from app.deploy_launch.prototype_authentication_service import (
+    PrototypeAuthenticationConfiguration,
+)
+from app.deploy_launch.security_scan_service import (
+    SecurityFinding,
+    SecurityScanResult,
+    SecurityScanService,
+)
 from app.deploy_launch.test_execution_service import TestExecutionService
 from app.models.workflow_models import WorkflowRunResult, WorkflowStepInput, WorkflowStepResult
 from app.orchestration.workflow_event_bus import WorkflowEventBus
@@ -392,6 +399,294 @@ async def test_full_pipeline_runs_every_step(tmp_path: Path):
         encoding="utf-8"
     )
     assert '__MISSION_AGENTS__ = ["Requirements Specialist"]' in runtime_config_source
+
+
+class _FakePrototypeAuthenticationService:
+    def __init__(self, delete_events: list[str] | None = None) -> None:
+        self.configuration = PrototypeAuthenticationConfiguration(
+            application_object_id="app-object",
+            service_principal_object_id="prototype-sp",
+            client_id="prototype-client",
+            tenant_id="tenant-1",
+            delegated_scope="api://prototype-client/access_as_user",
+            application_role_id="role-1",
+        )
+        self.provisioned_slug: str | None = None
+        self.provision_calls = 0
+        self.frontend_redirect: str | None = None
+        self.token_requested = False
+        self.delete_calls = 0
+        self.fail_delete = False
+        self.delete_events = delete_events
+
+    async def provision(self, *, mission_slug: str):
+        self.provision_calls += 1
+        self.provisioned_slug = mission_slug
+        return self.configuration
+
+    async def configure_frontend_redirect(self, configuration, *, frontend_url: str):
+        assert configuration is self.configuration
+        self.frontend_redirect = frontend_url
+
+    async def get_test_access_token(self, configuration):
+        assert configuration is self.configuration
+        self.token_requested = True
+        return "short-lived-test-token"
+
+    async def delete(self, configuration):
+        assert configuration is self.configuration
+        self.delete_calls += 1
+        if self.delete_events is not None:
+            self.delete_events.append("authentication")
+        if self.fail_delete:
+            raise RuntimeError("transient Graph delete failure")
+
+
+class _FakeProtectedBackendDeploymentService:
+    def __init__(self, delete_events: list[str] | None = None) -> None:
+        self.authentication = None
+        self.frontend_origin: str | None = None
+        self.delete_events = delete_events
+
+    async def deploy(self, *, mission_slug: str, prototype_authentication=None, **kwargs):
+        self.authentication = prototype_authentication
+        return BackendDeploymentResult(
+            image_tag=f"acr/{mission_slug}:dev",
+            backend_url=f"https://{mission_slug}-backend.example.com",
+        )
+
+    async def configure_gateway_frontend_origin(
+        self, *, mission_slug: str, frontend_origin: str
+    ):
+        del mission_slug
+        self.frontend_origin = frontend_origin
+
+    async def delete(self, *, mission_slug: str):
+        if self.delete_events is not None:
+            self.delete_events.append(f"backend:{mission_slug}")
+
+
+class _FakeProtectedFrontendDeploymentService:
+    def __init__(self, delete_events: list[str] | None = None) -> None:
+        self.mission_identity_resource_id: str | None = None
+        self.delete_events = delete_events
+
+    async def deploy(self, *, mission_identity_resource_id=None, **kwargs):
+        self.mission_identity_resource_id = mission_identity_resource_id
+        return SimpleNamespace(frontend_url="https://prototype.example.com")
+
+    async def delete(self, *, mission_slug: str):
+        if self.delete_events is not None:
+            self.delete_events.append(f"frontend:{mission_slug}")
+
+
+async def test_protected_pipeline_finalizes_auth_and_injects_test_token(tmp_path: Path):
+    authenticated_test_output = """
+```python
+# REQ-001
+import os
+
+def test_req_001_uses_prototype_authentication():
+    assert os.environ["MISSION_BACKEND_URL"].startswith("http://127.0.0.1:")
+    assert os.environ["MISSION_UNAUTHENTICATED_BACKEND_URL"].startswith("https://")
+    assert "MISSION_ACCESS_TOKEN" not in os.environ
+```
+"""
+    authentication_service = _FakePrototypeAuthenticationService()
+    backend_service = _FakeProtectedBackendDeploymentService()
+    frontend_service = _FakeProtectedFrontendDeploymentService()
+    service = DeploymentPipelineService(
+        orchestrator=_FakeOrchestrator(test_output_text=authenticated_test_output),  # type: ignore[arg-type]
+        session_service=_FakeSessionService(),  # type: ignore[arg-type]
+        event_bus=WorkflowEventBus(),
+        access_policy_service=_access_policy_service(),
+        mission_identity_service=NullMissionIdentityService(),
+        mission_agent_provisioning_service=NullMissionAgentProvisioningService(),
+        backend_deployment_service=backend_service,  # type: ignore[arg-type]
+        frontend_deployment_service=frontend_service,  # type: ignore[arg-type]
+        prototype_authentication_service=authentication_service,  # type: ignore[arg-type]
+        test_execution_service=TestExecutionService(timeout_seconds=60),
+        security_scan_service=SecurityScanService(timeout_seconds=60),
+        build_workspace_root=tmp_path,
+    )
+
+    run = await service.start(
+        session_id="session-1", requesting_user_id="user-1", workflow_run_id="run-1"
+    )
+    run = await service.wait_for_run(run.id)
+
+    assert run.status == "completed"
+    assert authentication_service.provisioned_slug is not None
+    assert backend_service.authentication is authentication_service.configuration
+    assert authentication_service.frontend_redirect == "https://prototype.example.com"
+    assert backend_service.frontend_origin == "https://prototype.example.com"
+    assert frontend_service.mission_identity_resource_id is not None
+    assert "userAssignedIdentities" in frontend_service.mission_identity_resource_id
+    assert authentication_service.token_requested
+    runtime_config = (
+        tmp_path / run.id / "frontend" / "public" / "runtime-config.js"
+    ).read_text(encoding="utf-8")
+    assert '__MISSION_ENTRA_CLIENT_ID__ = "prototype-client"' in runtime_config
+    assert '__MISSION_ENTRA_TENANT_ID__ = "tenant-1"' in runtime_config
+    assert '__MISSION_ENTRA_SCOPE__ = "api://prototype-client/access_as_user"' in runtime_config
+
+
+async def test_terminal_auth_cleanup_retains_failed_delete_for_retry(tmp_path: Path):
+    authentication_service = _FakePrototypeAuthenticationService()
+    service = _build_service(test_output_text=_PASSING_TEST_OUTPUT, tmp_path=tmp_path)
+    service._prototype_authentication_service = authentication_service
+    service._prototype_authentications["run-1"] = authentication_service.configuration
+
+    authentication_service.fail_delete = True
+    await service._cleanup_prototype_authentication("run-1")
+
+    assert authentication_service.delete_calls == 1
+    assert "run-1" in service._prototype_authentications
+
+    authentication_service.fail_delete = False
+    await service._cleanup_prototype_authentication("run-1")
+
+    assert authentication_service.delete_calls == 2
+    assert "run-1" not in service._prototype_authentications
+
+
+class _FailOnceSecurityScanService:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def scan(self, *, build_root: Path) -> SecurityScanResult:
+        del build_root
+        self.calls += 1
+        if self.calls == 1:
+            return SecurityScanResult(
+                ran=True,
+                findings=[
+                    SecurityFinding(
+                        file="generated.py",
+                        severity="high",
+                        description="simulated blocking finding",
+                    )
+                ],
+                summary="simulated blocking finding",
+            )
+        return SecurityScanResult(ran=True, summary="No findings.")
+
+
+async def test_retry_after_deployment_reuses_intact_prototype_authentication(tmp_path: Path):
+    authenticated_test_output = '''
+```python
+# REQ-001
+import os
+
+def test_req_001_uses_live_prototype():
+    assert os.environ["MISSION_BACKEND_URL"].startswith("http://127.0.0.1:")
+```
+'''
+    authentication_service = _FakePrototypeAuthenticationService()
+    security_scan_service = _FailOnceSecurityScanService()
+    service = DeploymentPipelineService(
+        orchestrator=_FakeOrchestrator(test_output_text=authenticated_test_output),  # type: ignore[arg-type]
+        session_service=_FakeSessionService(),  # type: ignore[arg-type]
+        event_bus=WorkflowEventBus(),
+        access_policy_service=_access_policy_service(),
+        mission_identity_service=NullMissionIdentityService(),
+        mission_agent_provisioning_service=NullMissionAgentProvisioningService(),
+        backend_deployment_service=_FakeProtectedBackendDeploymentService(),  # type: ignore[arg-type]
+        frontend_deployment_service=_FakeProtectedFrontendDeploymentService(),  # type: ignore[arg-type]
+        prototype_authentication_service=authentication_service,  # type: ignore[arg-type]
+        test_execution_service=TestExecutionService(timeout_seconds=60),
+        security_scan_service=security_scan_service,  # type: ignore[arg-type]
+        build_workspace_root=tmp_path,
+    )
+
+    first_attempt = await service.start(
+        session_id="session-1", requesting_user_id="user-1", workflow_run_id="run-1"
+    )
+    first_attempt = await service.wait_for_run(first_attempt.id)
+    failed_step = next(step for step in first_attempt.steps if step.status == "failed")
+
+    assert failed_step.step_id == "run-security-scan"
+    assert authentication_service.provision_calls == 1
+    assert authentication_service.delete_calls == 0
+
+    retried = await service.start(
+        session_id="session-1",
+        requesting_user_id="user-1",
+        workflow_run_id="run-1",
+        resume_from_step=failed_step.step_id,
+    )
+    retried = await service.wait_for_run(retried.id)
+
+    assert retried.status == "completed"
+    assert authentication_service.provision_calls == 1
+    assert authentication_service.delete_calls == 0
+    assert service._prototype_authentications[retried.id] is authentication_service.configuration
+
+
+class _RecordingMissionIdentityService(NullMissionIdentityService):
+    def __init__(self, delete_events: list[str]) -> None:
+        self.delete_events = delete_events
+
+    async def delete(self, *, identity_name: str, principal_id: str) -> None:
+        self.delete_events.append(f"identity:{identity_name}:{principal_id}")
+
+
+class _RecordingMissionAgentService(NullMissionAgentProvisioningService):
+    def __init__(self, delete_events: list[str]) -> None:
+        self.delete_events = delete_events
+
+    async def delete(self, *, foundry_agent_names: list[str]) -> None:
+        self.delete_events.append(f"agents:{len(foundry_agent_names)}")
+
+
+async def test_abandon_deletes_complete_prototype_boundary_in_dependency_order(
+    tmp_path: Path,
+):
+    authenticated_test_output = '''
+```python
+# REQ-001
+import os
+
+def test_req_001_uses_live_prototype():
+    assert os.environ["MISSION_BACKEND_URL"].startswith("http://127.0.0.1:")
+```
+'''
+    delete_events: list[str] = []
+    authentication_service = _FakePrototypeAuthenticationService(delete_events)
+    service = DeploymentPipelineService(
+        orchestrator=_FakeOrchestrator(test_output_text=authenticated_test_output),  # type: ignore[arg-type]
+        session_service=_FakeSessionService(),  # type: ignore[arg-type]
+        event_bus=WorkflowEventBus(),
+        access_policy_service=_access_policy_service(),
+        mission_identity_service=_RecordingMissionIdentityService(delete_events),
+        mission_agent_provisioning_service=_RecordingMissionAgentService(delete_events),
+        backend_deployment_service=_FakeProtectedBackendDeploymentService(delete_events),  # type: ignore[arg-type]
+        frontend_deployment_service=_FakeProtectedFrontendDeploymentService(delete_events),  # type: ignore[arg-type]
+        prototype_authentication_service=authentication_service,  # type: ignore[arg-type]
+        test_execution_service=TestExecutionService(timeout_seconds=60),
+        security_scan_service=SecurityScanService(timeout_seconds=60),
+        build_workspace_root=tmp_path,
+    )
+    run = await service.start(
+        session_id="session-1", requesting_user_id="user-1", workflow_run_id="run-1"
+    )
+    run = await service.wait_for_run(run.id)
+    mission_slug = f"acme-mission-{run.id[:8]}"
+
+    await service.abandon(pipeline_run_id=run.id, mission_title="Acme Mission")
+
+    assert delete_events == [
+        f"backend:{mission_slug}",
+        f"frontend:{mission_slug}",
+        "agents:2",
+        (
+            f"identity:local-genie-mission-{mission_slug[:16]}:"
+            f"local-principal-{mission_slug}"
+        ),
+        "authentication",
+    ]
+    assert service.get_run(run.id) is None
+    assert not (tmp_path / run.id).exists()
 
 
 async def test_start_self_heals_incomplete_build_solution_with_safe_policy_defaults(tmp_path: Path):

@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+import httpx
 import pytest
 
 from app.deploy_launch.test_execution_service import (
     TestExecutionService,
+    _AuthenticatedTestProxy,
     extract_test_modules,
     has_pytest_discoverable_tests,
     validate_real_action_tests,
@@ -287,3 +291,68 @@ def test_real_action_policy_accepts_black_box_test_using_deployed_url() -> None:
     )
 
     assert reasons == ()
+
+
+async def test_run_tests_keeps_injected_access_token_out_of_generated_process(tmp_path: Path):
+    access_token = "eyJ-sensitive-prototype-token"
+    output = '''\n```python
+import os
+
+def test_token_is_not_available_to_generated_code():
+    assert "MISSION_ACCESS_TOKEN" not in os.environ
+    assert os.environ["MISSION_BACKEND_URL"].startswith("http://127.0.0.1:")
+    assert os.environ["MISSION_UNAUTHENTICATED_BACKEND_URL"] == "https://prototype.example.com"
+```\n'''
+    service = TestExecutionService(timeout_seconds=60)
+
+    result = await service.run_tests(
+        build_root=tmp_path,
+        test_output_text=output,
+        runtime_environment={
+            "MISSION_ACCESS_TOKEN": access_token,
+            "MISSION_BACKEND_URL": "https://prototype.example.com",
+        },
+    )
+
+    assert result.success
+    assert access_token not in result.raw_output
+    assert access_token not in result.summary
+
+
+def test_authenticated_test_proxy_injects_token_only_at_fixed_upstream() -> None:
+    observed: dict[str, str] = {}
+
+    class UpstreamHandler(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:
+            observed["authorization"] = self.headers.get("Authorization", "")
+            observed["path"] = self.path
+            self.send_response(201)
+            self.send_header("Content-Length", "2")
+            self.end_headers()
+            self.wfile.write(b"ok")
+
+        def log_message(self, format: str, *args: object) -> None:
+            del format, args
+
+    upstream = ThreadingHTTPServer(("127.0.0.1", 0), UpstreamHandler)
+    upstream_thread = threading.Thread(target=upstream.serve_forever, daemon=True)
+    upstream_thread.start()
+    host, port = upstream.server_address
+    proxy = _AuthenticatedTestProxy(
+        backend_url=f"http://{host}:{port}", access_token="prototype-token"
+    )
+    proxy.start()
+    try:
+        response = httpx.post(proxy.url + "/invoke?case=1", content=b"{}")
+    finally:
+        proxy.close()
+        upstream.shutdown()
+        upstream.server_close()
+        upstream_thread.join(timeout=5)
+
+    assert response.status_code == 201
+    assert response.text == "ok"
+    assert observed == {
+        "authorization": "Bearer prototype-token",
+        "path": "/invoke?case=1",
+    }

@@ -160,6 +160,9 @@ class Settings(BaseSettings):
     deployment_container_apps_environment_id: str | None = None
     deployment_storage_account_name: str | None = None
     deployment_location: str | None = None
+    prototype_mise_enabled: bool = False
+    prototype_mise_gateway_image: str | None = None
+    prototype_mise_test_principal_client_id: str | None = None
     deployment_fidelity_max_repair_attempts: int = 3
     deployment_fidelity_min_coverage_percent: float = Field(default=90.0, gt=0, le=100)
     # How long the Requirement Fidelity Gate's real pytest subprocess is
@@ -219,6 +222,8 @@ class Settings(BaseSettings):
         "deployment_container_apps_environment_id",
         "deployment_storage_account_name",
         "deployment_location",
+        "prototype_mise_gateway_image",
+        "prototype_mise_test_principal_client_id",
         mode="after",
     )
     @classmethod

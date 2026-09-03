@@ -33,9 +33,11 @@ class AccessPolicyService:
         *,
         agent_registry: AgentRegistry,
         mission_identity_service: MissionIdentityService | NullMissionIdentityService,
+        acr_id: str | None = None,
     ) -> None:
         self._agent_registry = agent_registry
         self._mission_identity_service = mission_identity_service
+        self._acr_id = acr_id
 
     async def generate(self, mission_id: str) -> AccessPolicyDocument:
         """Returns the real, current least-access policy for every enabled agent.
@@ -47,6 +49,7 @@ class AccessPolicyService:
         # Provision the real mission identity.
         provisioned_identity = await self._mission_identity_service.provision(
             mission_id=mission_id,
+            acr_id=self._acr_id,
         )
 
         identity_info = MissionIdentityInfo(

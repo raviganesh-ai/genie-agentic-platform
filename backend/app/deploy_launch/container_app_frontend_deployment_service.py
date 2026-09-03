@@ -92,20 +92,6 @@ class ContainerAppFrontendDeploymentService:
                 f"Failed to construct ACR management client: {exc}"
             ) from exc
 
-    def _acr_credentials_client(self) -> Any:
-        try:
-            from azure.identity import DefaultAzureCredential
-            from azure.mgmt.containerregistry import ContainerRegistryManagementClient
-            return ContainerRegistryManagementClient(DefaultAzureCredential(), self._subscription_id)
-        except ImportError as exc:
-            raise ContainerAppFrontendDeploymentError(
-                "azure-mgmt-containerregistry / azure-identity are not installed."
-            ) from exc
-        except Exception as exc:
-            raise ContainerAppFrontendDeploymentError(
-                f"Failed to construct ACR management client: {exc}"
-            ) from exc
-
     def _container_apps_client(self) -> Any:
         try:
             from azure.identity import DefaultAzureCredential
@@ -125,6 +111,7 @@ class ContainerAppFrontendDeploymentService:
         *,
         mission_slug: str,
         ui_root: Path,
+        mission_identity_resource_id: str | None = None,
         on_progress: DeploymentProgressCallback | None = None,
     ) -> ContainerAppFrontendDeploymentResult:
         async def report(message: str) -> None:
@@ -134,6 +121,10 @@ class ContainerAppFrontendDeploymentService:
         if not ui_root.exists() or not any(ui_root.iterdir()):
             raise ContainerAppFrontendDeploymentError(
                 f"No materialized UI build found at '{ui_root}'."
+            )
+        if not mission_identity_resource_id:
+            raise ContainerAppFrontendDeploymentError(
+                "Frontend deployment requires the mission user-assigned identity."
             )
 
         dockerfile = ui_root / "Dockerfile"
@@ -199,37 +190,36 @@ class ContainerAppFrontendDeploymentService:
             ) from exc
 
         try:
-            await report("Reading Azure Container Registry credentials...")
-            credentials = self._acr_credentials_client().registries.list_credentials(
-                self._resource_group, self._acr_name
-            )
-            username = credentials.username
-            password = credentials.passwords[0].value
-
             from azure.mgmt.appcontainers.models import (
                 Configuration,
                 Container,
                 ContainerApp,
                 Ingress,
+                ManagedServiceIdentity,
                 RegistryCredentials,
                 Scale,
-                Secret,
                 Template,
+                UserAssignedIdentity,
             )
 
             envelope = ContainerApp(
                 location=self._location,
                 managed_environment_id=self._container_apps_environment_id,
+                identity=ManagedServiceIdentity(
+                    type="UserAssigned",
+                    user_assigned_identities={
+                        mission_identity_resource_id: UserAssignedIdentity()
+                    },
+                ),
                 configuration=Configuration(
                     ingress=Ingress(external=True, target_port=80),
                     registries=[
                         RegistryCredentials(
                             server=f"{self._acr_name}.azurecr.io",
-                            username=username,
-                            password_secret_ref="acr-password",
+                            identity=mission_identity_resource_id,
                         )
                     ],
-                    secrets=[Secret(name="acr-password", value=password)],
+                    secrets=[],
                 ),
                 template=Template(
                     containers=[Container(name="frontend", image=image_tag)],
@@ -254,6 +244,22 @@ class ContainerAppFrontendDeploymentService:
             frontend_url=f"https://{fqdn}", image_tag=image_tag
         )
 
+    async def delete(self, *, mission_slug: str) -> None:
+        """Deletes the generated frontend Container App for an abandoned run."""
+
+        app_name = f"genie-{mission_slug}-frontend"
+        try:
+            poller = self._container_apps_client().container_apps.begin_delete(
+                self._resource_group, app_name
+            )
+            await asyncio.to_thread(poller.result)
+        except Exception as exc:
+            if getattr(exc, "status_code", None) == 404:
+                return
+            raise ContainerAppFrontendDeploymentError(
+                f"Failed to delete frontend Container App '{app_name}': {exc}"
+            ) from exc
+
 
 class NullContainerAppFrontendDeploymentService:
     async def deploy(
@@ -261,15 +267,19 @@ class NullContainerAppFrontendDeploymentService:
         *,
         mission_slug: str,
         ui_root: Path,
+        mission_identity_resource_id: str | None = None,
         on_progress: DeploymentProgressCallback | None = None,
     ) -> ContainerAppFrontendDeploymentResult:
-        del ui_root
+        del ui_root, mission_identity_resource_id
         if on_progress is not None:
             await on_progress("Deploying frontend Container App (local mode)...")
         return ContainerAppFrontendDeploymentResult(
             frontend_url=f"http://localhost/missions/{mission_slug}/frontend",
             image_tag=f"local/{mission_slug}-frontend:dev",
         )
+
+    async def delete(self, *, mission_slug: str) -> None:
+        del mission_slug
 
 
 def create_container_app_frontend_deployment_service(
