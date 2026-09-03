@@ -2,13 +2,23 @@
 
 Genie is an Azure-native Agentic AI solutioning platform. It ingests transcripts, recordings, documents, and customer context and transforms them into an interactive AI **Mission Control** experience — where requirement discovery, agent collaboration, architecture design, governance decisions, memory updates, approvals, and final outputs can all be observed **in real time**.
 
-> Genie is **not** a report generator. Every artifact it produces is backed by a traceable chain of agent execution, governance events, and approved memory — never a static template.
+## Purpose and use boundary
+
+> [!IMPORTANT]
+> **MICROSOFT CONFIDENTIAL — INTERNAL COLLABORATION ONLY**
+>
+> Genie is an **art-of-the-possible prototype** for rapidly validating an agentic solution vision, architecture, interaction model, and requirement coverage. It is not a generally available Microsoft product, production reference implementation, or support commitment. **Do not deploy Genie, or a Genie-generated prototype, directly to production.** Before any production use, complete an independent architecture review, threat model, privacy and Responsible AI review, accessibility review, data-governance assessment, operational-readiness review, performance and resilience testing, and approval through the owning organization's standard engineering and release processes.
+
+Genie is **not** a report generator. Every artifact it produces is backed by a traceable chain of agent execution, governance events, and approved memory rather than a static template.
 
 ---
 
 ## Table of contents
 
+- [Purpose and use boundary](#purpose-and-use-boundary)
 - [Architecture](#architecture)
+  - [Genie Azure platform](#genie-azure-platform)
+  - [Generated prototype isolation](#generated-prototype-isolation)
 - [Core concepts](#core-concepts)
 - [Agents](#agents)
 - [Workflows](#workflows)
@@ -20,9 +30,9 @@ Genie is an Azure-native Agentic AI solutioning platform. It ingests transcripts
 - [Authentication](#authentication)
 - [Deployment strategy](#deployment-strategy)
   - [Deploying into a brand-new Azure subscription](#deploying-into-a-brand-new-azure-subscription)
+  - [Provisioning Foundry agents](#provisioning-foundry-agents)
   - [Deploying application code (backend + frontend)](#deploying-application-code-backend--frontend)
   - [Continuous deployment (GitHub Actions)](#continuous-deployment-github-actions)
-  - [Provisioning Foundry agents](#provisioning-foundry-agents)
 - [Testing](#testing)
 - [Troubleshooting](#troubleshooting)
 - [Deploy log](#deploy-log)
@@ -32,58 +42,38 @@ Genie is an Azure-native Agentic AI solutioning platform. It ingests transcripts
 
 ## Architecture
 
-Genie follows Clean Architecture with strict layering: API routes never contain business logic, business logic never talks to Azure AI Foundry directly, and only one narrow module is allowed to import the Foundry SDK.
+Genie follows Clean Architecture in application code and uses Azure-native identity, hosting, data, AI, and observability services. The diagrams below separate the long-lived **Genie control plane** from the isolated Azure resources created for each generated prototype.
 
-```mermaid
-flowchart TB
-    subgraph Client
-        FE["React + TypeScript Frontend\n(Fluent UI, React Flow, Recharts)"]
-    end
+### Genie Azure platform
 
-    subgraph Backend["FastAPI Backend (Python 3.12, async)"]
-        API["API layer\n(19 routers: sessions, uploads, ingestion,\nworkflows, workflow-events, agents, memory, peer-review,\napprovals, architecture, requirements, workshop, replay,\noutputs, deploy-launch, debugging, foundry-admin, model-catalog, health)"]
-        SVC["Application services\n(session, requirements, workshop,\narchitecture, peer review, output services)"]
-        ORCH["Orchestration\n(WorkflowRuntime, AgentOrchestrator,\ngenie-orchestrator tool delegation,\nHandoff / Collaboration / Reanalysis)"]
-        DL["Deploy & Launch Pipeline\n(deterministic, non-LLM Azure provisioning\n- see app.deploy_launch)"]
-        GW["AzureAgentGateway"]
-        MEM["Memory Service\n(Personal / Shared / Enterprise)"]
-        GOV["Governance Service\n(lineage, approvals, replay, traceability)"]
-        VAL["Startup Validators\n(fail-closed)"]
-    end
+[![Genie Azure platform architecture showing Azure service boundaries, identity, runtime, data, AI, registry, and observability](docs/architecture/genie-azure-platform.png)](docs/architecture/genie-azure-platform.svg)
 
-    subgraph Azure["Azure Services"]
-        FOUNDRY["Azure AI Foundry\n(independently provisioned agents)"]
-        SEARCH["Azure AI Search\n(Enterprise Knowledge Memory)"]
-        STORE["Cosmos DB / Storage\n(Shared + Personal Memory, sessions)"]
-        KV["Key Vault"]
-        ENTRA["Microsoft Entra ID"]
-        MI["Managed Identity"]
-        MON["Azure Monitor / App Insights"]
-    end
+*Figure 1. Genie evaluation platform. Select the diagram to open the scalable SVG. The service symbols come from the [official Microsoft Azure Architecture Icons](https://learn.microsoft.com/azure/architecture/icons/).*
 
-    FE -- "HTTPS + Entra bearer token" --> API
-    API --> SVC --> ORCH
-    API --> DL
-    ORCH --> GW --> FOUNDRY
-    ORCH --> MEM --> SEARCH
-    ORCH --> MEM --> STORE
-    ORCH --> GOV
-    DL --> FOUNDRY
-    DL --> GOV
-    VAL -.->|"gates startup"| API
-    Backend -- "MSI" --> MI
-    MI --> KV
-    MI --> FOUNDRY
-    MI --> SEARCH
-    MI --> STORE
-    Backend --> MON
-    FE -- "OIDC redirect login" --> ENTRA
-    API -- "validates JWT against" --> ENTRA
-```
+| Azure concern | Implementation |
+|---|---|
+| **Web experience** | React/TypeScript on Azure Static Web Apps; MSAL authenticates internal collaborators with Microsoft Entra ID |
+| **API security boundary** | Public Azure Container Apps ingress reaches only the .NET 8 MISE gateway on `8080`; FastAPI remains private on `localhost:8000` and validates the token again |
+| **Agent execution** | `AzureAgentGateway` is the only production execution path to independently provisioned Azure AI Foundry Prompt Agents |
+| **Identity and secrets** | User-assigned managed identity and least-privilege Azure RBAC; secrets belong in Key Vault and are never embedded in images or source |
+| **Memory and artifacts** | Cosmos DB for durable session/memory/lineage state, Azure AI Search for enterprise knowledge, and Azure Storage for uploads and generated artifacts |
+| **Images and hosting** | Commit-pinned backend and gateway images in Azure Container Registry, deployed together to Azure Container Apps |
+| **Observability** | Application Insights and Azure Monitor receive structured logs, traces, metrics, correlation IDs, and governance telemetry |
+| **Infrastructure** | Subscription-scoped Bicep creates the resource group and foundational Azure resources; GitHub Actions deploys application revisions through Azure OIDC |
+
+### Generated prototype isolation
+
+Deploy & Launch creates a separate security and runtime boundary for every newly generated prototype. Prototypes reuse the immutable gateway image, but they do **not** inherit Genie's gateway, Entra audience, managed identity, or Container App.
+
+[![Generated prototype Azure isolation architecture showing dedicated identity, Container Apps, MISE gateway, Foundry agents, registry, and monitoring](docs/architecture/generated-prototype-isolation.png)](docs/architecture/generated-prototype-isolation.svg)
+
+*Figure 2. Per-prototype security and runtime isolation. Select the diagram to open the scalable SVG.*
+
+Each prototype receives its own single-tenant Entra application and service principal, API audience, delegated scope, application role, SPA redirect URI, exact CORS origin, gateway container, backend/frontend Container Apps, mission managed identity, RBAC assignments, and generated Foundry agents. Failed runs retain the protected boundary for safe retry. An owner-authorized abandonment operation deletes the runtime resources, RBAC assignments, identity, and Entra application in dependency order.
 
 ### Layering rules (enforced by tests)
 
-- Only `app/agents/foundry/project_service.py` (and, for deployment tooling, `app/deployment/provider_status_source.py`) may import `azure-ai-projects` / `azure-identity`. A standing test (`tests/unit/test_architecture_boundary.py`) greps the whole backend source tree to guarantee this.
+- Azure SDK imports are confined to an explicit allow-list of Foundry, deployment, transcription, and generated-prototype infrastructure adapters. A standing test (`tests/unit/test_architecture_boundary.py`) scans the backend source tree and fails if an application/domain module crosses that boundary.
 - Every Genie business/debugging **agent is an independently deployed Azure AI Foundry agent resource** (created via the Foundry portal, CLI, or the provisioning scripts in this repo) — Genie never implements agent reasoning as ad hoc Python classes, and never calls `create_agent()` at request time.
 - The frontend **never** calls Azure AI Foundry directly — a static scan test (`no_foundry_direct_access.test.tsx`) fails the build if any non-`httpClient.ts` file performs a raw `fetch()` call or imports a Foundry SDK / hostname.
 - Execution goes through `AzureAgentGateway` whenever Azure AI Foundry is configured. Local/mock agents, static demo data, and fallback execution are only permitted when `GENIE_ALLOW_LOCAL_AGENTS=true` (and no Foundry endpoint is configured) — otherwise the gateway fails closed instead of ever silently falling back.
@@ -178,17 +168,15 @@ The backend (`RequirementsService.get_qualification`, `GET /sessions/{id}/requir
 
 This is the "how": the exact mechanism Genie uses to turn an uploaded transcript into a working, requirements-traceable UI + multi-agent backend — end to end, nothing hardcoded or templated.
 
-```mermaid
-flowchart LR
-    T["Transcript / recording\n/ document upload"] --> RA["Requirements Analyst\nMUST-HAVE vs NICE-TO-HAVE\n+ numbered Critical Path"]
-    RA -->|"human approves"| AD["Architecture Designer\nMulti-Agent Workflow +\nSingle-Page UI Design"]
-    AD -->|"human approves"| BA["Build Agent\n(one component at a time)"]
-    BA --> SA["Security Assessment Agent\nSECURITY_GATE: PASS/FAIL"]
-    BA --> TG["Test Generation Agent\nTEST_COVERAGE_GATE: PASS/FAIL"]
-    SA --> WS["Workshop Center\n(peer review + Apply Selected Fixes)"]
-    TG --> WS
-    WS -->|"human approves"| DL["Deploy & Launch pipeline\n(real Azure provisioning)"]
-```
+| Stage | Governed outcome | Approval or gate |
+|---|---|---|
+| **1. Ingest** | Transcript, recording, or document enters the session scope | Upload validation |
+| **2. Requirements** | Requirements Analyst classifies scope and creates the numbered critical path | Human approval |
+| **3. Architecture** | Architecture Designer produces the multi-agent workflow and single-page UI design | Human approval |
+| **4. Build** | Build Agent generates one traceable component at a time | Requirement-fidelity validation |
+| **5. Assess and test** | Security Assessment and Test Generation run independently | `SECURITY_GATE` and `TEST_COVERAGE_GATE` |
+| **6. Workshop** | Peer-review findings and selected fixes are reconciled | Human approval |
+| **7. Deploy & Launch** | The deterministic pipeline provisions the isolated Azure prototype | At least 90% executable coverage and 100% of executable tests passing |
 
 ### 1. Requirements are pinned into a single scope contract
 
@@ -414,7 +402,7 @@ Genie uses **Microsoft Entra ID** end to end:
 
 ## Deployment strategy
 
-Genie ships as: (1) Bicep infrastructure-as-code that provisions every foundational Azure resource into a brand-new subscription, (2) a .NET 8 MISE gateway and private FastAPI container deployed together in every Azure Container Apps replica, and (3) a static React frontend deployed to Azure Static Web Apps. Deployment is split into readiness validation → infrastructure provisioning → agent provisioning → application deployment, matching the repo's fail-closed philosophy: nothing proceeds until the previous step is verified.
+An Azure **evaluation environment** consists of: (1) Bicep infrastructure-as-code that provisions the foundational Azure resources, (2) a .NET 8 MISE gateway and private FastAPI container deployed together in every Azure Container Apps replica, and (3) a static React frontend deployed to Azure Static Web Apps. Deployment is split into readiness validation → infrastructure provisioning → agent provisioning → application deployment, matching the repo's fail-closed philosophy: nothing proceeds until the previous step is verified. These deployment instructions reproduce the prototype environment; they do not supersede the production-readiness work required by the [purpose and use boundary](#purpose-and-use-boundary).
 
 ### Deploying into a brand-new Azure subscription
 
@@ -653,13 +641,18 @@ If this identity/RBAC/secrets setup is ever missing or revoked, `deploy-backend`
 
 ## Deploy log
 
-Every deploy to production (backend Container App and/or frontend Static Web App) is recorded here — commit, what changed, and why. Update this section as part of the same commit that ships the fix/feature, before pushing to `master` triggers [Continuous deployment](#continuous-deployment-github-actions).
+Every deployment to the shared Azure evaluation environment (backend Container App and/or frontend Static Web App) is recorded here: commit, what changed, and why. Update this section as part of the same commit that ships the fix/feature, before pushing to `master` triggers [Continuous deployment](#continuous-deployment-github-actions).
+
+### 2026-09-03 — Azure architecture and usage boundary
+
+- **Documentation**: replaced Mermaid diagrams with professional, renderer-independent architecture images built from the official Microsoft Azure Architecture Icons. The diagrams separate the Genie control plane from each generated prototype and cover Static Web Apps, Container Apps, MISE, Entra ID, managed identity/RBAC, Foundry, Azure data services, ACR, and Azure Monitor.
+- **Usage boundary**: added a prominent **Microsoft Confidential — Internal Collaboration Only** notice. Genie is an art-of-the-possible rapid-prototyping environment and must not be deployed directly to production without independent security, privacy, Responsible AI, accessibility, data-governance, resilience, and operational-readiness reviews.
 
 ### 2026-09-03 — Independent MISE gateway for every generated prototype
 
 - **What changed**: Deploy & Launch now creates one owned Entra API/SPA registration and one independently configured MISE gateway container for each new prototype. Public backend ingress targets that gateway on `8080`; generated FastAPI remains private on `8000` and validates the same unique audience as defense in depth.
 - **Browser and test authentication**: generated Vite shells use MSAL redirect login, the prototype's `access_as_user` scope, bearer forwarding, and silent refresh. A trusted loopback proxy owns the short-lived `Prototype.Invoke` app token and injects it only while forwarding to the fixed prototype backend; generated pytest code receives no bearer token.
-- **Fail-closed lifecycle**: the backend starts only when the pinned gateway image, tenant, and managed-identity test principal are configured. Entra app creation, service-principal creation, app-role assignment, mission-identity ACR pull configuration, SPA redirect finalization, exact-origin CORS revision, and token acquisition all fail the deployment rather than exposing FastAPI or selecting a local fallback. Terminal failures clean up the owned Entra application.
+- **Fail-closed lifecycle**: the backend starts only when the pinned gateway image, tenant, and managed-identity test principal are configured. Entra app creation, service-principal creation, app-role assignment, mission-identity ACR pull configuration, SPA redirect finalization, exact-origin CORS revision, and token acquisition all fail the deployment rather than exposing FastAPI or selecting a local fallback. Failed runs retain the complete protected boundary for retry; explicit owner-authorized abandonment removes runtime resources, RBAC assignments, the mission identity, and the Entra application in dependency order.
 - **Deployment**: CI/CD passes the already-built commit-pinned gateway image into Genie's runtime through `scripts/deploy_authentication_gateway.ps1`; no manual application deploy is used. The runtime managed identity requires tenant-admin-consented Graph application permissions documented in [Authentication](#authentication).
 - **Operational verification**: the implementation and fail-closed tests are complete, but this environment's Graph application permissions and tenant-admin consent remain unverified until a real Deploy & Launch run successfully provisions its prototype registration, service principal, and role assignment.
 
