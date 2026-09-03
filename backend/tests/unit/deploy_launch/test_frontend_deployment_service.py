@@ -31,3 +31,12 @@ def test_detects_storage_authorization_permission_mismatch():
     exc = RuntimeError("ErrorCode:AuthorizationPermissionMismatch Content: <Error />")
 
     assert _is_authorization_permission_mismatch(exc)
+
+
+def test_generated_frontend_build_uses_impeccable_compatible_node_runtime() -> None:
+    from app.deploy_launch.container_app_frontend_deployment_service import (
+        _FRONTEND_DOCKERFILE,
+    )
+
+    assert "FROM node:22-alpine AS build" in _FRONTEND_DOCKERFILE
+    assert "RUN npm run build" in _FRONTEND_DOCKERFILE

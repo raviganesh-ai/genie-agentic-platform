@@ -214,3 +214,32 @@ def test_build_generation_prompts_require_self_verification_before_finishing():
     assert "assigned_requirements" in build_component_v1
     assert "deterministically assigned to THIS component" in build_component_v1
 
+
+def test_ui_generation_and_regeneration_prompts_apply_impeccable_design_contract():
+    registry = PromptRegistry.load(_REPO_CONFIG_ROOT / "prompts")
+
+    for prompt_id in ("build-generation-v1", "build-generation-component-v1"):
+        template = " ".join(registry.get(prompt_id).template.split())
+        assert "IMPECCABLE DESIGN CONTRACT" in template
+        assert "https://impeccable.style/" in template
+        assert "never wrap every element in a card or nest cards" in template
+        assert "pinned Impeccable detector" in template
+        assert "reduced-motion" in template or "reduced motion" in template
+
+    regeneration = " ".join(
+        registry.get("build-component-regeneration-v1").template.split()
+    )
+    assert 'If component_kind is "ui"' in regeneration
+    assert "https://impeccable.style/" in regeneration
+    assert "pinned Impeccable detector" in regeneration
+
+
+def test_architecture_prompt_shapes_an_impeccable_visual_direction_for_each_mission():
+    registry = PromptRegistry.load(_REPO_CONFIG_ROOT / "prompts")
+    template = " ".join(registry.get("architecture-recommendation-v1").template.split())
+
+    assert "shape-first method from https://impeccable.style/" in template
+    assert "OPERATE (fast scanning and repeated action)" in template
+    assert '"Surface mode: <OPERATE|READ|EXPERIENCE|PERSUADE>.' in template
+    assert "do not add a third top-level section" in template
+

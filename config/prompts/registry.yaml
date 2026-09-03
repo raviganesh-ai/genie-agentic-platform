@@ -234,6 +234,17 @@ prompts:
          labeled text field. Never default a field to a text box when the
          requirements imply an enumerable or bounded value.
 
+         Apply the shape-first method from https://impeccable.style/ before
+         choosing visual details. Classify the mission surface as one of:
+         OPERATE (fast scanning and repeated action), READ (build clear
+         understanding), EXPERIENCE (let the work lead), or PERSUADE (win
+         attention). Derive one concise, domain-specific visual direction
+         from the actual audience and work - including information density,
+         typographic character, color strategy, and interaction rhythm.
+         Never default to a generic SaaS dashboard, purple/cyan gradient,
+         glowing dark mission-control theme, nested-card grid, or marketing
+         hero when the mission's purpose does not call for it.
+
       5. VALIDATION: Verify that the workflow genuinely requires multiple
          agents collaborating (not just a sequential script), that the
          UI clearly shows orchestrator coordination happening, and that
@@ -244,7 +255,12 @@ prompts:
       RESPONSE FORMAT:
       Respond with exactly these two top-level sections, in this order,
       each as a markdown "## " header followed by a one-sentence summary
-      of that section, then its own items:
+      of that section, then its own items. The Single-Page UI Design
+      summary must use this exact shape before its prose: "Surface mode:
+      <OPERATE|READ|EXPERIENCE|PERSUADE>. Visual direction: <one concise,
+      domain-specific direction covering density, typography, color, and
+      interaction rhythm>." This is the design brief the Build Agent must
+      implement; do not add a third top-level section:
 
       "## Single-Page UI Design" - this section designs ONLY this
       mission's own bespoke INPUT zone(s); it never describes an
@@ -304,7 +320,7 @@ prompts:
     variables:
       - approved_requirements
       - user_message
-    version: "4.4.0"
+    version: "4.5.0"
 
   - id: security-assessment-v1
     name: Security Assessment
@@ -797,18 +813,29 @@ prompts:
       - never call `/invoke/stream` yourself, never render your own
         output/progress/agent-status UI, never talk to any agent directly
 
-      VISUAL STYLE - this prototype must look like a genuine, polished
-      part of Genie, not a bare unstyled page: the surrounding shell
-      already loads a stylesheet with Genie's own dark, gradient-accented
-      look and a set of ready-made utility classes - use them instead of
-      inventing new inline styles. Wrap each zone in a `<section
-      className="genie-card">` with a `<h2 className="genie-zone-title">`
-      heading. Use `<div className="genie-dropzone">` (with an
-      `onDragOver`/`onDrop` pair, exactly like the shell's own dropzone)
-      for any file/folder input, and `<button className="genie-btn
-      genie-btn-primary">` for the submit action. This must read as
-      gamified and alive - a user should feel like they are configuring a
-      real mission control panel, not filling out a bureaucratic form.
+      IMPECCABLE DESIGN CONTRACT - apply the design methodology from
+      https://impeccable.style/ to this UI, not generic AI styling. First
+      infer the surface mode from the mission: operational tools optimize
+      for fast scanning and repeated action; explanatory tools optimize
+      for comprehension; experiential tools let the work itself lead.
+      Commit to one domain-specific visual direction and clear information
+      hierarchy. Use the shell's semantic utility classes (`genie-card`,
+      `genie-zone-title`, `genie-dropzone`, `genie-btn`, and
+      `genie-btn-primary`) only where their meaning fits; never wrap every
+      element in a card or nest cards. Keep compact tools compact. Use
+      meaningful labels and real mission content, not feature narration,
+      generic slogans, or decorative status copy. Avoid the AI tells
+      Impeccable detects: overused default typography, purple/cyan
+      gradients, glowing dark panels, excessive rounded rectangles,
+      pill-shaped containers for ordinary text, eyebrow chips, icon tiles
+      above headings, decorative pulsing dots, and bounce/elastic motion.
+      Use whitespace, alignment, contrast, typographic hierarchy, and one
+      restrained accent more than decoration. Before returning, audit the
+      component for keyboard access, visible focus, touch targets,
+      responsive reflow, text overflow, loading/disabled/error/empty
+      states, and reduced-motion compatibility. Deploy & Launch runs the
+      pinned Impeccable detector over the completed frontend and fails the
+      build when deterministic anti-patterns remain.
 
       COMPONENT CONTRACT - your default-exported component receives
       exactly one prop object: `{{ onSubmit: (message: string,
@@ -881,7 +908,7 @@ prompts:
       - policies
       - excluded_agents
       - user_message
-    version: "5.15.0"
+    version: "5.16.0"
 
   - id: build-generation-component-v1
     name: Build Generation - Single Component
@@ -1111,15 +1138,23 @@ prompts:
       narration into it word-by-word, and shows its output/download link
       automatically. Never call `/invoke/stream` yourself, never render
       your own output/progress/agent-status UI.
-      VISUAL STYLE: the surrounding shell already loads a stylesheet with
-      Genie's own dark, gradient-accented look and ready-made utility
-      classes - use them instead of inventing new inline styles. Wrap
-      each zone in a `<section className="genie-card">` with a `<h2
-      className="genie-zone-title">` heading, `genie-dropzone` for any
-      file input, and `genie-btn`/`genie-btn-primary` for buttons. Bare
-      `<input>`/`<textarea>`/`<select>` already inherit the themed look.
-      This must read as gamified and alive, matching Genie's own look,
-      not a bare unstyled form.
+      IMPECCABLE DESIGN CONTRACT: apply the design methodology from
+      https://impeccable.style/ to this UI, not generic AI styling. Infer
+      whether the mission surface is operational, explanatory, or
+      experiential, then commit to one domain-specific hierarchy. Use the
+      shell's semantic utility classes (`genie-card`, `genie-zone-title`,
+      `genie-dropzone`, `genie-btn`, `genie-btn-primary`) only where their
+      meaning fits; never wrap every element in a card or nest cards. Keep
+      operational forms compact and scannable. Avoid overused default
+      typography, purple/cyan gradients, glowing dark panels, excessive
+      rounded rectangles, pills for ordinary text, eyebrow chips, icon
+      tiles above headings, decorative pulsing dots, and bounce/elastic
+      motion. Prefer alignment, whitespace, contrast, typographic
+      hierarchy, and one restrained accent. Before returning, audit
+      keyboard access, visible focus, touch targets, responsive reflow,
+      text overflow, loading/disabled/error/empty states, and reduced
+      motion. Deploy & Launch runs the pinned Impeccable detector and
+      fails the frontend build when deterministic anti-patterns remain.
       Return one fenced ```tsx code block, first line `// agent: ui`, then
       a "## Multi-Agent Workflow" section listing ONLY the agents actually
       generated - same count and names as above.
@@ -1170,7 +1205,7 @@ prompts:
       - component_name
       - user_message
       - assigned_requirements
-    version: "1.18.0"
+    version: "1.19.0"
 
   - id: build-component-regeneration-v1
     name: Build Generation - Regenerate Single Component
@@ -1197,6 +1232,18 @@ prompts:
 
       Customer's requested change: {instructions}
 
+      If component_kind is "ui", preserve the Impeccable design standard
+      from https://impeccable.style/: keep the interface domain-specific,
+      compact, scannable, responsive, keyboard accessible, and visually
+      deliberate. Do not introduce nested cards, generic dashboard
+      decoration, overused default typography, purple/cyan gradients,
+      glowing dark panels, excessive rounded rectangles, pills for
+      ordinary text, eyebrow chips, icon tiles above headings, decorative
+      pulsing dots, or bounce/elastic motion. Re-check focus, touch targets,
+      overflow, disabled/error/empty states, and reduced motion before
+      returning the revised component; the deployed frontend build runs
+      the pinned Impeccable detector and fails on deterministic findings.
+
       Security rules you MUST follow: never hardcode any URL, hostname,
       port, API key, token, secret, or credential anywhere - read every
       endpoint, deployment name, and secret from configuration/environment
@@ -1214,7 +1261,7 @@ prompts:
       - component_name
       - existing_code
       - instructions
-    version: "1.0.0"
+    version: "1.1.0"
 
   - id: orchestrator-mission-v1
     name: Orchestrator Mission

@@ -19,6 +19,16 @@ from app.config.settings import Settings
 
 DeploymentProgressCallback = Callable[[str], Awaitable[None]]
 _ACR_RUN_FAILURE_STATUSES = frozenset({"failed", "canceled", "cancelled", "error", "timeout"})
+_FRONTEND_DOCKERFILE = """FROM node:22-alpine AS build
+WORKDIR /app
+COPY package.json ./
+RUN npm install
+COPY . .
+RUN npm run build
+FROM nginx:alpine
+COPY --from=build /app/dist /usr/share/nginx/html
+EXPOSE 80
+"""
 
 __all__ = [
     "ContainerAppFrontendDeploymentError",
@@ -127,18 +137,7 @@ class ContainerAppFrontendDeploymentService:
             )
 
         dockerfile = ui_root / "Dockerfile"
-        dockerfile.write_text(
-            "FROM node:20-alpine AS build\n"
-            "WORKDIR /app\n"
-            "COPY package.json ./\n"
-            "RUN npm install\n"
-            "COPY . .\n"
-            "RUN npm run build\n"
-            "FROM nginx:alpine\n"
-            "COPY --from=build /app/dist /usr/share/nginx/html\n"
-            "EXPOSE 80\n",
-            encoding="utf-8",
-        )
+        dockerfile.write_text(_FRONTEND_DOCKERFILE, encoding="utf-8")
         app_name = f"genie-{mission_slug}-frontend"
         image_tag = f"{self._acr_name}.azurecr.io/{app_name}:latest"
 

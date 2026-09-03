@@ -635,6 +635,23 @@ async def test_pipeline_launches_at_ninety_percent_and_preserves_requirement_gap
     assert len(orchestrator.execute_agent_calls) == 1
 
 
+def test_generated_frontend_runs_pinned_impeccable_detector_before_build() -> None:
+    from app.deploy_launch.pipeline_service import _FRONTEND_PACKAGE_JSON
+
+    assert '"impeccable": "3.6.0"' in _FRONTEND_PACKAGE_JSON
+    assert '"vite": "6.4.3"' in _FRONTEND_PACKAGE_JSON
+    assert '"design:check": "impeccable detect MissionApp.tsx src/"' in _FRONTEND_PACKAGE_JSON
+    assert '"build": "npm run design:check && vite build"' in _FRONTEND_PACKAGE_JSON
+
+
+def test_generated_mission_input_does_not_nest_custom_zones_inside_a_shell_card() -> None:
+    from app.deploy_launch.pipeline_service import _FRONTEND_MAIN_TSX, _FRONTEND_STYLES_CSS
+
+    assert '<section className="genie-input-surface genie-fade-in">' in _FRONTEND_MAIN_TSX
+    assert '<section className="genie-card genie-fade-in">' not in _FRONTEND_MAIN_TSX
+    assert ".genie-input-surface {" in _FRONTEND_STYLES_CSS
+
+
 async def test_pipeline_accumulates_test_coverage_across_repair_retries(
     tmp_path: Path,
 ) -> None:

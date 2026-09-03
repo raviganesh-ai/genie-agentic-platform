@@ -132,9 +132,9 @@ _FRONTEND_INDEX_HTML_TEMPLATE = """<!doctype html>
 _FRONTEND_PACKAGE_JSON = """{
     "private": true,
     "type": "module",
-    "scripts": {"build": "vite build"},
+    "scripts": {"build": "npm run design:check && vite build", "design:check": "impeccable detect MissionApp.tsx src/"},
     "dependencies": {"react": "18.3.1", "react-dom": "18.3.1"},
-    "devDependencies": {"@vitejs/plugin-react": "4.3.4", "@types/react": "18.3.18", "@types/react-dom": "18.3.5", "typescript": "5.7.2", "vite": "6.0.7"}
+    "devDependencies": {"@vitejs/plugin-react": "4.3.4", "@types/react": "18.3.18", "@types/react-dom": "18.3.5", "impeccable": "3.6.0", "typescript": "5.7.2", "vite": "6.4.3"}
 }
 """
 
@@ -168,7 +168,7 @@ export default defineConfig({ plugins: [react()] });
 
 # Mirrors the core visual language of Genie's own Mission Control app
 # (frontend/src/styles/global.css): the same dark gradient background,
-# accent colors, and "live agent working" animations (bounce dots, glow,
+# accent colors, and "live agent working" animations (loading dots, glow,
 # indeterminate rail, pulsing live dot). Every generated mission prototype
 # ships this stylesheet so it reads as a genuine extension of Genie - not a
 # bare, unstyled document - regardless of how much/little styling the LLM-
@@ -274,6 +274,10 @@ input:focus, textarea:focus, select:focus {
   margin-bottom: 12px;
 }
 
+.genie-input-surface {
+    margin: 28px 0;
+}
+
 .genie-btn {
   padding: 10px 18px;
   border-radius: 8px;
@@ -357,9 +361,9 @@ input:focus, textarea:focus, select:focus {
   animation: genie-live-pulse 1.6s ease-in-out infinite;
 }
 
-@keyframes genie-bounce-dot {
-  0%, 100% { transform: translateY(0); opacity: 0.5; }
-  40% { transform: translateY(-6px); opacity: 1; }
+@keyframes genie-loading-dot {
+    0%, 100% { transform: scale(0.82); opacity: 0.42; }
+    50% { transform: scale(1); opacity: 1; }
 }
 
 .genie-bounce-dots {
@@ -374,7 +378,7 @@ input:focus, textarea:focus, select:focus {
   height: 7px;
   border-radius: 50%;
   background-color: #6ba3ea;
-  animation: genie-bounce-dot 1.1s ease-in-out infinite;
+    animation: genie-loading-dot 1.1s cubic-bezier(0.22, 1, 0.36, 1) infinite;
 }
 
 .genie-bounce-dot:nth-child(2) { animation-delay: 0.15s; }
@@ -973,7 +977,7 @@ function MissionConsole() {
             </section>
         ) : null}
         {GeneratedMissionApp ? (
-            <section className="genie-card genie-fade-in">
+            <section className="genie-input-surface genie-fade-in">
                 <h2 className="genie-zone-title">Mission Input</h2>
                 <MissionInputBoundary>
                     <GeneratedMissionApp onSubmit={submitFromCustomUI} missionAgents={missionAgents} />

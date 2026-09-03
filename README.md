@@ -129,8 +129,8 @@ Genie's mission pipeline is deliberately lean — seven real Foundry agents, no 
 |---|---|---|---|---|
 | `genie-orchestrator` | Genie Orchestrator | mission_orchestration | `orchestrator-mission-v1` | The **only** agent every workflow step actually addresses directly — see [delegation pattern](#the-orchestrator-delegation-pattern) below |
 | `requirements-analyst` | Requirements Analyst | requirement_discovery | `requirements-extraction-v1` | Extracts goals/requirements/risks and rules on agentic-workflow qualification |
-| `architecture-designer` | Architecture Designer | architecture_design | `architecture-recommendation-v1` | Designs the multi-agent workflow and single-page UI, strictly scoped to the approved critical path |
-| `build-agent` | Build Agent | solution_build | `build-generation-v1` / `build-generation-component-v1` / `build-component-regeneration-v1` | Generates the real UI + specialist agent + orchestrator code, one component at a time |
+| `architecture-designer` | Architecture Designer | architecture_design | `architecture-recommendation-v1` | Designs the multi-agent workflow and shapes an [Impeccable](https://impeccable.style/)-style, domain-specific surface mode and visual direction for the single-page UI |
+| `build-agent` | Build Agent | solution_build | `build-generation-v1` / `build-generation-component-v1` / `build-component-regeneration-v1` | Generates the real UI + specialist agent + orchestrator code one component at a time; every UI generation/regeneration path applies the Impeccable design contract |
 | `security-assessment-agent` | Security Assessment Agent | security_assessment | `security-assessment-v1` | Independent OWASP Top 10 review of the generated build; reports `SECURITY_GATE: PASS/FAIL` |
 | `test-generation-agent` | Test Generation Agent | test_generation | `test-generation-v1` | Independent test-coverage review of the generated build; reports `TEST_COVERAGE_GATE: PASS/FAIL` |
 | `debugging-agent` | Debugging Agent | debugging | `failure-diagnosis-v1` | Diagnoses a detected workflow/agent execution failure |
@@ -234,7 +234,7 @@ Deploy & Launch is deliberately **not** an LLM-narrative workflow step — it is
 | 2 | `provision-foundry-agents` | Deploy Agents to Foundry | Provisions each generated specialist + orchestrator agent as a real Azure AI Foundry resource |
 | 3 | `deploy-backend-service` | Deploy Backend Service | Builds and deploys the mission's generated backend service |
 | 4 | `sync-frontend-integration` | Update Frontend Integrations | Wires the generated UI to the newly deployed backend/agents |
-| 5 | `deploy-frontend-app` | Deploy Frontend | Deploys the mission's generated UI |
+| 5 | `deploy-frontend-app` | Deploy Frontend | Builds the mission UI under Node 22, runs the pinned Apache-2.0 Impeccable `3.6.0` detector over generated TSX/CSS, fails closed on deterministic design anti-patterns, then deploys the Vite build |
 | 6 | `generate-test-suite` | Generate Requirement Acceptance Tests | Test Generation Agent writes real, black-box tests against the deployed prototype's actual `MISSION_BACKEND_URL`/`MISSION_FRONTEND_URL` (no mocks/patches), targeting every approved requirement id. A requirement-coverage repair loop retries omitted IDs up to `GENIE_DEPLOYMENT_FIDELITY_MAX_REPAIR_ATTEMPTS`; after that, executable coverage must meet `GENIE_DEPLOYMENT_FIDELITY_MIN_COVERAGE_PERCENT` (default 90%) and every omitted ID remains an explicit fidelity gap. For a real `https://` backend URL, a `validate_real_action_tests` repair loop also rejects `unittest.mock`/`MagicMock`/`patch()`/`monkeypatch`/`respx`/`responses` in place of real HTTP calls |
 | 7 | `execute-test-suite` | Requirement Fidelity Gate | `TestExecutionService` really shells out to `pytest` against the generated tests and the live deployed prototype — a genuine pass/fail, never a fabricated success. Launch requires the configured executable-coverage threshold and 100% passing evidence for all executable requirement tests. Failed, errored, skipped, timed-out, or unobserved executable tests still trigger automatic regeneration and redeployment up to `GENIE_DEPLOYMENT_FIDELITY_MAX_REPAIR_ATTEMPTS` times (default 3), then fail closed |
 | 8 | `run-security-scan` | Security Scan (Backend & Frontend) | Real security scan of the deployed backend and frontend artifacts |
@@ -646,6 +646,13 @@ If this identity/RBAC/secrets setup is ever missing or revoked, `deploy-backend`
 ## Deploy log
 
 Every deploy to production (backend Container App and/or frontend Static Web App) is recorded here — commit, what changed, and why. Update this section as part of the same commit that ships the fix/feature, before pushing to `master` triggers [Continuous deployment](#continuous-deployment-github-actions).
+
+### 2026-09-02 — Impeccable design contract for generated prototype frontends
+
+- **What changed**: the Architecture Designer now shapes a domain-specific surface mode and visual direction using the method from [Impeccable](https://impeccable.style/); initial UI generation, component generation, and Workshop UI regeneration all enforce the same anti-slop, responsive, accessible design contract.
+- **Fail-closed design check**: every materialized prototype frontend pins `impeccable` `3.6.0` and runs `impeccable detect MissionApp.tsx src/` before Vite. The generated frontend image now builds on Node 22 to satisfy the CLI runtime requirement. A deterministic finding exits with code 2 and prevents deployment. The generated scaffold's Vite pin moves from vulnerable `6.0.7` to npm's non-major fixed release `6.4.3`.
+- **Shell quality**: removed nested mission-input cards and replaced bounce motion with a restrained loading cadence. The exact generated shell templates pass the real Impeccable detector with zero findings.
+- **Scope**: this affects newly generated or regenerated prototypes and future Deploy & Launch runs. It does not retroactively redesign already-deployed prototype source.
 
 ### 2026-08-31 — MISE authentication gateway and private FastAPI ingress
 
