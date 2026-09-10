@@ -612,7 +612,7 @@ All three require `GENIE_AZURE_FOUNDRY_ENDPOINT` / `GENIE_AZURE_FOUNDRY_PROJECT_
 1. A dedicated app registration (`genie-github-actions-deploy`, no client secret) holds a **federated identity credential** trusting this repo's GitHub Actions OIDC issuer, scoped to the `production` GitHub Environment — narrower than a branch-based subject, since it also requires the workflow job to declare `environment: production`. **Important**: the subject must match GitHub's *actual* token claim exactly, which is `repo:<org>/<repo>:environment:<env>` only if the org/repo have never been renamed — if either has been renamed, GitHub appends numeric IDs instead (`repo:<org>@<orgId>/<repo>@<repoId>:environment:<env>`). Get the exact value from a failed `azure/login@v2` run's log line `Federated token details: ... subject claim - ...` if login fails with `AADSTS700213`.
 2. That identity's service principal holds exactly two least-privilege, resource-scoped RBAC roles (never a subscription- or resource-group-wide Owner/Contributor grant):
    - **Container Registry Tasks Contributor**, scoped to just the ACR resource — covers `az acr build`'s scheduleRun/upload actions without granting registry data-plane push/pull.
-  - **Container Apps Contributor**, scoped to just the `genie-backend` Container App resource — covers the atomic ARM patch.
+  - **Container Apps Contributor**, scoped to just the `genie-backend-corporate` Container App resource — covers the atomic ARM patch.
 3. The **runtime Genie backend managed identity** has the custom `Genie Prototype Resource Group Operator` role plus Container Apps Contributor, Managed Identity Contributor, and Managed Identity Operator at subscription scope. The custom role permits only resource-group read/write/delete. Shared ACR and role-assignment permissions remain constrained to existing resource scopes. New prototypes do not require Microsoft Graph application writes.
 4. The repo's **Settings → Secrets and variables → Actions** has:
   - **Secrets**: `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID` (identify the federated deployment app — not credentials by themselves), `AZURE_DEVOPS_TOKEN` (MicrosoftIT PAT with Packaging Read only), and `SWA_DEPLOYMENT_TOKEN`.
@@ -649,6 +649,12 @@ If this identity/RBAC/secrets setup is ever missing or revoked, `deploy-backend`
 ## Deploy log
 
 Every deployment to the shared Azure evaluation environment (backend Container App and/or frontend Static Web App) is recorded here: commit, what changed, and why. Update this section as part of the same commit that ships the fix/feature, before pushing to `master` triggers [Continuous deployment](#continuous-deployment-github-actions).
+
+### 2026-09-10 — Retire the detached legacy Container App
+
+- **Cleanup**: removed the legacy `genie-backend` Container App and its two revisions after the corporate/private-network cutover. Its logs contained only platform health probes; its latest revision could not access private Cosmos and was unhealthy.
+- **Current deployment**: `genie-backend-corporate` is the sole Genie Container App. The deployed frontend bundle and GitHub Actions variables both target its `proudtree-6b064653.eastus2.azurecontainerapps.io` endpoint, and its single `gh45` revision was healthy with 100% traffic before retirement.
+- **Preserved dependencies**: the shared managed identity, ACR, legacy Container Apps environment, and current private environment were not deleted. Removing the old app therefore does not remove credentials, images, networking, or resources used by the corporate deployment.
 
 ### 2026-09-09 — Fix corporate Entra discovery after private-network cutover
 
