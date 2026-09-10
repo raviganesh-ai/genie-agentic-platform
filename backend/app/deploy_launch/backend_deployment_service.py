@@ -49,6 +49,7 @@ from app.config.settings import Settings
 from app.deploy_launch.prototype_authentication_service import (
     PrototypeAuthenticationConfiguration,
 )
+from app.deploy_launch.resource_naming import prototype_resource_group_name
 
 # Invoked with a short human-readable message right before each real,
 # potentially slow sub-phase of ``deploy()`` (source upload, remote ACR
@@ -80,6 +81,7 @@ class BackendDeploymentError(RuntimeError):
 class BackendDeploymentResult:
     image_tag: str
     backend_url: str
+    test_backend_url: str | None = None
 
 
 def _tar_gzip_directory(source_dir: Path) -> bytes:
@@ -194,17 +196,21 @@ class BackendDeploymentService:
         """Deletes the Container App that owns the backend and MISE gateway."""
 
         app_name = f"genie-{mission_slug}-backend"
-        try:
-            poller = self._container_apps_client().container_apps.begin_delete(
-                self._resource_group, app_name
-            )
-            await asyncio.to_thread(poller.result)
-        except Exception as exc:
-            if getattr(exc, "status_code", None) == 404:
+        client = self._container_apps_client()
+        for resource_group in (
+            prototype_resource_group_name(mission_slug),
+            self._resource_group,
+        ):
+            try:
+                poller = client.container_apps.begin_delete(resource_group, app_name)
+                await asyncio.to_thread(poller.result)
                 return
-            raise BackendDeploymentError(
-                f"Failed to delete backend Container App '{app_name}': {exc}"
-            ) from exc
+            except Exception as exc:
+                if getattr(exc, "status_code", None) == 404:
+                    continue
+                raise BackendDeploymentError(
+                    f"Failed to delete backend Container App '{app_name}': {exc}"
+                ) from exc
 
     def _configure_mission_identity(self, identity_resource_id: str) -> str:
         """Returns the mission identity client id after granting Foundry invocation access."""
@@ -429,6 +435,7 @@ class BackendDeploymentService:
                 ContainerAppProbeHttpGet,
                 EnvironmentVar,
                 Ingress,
+                IngressPortMapping,
                 ManagedServiceIdentity,
                 RegistryCredentials,
                 Secret,
@@ -556,12 +563,22 @@ class BackendDeploymentService:
                 )
                 ingress_target_port = 8080
 
+            additional_port_mappings = (
+                [IngressPortMapping(external=False, target_port=8000, exposed_port=8000)]
+                if prototype_authentication is not None
+                else None
+            )
             envelope = ContainerApp(
                 location=self._location,
+                tags={"genie-managed-by": "genie", "genie-mission-id": mission_slug},
                 managed_environment_id=self._container_apps_environment_id,
                 identity=identity_config,
                 configuration=Configuration(
-                    ingress=Ingress(external=True, target_port=ingress_target_port),
+                    ingress=Ingress(
+                        external=True,
+                        target_port=ingress_target_port,
+                        additional_port_mappings=additional_port_mappings,
+                    ),
                     registries=[registry_credentials],
                     secrets=registry_secrets,
                 ),
@@ -571,7 +588,7 @@ class BackendDeploymentService:
             )
             await _report("Creating/updating the Azure Container App revision...")
             poller = container_apps_client.container_apps.begin_create_or_update(
-                self._resource_group, app_name, envelope
+                prototype_resource_group_name(mission_slug), app_name, envelope
             )
             result = poller.result()
         except Exception as exc:
@@ -579,7 +596,13 @@ class BackendDeploymentService:
 
         fqdn = getattr(getattr(result.configuration, "ingress", None), "fqdn", None)
         backend_url = f"https://{fqdn}" if fqdn else ""
-        return BackendDeploymentResult(image_tag=image_tag, backend_url=backend_url)
+        return BackendDeploymentResult(
+            image_tag=image_tag,
+            backend_url=backend_url,
+            test_backend_url=(
+                f"http://{fqdn}:8000" if fqdn and prototype_authentication is not None else None
+            ),
+        )
 
     async def configure_gateway_frontend_origin(
         self, *, mission_slug: str, frontend_origin: str
@@ -592,9 +615,10 @@ class BackendDeploymentService:
             raise BackendDeploymentError("Prototype gateway CORS origin must use HTTPS.")
         client = self._container_apps_client()
         app_name = f"genie-{mission_slug}-backend"
+        target_resource_group = prototype_resource_group_name(mission_slug)
         try:
             app = await asyncio.to_thread(
-                client.container_apps.get, self._resource_group, app_name
+            client.container_apps.get, target_resource_group, app_name
             )
             gateway = next(
                 (
@@ -623,7 +647,7 @@ class BackendDeploymentService:
                     "Prototype external ingress does not target the MISE gateway."
                 )
             poller = client.container_apps.begin_create_or_update(
-                self._resource_group, app_name, app
+                target_resource_group, app_name, app
             )
             await asyncio.to_thread(poller.result)
         except BackendDeploymentError:

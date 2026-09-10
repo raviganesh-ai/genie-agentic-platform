@@ -17,6 +17,14 @@ class AuthenticatedUser(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    user_id: str = Field(min_length=1, description="The token's 'oid' (or 'sub') claim.")
+    user_id: str = Field(
+        min_length=1,
+        description="Canonical '<tid>:<oid>' identity, or the subject in local development.",
+    )
+    tenant_id: str = ""
+    object_id: str = Field(
+        default="",
+        description="The token's immutable 'oid' claim, falling back to 'sub'.",
+    )
     display_name: str = ""
     roles: list[str] = Field(default_factory=list)

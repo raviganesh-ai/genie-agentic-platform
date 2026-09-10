@@ -39,7 +39,13 @@ class AccessPolicyService:
         self._mission_identity_service = mission_identity_service
         self._acr_id = acr_id
 
-    async def generate(self, mission_id: str) -> AccessPolicyDocument:
+    async def generate(
+        self,
+        mission_id: str,
+        *,
+        resource_group_name: str | None = None,
+        resource_tags: dict[str, str] | None = None,
+    ) -> AccessPolicyDocument:
         """Returns the real, current least-access policy for every enabled agent.
 
         Also provisions a real Azure managed identity for this mission and
@@ -50,6 +56,8 @@ class AccessPolicyService:
         provisioned_identity = await self._mission_identity_service.provision(
             mission_id=mission_id,
             acr_id=self._acr_id,
+            resource_group_name=resource_group_name,
+            resource_tags=resource_tags,
         )
 
         identity_info = MissionIdentityInfo(
@@ -57,6 +65,11 @@ class AccessPolicyService:
             identity_principal_id=provisioned_identity.identity_principal_id,
             identity_client_id=provisioned_identity.identity_client_id,
             identity_resource_id=provisioned_identity.identity_resource_id,
+            role_assignment_ids=[
+                assignment.assignment_id
+                for assignment in provisioned_identity.role_assignments
+                if assignment.assignment_id is not None
+            ],
             assigned_at=provisioned_identity.provisioned_at,
         )
 

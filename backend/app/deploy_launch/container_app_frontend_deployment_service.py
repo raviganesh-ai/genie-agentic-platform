@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from app.config.settings import Settings
+from app.deploy_launch.resource_naming import prototype_resource_group_name
 
 DeploymentProgressCallback = Callable[[str], Awaitable[None]]
 _ACR_RUN_FAILURE_STATUSES = frozenset({"failed", "canceled", "cancelled", "error", "timeout"})
@@ -111,6 +112,7 @@ class ContainerAppFrontendDeploymentService:
         *,
         mission_slug: str,
         ui_root: Path,
+        app_name: str | None = None,
         mission_identity_resource_id: str | None = None,
         on_progress: DeploymentProgressCallback | None = None,
     ) -> ContainerAppFrontendDeploymentResult:
@@ -129,7 +131,7 @@ class ContainerAppFrontendDeploymentService:
 
         dockerfile = ui_root / "Dockerfile"
         dockerfile.write_text(_FRONTEND_DOCKERFILE, encoding="utf-8")
-        app_name = f"genie-{mission_slug}-frontend"
+        app_name = app_name or f"genie-{mission_slug}-frontend"
         image_tag = f"{self._acr_name}.azurecr.io/{app_name}:latest"
 
         try:
@@ -204,6 +206,7 @@ class ContainerAppFrontendDeploymentService:
 
             envelope = ContainerApp(
                 location=self._location,
+                tags={"genie-managed-by": "genie", "genie-mission-id": mission_slug},
                 managed_environment_id=self._container_apps_environment_id,
                 identity=ManagedServiceIdentity(
                     type="UserAssigned",
@@ -228,7 +231,7 @@ class ContainerAppFrontendDeploymentService:
             )
             await report("Creating/updating the mission frontend Container App...")
             result = self._container_apps_client().container_apps.begin_create_or_update(
-                self._resource_group, app_name, envelope
+                prototype_resource_group_name(mission_slug), app_name, envelope
             ).result()
         except Exception as exc:
             raise ContainerAppFrontendDeploymentError(
@@ -244,21 +247,25 @@ class ContainerAppFrontendDeploymentService:
             frontend_url=f"https://{fqdn}", image_tag=image_tag
         )
 
-    async def delete(self, *, mission_slug: str) -> None:
+    async def delete(self, *, mission_slug: str, app_name: str | None = None) -> None:
         """Deletes the generated frontend Container App for an abandoned run."""
 
-        app_name = f"genie-{mission_slug}-frontend"
-        try:
-            poller = self._container_apps_client().container_apps.begin_delete(
-                self._resource_group, app_name
-            )
-            await asyncio.to_thread(poller.result)
-        except Exception as exc:
-            if getattr(exc, "status_code", None) == 404:
+        app_name = app_name or f"genie-{mission_slug}-frontend"
+        client = self._container_apps_client()
+        for resource_group in (
+            prototype_resource_group_name(mission_slug),
+            self._resource_group,
+        ):
+            try:
+                poller = client.container_apps.begin_delete(resource_group, app_name)
+                await asyncio.to_thread(poller.result)
                 return
-            raise ContainerAppFrontendDeploymentError(
-                f"Failed to delete frontend Container App '{app_name}': {exc}"
-            ) from exc
+            except Exception as exc:
+                if getattr(exc, "status_code", None) == 404:
+                    continue
+                raise ContainerAppFrontendDeploymentError(
+                    f"Failed to delete frontend Container App '{app_name}': {exc}"
+                ) from exc
 
 
 class NullContainerAppFrontendDeploymentService:
@@ -267,10 +274,11 @@ class NullContainerAppFrontendDeploymentService:
         *,
         mission_slug: str,
         ui_root: Path,
+        app_name: str | None = None,
         mission_identity_resource_id: str | None = None,
         on_progress: DeploymentProgressCallback | None = None,
     ) -> ContainerAppFrontendDeploymentResult:
-        del ui_root, mission_identity_resource_id
+        del ui_root, app_name, mission_identity_resource_id
         if on_progress is not None:
             await on_progress("Deploying frontend Container App (local mode)...")
         return ContainerAppFrontendDeploymentResult(
@@ -278,8 +286,8 @@ class NullContainerAppFrontendDeploymentService:
             image_tag=f"local/{mission_slug}-frontend:dev",
         )
 
-    async def delete(self, *, mission_slug: str) -> None:
-        del mission_slug
+    async def delete(self, *, mission_slug: str, app_name: str | None = None) -> None:
+        del mission_slug, app_name
 
 
 def create_container_app_frontend_deployment_service(

@@ -10,9 +10,11 @@ no separate approval-checkpoint request/decide dance to exercise here.
 """
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
+
+import pytest
 
 from app.agents.models import AgentDefinition, AgentExecutionResult
 from app.agents.registry import AgentRegistry
@@ -27,7 +29,11 @@ from app.deploy_launch.mission_agent_provisioning_service import (
     NullMissionAgentProvisioningService,
 )
 from app.deploy_launch.mission_identity_service import NullMissionIdentityService
-from app.deploy_launch.pipeline_service import DeploymentPipelineService
+from app.deploy_launch.models import DeploymentPipelineRun, DeploymentStepResult
+from app.deploy_launch.pipeline_service import (
+    DeploymentPipelineService,
+    DeploymentPipelineStepFailedError,
+)
 from app.deploy_launch.prototype_authentication_service import (
     PrototypeAuthenticationConfiguration,
 )
@@ -39,6 +45,7 @@ from app.deploy_launch.security_scan_service import (
 from app.deploy_launch.test_execution_service import TestExecutionService
 from app.models.workflow_models import WorkflowRunResult, WorkflowStepInput, WorkflowStepResult
 from app.orchestration.workflow_event_bus import WorkflowEventBus
+from app.repositories.deployment_run_repository import InMemoryDeploymentRunRepository
 
 _BUILD_OUTPUT = '''
 ```python
@@ -329,6 +336,8 @@ def _build_service(
     tmp_path: Path,
     backend_deployment_service=None,
     requirements_output: str = _REQUIREMENTS_OUTPUT,
+    run_repository=None,
+    prototype_max_active_per_owner: int = 3,
 ) -> DeploymentPipelineService:
     return DeploymentPipelineService(
         orchestrator=_FakeOrchestrator(
@@ -345,6 +354,8 @@ def _build_service(
         test_execution_service=TestExecutionService(timeout_seconds=60),
         security_scan_service=SecurityScanService(timeout_seconds=60),
         build_workspace_root=tmp_path,
+        run_repository=run_repository,
+        prototype_max_active_per_owner=prototype_max_active_per_owner,
     )
 
 
@@ -453,6 +464,7 @@ class _FakeProtectedBackendDeploymentService:
         return BackendDeploymentResult(
             image_tag=f"acr/{mission_slug}:dev",
             backend_url=f"https://{mission_slug}-backend.example.com",
+            test_backend_url="http://prototype.internal:8000",
         )
 
     async def configure_gateway_frontend_origin(
@@ -461,7 +473,8 @@ class _FakeProtectedBackendDeploymentService:
         del mission_slug
         self.frontend_origin = frontend_origin
 
-    async def delete(self, *, mission_slug: str):
+    async def delete(self, *, mission_slug: str, app_name: str | None = None):
+        del app_name
         if self.delete_events is not None:
             self.delete_events.append(f"backend:{mission_slug}")
 
@@ -475,7 +488,8 @@ class _FakeProtectedFrontendDeploymentService:
         self.mission_identity_resource_id = mission_identity_resource_id
         return SimpleNamespace(frontend_url="https://prototype.example.com")
 
-    async def delete(self, *, mission_slug: str):
+    async def delete(self, *, mission_slug: str, app_name: str | None = None):
+        del app_name
         if self.delete_events is not None:
             self.delete_events.append(f"frontend:{mission_slug}")
 
@@ -529,6 +543,46 @@ def test_req_001_uses_prototype_authentication():
     assert '__MISSION_ENTRA_CLIENT_ID__ = "prototype-client"' in runtime_config
     assert '__MISSION_ENTRA_TENANT_ID__ = "tenant-1"' in runtime_config
     assert '__MISSION_ENTRA_SCOPE__ = "api://prototype-client/access_as_user"' in runtime_config
+
+
+async def test_shared_auth_pipeline_uses_internal_endpoint_without_app_token(tmp_path: Path):
+    test_output = """
+```python
+# REQ-001
+import os
+
+def test_req_001_uses_internal_acceptance_endpoint():
+    assert os.environ["MISSION_BACKEND_URL"] == "http://prototype.internal:8000"
+    assert os.environ["MISSION_UNAUTHENTICATED_BACKEND_URL"].startswith("https://")
+    assert "MISSION_ACCESS_TOKEN" not in os.environ
+```
+"""
+    authentication_service = _FakePrototypeAuthenticationService()
+    authentication_service.configuration.shared = True
+    service = DeploymentPipelineService(
+        orchestrator=_FakeOrchestrator(test_output_text=test_output),  # type: ignore[arg-type]
+        session_service=_FakeSessionService(),  # type: ignore[arg-type]
+        event_bus=WorkflowEventBus(),
+        access_policy_service=_access_policy_service(),
+        mission_identity_service=NullMissionIdentityService(),
+        mission_agent_provisioning_service=NullMissionAgentProvisioningService(),
+        backend_deployment_service=_FakeProtectedBackendDeploymentService(),  # type: ignore[arg-type]
+        frontend_deployment_service=_FakeProtectedFrontendDeploymentService(),  # type: ignore[arg-type]
+        prototype_authentication_service=authentication_service,  # type: ignore[arg-type]
+        test_execution_service=TestExecutionService(timeout_seconds=60),
+        security_scan_service=SecurityScanService(timeout_seconds=60),
+        build_workspace_root=tmp_path,
+        prototype_authentication_mode="shared",
+    )
+
+    run = await service.start(
+        session_id="session-1", requesting_user_id="user-1", workflow_run_id="run-1"
+    )
+    run = await service.wait_for_run(run.id)
+
+    assert run.status == "completed"
+    assert run.shared_authentication_slot == 1
+    assert authentication_service.token_requested is False
 
 
 async def test_terminal_auth_cleanup_retains_failed_delete_for_retry(tmp_path: Path):
@@ -627,7 +681,15 @@ class _RecordingMissionIdentityService(NullMissionIdentityService):
     def __init__(self, delete_events: list[str]) -> None:
         self.delete_events = delete_events
 
-    async def delete(self, *, identity_name: str, principal_id: str) -> None:
+    async def delete(
+        self,
+        *,
+        identity_name: str,
+        principal_id: str,
+        resource_group_name: str | None = None,
+        role_assignment_ids: list[str] | None = None,
+    ) -> None:
+        del resource_group_name, role_assignment_ids
         self.delete_events.append(f"identity:{identity_name}:{principal_id}")
 
 
@@ -1373,6 +1435,151 @@ async def test_retry_with_no_matching_failed_run_restarts_from_the_first_step(tm
     assert all(step.status == "completed" for step in run.steps)
     assert run.fidelity_report is not None
     assert run.fidelity_report.status == "passed"
+
+
+async def test_completed_prototype_inventory_rehydrates_after_restart(tmp_path: Path):
+    repository = InMemoryDeploymentRunRepository()
+    service = _build_service(
+        test_output_text=_PASSING_TEST_OUTPUT,
+        tmp_path=tmp_path,
+        run_repository=repository,
+    )
+    run = await service.start(
+        session_id="session-1",
+        requesting_user_id="tenant-1:object-1",
+        requesting_tenant_id="tenant-1",
+        requesting_object_id="object-1",
+        workflow_run_id="run-1",
+    )
+    run = await service.wait_for_run(run.id)
+
+    restarted = _build_service(
+        test_output_text=_PASSING_TEST_OUTPUT,
+        tmp_path=tmp_path,
+        run_repository=repository,
+    )
+    await restarted.initialize()
+
+    restored = restarted.get_run(run.id)
+    assert restored is not None
+    assert restored.status == "completed"
+    assert restored.owner_user_id == "tenant-1:object-1"
+    assert restored.owner_tenant_id == "tenant-1"
+    assert restored.owner_object_id == "object-1"
+    assert restored.expires_at is not None
+
+
+async def test_interrupted_prototype_fails_closed_when_inventory_rehydrates(tmp_path: Path):
+    repository = InMemoryDeploymentRunRepository()
+    now = datetime.now(UTC)
+    interrupted = DeploymentPipelineRun(
+        id="prototype-1",
+        session_id="session-1",
+        workflow_run_id="workflow-1",
+        owner_user_id="tenant-1:object-1",
+        status="running",
+        steps=[
+            DeploymentStepResult(
+                step_id="deploy-backend-service",
+                name="Deploy Backend Service",
+                status="running",
+                started_at=now,
+            )
+        ],
+        created_at=now,
+        updated_at=now,
+        expires_at=now + timedelta(days=7),
+    )
+    await repository.put(interrupted)
+    restarted = _build_service(
+        test_output_text=_PASSING_TEST_OUTPUT,
+        tmp_path=tmp_path,
+        run_repository=repository,
+    )
+
+    await restarted.initialize()
+
+    restored = restarted.get_run(interrupted.id)
+    assert restored is not None
+    assert restored.status == "failed"
+    assert restored.steps[0].status == "failed"
+    assert restored.steps[0].error == "Deployment was interrupted by a service restart."
+
+
+async def test_owner_cannot_exceed_active_prototype_limit(tmp_path: Path):
+    service = _build_service(
+        test_output_text=_PASSING_TEST_OUTPUT,
+        tmp_path=tmp_path,
+        prototype_max_active_per_owner=1,
+    )
+    first = await service.start(
+        session_id="session-1",
+        requesting_user_id="tenant-1:object-1",
+        workflow_run_id="run-1",
+    )
+    await service.wait_for_run(first.id)
+
+    with pytest.raises(DeploymentPipelineStepFailedError, match="limit reached"):
+        await service.start(
+            session_id="session-2",
+            requesting_user_id="tenant-1:object-1",
+            workflow_run_id="run-1",
+        )
+
+
+async def test_cleanup_expired_deletes_terminal_prototype(tmp_path: Path):
+    repository = InMemoryDeploymentRunRepository()
+    service = _build_service(
+        test_output_text=_PASSING_TEST_OUTPUT,
+        tmp_path=tmp_path,
+        run_repository=repository,
+    )
+    run = await service.start(
+        session_id="session-1",
+        requesting_user_id="tenant-1:object-1",
+        workflow_run_id="run-1",
+    )
+    run = await service.wait_for_run(run.id)
+    run.expires_at = datetime.now(UTC) - timedelta(seconds=1)
+    await repository.put(run)
+
+    deleted = await service.cleanup_expired()
+
+    assert deleted == [run.id]
+    assert service.get_run(run.id) is None
+    assert await repository.list_all() == []
+
+
+class _DeleteFailingBackendDeploymentService(NullBackendDeploymentService):
+    async def delete(self, *, mission_slug: str, app_name: str | None = None) -> None:
+        del app_name
+        raise BackendDeploymentError(f"Cannot delete {mission_slug}.")
+
+
+async def test_cleanup_failure_remains_in_inventory_for_retry(tmp_path: Path):
+    repository = InMemoryDeploymentRunRepository()
+    service = _build_service(
+        test_output_text=_PASSING_TEST_OUTPUT,
+        tmp_path=tmp_path,
+        run_repository=repository,
+        backend_deployment_service=_DeleteFailingBackendDeploymentService(),
+    )
+    run = await service.start(
+        session_id="session-1",
+        requesting_user_id="tenant-1:object-1",
+        workflow_run_id="run-1",
+    )
+    run = await service.wait_for_run(run.id)
+    run.expires_at = datetime.now(UTC) - timedelta(seconds=1)
+
+    deleted = await service.cleanup_expired()
+
+    assert deleted == []
+    retained = service.get_run(run.id)
+    assert retained is not None
+    assert retained.cleanup_status == "deletion_failed"
+    assert retained.cleanup_error == f"Cannot delete {run.mission_slug}."
+    assert [stored.id for stored in await repository.list_all()] == [run.id]
 
 
 def test_frontend_main_tsx_renders_a_gamified_multi_input_mission_queue():

@@ -144,6 +144,8 @@ class EntraTokenValidator:
             )
         except jwt.PyJWTError as exc:
             raise AuthenticationError(f"Invalid Microsoft Entra bearer token: {exc}") from exc
+        if claims.get("tid") != self._tenant_id:
+            raise AuthenticationError("Microsoft Entra bearer token has an unexpected tenant.")
         user_id = claims.get("oid") or claims.get("sub")
         if not user_id or not str(user_id).strip():
             raise AuthenticationError("Bearer token is missing a 'sub' or 'oid' claim.")

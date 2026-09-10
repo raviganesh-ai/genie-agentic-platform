@@ -79,6 +79,7 @@ DEPLOYMENT_STEP_NAMES: dict[DeploymentStepId, str] = {
 
 DeploymentStepStatus = Literal["pending", "running", "completed", "failed", "skipped"]
 DeploymentPipelineStatus = Literal["pending", "running", "completed", "failed"]
+PrototypeCleanupStatus = Literal["active", "deletion_pending", "deletion_failed"]
 RequirementFidelityStatus = Literal["pending", "testing", "repairing", "passed", "failed"]
 RequirementEvidenceStatus = Literal["pending", "covered", "passed", "failed", "missing"]
 
@@ -146,6 +147,7 @@ class MissionIdentityInfo(BaseModel):
     )
     identity_client_id: str = Field(min_length=1, description="Managed identity client ID (app ID)")
     identity_resource_id: str = Field(min_length=1, description="Full Azure resource ID")
+    role_assignment_ids: list[str] = Field(default_factory=list)
     assigned_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
@@ -196,6 +198,22 @@ class ProvisionedAgentStatus(BaseModel):
     foundry_agent_name: str | None = None
 
 
+class PrototypeAuthenticationInfo(BaseModel):
+    """Durable metadata needed to recover or retire a prototype auth boundary."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    application_object_id: str = Field(min_length=1)
+    service_principal_object_id: str = Field(min_length=1)
+    client_id: str = Field(min_length=1)
+    tenant_id: str = Field(min_length=1)
+    delegated_scope: str = Field(min_length=1)
+    application_role_id: str = Field(min_length=1)
+    mission_slug: str = Field(min_length=1)
+    shared: bool = False
+    frontend_redirect_uri: str | None = None
+
+
 class DeploymentPipelineRun(BaseModel):
     """The full, real state of one mission's Deploy & Launch pipeline run."""
 
@@ -204,7 +222,19 @@ class DeploymentPipelineRun(BaseModel):
     id: str = Field(min_length=1)
     session_id: str = Field(min_length=1)
     workflow_run_id: str = Field(min_length=1)
+    owner_user_id: str = Field(min_length=1)
+    owner_tenant_id: str = ""
+    owner_object_id: str = ""
+    mission_title: str | None = None
+    mission_slug: str | None = None
     status: DeploymentPipelineStatus = "pending"
+    cleanup_status: PrototypeCleanupStatus = "active"
+    cleanup_error: str | None = None
+    resource_group_name: str | None = None
+    shared_authentication_slot: int | None = Field(default=None, ge=1)
+    prototype_authentication: PrototypeAuthenticationInfo | None = None
+    expires_at: datetime | None = None
+    last_accessed_at: datetime | None = None
     steps: list[DeploymentStepResult] = Field(default_factory=list)
     access_policy: AccessPolicyDocument | None = None
     provisioned_agents: list[ProvisionedAgentStatus] = Field(default_factory=list)

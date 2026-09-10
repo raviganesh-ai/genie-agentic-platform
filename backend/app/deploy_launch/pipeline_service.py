@@ -44,7 +44,7 @@ import logging
 import re
 import shutil
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Final
 from uuid import uuid4
@@ -80,6 +80,7 @@ from app.deploy_launch.models import (
     DeploymentPipelineRun,
     DeploymentStepId,
     DeploymentStepResult,
+    PrototypeAuthenticationInfo,
     ProvisionedAgentStatus,
 )
 from app.deploy_launch.prototype_authentication_service import (
@@ -87,6 +88,7 @@ from app.deploy_launch.prototype_authentication_service import (
     PrototypeAuthenticationConfiguration,
     PrototypeAuthenticationService,
 )
+from app.deploy_launch.resource_naming import prototype_resource_group_name
 from app.deploy_launch.security_scan_service import SecurityScanService
 from app.deploy_launch.test_execution_service import (
     TestExecutionService,
@@ -98,6 +100,10 @@ from app.models.workflow_models import WorkflowRunResult, WorkflowStepInput
 from app.models.workflow_stream_models import WorkflowStreamEvent, WorkflowStreamEventType
 from app.orchestration.agent_orchestrator import AgentOrchestrator
 from app.orchestration.workflow_event_bus import WorkflowEventBus
+from app.repositories.deployment_run_repository import (
+    DeploymentRunRepository,
+    InMemoryDeploymentRunRepository,
+)
 from app.services.requirement_fidelity_service import (
     create_fidelity_report,
     record_fidelity_execution,
@@ -1273,6 +1279,11 @@ class DeploymentPipelineService:
         prototype_authentication_service: PrototypeAuthenticationService
         | NullPrototypeAuthenticationService
         | None = None,
+        run_repository: DeploymentRunRepository | None = None,
+        prototype_default_ttl_days: int = 7,
+        prototype_max_active_per_owner: int = 3,
+        prototype_authentication_mode: str = "per_prototype",
+        prototype_shared_slot_count: int = 50,
         architecture_step_id: str = "design-architecture",
         build_step_id: str = "build-solution",
         requirements_step_id: str = "analyze-requirements",
@@ -1294,6 +1305,11 @@ class DeploymentPipelineService:
         self._prototype_authentication_service = (
             prototype_authentication_service or NullPrototypeAuthenticationService()
         )
+        self._run_repository = run_repository or InMemoryDeploymentRunRepository()
+        self._prototype_default_ttl_days = prototype_default_ttl_days
+        self._prototype_max_active_per_owner = prototype_max_active_per_owner
+        self._prototype_authentication_mode = prototype_authentication_mode
+        self._prototype_shared_slot_count = prototype_shared_slot_count
         self._build_workspace_root = build_workspace_root
         self._architecture_step_id = architecture_step_id
         self._build_step_id = build_step_id
@@ -1307,16 +1323,56 @@ class DeploymentPipelineService:
         self._materialized_builds: dict[str, MaterializedBuild] = {}
         self._agent_foundry_names: dict[str, dict[str, str]] = {}
         self._generated_test_outputs: dict[str, str] = {}
+        self._test_backend_urls: dict[str, str] = {}
         self._prototype_authentications: dict[
             str, PrototypeAuthenticationConfiguration
         ] = {}
         self._background_tasks: dict[str, asyncio.Task[None]] = {}
+
+    async def initialize(self) -> None:
+        """Hydrate the prototype inventory and fail interrupted runs closed."""
+
+        for run in await self._run_repository.list_all():
+            if run.status == "running":
+                run.status = "failed"
+                run.updated_at = datetime.now(UTC)
+                running_step = next((step for step in run.steps if step.status == "running"), None)
+                if running_step is not None:
+                    running_step.status = "failed"
+                    running_step.error = "Deployment was interrupted by a service restart."
+                    running_step.completed_at = run.updated_at
+                await self._run_repository.put(run)
+            if run.prototype_authentication is not None:
+                authentication = PrototypeAuthenticationConfiguration(
+                    **run.prototype_authentication.model_dump()
+                )
+                if authentication.frontend_redirect_uri is None and run.frontend_url:
+                    authentication.frontend_redirect_uri = run.frontend_url.rstrip("/") + "/"
+                self._prototype_authentications[run.id] = authentication
+            self._runs[run.id] = run
+
+    async def _persist_run(self, run: DeploymentPipelineRun) -> None:
+        await self._run_repository.put(run)
+
+    async def _persist_authentication(
+        self,
+        run: DeploymentPipelineRun,
+        configuration: PrototypeAuthenticationConfiguration,
+    ) -> None:
+        run.prototype_authentication = PrototypeAuthenticationInfo(
+            **configuration.__dict__
+        )
+        run.updated_at = datetime.now(UTC)
+        await self._persist_run(run)
 
     def get_run(self, pipeline_run_id: str) -> DeploymentPipelineRun | None:
         return self._runs.get(pipeline_run_id)
 
     def list_runs_for_session(self, session_id: str) -> list[DeploymentPipelineRun]:
         return [run for run in self._runs.values() if run.session_id == session_id]
+
+    def list_all_runs(self) -> list[DeploymentPipelineRun]:
+        return sorted(self._runs.values(), key=lambda run: run.created_at, reverse=True)
 
     def get_build_root(self, pipeline_run_id: str) -> Path | None:
         workspace = self._workspaces.get(pipeline_run_id)
@@ -1330,6 +1386,8 @@ class DeploymentPipelineService:
         workflow_run_id: str,
         trace_id: str | None = None,
         resume_from_step: str | None = None,
+        requesting_tenant_id: str = "",
+        requesting_object_id: str = "",
     ) -> DeploymentPipelineRun:
         """Kicks off every Deploy & Launch step in order as soon as the human
         clicks Start - there is no separate approval checkpoint to decide.
@@ -1355,6 +1413,20 @@ class DeploymentPipelineService:
 
         resolved_trace_id = trace_id or str(uuid4())
 
+        if not resume_from_step:
+            active_count = sum(
+                1
+                for run in self._runs.values()
+                if run.owner_user_id == requesting_user_id
+                and run.cleanup_status == "active"
+                and (run.status == "running" or run.backend_url or run.frontend_url)
+            )
+            if active_count >= self._prototype_max_active_per_owner:
+                raise DeploymentPipelineStepFailedError(
+                    "Active prototype limit reached; delete or wait for an existing prototype "
+                    "to expire before creating another."
+                )
+
         # A retry (resume_from_step set) MUST continue the SAME run - i.e. the
         # same pipeline_run.id - not mint a fresh one. Every later step reads
         # its prerequisite artifacts (materialized build, provisioned Foundry
@@ -1375,6 +1447,7 @@ class DeploymentPipelineService:
                 if run.session_id == session_id
                 and run.workflow_run_id == workflow_run_id
                 and run.status == "failed"
+                and run.id in self._workspaces
             ]
             if candidates:
                 existing_run = max(candidates, key=lambda run: run.updated_at)
@@ -1405,7 +1478,12 @@ class DeploymentPipelineService:
                 id=str(uuid4()),
                 session_id=session_id,
                 workflow_run_id=workflow_run_id,
+                owner_user_id=requesting_user_id,
+                owner_tenant_id=requesting_tenant_id,
+                owner_object_id=requesting_object_id,
                 status="running",
+                expires_at=datetime.now(UTC) + timedelta(days=self._prototype_default_ttl_days),
+                last_accessed_at=datetime.now(UTC),
                 steps=[
                     DeploymentStepResult(step_id=step_id, name=DEPLOYMENT_STEP_NAMES[step_id])
                     for step_id in DEPLOYMENT_STEP_ORDER
@@ -1418,6 +1496,8 @@ class DeploymentPipelineService:
             self._workspaces[pipeline_run.id] = _RunWorkspace(
                 backend_root=backend_root, frontend_root=frontend_root
             )
+
+        await self._persist_run(pipeline_run)
 
         task = asyncio.create_task(
             self._prepare_and_run(
@@ -1482,6 +1562,7 @@ class DeploymentPipelineService:
             )
         except Exception as exc:  # noqa: BLE001 - top-level background-task boundary; see docstring above.
             self._fail_run(pipeline_run, error=str(exc))
+            await self._persist_run(pipeline_run)
             return
 
         # A human-readable mission slug rooted in the mission's own title (set once
@@ -1491,6 +1572,33 @@ class DeploymentPipelineService:
         # The short run-id suffix keeps names unique across repeat/retry deploys of
         # the same mission (Foundry agent names must be unique).
         mission_slug = f"{_slugify(session.title)}-{pipeline_run.id[:8]}"
+        pipeline_run.mission_title = session.title
+        pipeline_run.mission_slug = mission_slug
+        pipeline_run.resource_group_name = prototype_resource_group_name(mission_slug)
+        if (
+            self._prototype_authentication_mode == "shared"
+            and pipeline_run.shared_authentication_slot is None
+        ):
+            used_slots = {
+                run.shared_authentication_slot
+                for run in self._runs.values()
+                if run.id != pipeline_run.id
+                and run.cleanup_status == "active"
+                and run.shared_authentication_slot is not None
+            }
+            pipeline_run.shared_authentication_slot = next(
+                (
+                    slot
+                    for slot in range(1, self._prototype_shared_slot_count + 1)
+                    if slot not in used_slots
+                ),
+                None,
+            )
+            if pipeline_run.shared_authentication_slot is None:
+                raise DeploymentPipelineStepFailedError(
+                    "No shared prototype authentication slots are currently available."
+                )
+        await self._persist_run(pipeline_run)
 
         next_step = resume_from_step
         while True:
@@ -1535,6 +1643,7 @@ class DeploymentPipelineService:
                     )
                     pipeline_run.status = "failed"
                     pipeline_run.updated_at = datetime.now(UTC)
+                    await self._persist_run(pipeline_run)
                     return
                 pipeline_run.launch_url = None
                 next_step = "provision-foundry-agents"
@@ -1543,10 +1652,12 @@ class DeploymentPipelineService:
                 # synchronous caller left to catch/report it (see the docstring above).
                 pipeline_run.status = "failed"
                 pipeline_run.updated_at = datetime.now(UTC)
+                await self._persist_run(pipeline_run)
                 return
 
         pipeline_run.status = "completed"
         pipeline_run.updated_at = datetime.now(UTC)
+        await self._persist_run(pipeline_run)
 
     async def _cleanup_prototype_authentication(self, pipeline_run_id: str) -> None:
         authentication = self._prototype_authentications.get(pipeline_run_id)
@@ -1561,7 +1672,12 @@ class DeploymentPipelineService:
             return
         self._prototype_authentications.pop(pipeline_run_id, None)
 
-    async def abandon(self, *, pipeline_run_id: str, mission_title: str) -> None:
+    async def abandon(
+        self,
+        *,
+        pipeline_run_id: str,
+        mission_title: str | None = None,
+    ) -> None:
         """Tears down every resource owned by one non-running prototype run."""
 
         pipeline_run = self._runs.get(pipeline_run_id)
@@ -1574,25 +1690,54 @@ class DeploymentPipelineService:
                 "A running Deploy & Launch run cannot be abandoned."
             )
 
-        mission_slug = f"{_slugify(mission_title)}-{pipeline_run.id[:8]}"
-        await self._backend_deployment_service.delete(mission_slug=mission_slug)
-        await self._frontend_deployment_service.delete(mission_slug=mission_slug)
-        await self._mission_agent_provisioning_service.delete(
-            foundry_agent_names=[
-                agent.foundry_agent_name
-                for agent in pipeline_run.provisioned_agents
-                if agent.foundry_agent_name is not None
-            ]
-        )
-        if pipeline_run.access_policy and pipeline_run.access_policy.mission_identity:
-            mission_identity = pipeline_run.access_policy.mission_identity
-            await self._mission_identity_service.delete(
-                identity_name=mission_identity.identity_name,
-                principal_id=mission_identity.identity_principal_id,
+        pipeline_run.cleanup_status = "deletion_pending"
+        pipeline_run.cleanup_error = None
+        pipeline_run.updated_at = datetime.now(UTC)
+        await self._persist_run(pipeline_run)
+
+        try:
+            mission_slug = pipeline_run.mission_slug
+            if mission_slug is None:
+                resolved_title = mission_title or pipeline_run.mission_title
+                if resolved_title is None:
+                    raise DeploymentPipelineStepFailedError(
+                        "Prototype mission metadata is unavailable; cleanup cannot continue safely."
+                    )
+                mission_slug = f"{_slugify(resolved_title)}-{pipeline_run.id[:8]}"
+            await self._backend_deployment_service.delete(mission_slug=mission_slug)
+            frontend_app_name = (
+                f"genie-prototype-{pipeline_run.shared_authentication_slot:03d}-frontend"
+                if pipeline_run.shared_authentication_slot is not None
+                else None
             )
-        authentication = self._prototype_authentications.get(pipeline_run.id)
-        if authentication is not None:
-            await self._prototype_authentication_service.delete(authentication)
+            await self._frontend_deployment_service.delete(
+                mission_slug=mission_slug,
+                app_name=frontend_app_name,
+            )
+            await self._mission_agent_provisioning_service.delete(
+                foundry_agent_names=[
+                    agent.foundry_agent_name
+                    for agent in pipeline_run.provisioned_agents
+                    if agent.foundry_agent_name is not None
+                ]
+            )
+            if pipeline_run.access_policy and pipeline_run.access_policy.mission_identity:
+                mission_identity = pipeline_run.access_policy.mission_identity
+                await self._mission_identity_service.delete(
+                    identity_name=mission_identity.identity_name,
+                    principal_id=mission_identity.identity_principal_id,
+                    resource_group_name=pipeline_run.resource_group_name,
+                    role_assignment_ids=mission_identity.role_assignment_ids,
+                )
+            authentication = self._prototype_authentications.get(pipeline_run.id)
+            if authentication is not None:
+                await self._prototype_authentication_service.delete(authentication)
+        except Exception as exc:
+            pipeline_run.cleanup_status = "deletion_failed"
+            pipeline_run.cleanup_error = str(exc)
+            pipeline_run.updated_at = datetime.now(UTC)
+            await self._persist_run(pipeline_run)
+            raise
 
         workspace = self._workspaces.get(pipeline_run.id)
         if workspace is not None:
@@ -1605,6 +1750,23 @@ class DeploymentPipelineService:
         self._generated_test_outputs.pop(pipeline_run.id, None)
         self._workspaces.pop(pipeline_run.id, None)
         self._runs.pop(pipeline_run.id, None)
+        await self._run_repository.delete(pipeline_run_id=pipeline_run.id)
+
+    async def cleanup_expired(self, *, now: datetime | None = None) -> list[str]:
+        """Delete every terminal prototype whose owner-controlled TTL elapsed."""
+
+        cutoff = now or datetime.now(UTC)
+        deleted: list[str] = []
+        for run in list(self._runs.values()):
+            if run.status == "running" or run.expires_at is None or run.expires_at > cutoff:
+                continue
+            try:
+                await self.abandon(pipeline_run_id=run.id)
+            except Exception:
+                _logger.exception("Expired prototype cleanup failed for run %s.", run.id)
+                continue
+            deleted.append(run.id)
+        return deleted
 
     async def wait_for_run(self, pipeline_run_id: str) -> DeploymentPipelineRun:
         """Awaits a still-in-flight run's background execution to finish and
@@ -1911,10 +2073,25 @@ class DeploymentPipelineService:
             step_result = self._step_result(pipeline_run, step_id)
             step_result.status = "running"
             step_result.started_at = datetime.now(UTC)
+            pipeline_run.updated_at = step_result.started_at
+            await self._persist_run(pipeline_run)
 
             try:
                 if step_id == "generate-access-policy":
-                    document = await self._access_policy_service.generate(mission_id=mission_slug)
+                    document = await self._access_policy_service.generate(
+                        mission_id=mission_slug,
+                        resource_group_name=pipeline_run.resource_group_name,
+                        resource_tags={
+                            "genie-managed-by": "genie",
+                            "genie-prototype-id": pipeline_run.id,
+                            "genie-owner-id": pipeline_run.owner_user_id,
+                            "genie-expires-at": (
+                                pipeline_run.expires_at.isoformat()
+                                if pipeline_run.expires_at is not None
+                                else ""
+                            ),
+                        },
+                    )
                     pipeline_run.access_policy = document
                     detail = f"Generated least-access policy for {len(document.agents)} agent(s) with managed identity {document.mission_identity.identity_name if document.mission_identity else 'unknown'}."
 
@@ -2018,6 +2195,9 @@ class DeploymentPipelineService:
                             self._prototype_authentications[pipeline_run.id] = (
                                 prototype_authentication
                             )
+                            await self._persist_authentication(
+                                pipeline_run, prototype_authentication
+                            )
                     scaffold = generate_backend_service_scaffold(
                         mission_title=mission_title,
                         orchestrator_agent_name=orchestrator_foundry_name,
@@ -2051,6 +2231,10 @@ class DeploymentPipelineService:
                         **deployment_arguments
                     )
                     pipeline_run.backend_url = backend_result.backend_url
+                    if backend_result.test_backend_url:
+                        self._test_backend_urls[pipeline_run.id] = (
+                            backend_result.test_backend_url
+                        )
                     detail = (
                         f"Backend deployed at {backend_result.backend_url}, integrated with "
                         f"orchestrator agent '{orchestrator_foundry_name}'."
@@ -2132,6 +2316,10 @@ class DeploymentPipelineService:
                         "ui_root": frontend_root,
                         "on_progress": _on_frontend_progress,
                     }
+                    if pipeline_run.shared_authentication_slot is not None:
+                        frontend_deployment_arguments["app_name"] = (
+                            f"genie-prototype-{pipeline_run.shared_authentication_slot:03d}-frontend"
+                        )
                     if prototype_authentication is not None:
                         frontend_deployment_arguments["mission_identity_resource_id"] = (
                             pipeline_run.access_policy.mission_identity.identity_resource_id
@@ -2142,16 +2330,19 @@ class DeploymentPipelineService:
                     frontend_result = await self._frontend_deployment_service.deploy(
                         **frontend_deployment_arguments
                     )
+                    pipeline_run.frontend_url = frontend_result.frontend_url
                     if prototype_authentication is not None:
                         await self._prototype_authentication_service.configure_frontend_redirect(
                             prototype_authentication,
                             frontend_url=frontend_result.frontend_url,
                         )
+                        await self._persist_authentication(
+                            pipeline_run, prototype_authentication
+                        )
                         await self._backend_deployment_service.configure_gateway_frontend_origin(
                             mission_slug=mission_slug,
                             frontend_origin=frontend_result.frontend_url,
                         )
-                    pipeline_run.frontend_url = frontend_result.frontend_url
                     detail = f"Frontend deployed at {frontend_result.frontend_url}."
 
                 elif step_id == "generate-test-suite":
@@ -2383,7 +2574,20 @@ class DeploymentPipelineService:
                     prototype_authentication = self._prototype_authentications.get(
                         pipeline_run.id
                     )
-                    if prototype_authentication is not None:
+                    if (
+                        prototype_authentication is not None
+                        and self._prototype_authentication_mode == "shared"
+                    ):
+                        test_backend_url = self._test_backend_urls.get(pipeline_run.id)
+                        if not test_backend_url:
+                            raise DeploymentPipelineStepFailedError(
+                                "The internal prototype acceptance-test endpoint is unavailable."
+                            )
+                        runtime_environment["MISSION_UNAUTHENTICATED_BACKEND_URL"] = (
+                            pipeline_run.backend_url or ""
+                        )
+                        runtime_environment["MISSION_BACKEND_URL"] = test_backend_url
+                    elif prototype_authentication is not None:
                         runtime_environment["MISSION_ACCESS_TOKEN"] = (
                             await self._prototype_authentication_service.get_test_access_token(
                                 prototype_authentication
@@ -2483,6 +2687,8 @@ class DeploymentPipelineService:
                         event_type="step_failed",
                         error=str(exc),
                     )
+                pipeline_run.updated_at = datetime.now(UTC)
+                await self._persist_run(pipeline_run)
                 raise
             except Exception as exc:
                 # Catch every failure here (not just the specific, expected
@@ -2509,11 +2715,15 @@ class DeploymentPipelineService:
                 await self._publish(
                     pipeline_run, step_id=step_id, event_type="step_failed", error=str(exc)
                 )
+                pipeline_run.updated_at = datetime.now(UTC)
+                await self._persist_run(pipeline_run)
                 raise
 
             step_result.status = "completed"
             step_result.detail = detail
             step_result.completed_at = datetime.now(UTC)
+            pipeline_run.updated_at = step_result.completed_at
+            await self._persist_run(pipeline_run)
             await self._publish(
                 pipeline_run, step_id=step_id, event_type="step_completed", output_preview=detail
             )
@@ -2561,6 +2771,7 @@ def create_deployment_pipeline_service(
     ),
     prototype_authentication_service: PrototypeAuthenticationService
     | NullPrototypeAuthenticationService,
+    run_repository: DeploymentRunRepository | None = None,
 ) -> DeploymentPipelineService:
     """Wires a ``DeploymentPipelineService`` from already-constructed collaborators.
 
@@ -2580,6 +2791,11 @@ def create_deployment_pipeline_service(
         backend_deployment_service=backend_deployment_service,
         frontend_deployment_service=frontend_deployment_service,
         prototype_authentication_service=prototype_authentication_service,
+        run_repository=run_repository,
+        prototype_default_ttl_days=settings.prototype_default_ttl_days,
+        prototype_max_active_per_owner=settings.prototype_max_active_per_owner,
+        prototype_authentication_mode=settings.prototype_authentication_mode,
+        prototype_shared_slot_count=settings.prototype_shared_slot_count,
         test_execution_service=TestExecutionService(
             timeout_seconds=settings.deployment_test_execution_timeout_seconds
         ),

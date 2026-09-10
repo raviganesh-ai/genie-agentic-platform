@@ -208,7 +208,13 @@ async def test_protected_backend_deploys_exactly_one_gateway_on_public_ingress(
 
     envelope = captured["envelope"]
     assert result.backend_url == "https://prototype.example.com"
+    assert result.test_backend_url == "http://prototype.example.com:8000"
     assert envelope.configuration.ingress.target_port == 8080
+    assert len(envelope.configuration.ingress.additional_port_mappings) == 1
+    test_port = envelope.configuration.ingress.additional_port_mappings[0]
+    assert test_port.external is False
+    assert test_port.target_port == 8000
+    assert test_port.exposed_port == 8000
     assert envelope.configuration.registries[0].identity.endswith("/claims-1234")
     assert envelope.configuration.registries[0].username is None
     assert envelope.configuration.secrets == []

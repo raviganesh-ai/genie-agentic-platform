@@ -20,7 +20,7 @@ param(
     [string]$ContainerAppName,
 
     [Parameter(Mandatory = $true)]
-    [string]$TenantId,
+    [string]$ApplicationTenantId,
 
     [Parameter(Mandatory = $true)]
     [string]$ClientId,
@@ -33,6 +33,26 @@ param(
 
     [Parameter(Mandatory = $true)]
     [string]$AllowedOrigin,
+
+    [Parameter(Mandatory = $true)]
+    [string]$MemoryStoreEndpoint,
+
+    [Parameter(Mandatory = $true)]
+    [string]$SharedApplicationObjectId,
+
+    [Parameter(Mandatory = $true)]
+    [string]$SharedServicePrincipalObjectId,
+
+    [Parameter(Mandatory = $true)]
+    [string]$SharedApplicationRoleId,
+
+    [Parameter(Mandatory = $true)]
+    [string]$SharedFrontendDomain,
+
+    [int]$SharedSlotCount = 50,
+
+    [Parameter(Mandatory = $true)]
+    [string]$DelegatedScope,
 
     [Parameter(Mandatory = $true)]
     [ValidatePattern('^[a-z0-9-]{1,10}$')]
@@ -78,11 +98,17 @@ function Set-ContainerEnvironmentVariable {
 }
 
 foreach ($requiredValue in @{
-    TenantId = $TenantId
+    ApplicationTenantId = $ApplicationTenantId
     ClientId = $ClientId
     BackendImage = $BackendImage
     GatewayImage = $GatewayImage
     AllowedOrigin = $AllowedOrigin
+    MemoryStoreEndpoint = $MemoryStoreEndpoint
+    SharedApplicationObjectId = $SharedApplicationObjectId
+    SharedServicePrincipalObjectId = $SharedServicePrincipalObjectId
+    SharedApplicationRoleId = $SharedApplicationRoleId
+    SharedFrontendDomain = $SharedFrontendDomain
+    DelegatedScope = $DelegatedScope
 }.GetEnumerator()) {
     if ([string]::IsNullOrWhiteSpace($requiredValue.Value)) {
         throw "$($requiredValue.Key) cannot be blank."
@@ -113,7 +139,21 @@ $backendIdentityClientId = $backendIdentityClientIds[0].value
 Set-ContainerEnvironmentVariable -Container $backend -Name "GENIE_PROTOTYPE_MISE_ENABLED" -Value "true"
 Set-ContainerEnvironmentVariable -Container $backend -Name "GENIE_PROTOTYPE_MISE_GATEWAY_IMAGE" -Value $GatewayImage
 Set-ContainerEnvironmentVariable -Container $backend -Name "GENIE_PROTOTYPE_MISE_TEST_PRINCIPAL_CLIENT_ID" -Value $backendIdentityClientId
-Set-ContainerEnvironmentVariable -Container $backend -Name "GENIE_ENTRA_TENANT_ID" -Value $TenantId
+Set-ContainerEnvironmentVariable -Container $backend -Name "GENIE_ENTRA_AUTHORITY" -Value "https://login.microsoftonline.com/$ApplicationTenantId/v2.0"
+Set-ContainerEnvironmentVariable -Container $backend -Name "GENIE_ENTRA_TENANT_ID" -Value $ApplicationTenantId
+Set-ContainerEnvironmentVariable -Container $backend -Name "GENIE_ENTRA_CLIENT_ID" -Value $ClientId
+Set-ContainerEnvironmentVariable -Container $backend -Name "GENIE_MEMORY_STORE_BACKEND" -Value "cosmos_db"
+Set-ContainerEnvironmentVariable -Container $backend -Name "GENIE_MEMORY_STORE_ENDPOINT" -Value $MemoryStoreEndpoint
+Set-ContainerEnvironmentVariable -Container $backend -Name "GENIE_MEMORY_STORE_DATABASE_NAME" -Value "genie"
+Set-ContainerEnvironmentVariable -Container $backend -Name "GENIE_MEMORY_STORE_CONTAINER_NAME" -Value "memory"
+Set-ContainerEnvironmentVariable -Container $backend -Name "GENIE_PROTOTYPE_AUTHENTICATION_MODE" -Value "shared"
+Set-ContainerEnvironmentVariable -Container $backend -Name "GENIE_PROTOTYPE_SHARED_APPLICATION_OBJECT_ID" -Value $SharedApplicationObjectId
+Set-ContainerEnvironmentVariable -Container $backend -Name "GENIE_PROTOTYPE_SHARED_SERVICE_PRINCIPAL_OBJECT_ID" -Value $SharedServicePrincipalObjectId
+Set-ContainerEnvironmentVariable -Container $backend -Name "GENIE_PROTOTYPE_SHARED_CLIENT_ID" -Value $ClientId
+Set-ContainerEnvironmentVariable -Container $backend -Name "GENIE_PROTOTYPE_SHARED_DELEGATED_SCOPE" -Value $DelegatedScope
+Set-ContainerEnvironmentVariable -Container $backend -Name "GENIE_PROTOTYPE_SHARED_APPLICATION_ROLE_ID" -Value $SharedApplicationRoleId
+Set-ContainerEnvironmentVariable -Container $backend -Name "GENIE_PROTOTYPE_SHARED_FRONTEND_DOMAIN" -Value $SharedFrontendDomain
+Set-ContainerEnvironmentVariable -Container $backend -Name "GENIE_PROTOTYPE_SHARED_SLOT_COUNT" -Value $SharedSlotCount.ToString()
 
 $gateway = [pscustomobject]@{
     name = $GatewayContainerName
@@ -125,7 +165,7 @@ $gateway = [pscustomobject]@{
     env = @(
         [pscustomobject]@{ name = "ASPNETCORE_HTTP_PORTS"; value = "8080" }
         [pscustomobject]@{ name = "AzureAd__Instance"; value = "https://login.microsoftonline.com/" }
-        [pscustomobject]@{ name = "AzureAd__TenantId"; value = $TenantId }
+        [pscustomobject]@{ name = "AzureAd__TenantId"; value = $ApplicationTenantId }
         [pscustomobject]@{ name = "AzureAd__ClientId"; value = $ClientId }
         [pscustomobject]@{ name = "AzureAd__Audiences__0"; value = $ClientId }
         [pscustomobject]@{ name = "AzureAd__Audiences__1"; value = "api://$ClientId" }

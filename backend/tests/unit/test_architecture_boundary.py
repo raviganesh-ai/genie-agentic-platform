@@ -21,6 +21,8 @@ directly, each isolating that SDK behind its own interface:
 - ``app/transcription/speech_service.py`` owns the ``DefaultAzureCredential``
   lifecycle for Azure AI Speech call-transcript transcription
   (``SpeechToTextService`` protocol).
+- ``app/repositories/document_store.py`` owns the Cosmos client and managed
+  identity lifecycle behind the ``DocumentStore`` protocol.
 - ``app/deploy_launch/backend_deployment_service.py`` owns the
   ContainerRegistryManagementClient / ContainerAppsAPIClient /
   DefaultAzureCredential lifecycle for the Deploy & Launch pipeline's real
@@ -53,6 +55,7 @@ _ALLOWED_RELATIVE_PATHS = {
     Path("agents/foundry/project_service.py"),
     Path("agents/foundry/api_client.py"),
     Path("deployment/provider_status_source.py"),
+    Path("repositories/document_store.py"),
     Path("transcription/speech_service.py"),
     Path("deploy_launch/backend_deployment_service.py"),
     Path("deploy_launch/frontend_deployment_service.py"),

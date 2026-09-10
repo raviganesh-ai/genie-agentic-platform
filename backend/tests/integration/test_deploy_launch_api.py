@@ -92,8 +92,11 @@ def test_req_001_always_passes():
 _REQUIREMENTS_OUTPUT = "[REQ-001] The mission requires a search feature and an orchestrator agent."
 
 
-def _bearer_token(user_id: str) -> str:
-    return jwt.encode({"sub": user_id}, "unit-test-secret", algorithm="HS256")
+def _bearer_token(user_id: str, *, roles: list[str] | None = None) -> str:
+    claims: dict[str, object] = {"sub": user_id}
+    if roles is not None:
+        claims["roles"] = roles
+    return jwt.encode(claims, "unit-test-secret", algorithm="HS256")
 
 
 def _with_deployment_config(settings: Settings) -> Settings:
@@ -215,6 +218,26 @@ async def test_list_deployments_requires_a_session_owned_by_the_caller(local_set
                 "/sessions/does-not-exist/deploy-launch/", headers=headers
             )
             assert resp.status_code == 404
+
+
+async def test_prototype_inventory_requires_genie_admin_role(local_settings) -> None:
+    app = create_app(settings=_with_deployment_config(local_settings))
+    employee_headers = {"Authorization": f"Bearer {_bearer_token('employee-1')}"}
+    admin_headers = {
+        "Authorization": (
+            f"Bearer {_bearer_token('admin-1', roles=['Genie.Admin'])}"
+        )
+    }
+
+    async with app.router.lifespan_context(app):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            denied = await client.get("/api/admin/prototypes", headers=employee_headers)
+            allowed = await client.get("/api/admin/prototypes", headers=admin_headers)
+
+    assert denied.status_code == 403
+    assert allowed.status_code == 200
+    assert allowed.json() == []
 
 
 async def test_full_pipeline_runs_through_the_real_http_api(

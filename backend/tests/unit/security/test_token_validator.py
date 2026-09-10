@@ -73,6 +73,7 @@ def _entra_test_material(*, audience: str) -> tuple[str, dict[str, object]]:
     token = jwt.encode(
         {
             "oid": "user-1",
+            "tid": "tenant",
             "iss": "https://login.example/tenant/v2.0",
             "aud": audience,
             "iat": now,
@@ -131,6 +132,24 @@ async def test_entra_validator_rejects_wrong_audience() -> None:
     )
 
     with pytest.raises(AuthenticationError, match="Invalid Microsoft Entra"):
+        await validator.validate(token, method="GET", path="/sessions")
+    await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_entra_validator_rejects_wrong_tenant_claim() -> None:
+    token, jwk = _entra_test_material(audience="api://client-1")
+    client = _entra_mock_client(jwk)
+    validator = EntraTokenValidator(
+        authority="https://login.example",
+        tenant_id="different-tenant",
+        client_id="client-1",
+        http_client=client,
+    )
+    validator._issuer = "https://login.example/tenant/v2.0"
+    validator._keys_by_id = {"test-key": jwt.PyJWK.from_dict(jwk)}
+
+    with pytest.raises(AuthenticationError, match="unexpected tenant"):
         await validator.validate(token, method="GET", path="/sessions")
     await client.aclose()
 

@@ -97,6 +97,8 @@ class Settings(BaseSettings):
     # Architecture Principles in .github/copilot-instructions.md).
     memory_store_backend: MemoryStoreBackend = "in_memory"
     memory_store_endpoint: str | None = None
+    memory_store_database_name: str = "genie"
+    memory_store_container_name: str = "memory"
 
     # --- Governance / lineage storage backend ------------------------------------
     # "in_memory" is the only backend implemented in Phase 5 and is safe only
@@ -163,6 +165,14 @@ class Settings(BaseSettings):
     prototype_mise_enabled: bool = False
     prototype_mise_gateway_image: str | None = None
     prototype_mise_test_principal_client_id: str | None = None
+    prototype_authentication_mode: Literal["per_prototype", "shared"] = "per_prototype"
+    prototype_shared_application_object_id: str | None = None
+    prototype_shared_service_principal_object_id: str | None = None
+    prototype_shared_client_id: str | None = None
+    prototype_shared_delegated_scope: str | None = None
+    prototype_shared_application_role_id: str | None = None
+    prototype_shared_frontend_domain: str | None = None
+    prototype_shared_slot_count: int = Field(default=50, ge=1, le=200)
     deployment_fidelity_max_repair_attempts: int = 3
     deployment_fidelity_min_coverage_percent: float = Field(default=90.0, gt=0, le=100)
     # How long the Requirement Fidelity Gate's real pytest subprocess is
@@ -175,6 +185,9 @@ class Settings(BaseSettings):
     # single requirement as if its test didn't exist, rather than surfacing
     # the real "the suite didn't finish in time" cause.
     deployment_test_execution_timeout_seconds: int = 300
+    prototype_default_ttl_days: int = Field(default=7, ge=1, le=90)
+    prototype_max_active_per_owner: int = Field(default=3, ge=1, le=20)
+    prototype_cleanup_interval_seconds: int = Field(default=3600, ge=60, le=86400)
     # Local filesystem root the pipeline materializes each mission's generated
     # build under (one subdirectory per pipeline run id) before packaging it
     # for ACR/Storage upload - never a customer-specific path in source.

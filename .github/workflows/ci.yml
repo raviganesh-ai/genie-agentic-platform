@@ -143,6 +143,13 @@ jobs:
           [ -z "${{ vars.AZURE_CONTAINER_APP_NAME }}" ] && missing+=("AZURE_CONTAINER_APP_NAME")
           [ -z "${{ vars.AZURE_RESOURCE_GROUP }}" ] && missing+=("AZURE_RESOURCE_GROUP")
           [ -z "${{ vars.VITE_ENTRA_CLIENT_ID }}" ] && missing+=("VITE_ENTRA_CLIENT_ID")
+          [ -z "${{ vars.VITE_ENTRA_TENANT_ID }}" ] && missing+=("VITE_ENTRA_TENANT_ID")
+          [ -z "${{ vars.VITE_ENTRA_API_SCOPE }}" ] && missing+=("VITE_ENTRA_API_SCOPE")
+          [ -z "${{ vars.GENIE_MEMORY_STORE_ENDPOINT }}" ] && missing+=("GENIE_MEMORY_STORE_ENDPOINT")
+          [ -z "${{ vars.GENIE_PROTOTYPE_SHARED_APPLICATION_OBJECT_ID }}" ] && missing+=("GENIE_PROTOTYPE_SHARED_APPLICATION_OBJECT_ID")
+          [ -z "${{ vars.GENIE_PROTOTYPE_SHARED_SERVICE_PRINCIPAL_OBJECT_ID }}" ] && missing+=("GENIE_PROTOTYPE_SHARED_SERVICE_PRINCIPAL_OBJECT_ID")
+          [ -z "${{ vars.GENIE_PROTOTYPE_SHARED_APPLICATION_ROLE_ID }}" ] && missing+=("GENIE_PROTOTYPE_SHARED_APPLICATION_ROLE_ID")
+          [ -z "${{ vars.GENIE_PROTOTYPE_SHARED_FRONTEND_DOMAIN }}" ] && missing+=("GENIE_PROTOTYPE_SHARED_FRONTEND_DOMAIN")
           [ -z "${{ vars.GENIE_GATEWAY_ALLOWED_ORIGIN }}" ] && missing+=("GENIE_GATEWAY_ALLOWED_ORIGIN")
           if [ ${#missing[@]} -ne 0 ]; then
             echo "::error::Missing required secrets for deploy-backend: ${missing[*]}. See README.md 'Continuous deployment' section for one-time Azure OIDC setup."
@@ -182,11 +189,17 @@ jobs:
             -SubscriptionId "${{ secrets.AZURE_SUBSCRIPTION_ID }}" `
             -ResourceGroup "${{ vars.AZURE_RESOURCE_GROUP }}" `
             -ContainerAppName "${{ vars.AZURE_CONTAINER_APP_NAME }}" `
-            -TenantId "${{ secrets.AZURE_TENANT_ID }}" `
+            -ApplicationTenantId "${{ vars.VITE_ENTRA_TENANT_ID }}" `
             -ClientId "${{ vars.VITE_ENTRA_CLIENT_ID }}" `
             -BackendImage "${{ vars.AZURE_ACR_NAME }}.azurecr.io/genie-backend:${{ github.sha }}" `
             -GatewayImage "${{ vars.AZURE_ACR_NAME }}.azurecr.io/genie-auth-gateway:${{ github.sha }}" `
             -AllowedOrigin "${{ vars.GENIE_GATEWAY_ALLOWED_ORIGIN }}" `
+            -MemoryStoreEndpoint "${{ vars.GENIE_MEMORY_STORE_ENDPOINT }}" `
+            -SharedApplicationObjectId "${{ vars.GENIE_PROTOTYPE_SHARED_APPLICATION_OBJECT_ID }}" `
+            -SharedServicePrincipalObjectId "${{ vars.GENIE_PROTOTYPE_SHARED_SERVICE_PRINCIPAL_OBJECT_ID }}" `
+            -SharedApplicationRoleId "${{ vars.GENIE_PROTOTYPE_SHARED_APPLICATION_ROLE_ID }}" `
+            -SharedFrontendDomain "${{ vars.GENIE_PROTOTYPE_SHARED_FRONTEND_DOMAIN }}" `
+            -DelegatedScope "${{ vars.VITE_ENTRA_API_SCOPE }}" `
             -RevisionSuffix "gh${{ github.run_number }}"
 
   deploy-frontend:
@@ -213,8 +226,11 @@ jobs:
       # empty token (observed to not fail fast in practice).
       - name: Check required secrets
         run: |
-          if [ -z "${{ secrets.SWA_DEPLOYMENT_TOKEN }}" ]; then
-            echo "::error::Missing required secret SWA_DEPLOYMENT_TOKEN. See README.md 'Continuous deployment' section for one-time Azure setup."
+          if [ -z "${{ secrets.SWA_DEPLOYMENT_TOKEN }}" ] || \
+             [ -z "${{ vars.VITE_ENTRA_CLIENT_ID }}" ] || \
+             [ -z "${{ vars.VITE_ENTRA_TENANT_ID }}" ] || \
+             [ -z "${{ vars.VITE_ENTRA_API_SCOPE }}" ]; then
+            echo "::error::Missing frontend deployment authentication configuration. See README.md 'Continuous deployment' section."
             exit 1
           fi
 

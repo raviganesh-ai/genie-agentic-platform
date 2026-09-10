@@ -231,8 +231,8 @@ class NullFrontendDeploymentService:
             frontend_url=f"http://localhost/missions/{mission_slug}/frontend"
         )
 
-    async def delete(self, *, mission_slug: str) -> None:
-        del mission_slug
+    async def delete(self, *, mission_slug: str, app_name: str | None = None) -> None:
+        del mission_slug, app_name
 
 
 def create_frontend_deployment_service(

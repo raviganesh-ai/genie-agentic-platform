@@ -86,6 +86,8 @@ async def start_deployment(
         workflow_run_id=body.workflow_run_id,
         trace_id=body.trace_id,
         resume_from_step=body.resume_from_step,
+        requesting_tenant_id=user.tenant_id,
+        requesting_object_id=user.object_id,
     )
 
 

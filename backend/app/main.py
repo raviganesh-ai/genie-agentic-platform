@@ -11,7 +11,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -32,6 +32,7 @@ from app.api import (
     model_catalog,
     outputs,
     peer_review,
+    prototype_admin,
     replay,
     requirements,
     sessions,
@@ -59,6 +60,9 @@ from app.governance.replay_service import ReplayService
 from app.governance.traceability_service import TraceabilityService
 from app.orchestration.agent_orchestrator import create_agent_orchestrator
 from app.prompts.registry import PromptRegistry
+from app.repositories.deployment_run_repository import CosmosDeploymentRunRepository
+from app.repositories.document_store import CosmosDocumentStore
+from app.repositories.session_repository import CosmosSessionRepository
 from app.security.token_validator import create_token_validator
 from app.services.architecture_service import create_architecture_service
 from app.services.foundry_agent_inventory_service import FoundryAgentInventoryService
@@ -79,6 +83,19 @@ from app.validation.foundry_agent_registry_validator import FoundryAgentRegistry
 from app.validation.runner import StartupValidationRunner
 
 logger = logging.getLogger(__name__)
+
+
+async def _reconcile_expired_prototypes(service, *, interval_seconds: int) -> None:
+    while True:
+        try:
+            deleted = await service.cleanup_expired()
+            if deleted:
+                logger.info("Deleted %d expired prototype(s).", len(deleted))
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Prototype expiry reconciliation failed.")
+        await asyncio.sleep(interval_seconds)
 
 
 def configure_logging(settings: Settings) -> None:
@@ -142,6 +159,18 @@ def create_app(
         # below wraps the single AgentOrchestrator instance, so every
         # request sees consistent orchestration/governance/memory state.
         app.state.token_validator = create_token_validator(resolved_settings)
+        document_store: CosmosDocumentStore | None = None
+        session_repository = None
+        deployment_run_repository = None
+        if resolved_settings.memory_store_backend == "cosmos_db":
+            document_store = CosmosDocumentStore(
+                endpoint=resolved_settings.memory_store_endpoint or "",
+                database_name=resolved_settings.memory_store_database_name,
+                container_name=resolved_settings.memory_store_container_name,
+            )
+            session_repository = CosmosSessionRepository(store=document_store)
+            deployment_run_repository = CosmosDeploymentRunRepository(store=document_store)
+        app.state.document_store = document_store
         orchestrator = create_agent_orchestrator(settings=resolved_settings)
         app.state.agent_orchestrator = orchestrator
         app.state.model_catalog_service = create_model_catalog_service(
@@ -210,7 +239,10 @@ def create_app(
             await rich_synchronization_service.synchronize(orchestrator.agent_registry)
             app.state.foundry_synchronization_service = rich_synchronization_service
 
-        session_service = create_session_service(orchestrator=orchestrator)
+        session_service = create_session_service(
+            orchestrator=orchestrator,
+            session_repository=session_repository,
+        )
         app.state.session_service = session_service
         app.state.speech_to_text_service = create_speech_to_text_service(resolved_settings)
         app.state.workshop_service = create_workshop_service(
@@ -281,6 +313,15 @@ def create_app(
                 settings=resolved_settings
             ),
             prototype_authentication_service=prototype_authentication_service,
+            run_repository=deployment_run_repository,
+        )
+        await app.state.deployment_pipeline_service.initialize()
+        app.state.prototype_cleanup_task = asyncio.create_task(
+            _reconcile_expired_prototypes(
+                app.state.deployment_pipeline_service,
+                interval_seconds=resolved_settings.prototype_cleanup_interval_seconds,
+            ),
+            name="prototype-expiry-reconciler",
         )
 
         app.state.ready = True
@@ -292,8 +333,13 @@ def create_app(
             yield
         finally:
             app.state.ready = False
+            app.state.prototype_cleanup_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await app.state.prototype_cleanup_task
             await app.state.prototype_authentication_service.close()
             await app.state.token_validator.close()
+            if app.state.document_store is not None:
+                await app.state.document_store.close()
 
     app = FastAPI(
         title="Genie Agentic Experience Center",
@@ -322,6 +368,7 @@ def create_app(
     app.include_router(agents.router)
     app.include_router(memory.router)
     app.include_router(peer_review.router)
+    app.include_router(prototype_admin.router)
     app.include_router(approvals.router)
     app.include_router(architecture.router)
     app.include_router(workshop.router)

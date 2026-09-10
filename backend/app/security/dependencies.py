@@ -19,9 +19,10 @@ from app.security.token_validator import (
     TokenValidator,
 )
 
-__all__ = ["get_current_user"]
+__all__ = ["GENIE_ADMIN_ROLE", "get_current_user", "require_genie_admin"]
 
 _bearer_scheme = HTTPBearer(auto_error=False)
+GENIE_ADMIN_ROLE = "Genie.Admin"
 
 
 async def get_current_user(
@@ -54,10 +55,25 @@ async def get_current_user(
             headers={"WWW-Authenticate": exc.www_authenticate or "Bearer"},
         ) from exc
 
-    user_id = str(claims.get("oid") or claims.get("sub"))
+    object_id = str(claims.get("oid") or claims.get("sub"))
+    tenant_id = str(claims.get("tid") or "")
+    user_id = f"{tenant_id}:{object_id}" if tenant_id else object_id
     roles = claims.get("roles")
     return AuthenticatedUser(
         user_id=user_id,
+        tenant_id=tenant_id,
+        object_id=object_id,
         display_name=str(claims.get("name", "")),
         roles=list(roles) if isinstance(roles, list) else [],
     )
+
+
+def require_genie_admin(
+    user: AuthenticatedUser = Depends(get_current_user),
+) -> AuthenticatedUser:
+    if GENIE_ADMIN_ROLE not in user.roles:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"User is not authorized for Genie administration (requires '{GENIE_ADMIN_ROLE}').",
+        )
+    return user

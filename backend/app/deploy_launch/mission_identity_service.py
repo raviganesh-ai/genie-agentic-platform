@@ -41,6 +41,7 @@ from azure.identity.aio import ManagedIdentityCredential
 from azure.mgmt.authorization import AuthorizationManagementClient
 from azure.mgmt.msi import ManagedServiceIdentityClient
 from azure.mgmt.msi.models import Identity
+from azure.mgmt.resource import ResourceManagementClient
 
 from app.config.settings import Settings
 
@@ -141,6 +142,8 @@ class MissionIdentityService:
         key_vault_id: str | None = None,
         search_index_id: str | None = None,
         acr_id: str | None = None,
+        resource_group_name: str | None = None,
+        resource_tags: dict[str, str] | None = None,
         on_identity_provisioned: MissionIdentityProvisionedCallback | None = None,
     ) -> ProvisionedMissionIdentity:
         """Provisions a real managed identity for this mission and assigns RBAC roles.
@@ -165,16 +168,27 @@ class MissionIdentityService:
             ) from exc
 
         identity_name = f"genie-mission-{mission_id[:16]}"
+        target_resource_group = resource_group_name or self._resource_group_name
         role_assignments: list[RoleAssignment] = []
 
         try:
+            if resource_group_name is not None:
+                ResourceManagementClient(
+                    self._credential, self._subscription_id
+                ).resource_groups.create_or_update(
+                    resource_group_name,
+                    {
+                        "location": self._settings.deployment_location,
+                        "tags": resource_tags or {},
+                    },
+                )
             # Step 1: Create the user-assigned managed identity.
             identity_resource = Identity(
                 location=self._settings.deployment_location,
-                tags={"genie-mission-id": mission_id},
+                tags={"genie-mission-id": mission_id, **(resource_tags or {})},
             )
             identity = msi_client.user_assigned_identities.create_or_update(
-                resource_group_name=self._resource_group_name,
+                resource_group_name=target_resource_group,
                 resource_name=identity_name,
                 parameters=identity_resource,
             )
@@ -238,6 +252,7 @@ class MissionIdentityService:
                         await self.delete(
                             identity_name=identity_name,
                             principal_id=principal_id,
+                            resource_group_name=resource_group_name,
                         )
                     except Exception as cleanup_exc:  # noqa: BLE001 - Azure SDK errors vary.
                         raise MissionIdentityProvisioningError(
@@ -265,35 +280,57 @@ class MissionIdentityService:
                 f"Failed to provision mission identity for '{mission_id}': {exc}"
             ) from exc
 
-    async def delete(self, *, identity_name: str, principal_id: str) -> None:
+    async def delete(
+        self,
+        *,
+        identity_name: str,
+        principal_id: str,
+        resource_group_name: str | None = None,
+        role_assignment_ids: list[str] | None = None,
+    ) -> None:
         """Deletes one abandoned mission identity and its scoped RBAC assignments."""
 
         try:
             authorization_client = AuthorizationManagementClient(
                 self._credential, self._subscription_id
             )
-            assignments = authorization_client.role_assignments.list_for_subscription(
-                filter=f"principalId eq '{principal_id}'"
-            )
-            for assignment in assignments:
-                assignment_id = getattr(assignment, "id", None)
-                if assignment_id:
-                    try:
-                        authorization_client.role_assignments.delete_by_id(assignment_id)
-                    except Exception as exc:
-                        if getattr(exc, "status_code", None) != 404:
-                            raise
+            if role_assignment_ids is not None:
+                assignment_ids = role_assignment_ids
+            else:
+                assignments = authorization_client.role_assignments.list_for_subscription(
+                    filter=f"principalId eq '{principal_id}'"
+                )
+                assignment_ids = [
+                    assignment.id
+                    for assignment in assignments
+                    if getattr(assignment, "id", None)
+                ]
+            for assignment_id in assignment_ids:
+                try:
+                    authorization_client.role_assignments.delete_by_id(assignment_id)
+                except Exception as exc:
+                    if getattr(exc, "status_code", None) != 404:
+                        raise
 
             identity_client = ManagedServiceIdentityClient(
                 self._credential, self._subscription_id
             )
-            poller = identity_client.user_assigned_identities.delete(
-                resource_group_name=self._resource_group_name,
-                resource_name=identity_name,
-            )
-            result = getattr(poller, "result", None)
-            if callable(result):
-                await asyncio.to_thread(result)
+            try:
+                poller = identity_client.user_assigned_identities.delete(
+                    resource_group_name=resource_group_name or self._resource_group_name,
+                    resource_name=identity_name,
+                )
+                result = getattr(poller, "result", None)
+                if callable(result):
+                    await asyncio.to_thread(result)
+            except Exception as exc:
+                if getattr(exc, "status_code", None) != 404:
+                    raise
+            if resource_group_name is not None:
+                group_poller = ResourceManagementClient(
+                    self._credential, self._subscription_id
+                ).resource_groups.begin_delete(resource_group_name)
+                await asyncio.to_thread(group_poller.result)
         except Exception as exc:
             if getattr(exc, "status_code", None) == 404:
                 return
@@ -314,8 +351,11 @@ class NullMissionIdentityService:
         key_vault_id: str | None = None,
         search_index_id: str | None = None,
         acr_id: str | None = None,
+        resource_group_name: str | None = None,
+        resource_tags: dict[str, str] | None = None,
         on_identity_provisioned: MissionIdentityProvisionedCallback | None = None,
     ) -> ProvisionedMissionIdentity:
+        del resource_group_name, resource_tags
         identity_name = f"local-genie-mission-{mission_id[:16]}"
         principal_id = f"local-principal-{mission_id}"
         client_id = f"local-client-{mission_id}"
@@ -336,8 +376,15 @@ class NullMissionIdentityService:
 
         return record
 
-    async def delete(self, *, identity_name: str, principal_id: str) -> None:
-        del identity_name, principal_id
+    async def delete(
+        self,
+        *,
+        identity_name: str,
+        principal_id: str,
+        resource_group_name: str | None = None,
+        role_assignment_ids: list[str] | None = None,
+    ) -> None:
+        del identity_name, principal_id, resource_group_name, role_assignment_ids
 
 
 def create_mission_identity_service(

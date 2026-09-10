@@ -19,6 +19,7 @@ dependencies = [
     "azure-mgmt-msi>=7.0,<8.0",
     "azure-mgmt-authorization>=4.0,<5.0",
     "azure-storage-blob>=12.22,<13.0",
+    "azure-cosmos>=4.9,<5.0",
     "agent-framework-foundry>=1.10,<2.0",
     "agent-framework-core>=1.12,<2.0",
     "python-multipart>=0.0.9,<1.0",

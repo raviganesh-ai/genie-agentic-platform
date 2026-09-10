@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import urlparse
 from uuid import uuid4
 
 import httpx
@@ -30,7 +32,7 @@ class PrototypeAuthenticationError(RuntimeError):
     """Raised when a prototype authentication boundary cannot be provisioned."""
 
 
-@dataclass(frozen=True)
+@dataclass
 class PrototypeAuthenticationConfiguration:
     """Non-secret Entra identifiers for one independently protected prototype."""
 
@@ -40,6 +42,9 @@ class PrototypeAuthenticationConfiguration:
     tenant_id: str
     delegated_scope: str
     application_role_id: str
+    mission_slug: str = "legacy"
+    shared: bool = False
+    frontend_redirect_uri: str | None = None
 
 
 class PrototypeAuthenticationService:
@@ -52,6 +57,9 @@ class PrototypeAuthenticationService:
         test_principal_client_id: str,
         credential: AsyncTokenCredential | None = None,
         http_client: httpx.AsyncClient | None = None,
+        shared_configuration: PrototypeAuthenticationConfiguration | None = None,
+        shared_frontend_domain: str | None = None,
+        shared_slot_count: int = 0,
     ) -> None:
         if not tenant_id.strip() or not test_principal_client_id.strip():
             raise PrototypeAuthenticationError(
@@ -66,6 +74,9 @@ class PrototypeAuthenticationService:
         self._credential = credential
         self._http_client = http_client or httpx.AsyncClient(timeout=15.0)
         self._owns_http_client = http_client is None
+        self._shared_configuration = shared_configuration
+        self._shared_frontend_domain = (shared_frontend_domain or "").lower().strip(".")
+        self._shared_slot_count = shared_slot_count
 
     async def _request(
         self,
@@ -120,6 +131,19 @@ class PrototypeAuthenticationService:
 
     async def provision(self, *, mission_slug: str) -> PrototypeAuthenticationConfiguration:
         """Creates a single-tenant API/SPA registration and assigns its app role to Genie."""
+
+        if self._shared_configuration is not None:
+            shared = self._shared_configuration
+            return PrototypeAuthenticationConfiguration(
+                application_object_id=shared.application_object_id,
+                service_principal_object_id=shared.service_principal_object_id,
+                client_id=shared.client_id,
+                tenant_id=shared.tenant_id,
+                delegated_scope=shared.delegated_scope,
+                application_role_id=shared.application_role_id,
+                mission_slug=mission_slug,
+                shared=True,
+            )
 
         delegated_scope_id = str(uuid4())
         application_role_id = str(uuid4())
@@ -235,6 +259,7 @@ class PrototypeAuthenticationService:
                 tenant_id=self._tenant_id,
                 delegated_scope=f"api://{client_id}/access_as_user",
                 application_role_id=application_role_id,
+                mission_slug=mission_slug,
             )
         except Exception:
             if application_object_id is not None:
@@ -260,18 +285,37 @@ class PrototypeAuthenticationService:
             raise PrototypeAuthenticationError(
                 "Prototype SPA redirect URI must use an HTTPS origin."
             )
-        await self._request(
-            "PATCH",
-            f"/applications/{configuration.application_object_id}",
-            expected_statuses=(204,),
-            json={"spa": {"redirectUris": [frontend_url.rstrip("/") + "/"]}},
-        )
+        redirect_uri = frontend_url.rstrip("/") + "/"
+        if configuration.shared:
+            parsed = urlparse(redirect_uri)
+            match = re.fullmatch(
+                r"genie-prototype-(\d{3})-frontend\."
+                + re.escape(self._shared_frontend_domain),
+                (parsed.hostname or "").lower(),
+            )
+            slot = int(match.group(1)) if match else 0
+            if parsed.scheme != "https" or parsed.path != "/" or not (
+                1 <= slot <= self._shared_slot_count
+            ):
+                raise PrototypeAuthenticationError(
+                    "Prototype frontend URL is not a pre-registered shared authentication slot."
+                )
+        else:
+            await self._request(
+                "PATCH",
+                f"/applications/{configuration.application_object_id}",
+                expected_statuses=(204,),
+                json={"spa": {"redirectUris": [redirect_uri]}},
+            )
+        configuration.frontend_redirect_uri = redirect_uri
 
     async def delete(
         self, configuration: PrototypeAuthenticationConfiguration
     ) -> None:
         """Deletes the owned application; Entra cascades its service principal and roles."""
 
+        if configuration.shared:
+            return
         await self._request(
             "DELETE",
             f"/applications/{configuration.application_object_id}",
@@ -347,7 +391,38 @@ def create_prototype_authentication_service(
             "entra_tenant_id and prototype_mise_test_principal_client_id are required "
             "when prototype MISE is enabled."
         )
+    shared_configuration = None
+    if settings.prototype_authentication_mode == "shared":
+        shared_values = (
+            settings.prototype_shared_application_object_id,
+            settings.prototype_shared_service_principal_object_id,
+            settings.prototype_shared_client_id,
+            settings.prototype_shared_delegated_scope,
+            settings.prototype_shared_application_role_id,
+        )
+        if not all(shared_values):
+            raise PrototypeAuthenticationError(
+                "All prototype_shared_* settings are required for shared prototype authentication."
+            )
+        if not settings.prototype_shared_frontend_domain:
+            raise PrototypeAuthenticationError(
+                "prototype_shared_frontend_domain is required for shared authentication."
+            )
+        shared_configuration = PrototypeAuthenticationConfiguration(
+            application_object_id=settings.prototype_shared_application_object_id or "",
+            service_principal_object_id=(
+                settings.prototype_shared_service_principal_object_id or ""
+            ),
+            client_id=settings.prototype_shared_client_id or "",
+            tenant_id=settings.entra_tenant_id,
+            delegated_scope=settings.prototype_shared_delegated_scope or "",
+            application_role_id=settings.prototype_shared_application_role_id or "",
+            shared=True,
+        )
     return PrototypeAuthenticationService(
         tenant_id=settings.entra_tenant_id,
         test_principal_client_id=settings.prototype_mise_test_principal_client_id,
+        shared_configuration=shared_configuration,
+        shared_frontend_domain=settings.prototype_shared_frontend_domain,
+        shared_slot_count=settings.prototype_shared_slot_count,
     )

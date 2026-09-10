@@ -155,6 +155,55 @@ async def test_delete_retries_transient_graph_failures(monkeypatch) -> None:
     assert attempts == 3
 
 
+@pytest.mark.asyncio
+async def test_shared_registration_accepts_only_pre_registered_slot_urls() -> None:
+    requests: list[tuple[str, dict | None]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content) if request.content else None
+        requests.append((request.method, body))
+        raise AssertionError(f"Unexpected Graph request: {request.method}")
+
+    service = PrototypeAuthenticationService(
+        tenant_id="tenant-1",
+        test_principal_client_id="genie-client",
+        credential=_Credential(),
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+        shared_configuration=PrototypeAuthenticationConfiguration(
+            application_object_id="shared-app-object",
+            service_principal_object_id="shared-sp",
+            client_id="shared-client",
+            tenant_id="tenant-1",
+            delegated_scope="api://shared-client/access_as_user",
+            application_role_id="shared-role",
+            shared=True,
+        ),
+        shared_frontend_domain="gentleisland.example.com",
+        shared_slot_count=50,
+    )
+
+    configuration = await service.provision(mission_slug="claims-review-1234")
+    await service.configure_frontend_redirect(
+        configuration,
+        frontend_url=(
+            "https://genie-prototype-001-frontend.gentleisland.example.com"
+        ),
+    )
+    await service.delete(configuration)
+
+    assert configuration.shared is True
+    assert configuration.mission_slug == "claims-review-1234"
+    assert configuration.frontend_redirect_uri == (
+        "https://genie-prototype-001-frontend.gentleisland.example.com/"
+    )
+    assert requests == []
+
+    with pytest.raises(PrototypeAuthenticationError, match="pre-registered"):
+        await service.configure_frontend_redirect(
+            configuration, frontend_url="https://unregistered.example.com"
+        )
+
+
 def test_factory_is_explicitly_disabled_or_fails_closed_when_enabled() -> None:
     disabled = create_prototype_authentication_service(settings=Settings())
     assert isinstance(disabled, NullPrototypeAuthenticationService)
