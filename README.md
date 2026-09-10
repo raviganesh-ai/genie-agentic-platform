@@ -63,13 +63,13 @@ Genie follows Clean Architecture in application code and uses Azure-native ident
 
 ### Generated prototype isolation
 
-Deploy & Launch creates a separate runtime and ownership boundary for every newly generated prototype. Prototypes reuse the immutable gateway image and corporate Genie Entra audience, but they do **not** inherit Genie's gateway instance, managed identity, Container App, resource group, or data ownership.
+Deploy & Launch creates a separate runtime and ownership boundary for every newly generated prototype. Prototypes reuse the corporate Genie Entra audience, but they do **not** inherit Genie's gateway instance, managed identity, Container Apps environment, resource group, network, or data ownership.
 
-[![Generated prototype Azure isolation architecture showing dedicated identity, Container Apps, MISE gateway, Foundry agents, registry, and monitoring](docs/architecture/generated-prototype-isolation.png)](docs/architecture/generated-prototype-isolation.svg)
+[![Generated prototype Azure isolation architecture showing dedicated API Management, private Container Apps, identity, Foundry agents, registry, and monitoring](docs/architecture/generated-prototype-isolation.png)](docs/architecture/generated-prototype-isolation.svg)
 
 *Figure 2. Per-prototype security and runtime isolation. Select the diagram to open the scalable SVG.*
 
-Each prototype receives a tagged `genie-proto-<mission-slug>` resource group, exact CORS origin, gateway container, backend/frontend Container Apps, mission managed identity, RBAC assignments, and generated Foundry agents. Corporate employees authenticate through one centrally owned shared registration and one of 50 deterministic pre-registered frontend callback slots; no runtime Graph application creation is needed. The durable Cosmos inventory records canonical owner identity as `<tid>:<oid>`, raw tenant/object IDs, mission metadata, URLs, resource group, authentication slot, TTL, and cleanup state. Owners can abandon their own terminal runs, while `Genie.Admin` can inventory and clean up all prototypes.
+Each prototype receives a tagged `genie-proto-<mission-slug>` resource group, dedicated APIM service, VNet and private DNS, internal Container Apps environment, exact CORS origin, backend/frontend Container Apps, mission managed identity, RBAC assignments, and generated Foundry agents. Corporate employees authenticate through one centrally owned shared registration and one of 50 deterministic pre-registered frontend callback slots; no runtime Graph application creation is needed. The durable Cosmos inventory records canonical owner identity as `<tid>:<oid>`, raw tenant/object IDs, mission metadata, URLs, resource group, authentication slot, TTL, and cleanup state. Owners can abandon their own terminal runs, while `Genie.Admin` can inventory and clean up all prototypes by deleting tenant-level artifacts and then the complete resource group.
 
 ### Layering rules (enforced by tests)
 
@@ -214,17 +214,17 @@ Every stage above (`design-architecture`, `build-solution`) is `requires_human_p
 
 ## Deploy & Launch pipeline
 
-Deploy & Launch is deliberately **not** an LLM-narrative workflow step — it is a real, deterministic, code-driven Azure provisioning pipeline (`app/deploy_launch/pipeline_service.py`) that executes each named step in this exact order against real Azure SDKs — never fabricating a result for a step it didn't actually perform. Production startup fails when required deployment or prototype-MISE settings are absent; explicit Null collaborators exist only for local tests. It runs once a mission's `build-solution` step has been approved, and it deploys **one customer mission's generated build** (a separate concern from Genie's own infrastructure, which is provisioned once via `infra/main.bicep`).
+Deploy & Launch is deliberately **not** an LLM-narrative workflow step — it is a real, deterministic, code-driven Azure provisioning pipeline (`app/deploy_launch/pipeline_service.py`) that executes each named step in this exact order against real Azure SDKs — never fabricating a result for a step it didn't actually perform. Production startup fails when required deployment or prototype-APIM settings are absent; explicit Null collaborators exist only for local tests. It runs once a mission's `build-solution` step has been approved, and it deploys **one customer mission's generated build** (a separate concern from Genie's own infrastructure, which is provisioned once via `infra/main.bicep`).
 
 | # | Step id | Customer-facing name | What actually happens |
 |---|---|---|---|
 | 1 | `generate-access-policy` | Generate Access Policy & Least Access | Derives a least-privilege access policy for the mission's generated agents |
 | 2 | `provision-foundry-agents` | Deploy Agents to Foundry | Provisions each generated specialist + orchestrator agent as a real Azure AI Foundry resource |
-| 3 | `deploy-backend-service` | Deploy Backend Service | Reuses the corporate shared Entra audience, builds the mission backend, and deploys it with its own MISE gateway container in the prototype resource group. External ingress targets gateway port `8080`; generated FastAPI stays behind MISE on `8000`. An additional internal-only port mapping lets Genie's trusted acceptance-test runner reach FastAPI without a reusable bearer credential |
+| 3 | `deploy-backend-service` | Deploy Backend Service | Reuses the corporate shared Entra audience; provisions a prototype-owned VNet, private DNS zone, internal Container Apps environment, and dedicated Standard v2 API Management service; builds FastAPI; and deploys it with external ingress disabled. APIM validates Entra tokens and reaches FastAPI only over the prototype private network |
 | 4 | `sync-frontend-integration` | Update Frontend Integrations | Wires the generated UI to the deployed backend and writes the shared non-secret MSAL client, corporate tenant, and delegated-scope runtime configuration |
-| 5 | `deploy-frontend-app` | Deploy Frontend | Allocates one durable shared-auth slot, builds the mission UI under Node 22, runs the pinned Apache-2.0 Impeccable `3.6.0` detector over generated TSX/CSS, fails closed on deterministic design anti-patterns, then deploys to that slot's pre-registered Container App name. The gateway's deny-by-default bootstrap CORS origin is replaced with the returned exact HTTPS origin |
+| 5 | `deploy-frontend-app` | Deploy Frontend | Allocates one durable shared-auth slot, builds the mission UI under Node 22, runs the pinned Apache-2.0 Impeccable `3.6.0` detector over generated TSX/CSS, fails closed on deterministic design anti-patterns, then deploys to that slot's pre-registered Container App name. APIM's deny-by-default bootstrap CORS origin is replaced with the returned exact HTTPS origin |
 | 6 | `generate-test-suite` | Generate Requirement Acceptance Tests | Test Generation Agent writes real black-box tests against the deployed prototype's actual mission URLs (no mocks/patches), targeting every approved requirement id. Normal API calls use `MISSION_BACKEND_URL`, which points to the trusted authenticated loopback proxy during execution; generated code never handles credentials. A requirement-coverage repair loop retries omitted IDs up to `GENIE_DEPLOYMENT_FIDELITY_MAX_REPAIR_ATTEMPTS`; after that, executable coverage must meet `GENIE_DEPLOYMENT_FIDELITY_MIN_COVERAGE_PERCENT` (default 90%) and every omitted ID remains an explicit fidelity gap. For a real deployed backend, `validate_real_action_tests` also rejects test doubles in place of real HTTP calls |
-| 7 | `execute-test-suite` | Requirement Fidelity Gate | Shared-auth deployments run from Genie against the backend's internal-only Container Apps port; public traffic still reaches only MISE. Generated code receives no bearer token and no public unauthenticated endpoint. Launch requires the configured executable-coverage threshold and 100% passing evidence for all executable requirement tests. Failed, errored, skipped, timed-out, or unobserved executable tests still trigger automatic regeneration and redeployment up to `GENIE_DEPLOYMENT_FIDELITY_MAX_REPAIR_ATTEMPTS` times (default 3), then fail closed |
+| 7 | `execute-test-suite` | Requirement Fidelity Gate | Shared-auth deployments run from Genie through the prototype's APIM endpoint using a trusted loopback proxy that owns the short-lived token. Generated code receives no bearer token and FastAPI has no public endpoint. Launch requires the configured executable-coverage threshold and 100% passing evidence for all executable requirement tests. Failed, errored, skipped, timed-out, or unobserved executable tests still trigger automatic regeneration and redeployment up to `GENIE_DEPLOYMENT_FIDELITY_MAX_REPAIR_ATTEMPTS` times (default 3), then fail closed |
 | 8 | `run-security-scan` | Security Scan (Backend & Frontend) | Real security scan of the deployed backend and frontend artifacts |
 | 9 | `launch-mission` | Launch | Mints the customer-facing launch link once every prior step has passed |
 
@@ -366,9 +366,12 @@ All backend configuration is via environment variables prefixed `GENIE_` (pydant
 | `GENIE_DEPLOYMENT_FIDELITY_MAX_REPAIR_ATTEMPTS` | `3` | Max automatic regenerate-and-redeploy attempts the Requirement Fidelity Gate makes before failing closed |
 | `GENIE_DEPLOYMENT_FIDELITY_MIN_COVERAGE_PERCENT` | `90` | Minimum approved-requirement percentage with executable acceptance tests required for launch; every executable test must still pass and uncovered requirement IDs remain visible as gaps |
 | `GENIE_DEPLOYMENT_TEST_EXECUTION_TIMEOUT_SECONDS` | `300` | Max seconds the Requirement Fidelity Gate's real pytest subprocess (real black-box HTTP acceptance tests against the live deployed prototype, one per approved requirement) is allowed to run before being killed |
-| `GENIE_PROTOTYPE_MISE_ENABLED` | `false` | Enables one independently configured MISE gateway and Entra audience for every newly deployed prototype; it is mandatory (`true`) in production and startup fails closed when it or its dependent settings are absent |
-| `GENIE_PROTOTYPE_MISE_GATEWAY_IMAGE` | *(none)* | Immutable, commit-pinned `genie-auth-gateway` image used to create each prototype's own gateway container |
-| `GENIE_PROTOTYPE_MISE_TEST_PRINCIPAL_CLIENT_ID` | *(none)* | Client id of Genie's user-assigned managed identity; retained for protected deployment and legacy-auth cleanup compatibility |
+| `GENIE_PROTOTYPE_API_GATEWAY_ENABLED` | `false` | Enables a dedicated Azure API Management service and private runtime network for every newly deployed prototype; mandatory (`true`) in production |
+| `GENIE_PROTOTYPE_API_GATEWAY_PUBLISHER_EMAIL` | *(none)* | Required APIM publisher contact email supplied as external deployment configuration |
+| `GENIE_PROTOTYPE_API_GATEWAY_PUBLISHER_NAME` | *(none)* | Required APIM publisher display name supplied as external deployment configuration |
+| `GENIE_PROTOTYPE_API_GATEWAY_SKU_NAME` | `StandardV2` | APIM SKU; `StandardV2` or `PremiumV2` so the gateway can reach the private backend VNet |
+| `GENIE_PROTOTYPE_API_GATEWAY_CAPACITY` | `1` | Capacity units for each prototype's dedicated APIM service |
+| `GENIE_PROTOTYPE_TEST_PRINCIPAL_CLIENT_ID` | *(none)* | Client id of Genie's user-assigned managed identity used to obtain short-lived acceptance-test tokens |
 | `GENIE_PROTOTYPE_AUTHENTICATION_MODE` | `per_prototype` | `shared` in production; legacy mode remains only for retirement compatibility |
 | `GENIE_PROTOTYPE_SHARED_*` | *(none)* | Shared app/SP/client/scope/role IDs, Container Apps default domain, and bounded slot count; all are non-secret external configuration |
 | `GENIE_PROTOTYPE_DEFAULT_TTL_DAYS` | `7` | Initial owner prototype lifetime (1-90 days) |
@@ -402,14 +405,14 @@ Genie uses **Microsoft Entra ID** end to end:
 - **Backend defense in depth**: `EntraTokenValidator` (see `backend/app/security/token_validator.py`) validates the bearer token again against the tenant's Microsoft Entra ID OpenID metadata and JWKS (RS256 signature, issuer, audience, `exp`/`iat`). The gateway preserves the original `Authorization` header when proxying. Validation activates once `GENIE_ENTRA_AUTHORITY`, `GENIE_ENTRA_TENANT_ID`, and `GENIE_ENTRA_CLIENT_ID` are all set. `LocalDevTokenValidator` is available only when `GENIE_ALLOW_LOCAL_TOKEN_VALIDATION=true` and Entra isn't configured — never in production. `create_token_validator()` fails closed otherwise.
 - **Frontend**: MSAL (`@azure/msal-browser`) drives an automatic redirect sign-in flow — on load, the app silently acquires a token if a session exists, or redirects to the Microsoft sign-in page if not, then redirects back with no manual steps. Silent token refresh runs on a 5-minute timer via `acquireTokenSilent`, falling back to `acquireTokenRedirect` on `InteractionRequiredAuthError`. If the three `VITE_ENTRA_*` variables aren't set, the app transparently falls back to the pre-existing manual token-entry seam (`setAccessToken()`), so local/backend-only development never requires an Entra app registration.
 - **App registration and workforce identity**: one corporate single-tenant registration acts as both SPA client and API for Genie and all new prototypes. Its `access_as_user` scope, `idtyp` optional claim, `Genie.Admin` user role, and 50 deterministic prototype callback slots are centrally owned. Backend identity is canonicalized as `<tid>:<oid>`; display name/email are never used as authorization keys. Normal users remain owner-scoped, while `Genie.Admin` unlocks `GET/DELETE /api/admin/prototypes`.
-- **Generated prototypes**: every new Deploy & Launch run reuses the corporate registration but owns a separate MISE gateway, exact CORS origin, resource group, Container Apps, managed identity, RBAC assignments, and Foundry agents. The generated SPA uses MSAL redirect login and silent refresh; generated FastAPI independently validates the same corporate issuer/audience/scope as defense in depth. Public backend ingress reaches MISE only. Owner or admin cleanup removes runtime resources and the mission identity; shared Entra registration metadata is never deleted. Legacy per-prototype auth records, if present, retain their original Graph deletion behavior until retired.
+- **Generated prototypes**: every new Deploy & Launch run reuses the corporate registration but owns a dedicated API Management service, VNet, private DNS zone, internal Container Apps environment, exact CORS policy, resource group, managed identity, RBAC assignments, and Foundry agents. The generated SPA uses MSAL redirect login and silent refresh; APIM validates the corporate tenant/audience before forwarding over the private network, and generated FastAPI validates the token again as defense in depth. FastAPI has no public ingress. Owner or admin cleanup removes tenant-level artifacts first and then deletes the resource group containing the complete runtime boundary; shared Entra registration metadata is never deleted.
 - **Durable inventory and lifecycle**: production uses managed-identity Cosmos access. Startup hydrates deployment runs before readiness and marks interrupted work failed rather than pretending it completed. A cancellable hourly reconciler deletes expired terminal prototypes, stores `deletion_pending`/`deletion_failed` state, and preserves failures for retry. The current environment had zero legacy `Genie Prototype - *` registrations at migration time, so no active Entra registrations were deleted.
 
 ---
 
 ## Deployment strategy
 
-An Azure **evaluation environment** consists of: (1) Bicep infrastructure-as-code that provisions the foundational Azure resources, (2) a .NET 8 MISE gateway and private FastAPI container deployed together in every Azure Container Apps replica, and (3) a static React frontend deployed to Azure Static Web Apps. Deployment is split into readiness validation → infrastructure provisioning → agent provisioning → application deployment, matching the repo's fail-closed philosophy: nothing proceeds until the previous step is verified. These deployment instructions reproduce the prototype environment; they do not supersede the production-readiness work required by the [purpose and use boundary](#purpose-and-use-boundary).
+The long-lived Genie **evaluation environment** consists of: (1) Bicep infrastructure-as-code that provisions foundational Azure resources, (2) a .NET 8 MISE gateway and private FastAPI container deployed together for the Genie control plane, and (3) a static React frontend deployed to Azure Static Web Apps. Generated prototypes are separate: each receives its own APIM service and private Container Apps environment. Deployment is split into readiness validation → infrastructure provisioning → agent provisioning → application deployment, matching the repo's fail-closed philosophy: nothing proceeds until the previous step is verified. These deployment instructions reproduce the evaluation environment; they do not supersede the production-readiness work required by the [purpose and use boundary](#purpose-and-use-boundary).
 
 ### Deploying into a brand-new Azure subscription
 
@@ -549,20 +552,28 @@ All three require `GENIE_AZURE_FOUNDRY_ENDPOINT` / `GENIE_AZURE_FOUNDRY_PROJECT_
      -SubscriptionId <subscription-id> `
      -ResourceGroup <rg> `
      -ContainerAppName genie-backend `
-     -TenantId <tenant-id> `
+    -ApplicationTenantId <tenant-id> `
      -ClientId <api-client-id> `
      -BackendImage <acr-name>.azurecr.io/genie-backend:<commit> `
      -GatewayImage <acr-name>.azurecr.io/genie-auth-gateway:<commit> `
      -AllowedOrigin https://<static-web-app-host> `
+    -MemoryStoreEndpoint https://<cosmos-account>.documents.azure.com/ `
+    -PrototypeApiGatewayPublisherEmail <publisher-email> `
+    -PrototypeApiGatewayPublisherName "Genie" `
+    -SharedApplicationObjectId <application-object-id> `
+    -SharedServicePrincipalObjectId <service-principal-object-id> `
+    -SharedApplicationRoleId <application-role-id> `
+    -SharedFrontendDomain <container-apps-domain> `
+    -DelegatedScope api://<api-client-id>/access_as_user `
      -RevisionSuffix <unique-suffix>
    ```
 
    The script preserves the existing FastAPI environment, secrets, probes, and
    resources; removes the obsolete validation-sidecar setting; adds exactly one
    gateway container per replica; and changes external ingress from `8000` to
-  `8080` in the same ARM patch. It also enables per-prototype MISE using the same
-  commit-pinned gateway image and derives the acceptance-test principal from the
-  backend's existing `AZURE_CLIENT_ID`. It waits for the new revision, verifies gateway
+  `8080` in the same ARM patch. It also enables dedicated per-prototype APIM,
+  supplies its publisher metadata, and derives the acceptance-test principal from
+  the backend's existing `AZURE_CLIENT_ID`. It waits for the new revision, verifies gateway
    readiness, and confirms that an unauthenticated API request returns `401`.
    Roll back by running the same script with the previous backend and gateway
    image tags and a new revision suffix. Never roll back ingress to port `8000`.
@@ -613,7 +624,7 @@ All three require `GENIE_AZURE_FOUNDRY_ENDPOINT` / `GENIE_AZURE_FOUNDRY_PROJECT_
 2. That identity's service principal holds exactly two least-privilege, resource-scoped RBAC roles (never a subscription- or resource-group-wide Owner/Contributor grant):
    - **Container Registry Tasks Contributor**, scoped to just the ACR resource — covers `az acr build`'s scheduleRun/upload actions without granting registry data-plane push/pull.
   - **Container Apps Contributor**, scoped to just the `genie-backend-corporate` Container App resource — covers the atomic ARM patch.
-3. The **runtime Genie backend managed identity** has the custom `Genie Prototype Resource Group Operator` role plus Container Apps Contributor, Managed Identity Contributor, and Managed Identity Operator at subscription scope. The custom role permits only resource-group read/write/delete. Shared ACR and role-assignment permissions remain constrained to existing resource scopes. New prototypes do not require Microsoft Graph application writes.
+3. The **runtime Genie backend managed identity** has the custom `Genie Prototype Resource Group Operator` role plus API Management Service Contributor, Network Contributor, Container Apps Contributor, Managed Identity Contributor, and Managed Identity Operator at subscription scope. The custom role permits only resource-group read/write/delete; the built-in roles are restricted to their respective provider surfaces. Shared ACR and role-assignment permissions remain constrained to existing resource scopes. New prototypes do not require Microsoft Graph application writes.
 4. The repo's **Settings → Secrets and variables → Actions** has:
   - **Secrets**: `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID` (identify the federated deployment app — not credentials by themselves), `AZURE_DEVOPS_TOKEN` (MicrosoftIT PAT with Packaging Read only), and `SWA_DEPLOYMENT_TOKEN`.
   - **Variables**: `AZURE_ACR_NAME`, `AZURE_CONTAINER_APP_NAME`, `AZURE_RESOURCE_GROUP`, `GENIE_GATEWAY_ALLOWED_ORIGIN`, `GENIE_MEMORY_STORE_ENDPOINT`, `GENIE_PROTOTYPE_SHARED_APPLICATION_OBJECT_ID`, `GENIE_PROTOTYPE_SHARED_SERVICE_PRINCIPAL_OBJECT_ID`, `GENIE_PROTOTYPE_SHARED_APPLICATION_ROLE_ID`, `GENIE_PROTOTYPE_SHARED_FRONTEND_DOMAIN`, `VITE_GENIE_API_BASE_URL`, `VITE_ENTRA_CLIENT_ID`, `VITE_ENTRA_TENANT_ID`, `VITE_ENTRA_API_SCOPE`. `AZURE_TENANT_ID` remains the GitHub OIDC/deployment tenant; `VITE_ENTRA_TENANT_ID` is independently the corporate workforce sign-in tenant.
@@ -650,6 +661,13 @@ If this identity/RBAC/secrets setup is ever missing or revoked, `deploy-backend`
 
 Every deployment to the shared Azure evaluation environment (backend Container App and/or frontend Static Web App) is recorded here: commit, what changed, and why. Update this section as part of the same commit that ships the fix/feature, before pushing to `master` triggers [Continuous deployment](#continuous-deployment-github-actions).
 
+### 2026-09-10 — Dedicated API gateway and private backend per prototype
+
+- **Isolation**: every new prototype provisions a dedicated Standard v2 Azure API Management service, VNet, private DNS zone, and internal Container Apps environment in its own resource group. Generated FastAPI has no public ingress; browser and acceptance-test traffic reaches it only through APIM.
+- **Security**: APIM validates the corporate Entra tenant and audience, enforces exact-origin CORS and per-client rate limiting, and forwards the token for FastAPI defense-in-depth validation. Generated prototypes no longer deploy or configure a MISE sidecar.
+- **Lifecycle**: deterministic resource names make retries idempotent, while existing owner/admin abandonment deletes external Foundry and identity artifacts before deleting the prototype resource group and all gateway/network/runtime resources together.
+- **Deployment**: CI passes externally configured APIM publisher metadata to Genie and removes legacy prototype-MISE environment variables. The long-lived Genie control plane continues to use its existing MISE gateway.
+
 ### 2026-09-10 — Retire the detached legacy Container App
 
 - **Cleanup**: removed the legacy `genie-backend` Container App and its two revisions after the corporate/private-network cutover. Its logs contained only platform health probes; its latest revision could not access private Cosmos and was unhealthy.
@@ -666,7 +684,7 @@ Every deployment to the shared Azure evaluation environment (backend Container A
 - **Corporate access**: Genie now targets Microsoft corporate tenant `72f988bf-86f1-41af-91ab-2d7cd011db47`; a real delegated token was verified for the expected audience/scope with canonical user identity and `Genie.Admin`. GitHub's Azure deployment tenant remains separate.
 - **Ownership and administration**: sessions and deployment runs use canonical `<tid>:<oid>` ownership. Cosmos persists the global prototype inventory; owner routes stay owner-scoped, and `Genie.Admin` can list and clean all prototypes.
 - **Lifecycle and isolation**: each prototype gets a tagged resource group, 7-day TTL, three-active-prototype owner quota, hourly cleanup reconciliation, and durable retryable cleanup state. Interrupted runs fail closed on restart.
-- **Shared prototype authentication**: new prototypes reuse one corporate Entra registration and a bounded pool of 50 pre-registered frontend callbacks. Each still has its own MISE gateway and exact CORS origin. Acceptance tests use an internal-only Container Apps port, so generated tests receive no bearer token and public FastAPI exposure remains blocked.
+- **Shared prototype authentication**: new prototypes reuse one corporate Entra registration and a bounded pool of 50 pre-registered frontend callbacks. Each owns its API gateway and exact CORS origin. Generated acceptance tests receive no bearer token, and public FastAPI exposure remains blocked.
 - **Legacy retirement**: the pre-cutover directory inventory found zero legacy `Genie Prototype - *` registrations. Existing prototype Container Apps are not modified by the auth cutover and can age out through normal cleanup.
 - **Derek POC retirement**: removed all 82 `derekpoc-*` Foundry agents, four Container Apps, four ACR repositories, two managed identities, and their two Foundry role assignments. Post-cleanup inventories found no Derek resources, images, agents, app registrations, or service principals.
 - **Deployment**: CI now configures corporate frontend/gateway/backend identity together, enables managed-identity Cosmos persistence, and no longer conflates application sign-in tenant with GitHub OIDC tenant. Frontend deployment waits for the backend rollout to become ready, preventing a partial identity cutover.

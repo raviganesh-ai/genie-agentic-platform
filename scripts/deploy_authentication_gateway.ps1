@@ -38,6 +38,12 @@ param(
     [string]$MemoryStoreEndpoint,
 
     [Parameter(Mandatory = $true)]
+    [string]$PrototypeApiGatewayPublisherEmail,
+
+    [Parameter(Mandatory = $true)]
+    [string]$PrototypeApiGatewayPublisherName,
+
+    [Parameter(Mandatory = $true)]
     [string]$SharedApplicationObjectId,
 
     [Parameter(Mandatory = $true)]
@@ -104,6 +110,8 @@ foreach ($requiredValue in @{
     GatewayImage = $GatewayImage
     AllowedOrigin = $AllowedOrigin
     MemoryStoreEndpoint = $MemoryStoreEndpoint
+    PrototypeApiGatewayPublisherEmail = $PrototypeApiGatewayPublisherEmail
+    PrototypeApiGatewayPublisherName = $PrototypeApiGatewayPublisherName
     SharedApplicationObjectId = $SharedApplicationObjectId
     SharedServicePrincipalObjectId = $SharedServicePrincipalObjectId
     SharedApplicationRoleId = $SharedApplicationRoleId
@@ -136,9 +144,13 @@ if ($backendIdentityClientIds.Count -ne 1) {
     throw "Expected exactly one non-empty AZURE_CLIENT_ID on '$BackendContainerName'; found $($backendIdentityClientIds.Count)."
 }
 $backendIdentityClientId = $backendIdentityClientIds[0].value
-Set-ContainerEnvironmentVariable -Container $backend -Name "GENIE_PROTOTYPE_MISE_ENABLED" -Value "true"
-Set-ContainerEnvironmentVariable -Container $backend -Name "GENIE_PROTOTYPE_MISE_GATEWAY_IMAGE" -Value $GatewayImage
-Set-ContainerEnvironmentVariable -Container $backend -Name "GENIE_PROTOTYPE_MISE_TEST_PRINCIPAL_CLIENT_ID" -Value $backendIdentityClientId
+Remove-ContainerEnvironmentVariable -Container $backend -Name "GENIE_PROTOTYPE_MISE_ENABLED"
+Remove-ContainerEnvironmentVariable -Container $backend -Name "GENIE_PROTOTYPE_MISE_GATEWAY_IMAGE"
+Remove-ContainerEnvironmentVariable -Container $backend -Name "GENIE_PROTOTYPE_MISE_TEST_PRINCIPAL_CLIENT_ID"
+Set-ContainerEnvironmentVariable -Container $backend -Name "GENIE_PROTOTYPE_API_GATEWAY_ENABLED" -Value "true"
+Set-ContainerEnvironmentVariable -Container $backend -Name "GENIE_PROTOTYPE_API_GATEWAY_PUBLISHER_EMAIL" -Value $PrototypeApiGatewayPublisherEmail
+Set-ContainerEnvironmentVariable -Container $backend -Name "GENIE_PROTOTYPE_API_GATEWAY_PUBLISHER_NAME" -Value $PrototypeApiGatewayPublisherName
+Set-ContainerEnvironmentVariable -Container $backend -Name "GENIE_PROTOTYPE_TEST_PRINCIPAL_CLIENT_ID" -Value $backendIdentityClientId
 Set-ContainerEnvironmentVariable -Container $backend -Name "GENIE_ENTRA_AUTHORITY" -Value "https://login.microsoftonline.com"
 Set-ContainerEnvironmentVariable -Container $backend -Name "GENIE_ENTRA_TENANT_ID" -Value $ApplicationTenantId
 Set-ContainerEnvironmentVariable -Container $backend -Name "GENIE_ENTRA_CLIENT_ID" -Value $ClientId

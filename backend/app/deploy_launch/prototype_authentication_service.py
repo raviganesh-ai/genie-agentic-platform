@@ -384,12 +384,12 @@ class NullPrototypeAuthenticationService:
 def create_prototype_authentication_service(
     *, settings: Settings
 ) -> PrototypeAuthenticationService | NullPrototypeAuthenticationService:
-    if not settings.prototype_mise_enabled:
+    if not settings.prototype_api_gateway_enabled:
         return NullPrototypeAuthenticationService()
-    if not settings.entra_tenant_id or not settings.prototype_mise_test_principal_client_id:
+    if not settings.entra_tenant_id or not settings.prototype_test_principal_client_id:
         raise PrototypeAuthenticationError(
-            "entra_tenant_id and prototype_mise_test_principal_client_id are required "
-            "when prototype MISE is enabled."
+            "entra_tenant_id and prototype_test_principal_client_id are required "
+            "when the prototype API gateway is enabled."
         )
     shared_configuration = None
     if settings.prototype_authentication_mode == "shared":
@@ -421,7 +421,7 @@ def create_prototype_authentication_service(
         )
     return PrototypeAuthenticationService(
         tenant_id=settings.entra_tenant_id,
-        test_principal_client_id=settings.prototype_mise_test_principal_client_id,
+        test_principal_client_id=settings.prototype_test_principal_client_id,
         shared_configuration=shared_configuration,
         shared_frontend_domain=settings.prototype_shared_frontend_domain,
         shared_slot_count=settings.prototype_shared_slot_count,

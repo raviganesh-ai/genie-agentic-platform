@@ -53,7 +53,17 @@ resource_providers:
 
   - namespace: Microsoft.App
     display_name: Azure Container Apps
-    reason: Hosts the Genie backend's Container Apps environment and revisions.
+    reason: Hosts Genie and each prototype's private Container Apps environment and revisions.
+    required: true
+
+  - namespace: Microsoft.Network
+    display_name: Azure Virtual Network and Private DNS
+    reason: Isolates each prototype backend and resolves its internal Container Apps endpoint from its gateway.
+    required: true
+
+  - namespace: Microsoft.ApiManagement
+    display_name: Azure API Management
+    reason: Provides each generated prototype with a dedicated authenticated public API gateway.
     required: true
 
   - namespace: Microsoft.Web

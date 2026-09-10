@@ -2342,6 +2342,7 @@ class DeploymentPipelineService:
                         await self._backend_deployment_service.configure_gateway_frontend_origin(
                             mission_slug=mission_slug,
                             frontend_origin=frontend_result.frontend_url,
+                            prototype_authentication=prototype_authentication,
                         )
                     detail = f"Frontend deployed at {frontend_result.frontend_url}."
 

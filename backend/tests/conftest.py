@@ -168,9 +168,10 @@ def foundry_configured_settings(valid_config_root: Path) -> Settings:
         ),
         deployment_storage_account_name="genieexamplestorage",
         deployment_location="eastus2",
-        prototype_mise_enabled=True,
-        prototype_mise_gateway_image="genieexampleacr.azurecr.io/genie-auth-gateway:test",
-        prototype_mise_test_principal_client_id="00000000-0000-0000-0000-000000000001",
+        prototype_api_gateway_enabled=True,
+        prototype_api_gateway_publisher_email="genie@example.com",
+        prototype_api_gateway_publisher_name="Genie",
+        prototype_test_principal_client_id="00000000-0000-0000-0000-000000000001",
         entra_tenant_id="00000000-0000-0000-0000-000000000002",
         config_root=valid_config_root,
     )

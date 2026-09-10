@@ -73,6 +73,13 @@ module foundationalResources 'modules/foundational-resources.bicep' = {
   }
 }
 
+module prototypeGatewayRbac 'modules/prototype-gateway-rbac.bicep' = {
+  name: 'genie-prototype-gateway-rbac'
+  params: {
+    managedIdentityPrincipalId: foundationalResources.outputs.managedIdentityPrincipalId
+  }
+}
+
 output resourceGroupName string = resourceGroup.name
 output managedIdentityPrincipalId string = foundationalResources.outputs.managedIdentityPrincipalId
 output keyVaultUri string = foundationalResources.outputs.keyVaultUri

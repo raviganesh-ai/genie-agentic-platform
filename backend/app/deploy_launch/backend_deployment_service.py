@@ -46,6 +46,7 @@ from urllib.parse import urlparse
 from uuid import NAMESPACE_URL, uuid5
 
 from app.config.settings import Settings
+from app.deploy_launch.prototype_api_gateway_service import PrototypeApiGatewayService
 from app.deploy_launch.prototype_authentication_service import (
     PrototypeAuthenticationConfiguration,
 )
@@ -130,7 +131,7 @@ class BackendDeploymentService:
         location: str,
         foundry_endpoint: str,
         foundry_project_name: str,
-        prototype_gateway_image: str | None = None,
+        prototype_api_gateway_service: PrototypeApiGatewayService | None = None,
     ) -> None:
         self._subscription_id = subscription_id
         self._resource_group = resource_group
@@ -139,7 +140,7 @@ class BackendDeploymentService:
         self._location = location
         self._foundry_endpoint = foundry_endpoint
         self._foundry_project_name = foundry_project_name
-        self._prototype_gateway_image = prototype_gateway_image
+        self._prototype_api_gateway_service = prototype_api_gateway_service
 
     def _acr_client(self) -> Any:
         """Client pinned to the ``2019-06-01-preview`` API version - the version
@@ -299,17 +300,13 @@ class BackendDeploymentService:
             raise BackendDeploymentError(
                 f"No Dockerfile found in materialized build directory '{build_root}'."
             )
-        if self._prototype_gateway_image and prototype_authentication is None:
-            raise BackendDeploymentError(
-                "Prototype MISE is enabled but no prototype authentication configuration was supplied."
-            )
-        if prototype_authentication is not None and not self._prototype_gateway_image:
-            raise BackendDeploymentError(
-                "Prototype authentication was supplied but prototype_mise_gateway_image is missing."
-            )
         if prototype_authentication is not None and not mission_identity_resource_id:
             raise BackendDeploymentError(
                 "Protected prototype deployment requires its mission user-assigned identity."
+            )
+        if prototype_authentication is not None and self._prototype_api_gateway_service is None:
+            raise BackendDeploymentError(
+                "Protected prototype deployment requires a dedicated API gateway service."
             )
 
         acr_client = self._acr_client()
@@ -411,6 +408,20 @@ class BackendDeploymentService:
 
         registry_username: str | None = None
         registry_password: str | None = None
+        managed_environment_id = self._container_apps_environment_id
+        if prototype_authentication is not None:
+            try:
+                gateway_infrastructure = (
+                    await self._prototype_api_gateway_service.provision_infrastructure(
+                        mission_slug=mission_slug,
+                        on_progress=on_progress,
+                    )
+                )
+                managed_environment_id = gateway_infrastructure.managed_environment_id
+            except Exception as exc:
+                raise BackendDeploymentError(
+                    f"Failed to provision private prototype infrastructure: {exc}"
+                ) from exc
         if prototype_authentication is None:
             try:
                 await _report("Reading Azure Container Registry credentials...")
@@ -431,11 +442,8 @@ class BackendDeploymentService:
                 Configuration,
                 Container,
                 ContainerApp,
-                ContainerAppProbe,
-                ContainerAppProbeHttpGet,
                 EnvironmentVar,
                 Ingress,
-                IngressPortMapping,
                 ManagedServiceIdentity,
                 RegistryCredentials,
                 Secret,
@@ -507,77 +515,16 @@ class BackendDeploymentService:
             )
             
             containers = [Container(name="backend", image=image_tag, env=env_vars)]
-            ingress_target_port = 8000
-            if prototype_authentication is not None:
-                gateway_env = [
-                    EnvironmentVar(name="ASPNETCORE_HTTP_PORTS", value="8080"),
-                    EnvironmentVar(
-                        name="AzureAd__Instance", value="https://login.microsoftonline.com/"
-                    ),
-                    EnvironmentVar(
-                        name="AzureAd__TenantId", value=prototype_authentication.tenant_id
-                    ),
-                    EnvironmentVar(
-                        name="AzureAd__ClientId", value=prototype_authentication.client_id
-                    ),
-                    EnvironmentVar(
-                        name="AzureAd__Audiences__0", value=prototype_authentication.client_id
-                    ),
-                    EnvironmentVar(
-                        name="AzureAd__Audiences__1",
-                        value=f"api://{prototype_authentication.client_id}",
-                    ),
-                    EnvironmentVar(name="Backend__Destination", value="http://localhost:8000"),
-                    EnvironmentVar(
-                        name="Cors__AllowedOrigins__0", value="https://prototype.invalid"
-                    ),
-                ]
-                containers.append(
-                    Container(
-                        name="prototype-auth-gateway",
-                        image=self._prototype_gateway_image,
-                        env=gateway_env,
-                        probes=[
-                            ContainerAppProbe(
-                                type="Liveness",
-                                http_get=ContainerAppProbeHttpGet(
-                                    path="/health/live", port=8080, scheme="HTTP"
-                                ),
-                                initial_delay_seconds=10,
-                                period_seconds=30,
-                                timeout_seconds=5,
-                                failure_threshold=3,
-                            ),
-                            ContainerAppProbe(
-                                type="Readiness",
-                                http_get=ContainerAppProbeHttpGet(
-                                    path="/health/ready", port=8080, scheme="HTTP"
-                                ),
-                                initial_delay_seconds=10,
-                                period_seconds=10,
-                                timeout_seconds=5,
-                                failure_threshold=6,
-                            ),
-                        ],
-                    )
-                )
-                ingress_target_port = 8080
-
-            additional_port_mappings = (
-                [IngressPortMapping(external=False, target_port=8000, exposed_port=8000)]
-                if prototype_authentication is not None
-                else None
-            )
             envelope = ContainerApp(
                 location=self._location,
                 tags={"genie-managed-by": "genie", "genie-mission-id": mission_slug},
-                managed_environment_id=self._container_apps_environment_id,
+                managed_environment_id=managed_environment_id,
                 identity=identity_config,
                 configuration=Configuration(
                     ingress=Ingress(
-                        external=True,
-                        target_port=ingress_target_port,
-                        additional_port_mappings=additional_port_mappings,
+                        external=prototype_authentication is None,
+                        target_port=8000,
+                        additional_port_mappings=None,
                     ),
                     registries=[registry_credentials],
                     secrets=registry_secrets,
@@ -595,63 +542,47 @@ class BackendDeploymentService:
             raise BackendDeploymentError(f"Failed to deploy Container App: {exc}") from exc
 
         fqdn = getattr(getattr(result.configuration, "ingress", None), "fqdn", None)
-        backend_url = f"https://{fqdn}" if fqdn else ""
+        private_backend_url = f"https://{fqdn}" if fqdn else ""
+        backend_url = private_backend_url
+        if prototype_authentication is not None:
+            try:
+                backend_url = await self._prototype_api_gateway_service.publish_api(
+                    mission_slug=mission_slug,
+                    backend_url=private_backend_url,
+                    authentication=prototype_authentication,
+                    on_progress=on_progress,
+                )
+            except Exception as exc:
+                raise BackendDeploymentError(
+                    f"Failed to publish protected prototype API: {exc}"
+                ) from exc
         return BackendDeploymentResult(
             image_tag=image_tag,
             backend_url=backend_url,
-            test_backend_url=(
-                f"http://{fqdn}:8000" if fqdn and prototype_authentication is not None else None
-            ),
+            test_backend_url=backend_url if prototype_authentication is not None else None,
         )
 
     async def configure_gateway_frontend_origin(
-        self, *, mission_slug: str, frontend_origin: str
+        self,
+        *,
+        mission_slug: str,
+        frontend_origin: str,
+        prototype_authentication: PrototypeAuthenticationConfiguration | None = None,
     ) -> None:
-        """Replaces the bootstrap-deny origin with the prototype's exact deployed SPA origin."""
+        """Replaces the bootstrap-deny APIM origin with the deployed SPA origin."""
 
-        if not self._prototype_gateway_image:
+        if prototype_authentication is None:
             return
-        if not frontend_origin.startswith("https://"):
-            raise BackendDeploymentError("Prototype gateway CORS origin must use HTTPS.")
-        client = self._container_apps_client()
-        app_name = f"genie-{mission_slug}-backend"
-        target_resource_group = prototype_resource_group_name(mission_slug)
+        if self._prototype_api_gateway_service is None:
+            raise BackendDeploymentError(
+                "Protected prototype deployment requires a dedicated API gateway service."
+            )
         try:
-            app = await asyncio.to_thread(
-            client.container_apps.get, target_resource_group, app_name
+            await self._prototype_api_gateway_service.configure_frontend_origin(
+                mission_slug=mission_slug,
+                frontend_origin=frontend_origin,
+                authentication=prototype_authentication,
             )
-            gateway = next(
-                (
-                    container
-                    for container in app.template.containers
-                    if container.name == "prototype-auth-gateway"
-                ),
-                None,
-            )
-            if gateway is None:
-                raise BackendDeploymentError(
-                    f"Prototype Container App '{app_name}' has no MISE gateway container."
-                )
-            origin_updated = False
-            for environment_variable in gateway.env or []:
-                if environment_variable.name == "Cors__AllowedOrigins__0":
-                    environment_variable.value = frontend_origin.rstrip("/")
-                    origin_updated = True
-                    break
-            if not origin_updated:
-                raise BackendDeploymentError(
-                    "Prototype MISE gateway has no configured CORS origin slot."
-                )
-            if app.configuration.ingress.target_port != 8080:
-                raise BackendDeploymentError(
-                    "Prototype external ingress does not target the MISE gateway."
-                )
-            poller = client.container_apps.begin_create_or_update(
-                target_resource_group, app_name, app
-            )
-            await asyncio.to_thread(poller.result)
-        except BackendDeploymentError:
-            raise
         except Exception as exc:
             raise BackendDeploymentError(
                 f"Failed to configure prototype gateway CORS origin: {exc}"
@@ -679,9 +610,13 @@ class NullBackendDeploymentService:
         )
 
     async def configure_gateway_frontend_origin(
-        self, *, mission_slug: str, frontend_origin: str
+        self,
+        *,
+        mission_slug: str,
+        frontend_origin: str,
+        prototype_authentication: PrototypeAuthenticationConfiguration | None = None,
     ) -> None:
-        del mission_slug, frontend_origin
+        del mission_slug, frontend_origin, prototype_authentication
 
     async def delete(self, *, mission_slug: str) -> None:
         del mission_slug
@@ -718,7 +653,16 @@ def create_backend_deployment_service(
         location=settings.deployment_location,  # type: ignore[arg-type]
         foundry_endpoint=settings.azure_foundry_endpoint,  # type: ignore[arg-type]
         foundry_project_name=settings.azure_foundry_project_name,  # type: ignore[arg-type]
-        prototype_gateway_image=(
-            settings.prototype_mise_gateway_image if settings.prototype_mise_enabled else None
+        prototype_api_gateway_service=(
+            PrototypeApiGatewayService(
+                subscription_id=settings.azure_subscription_id,  # type: ignore[arg-type]
+                location=settings.deployment_location,  # type: ignore[arg-type]
+                publisher_email=settings.prototype_api_gateway_publisher_email or "",
+                publisher_name=settings.prototype_api_gateway_publisher_name or "",
+                sku_name=settings.prototype_api_gateway_sku_name,
+                capacity=settings.prototype_api_gateway_capacity,
+            )
+            if settings.prototype_api_gateway_enabled
+            else None
         ),
     )

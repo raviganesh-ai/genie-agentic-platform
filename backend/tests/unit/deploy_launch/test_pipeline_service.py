@@ -468,9 +468,14 @@ class _FakeProtectedBackendDeploymentService:
         )
 
     async def configure_gateway_frontend_origin(
-        self, *, mission_slug: str, frontend_origin: str
+        self,
+        *,
+        mission_slug: str,
+        frontend_origin: str,
+        prototype_authentication=None,
     ):
         del mission_slug
+        assert prototype_authentication is self.authentication
         self.frontend_origin = frontend_origin
 
     async def delete(self, *, mission_slug: str, app_name: str | None = None):

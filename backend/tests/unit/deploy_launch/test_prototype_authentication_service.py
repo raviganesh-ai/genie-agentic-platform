@@ -209,8 +209,8 @@ def test_factory_is_explicitly_disabled_or_fails_closed_when_enabled() -> None:
     assert isinstance(disabled, NullPrototypeAuthenticationService)
 
     with pytest.raises(
-        PrototypeAuthenticationError, match="prototype_mise_test_principal_client_id"
+        PrototypeAuthenticationError, match="prototype_test_principal_client_id"
     ):
         create_prototype_authentication_service(
-            settings=Settings(prototype_mise_enabled=True)
+            settings=Settings(prototype_api_gateway_enabled=True)
         )

@@ -92,29 +92,30 @@ def test_missing_deployment_config_does_not_fail_in_development(local_settings):
     assert result.passed
 
 
-def test_production_fails_closed_when_prototype_mise_is_disabled(
+def test_production_fails_closed_when_prototype_api_gateway_is_disabled(
     foundry_configured_settings,
 ):
     broken = foundry_configured_settings.model_copy(
-        update={"prototype_mise_enabled": False}
+        update={"prototype_api_gateway_enabled": False}
     )
 
     result = ConfigurationValidator().validate(broken)
 
     assert not result.passed
     assert any(
-        "prototype_mise_enabled must be true" in issue.message
+        "prototype_api_gateway_enabled must be true" in issue.message
         for issue in result.issues
     )
 
 
-def test_prototype_mise_fails_closed_when_required_settings_are_missing(local_settings):
-    broken = local_settings.model_copy(update={"prototype_mise_enabled": True})
+def test_prototype_api_gateway_fails_closed_when_required_settings_are_missing(local_settings):
+    broken = local_settings.model_copy(update={"prototype_api_gateway_enabled": True})
 
     result = ConfigurationValidator().validate(broken)
 
     assert not result.passed
     messages = {issue.message for issue in result.issues}
-    assert any("prototype_mise_gateway_image" in message for message in messages)
+    assert any("prototype_api_gateway_publisher_email" in message for message in messages)
+    assert any("prototype_api_gateway_publisher_name" in message for message in messages)
     assert any("entra_tenant_id" in message for message in messages)
-    assert any("prototype_mise_test_principal_client_id" in message for message in messages)
+    assert any("prototype_test_principal_client_id" in message for message in messages)

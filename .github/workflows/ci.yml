@@ -146,6 +146,8 @@ jobs:
           [ -z "${{ vars.VITE_ENTRA_TENANT_ID }}" ] && missing+=("VITE_ENTRA_TENANT_ID")
           [ -z "${{ vars.VITE_ENTRA_API_SCOPE }}" ] && missing+=("VITE_ENTRA_API_SCOPE")
           [ -z "${{ vars.GENIE_MEMORY_STORE_ENDPOINT }}" ] && missing+=("GENIE_MEMORY_STORE_ENDPOINT")
+          [ -z "${{ vars.GENIE_PROTOTYPE_API_GATEWAY_PUBLISHER_EMAIL }}" ] && missing+=("GENIE_PROTOTYPE_API_GATEWAY_PUBLISHER_EMAIL")
+          [ -z "${{ vars.GENIE_PROTOTYPE_API_GATEWAY_PUBLISHER_NAME }}" ] && missing+=("GENIE_PROTOTYPE_API_GATEWAY_PUBLISHER_NAME")
           [ -z "${{ vars.GENIE_PROTOTYPE_SHARED_APPLICATION_OBJECT_ID }}" ] && missing+=("GENIE_PROTOTYPE_SHARED_APPLICATION_OBJECT_ID")
           [ -z "${{ vars.GENIE_PROTOTYPE_SHARED_SERVICE_PRINCIPAL_OBJECT_ID }}" ] && missing+=("GENIE_PROTOTYPE_SHARED_SERVICE_PRINCIPAL_OBJECT_ID")
           [ -z "${{ vars.GENIE_PROTOTYPE_SHARED_APPLICATION_ROLE_ID }}" ] && missing+=("GENIE_PROTOTYPE_SHARED_APPLICATION_ROLE_ID")
@@ -195,6 +197,8 @@ jobs:
             -GatewayImage "${{ vars.AZURE_ACR_NAME }}.azurecr.io/genie-auth-gateway:${{ github.sha }}" `
             -AllowedOrigin "${{ vars.GENIE_GATEWAY_ALLOWED_ORIGIN }}" `
             -MemoryStoreEndpoint "${{ vars.GENIE_MEMORY_STORE_ENDPOINT }}" `
+            -PrototypeApiGatewayPublisherEmail "${{ vars.GENIE_PROTOTYPE_API_GATEWAY_PUBLISHER_EMAIL }}" `
+            -PrototypeApiGatewayPublisherName "${{ vars.GENIE_PROTOTYPE_API_GATEWAY_PUBLISHER_NAME }}" `
             -SharedApplicationObjectId "${{ vars.GENIE_PROTOTYPE_SHARED_APPLICATION_OBJECT_ID }}" `
             -SharedServicePrincipalObjectId "${{ vars.GENIE_PROTOTYPE_SHARED_SERVICE_PRINCIPAL_OBJECT_ID }}" `
             -SharedApplicationRoleId "${{ vars.GENIE_PROTOTYPE_SHARED_APPLICATION_ROLE_ID }}" `

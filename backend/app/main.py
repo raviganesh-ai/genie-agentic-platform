@@ -296,7 +296,7 @@ def create_app(
                     f"{resolved_settings.deployment_resource_group}/providers/"
                     f"Microsoft.ContainerRegistry/registries/"
                     f"{resolved_settings.deployment_acr_name}"
-                    if resolved_settings.prototype_mise_enabled
+                    if resolved_settings.prototype_api_gateway_enabled
                     else None
                 ),
             ),

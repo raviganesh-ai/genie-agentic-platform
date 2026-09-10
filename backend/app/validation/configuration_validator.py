@@ -32,8 +32,8 @@ class ConfigurationValidator:
             errors.append("default_llm must not be empty.")
 
         if settings.environment == "production":
-            if not settings.prototype_mise_enabled:
-                errors.append("prototype_mise_enabled must be true in production.")
+            if not settings.prototype_api_gateway_enabled:
+                errors.append("prototype_api_gateway_enabled must be true in production.")
             # Deploy & Launch's backend/frontend deployment factories silently
             # fall back to Null*DeploymentService stand-ins (fake "localhost"
             # URLs, no real Azure resources touched) whenever these are unset -
@@ -53,17 +53,23 @@ class ConfigurationValidator:
             if not settings.deployment_location:
                 errors.append("deployment_location is required in production.")
 
-        if settings.prototype_mise_enabled:
-            if not settings.prototype_mise_gateway_image:
+        if settings.prototype_api_gateway_enabled:
+            if not settings.prototype_api_gateway_publisher_email:
                 errors.append(
-                    "prototype_mise_gateway_image is required when prototype MISE is enabled."
+                    "prototype_api_gateway_publisher_email is required when the prototype "
+                    "API gateway is enabled."
+                )
+            if not settings.prototype_api_gateway_publisher_name:
+                errors.append(
+                    "prototype_api_gateway_publisher_name is required when the prototype "
+                    "API gateway is enabled."
                 )
             if not settings.entra_tenant_id:
-                errors.append("entra_tenant_id is required when prototype MISE is enabled.")
-            if not settings.prototype_mise_test_principal_client_id:
+                errors.append("entra_tenant_id is required when the prototype API gateway is enabled.")
+            if not settings.prototype_test_principal_client_id:
                 errors.append(
-                    "prototype_mise_test_principal_client_id is required when prototype MISE "
-                    "is enabled."
+                    "prototype_test_principal_client_id is required when the prototype API "
+                    "gateway is enabled."
                 )
 
         if errors:

@@ -27,6 +27,9 @@ directly, each isolating that SDK behind its own interface:
   ContainerRegistryManagementClient / ContainerAppsAPIClient /
   DefaultAzureCredential lifecycle for the Deploy & Launch pipeline's real
   ACR build + Container Apps deploy steps.
+- ``app/deploy_launch/prototype_api_gateway_service.py`` owns the Network,
+  Private DNS, Container Apps environment, and API Management clients used
+  to create each prototype's isolated gateway and private backend network.
 - ``app/deploy_launch/frontend_deployment_service.py`` owns the
   BlobServiceClient / StorageManagementClient / DefaultAzureCredential
   lifecycle for the Deploy & Launch pipeline's real Storage static website
@@ -58,6 +61,7 @@ _ALLOWED_RELATIVE_PATHS = {
     Path("repositories/document_store.py"),
     Path("transcription/speech_service.py"),
     Path("deploy_launch/backend_deployment_service.py"),
+    Path("deploy_launch/prototype_api_gateway_service.py"),
     Path("deploy_launch/frontend_deployment_service.py"),
     Path("deploy_launch/container_app_frontend_deployment_service.py"),
     Path("deploy_launch/code_materializer.py"),

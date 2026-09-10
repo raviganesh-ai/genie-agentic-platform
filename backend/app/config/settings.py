@@ -162,9 +162,12 @@ class Settings(BaseSettings):
     deployment_container_apps_environment_id: str | None = None
     deployment_storage_account_name: str | None = None
     deployment_location: str | None = None
-    prototype_mise_enabled: bool = False
-    prototype_mise_gateway_image: str | None = None
-    prototype_mise_test_principal_client_id: str | None = None
+    prototype_api_gateway_enabled: bool = False
+    prototype_api_gateway_publisher_email: str | None = None
+    prototype_api_gateway_publisher_name: str | None = None
+    prototype_api_gateway_sku_name: Literal["StandardV2", "PremiumV2"] = "StandardV2"
+    prototype_api_gateway_capacity: int = Field(default=1, ge=1, le=10)
+    prototype_test_principal_client_id: str | None = None
     prototype_authentication_mode: Literal["per_prototype", "shared"] = "per_prototype"
     prototype_shared_application_object_id: str | None = None
     prototype_shared_service_principal_object_id: str | None = None
@@ -235,8 +238,9 @@ class Settings(BaseSettings):
         "deployment_container_apps_environment_id",
         "deployment_storage_account_name",
         "deployment_location",
-        "prototype_mise_gateway_image",
-        "prototype_mise_test_principal_client_id",
+        "prototype_api_gateway_publisher_email",
+        "prototype_api_gateway_publisher_name",
+        "prototype_test_principal_client_id",
         mode="after",
     )
     @classmethod

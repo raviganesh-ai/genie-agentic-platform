@@ -130,7 +130,7 @@ def test_configure_mission_identity_accepts_valid_resource_id_casing(monkeypatch
     assert assignment_calls
 
 
-async def test_protected_backend_deploys_exactly_one_gateway_on_public_ingress(
+async def test_protected_backend_deploys_private_backend_without_mise_sidecar(
     monkeypatch, tmp_path
 ):
     from azure.storage.blob import BlobClient
@@ -144,6 +144,24 @@ async def test_protected_backend_deploys_exactly_one_gateway_on_public_ingress(
         delegated_scope="api://prototype-client/access_as_user",
         application_role_id="role-1",
     )
+    gateway_calls = {}
+
+    class FakeGatewayService:
+        async def provision_infrastructure(self, *, mission_slug, on_progress=None):
+            gateway_calls["provision"] = mission_slug
+            return SimpleNamespace(managed_environment_id="private-env-123")
+
+        async def publish_api(
+            self,
+            *,
+            mission_slug,
+            backend_url,
+            authentication,
+            on_progress=None,
+        ):
+            gateway_calls["publish"] = (mission_slug, backend_url, authentication.client_id)
+            return "https://claims-1234.azure-api.net"
+
     service = BackendDeploymentService(
         subscription_id="sub-123",
         resource_group="genie-dev-rg",
@@ -152,7 +170,7 @@ async def test_protected_backend_deploys_exactly_one_gateway_on_public_ingress(
         location="eastus2",
         foundry_endpoint="https://foundry.example.com/api/projects/demo",
         foundry_project_name="demo",
-        prototype_gateway_image="acr123.azurecr.io/genie-auth-gateway:sha-1",
+        prototype_api_gateway_service=FakeGatewayService(),
     )
     acr_client = SimpleNamespace(
         registries=SimpleNamespace(
@@ -207,36 +225,29 @@ async def test_protected_backend_deploys_exactly_one_gateway_on_public_ingress(
     )
 
     envelope = captured["envelope"]
-    assert result.backend_url == "https://prototype.example.com"
-    assert result.test_backend_url == "http://prototype.example.com:8000"
-    assert envelope.configuration.ingress.target_port == 8080
-    assert len(envelope.configuration.ingress.additional_port_mappings) == 1
-    test_port = envelope.configuration.ingress.additional_port_mappings[0]
-    assert test_port.external is False
-    assert test_port.target_port == 8000
-    assert test_port.exposed_port == 8000
+    assert result.backend_url == "https://claims-1234.azure-api.net"
+    assert result.test_backend_url == "https://claims-1234.azure-api.net"
+    assert envelope.managed_environment_id == "private-env-123"
+    assert envelope.configuration.ingress.external is False
+    assert envelope.configuration.ingress.target_port == 8000
+    assert envelope.configuration.ingress.additional_port_mappings is None
     assert envelope.configuration.registries[0].identity.endswith("/claims-1234")
     assert envelope.configuration.registries[0].username is None
     assert envelope.configuration.secrets == []
-    gateways = [
-        container
-        for container in envelope.template.containers
-        if container.name == "prototype-auth-gateway"
-    ]
-    assert len(gateways) == 1
-    assert gateways[0].image == "acr123.azurecr.io/genie-auth-gateway:sha-1"
-    gateway_environment = {item.name: item.value for item in gateways[0].env}
-    assert gateway_environment["AzureAd__ClientId"] == "prototype-client"
-    assert gateway_environment["Backend__Destination"] == "http://localhost:8000"
-    assert {probe.http_get.path for probe in gateways[0].probes} == {
-        "/health/live",
-        "/health/ready",
-    }
+    assert [container.name for container in envelope.template.containers] == ["backend"]
     backend = next(
         container for container in envelope.template.containers if container.name == "backend"
     )
     backend_environment = {item.name: item.value for item in backend.env}
     assert backend_environment["ENTRA_CLIENT_ID"] == "prototype-client"
+    assert gateway_calls == {
+        "provision": "claims-1234",
+        "publish": (
+            "claims-1234",
+            "https://prototype.example.com",
+            "prototype-client",
+        ),
+    }
 
 
 async def test_frontend_deployment_uses_mission_identity_for_acr(monkeypatch, tmp_path):
@@ -305,7 +316,21 @@ async def test_frontend_deployment_uses_mission_identity_for_acr(monkeypatch, tm
     assert envelope.configuration.secrets == []
 
 
-async def test_gateway_origin_finalization_preserves_gateway_ingress(monkeypatch):
+async def test_gateway_origin_finalization_updates_apim_policy():
+    authentication = PrototypeAuthenticationConfiguration(
+        application_object_id="app-object",
+        service_principal_object_id="prototype-sp",
+        client_id="prototype-client",
+        tenant_id="tenant-1",
+        delegated_scope="api://prototype-client/access_as_user",
+        application_role_id="role-1",
+    )
+    calls = []
+
+    class FakeGatewayService:
+        async def configure_frontend_origin(self, **kwargs):
+            calls.append(kwargs)
+
     service = BackendDeploymentService(
         subscription_id="sub-123",
         resource_group="genie-dev-rg",
@@ -314,30 +339,19 @@ async def test_gateway_origin_finalization_preserves_gateway_ingress(monkeypatch
         location="eastus2",
         foundry_endpoint="https://foundry.example.com/api/projects/demo",
         foundry_project_name="demo",
-        prototype_gateway_image="acr123.azurecr.io/genie-auth-gateway:sha-1",
+        prototype_api_gateway_service=FakeGatewayService(),
     )
-    gateway = SimpleNamespace(
-        name="prototype-auth-gateway",
-        env=[SimpleNamespace(name="Cors__AllowedOrigins__0", value="https://prototype.invalid")],
-    )
-    app = SimpleNamespace(
-        template=SimpleNamespace(containers=[gateway]),
-        configuration=SimpleNamespace(ingress=SimpleNamespace(target_port=8080)),
-    )
-    updates = []
-    client = SimpleNamespace(
-        container_apps=SimpleNamespace(
-            get=lambda *_: app,
-            begin_create_or_update=lambda *args: updates.append(args)
-            or SimpleNamespace(result=lambda: None),
-        )
-    )
-    monkeypatch.setattr(service, "_container_apps_client", lambda: client)
 
     await service.configure_gateway_frontend_origin(
-        mission_slug="claims-1234", frontend_origin="https://prototype.example.com/"
+        mission_slug="claims-1234",
+        frontend_origin="https://prototype.example.com/",
+        prototype_authentication=authentication,
     )
 
-    assert gateway.env[0].value == "https://prototype.example.com"
-    assert len(updates) == 1
-    assert updates[0][2].configuration.ingress.target_port == 8080
+    assert calls == [
+        {
+            "mission_slug": "claims-1234",
+            "frontend_origin": "https://prototype.example.com/",
+            "authentication": authentication,
+        }
+    ]
