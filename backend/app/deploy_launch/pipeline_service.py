@@ -1324,6 +1324,7 @@ class DeploymentPipelineService:
         self._agent_foundry_names: dict[str, dict[str, str]] = {}
         self._generated_test_outputs: dict[str, str] = {}
         self._test_backend_urls: dict[str, str] = {}
+        self._test_access_keys: dict[str, str] = {}
         self._prototype_authentications: dict[
             str, PrototypeAuthenticationConfiguration
         ] = {}
@@ -1748,6 +1749,8 @@ class DeploymentPipelineService:
         self._materialized_builds.pop(pipeline_run.id, None)
         self._agent_foundry_names.pop(pipeline_run.id, None)
         self._generated_test_outputs.pop(pipeline_run.id, None)
+        self._test_backend_urls.pop(pipeline_run.id, None)
+        self._test_access_keys.pop(pipeline_run.id, None)
         self._workspaces.pop(pipeline_run.id, None)
         self._runs.pop(pipeline_run.id, None)
         await self._run_repository.delete(pipeline_run_id=pipeline_run.id)
@@ -2235,6 +2238,8 @@ class DeploymentPipelineService:
                         self._test_backend_urls[pipeline_run.id] = (
                             backend_result.test_backend_url
                         )
+                    if backend_result.test_access_key:
+                        self._test_access_keys[pipeline_run.id] = backend_result.test_access_key
                     detail = (
                         f"Backend deployed at {backend_result.backend_url}, integrated with "
                         f"orchestrator agent '{orchestrator_foundry_name}'."
@@ -2575,25 +2580,31 @@ class DeploymentPipelineService:
                     prototype_authentication = self._prototype_authentications.get(
                         pipeline_run.id
                     )
-                    if (
-                        prototype_authentication is not None
-                        and self._prototype_authentication_mode == "shared"
-                    ):
+                    if prototype_authentication is not None:
                         test_backend_url = self._test_backend_urls.get(pipeline_run.id)
                         if not test_backend_url:
                             raise DeploymentPipelineStepFailedError(
-                                "The internal prototype acceptance-test endpoint is unavailable."
+                                "The authenticated prototype acceptance-test endpoint is unavailable."
                             )
                         runtime_environment["MISSION_UNAUTHENTICATED_BACKEND_URL"] = (
                             pipeline_run.backend_url or ""
                         )
                         runtime_environment["MISSION_BACKEND_URL"] = test_backend_url
-                    elif prototype_authentication is not None:
-                        runtime_environment["MISSION_ACCESS_TOKEN"] = (
-                            await self._prototype_authentication_service.get_test_access_token(
-                                prototype_authentication
-                            )
+                        test_access_key = self._test_access_keys.pop(
+                            pipeline_run.id, None
                         )
+                        if self._prototype_authentication_mode == "shared":
+                            if not test_access_key:
+                                raise DeploymentPipelineStepFailedError(
+                                    "The prototype acceptance-test credential is unavailable."
+                                )
+                            runtime_environment["MISSION_ACCEPTANCE_TEST_KEY"] = test_access_key
+                        else:
+                            runtime_environment["MISSION_ACCESS_TOKEN"] = (
+                                await self._prototype_authentication_service.get_test_access_token(
+                                    prototype_authentication
+                                )
+                            )
                     test_result = await self._test_execution_service.run_tests(
                         build_root=backend_root,
                         test_output_text=test_output_text,

@@ -66,10 +66,13 @@ class ConfigurationValidator:
                 )
             if not settings.entra_tenant_id:
                 errors.append("entra_tenant_id is required when the prototype API gateway is enabled.")
-            if not settings.prototype_test_principal_client_id:
+            if (
+                settings.prototype_authentication_mode == "per_prototype"
+                and not settings.prototype_test_principal_client_id
+            ):
                 errors.append(
                     "prototype_test_principal_client_id is required when the prototype API "
-                    "gateway is enabled."
+                    "gateway uses per-prototype authentication."
                 )
 
         if errors:

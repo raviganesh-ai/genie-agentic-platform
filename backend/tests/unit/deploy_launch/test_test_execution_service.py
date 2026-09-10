@@ -319,6 +319,31 @@ def test_token_is_not_available_to_generated_code():
     assert access_token not in result.summary
 
 
+async def test_run_tests_keeps_acceptance_key_out_of_generated_process(tmp_path: Path):
+    acceptance_key = "sensitive-prototype-acceptance-key"
+    output = '''\n```python
+import os
+
+def test_key_is_not_available_to_generated_code():
+    assert "MISSION_ACCEPTANCE_TEST_KEY" not in os.environ
+    assert os.environ["MISSION_BACKEND_URL"].startswith("http://127.0.0.1:")
+```\n'''
+    service = TestExecutionService(timeout_seconds=60)
+
+    result = await service.run_tests(
+        build_root=tmp_path,
+        test_output_text=output,
+        runtime_environment={
+            "MISSION_ACCEPTANCE_TEST_KEY": acceptance_key,
+            "MISSION_BACKEND_URL": "https://prototype.example.com",
+        },
+    )
+
+    assert result.success
+    assert acceptance_key not in result.raw_output
+    assert acceptance_key not in result.summary
+
+
 def test_authenticated_test_proxy_injects_token_only_at_fixed_upstream() -> None:
     observed: dict[str, str] = {}
 
@@ -355,4 +380,43 @@ def test_authenticated_test_proxy_injects_token_only_at_fixed_upstream() -> None
     assert observed == {
         "authorization": "Bearer prototype-token",
         "path": "/invoke?case=1",
+    }
+
+
+def test_authenticated_test_proxy_injects_acceptance_key_only_at_fixed_upstream() -> None:
+    observed: dict[str, str] = {}
+
+    class UpstreamHandler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            observed["acceptance_key"] = self.headers.get("X-Genie-Acceptance-Key", "")
+            observed["path"] = self.path
+            self.send_response(200)
+            self.send_header("Content-Length", "2")
+            self.end_headers()
+            self.wfile.write(b"ok")
+
+        def log_message(self, format: str, *args: object) -> None:
+            del format, args
+
+    upstream = ThreadingHTTPServer(("127.0.0.1", 0), UpstreamHandler)
+    upstream_thread = threading.Thread(target=upstream.serve_forever, daemon=True)
+    upstream_thread.start()
+    host, port = upstream.server_address
+    proxy = _AuthenticatedTestProxy(
+        backend_url=f"http://{host}:{port}",
+        acceptance_test_key="prototype-acceptance-key",
+    )
+    proxy.start()
+    try:
+        response = httpx.get(proxy.url + "/health?case=1")
+    finally:
+        proxy.close()
+        upstream.shutdown()
+        upstream.server_close()
+        upstream_thread.join(timeout=5)
+
+    assert response.status_code == 200
+    assert observed == {
+        "acceptance_key": "prototype-acceptance-key",
+        "path": "/health?case=1",
     }

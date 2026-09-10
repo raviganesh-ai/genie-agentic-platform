@@ -111,6 +111,9 @@ def test_write_to_directory_includes_backend_service_scaffold(tmp_path: Path):
     compile(token_validation_source, "token_validation.py", "exec")
     assert 'audience=[_client_id, f"api://{_client_id}"]' in token_validation_source
     assert '"Prototype.Invoke" not in roles' in token_validation_source
+    assert 'os.environ.get("GENIE_ACCEPTANCE_TEST_KEY", "")' in token_validation_source
+    assert 'request.headers.get("X-Genie-Acceptance-Authorized", "")' in token_validation_source
+    assert "secrets.compare_digest" in token_validation_source
     assert '"access_as_user" not in str(claims.get("scp", "")).split()' in token_validation_source
     assert 'status_code=401' in token_validation_source
     requirements = (tmp_path / "requirements.txt").read_text(encoding="utf-8")

@@ -36,10 +36,11 @@ from __future__ import annotations
 
 import asyncio
 import io
+import secrets
 import tarfile
 import time
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -83,6 +84,7 @@ class BackendDeploymentResult:
     image_tag: str
     backend_url: str
     test_backend_url: str | None = None
+    test_access_key: str | None = field(default=None, repr=False)
 
 
 def _tar_gzip_directory(source_dir: Path) -> bytes:
@@ -408,6 +410,9 @@ class BackendDeploymentService:
 
         registry_username: str | None = None
         registry_password: str | None = None
+        acceptance_test_key = (
+            secrets.token_urlsafe(32) if prototype_authentication is not None else None
+        )
         managed_environment_id = self._container_apps_environment_id
         if prototype_authentication is not None:
             try:
@@ -475,6 +480,10 @@ class BackendDeploymentService:
                         EnvironmentVar(
                             name="ENTRA_CLIENT_ID", value=prototype_authentication.client_id
                         ),
+                        EnvironmentVar(
+                            name="GENIE_ACCEPTANCE_TEST_KEY",
+                            secret_ref="acceptance-test-key",
+                        ),
                     ]
                 )
             
@@ -513,6 +522,10 @@ class BackendDeploymentService:
                 if registry_password is not None
                 else []
             )
+            if acceptance_test_key is not None:
+                registry_secrets.append(
+                    Secret(name="acceptance-test-key", value=acceptance_test_key)
+                )
             
             containers = [Container(name="backend", image=image_tag, env=env_vars)]
             envelope = ContainerApp(
@@ -549,6 +562,7 @@ class BackendDeploymentService:
                 backend_url = await self._prototype_api_gateway_service.publish_api(
                     mission_slug=mission_slug,
                     backend_url=private_backend_url,
+                    acceptance_test_key=acceptance_test_key or "",
                     authentication=prototype_authentication,
                     on_progress=on_progress,
                 )
@@ -560,6 +574,7 @@ class BackendDeploymentService:
             image_tag=image_tag,
             backend_url=backend_url,
             test_backend_url=backend_url if prototype_authentication is not None else None,
+            test_access_key=acceptance_test_key,
         )
 
     async def configure_gateway_frontend_origin(

@@ -212,5 +212,28 @@ def test_factory_is_explicitly_disabled_or_fails_closed_when_enabled() -> None:
         PrototypeAuthenticationError, match="prototype_test_principal_client_id"
     ):
         create_prototype_authentication_service(
-            settings=Settings(prototype_api_gateway_enabled=True)
+            settings=Settings(
+                prototype_api_gateway_enabled=True,
+                entra_tenant_id="tenant-1",
+            )
         )
+
+
+def test_factory_shared_mode_does_not_require_cross_tenant_test_principal() -> None:
+    service = create_prototype_authentication_service(
+        settings=Settings(
+            prototype_api_gateway_enabled=True,
+            prototype_authentication_mode="shared",
+            entra_tenant_id="corporate-tenant",
+            prototype_shared_application_object_id="application-object",
+            prototype_shared_service_principal_object_id="service-principal",
+            prototype_shared_client_id="client-id",
+            prototype_shared_delegated_scope="api://client-id/access_as_user",
+            prototype_shared_application_role_id="role-id",
+            prototype_shared_frontend_domain="prototype.example.com",
+            prototype_shared_slot_count=50,
+        )
+    )
+
+    assert isinstance(service, PrototypeAuthenticationService)
+    assert service._credential is None

@@ -156,10 +156,16 @@ async def test_protected_backend_deploys_private_backend_without_mise_sidecar(
             *,
             mission_slug,
             backend_url,
+            acceptance_test_key,
             authentication,
             on_progress=None,
         ):
-            gateway_calls["publish"] = (mission_slug, backend_url, authentication.client_id)
+            gateway_calls["publish"] = (
+                mission_slug,
+                backend_url,
+                authentication.client_id,
+                acceptance_test_key,
+            )
             return "https://claims-1234.azure-api.net"
 
     service = BackendDeploymentService(
@@ -227,27 +233,33 @@ async def test_protected_backend_deploys_private_backend_without_mise_sidecar(
     envelope = captured["envelope"]
     assert result.backend_url == "https://claims-1234.azure-api.net"
     assert result.test_backend_url == "https://claims-1234.azure-api.net"
+    assert result.test_access_key
     assert envelope.managed_environment_id == "private-env-123"
     assert envelope.configuration.ingress.external is False
     assert envelope.configuration.ingress.target_port == 8000
     assert envelope.configuration.ingress.additional_port_mappings is None
     assert envelope.configuration.registries[0].identity.endswith("/claims-1234")
     assert envelope.configuration.registries[0].username is None
-    assert envelope.configuration.secrets == []
+    assert [secret.name for secret in envelope.configuration.secrets] == [
+        "acceptance-test-key"
+    ]
     assert [container.name for container in envelope.template.containers] == ["backend"]
     backend = next(
         container for container in envelope.template.containers if container.name == "backend"
     )
     backend_environment = {item.name: item.value for item in backend.env}
     assert backend_environment["ENTRA_CLIENT_ID"] == "prototype-client"
-    assert gateway_calls == {
-        "provision": "claims-1234",
-        "publish": (
-            "claims-1234",
-            "https://prototype.example.com",
-            "prototype-client",
-        ),
-    }
+    acceptance_environment = next(
+        item for item in backend.env if item.name == "GENIE_ACCEPTANCE_TEST_KEY"
+    )
+    assert acceptance_environment.secret_ref == "acceptance-test-key"
+    assert gateway_calls["provision"] == "claims-1234"
+    assert gateway_calls["publish"][:3] == (
+        "claims-1234",
+        "https://prototype.example.com",
+        "prototype-client",
+    )
+    assert gateway_calls["publish"][3] == result.test_access_key
 
 
 async def test_frontend_deployment_uses_mission_identity_for_acr(monkeypatch, tmp_path):

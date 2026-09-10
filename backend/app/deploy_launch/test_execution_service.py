@@ -100,11 +100,20 @@ def validate_real_action_tests(modules: list[str]) -> tuple[str, ...]:
 
 
 class _AuthenticatedTestProxy:
-    """Trusted loopback proxy; generated tests never receive the bearer token."""
+    """Trusted loopback proxy; generated tests never receive upstream credentials."""
 
-    def __init__(self, *, backend_url: str, access_token: str) -> None:
+    def __init__(
+        self,
+        *,
+        backend_url: str,
+        access_token: str | None = None,
+        acceptance_test_key: str | None = None,
+    ) -> None:
+        if bool(access_token) == bool(acceptance_test_key):
+            raise ValueError("Exactly one prototype test credential is required.")
         target_origin = backend_url.rstrip("/")
-        token = access_token
+        token = access_token or ""
+        acceptance_key = acceptance_test_key or ""
 
         class Handler(BaseHTTPRequestHandler):
             def _forward(self) -> None:
@@ -116,7 +125,10 @@ class _AuthenticatedTestProxy:
                     if name.lower()
                     not in {"authorization", "connection", "content-length", "host"}
                 }
-                request_headers["Authorization"] = f"Bearer {token}"
+                if token:
+                    request_headers["Authorization"] = f"Bearer {token}"
+                else:
+                    request_headers["X-Genie-Acceptance-Key"] = acceptance_key
                 try:
                     with httpx.Client(
                         transport=httpx.HTTPTransport(retries=2),
@@ -249,8 +261,11 @@ class TestExecutionService:
             env["SYSTEMROOT"] = os.environ.get("SYSTEMROOT", "")
         explicit_environment = dict(runtime_environment or {})
         access_token = explicit_environment.pop("MISSION_ACCESS_TOKEN", None)
+        acceptance_test_key = explicit_environment.pop(
+            "MISSION_ACCEPTANCE_TEST_KEY", None
+        )
         authenticated_proxy: _AuthenticatedTestProxy | None = None
-        if access_token:
+        if access_token or acceptance_test_key:
             backend_url = explicit_environment.get("MISSION_BACKEND_URL", "")
             if not backend_url.startswith("https://"):
                 return TestExecutionResult(
@@ -260,6 +275,7 @@ class TestExecutionService:
             authenticated_proxy = _AuthenticatedTestProxy(
                 backend_url=backend_url,
                 access_token=access_token,
+                acceptance_test_key=acceptance_test_key,
             )
             authenticated_proxy.start()
             explicit_environment["MISSION_UNAUTHENTICATED_BACKEND_URL"] = backend_url
@@ -313,7 +329,11 @@ class TestExecutionService:
         sensitive_values = {
             value
             for name, value in (runtime_environment or {}).items()
-            if value and any(marker in name.upper() for marker in ("TOKEN", "SECRET", "PASSWORD"))
+            if value
+            and any(
+                marker in name.upper()
+                for marker in ("TOKEN", "SECRET", "PASSWORD", "KEY")
+            )
         }
         for sensitive_value in sensitive_values:
             raw_output = raw_output.replace(sensitive_value, "[REDACTED]")

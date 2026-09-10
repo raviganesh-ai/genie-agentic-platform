@@ -1,4 +1,4 @@
-"""Per-prototype Microsoft Entra application provisioning for MISE gateways."""
+"""Microsoft Entra configuration for APIM-protected prototypes."""
 from __future__ import annotations
 
 import asyncio
@@ -48,7 +48,7 @@ class PrototypeAuthenticationConfiguration:
 
 
 class PrototypeAuthenticationService:
-    """Creates one Entra API/SPA application and test app-role assignment per prototype."""
+    """Configures shared or per-prototype Entra API/SPA authentication."""
 
     def __init__(
         self,
@@ -61,11 +61,15 @@ class PrototypeAuthenticationService:
         shared_frontend_domain: str | None = None,
         shared_slot_count: int = 0,
     ) -> None:
-        if not tenant_id.strip() or not test_principal_client_id.strip():
+        if not tenant_id.strip():
             raise PrototypeAuthenticationError(
-                "tenant_id and test_principal_client_id are required for prototype MISE."
+                "tenant_id is required for prototype authentication."
             )
-        if credential is None:
+        if shared_configuration is None and not test_principal_client_id.strip():
+            raise PrototypeAuthenticationError(
+                "test_principal_client_id is required for per-prototype authentication."
+            )
+        if credential is None and test_principal_client_id.strip():
             credential = create_user_assigned_token_credential(
                 client_id=test_principal_client_id
             )
@@ -88,6 +92,10 @@ class PrototypeAuthenticationService:
         transient_statuses: tuple[int, ...] = (),
         max_attempts: int = 1,
     ) -> dict[str, Any]:
+        if self._credential is None:
+            raise PrototypeAuthenticationError(
+                "Microsoft Graph credentials are unavailable in shared authentication mode."
+            )
         response: httpx.Response | None = None
         for attempt in range(max_attempts):
             try:
@@ -329,6 +337,10 @@ class PrototypeAuthenticationService:
     ) -> str:
         """Gets a short-lived, audience-limited application token after role propagation."""
 
+        if self._credential is None:
+            raise PrototypeAuthenticationError(
+                "Application access tokens are unavailable in shared authentication mode."
+            )
         last_error: Exception | None = None
         for attempt in range(5):
             try:
@@ -386,10 +398,16 @@ def create_prototype_authentication_service(
 ) -> PrototypeAuthenticationService | NullPrototypeAuthenticationService:
     if not settings.prototype_api_gateway_enabled:
         return NullPrototypeAuthenticationService()
-    if not settings.entra_tenant_id or not settings.prototype_test_principal_client_id:
+    if not settings.entra_tenant_id:
         raise PrototypeAuthenticationError(
-            "entra_tenant_id and prototype_test_principal_client_id are required "
-            "when the prototype API gateway is enabled."
+            "entra_tenant_id is required when the prototype API gateway is enabled."
+        )
+    if (
+        settings.prototype_authentication_mode == "per_prototype"
+        and not settings.prototype_test_principal_client_id
+    ):
+        raise PrototypeAuthenticationError(
+            "prototype_test_principal_client_id is required for per-prototype authentication."
         )
     shared_configuration = None
     if settings.prototype_authentication_mode == "shared":
@@ -421,7 +439,7 @@ def create_prototype_authentication_service(
         )
     return PrototypeAuthenticationService(
         tenant_id=settings.entra_tenant_id,
-        test_principal_client_id=settings.prototype_test_principal_client_id,
+        test_principal_client_id=settings.prototype_test_principal_client_id or "",
         shared_configuration=shared_configuration,
         shared_frontend_domain=settings.prototype_shared_frontend_domain,
         shared_slot_count=settings.prototype_shared_slot_count,

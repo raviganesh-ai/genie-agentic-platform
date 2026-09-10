@@ -464,7 +464,8 @@ class _FakeProtectedBackendDeploymentService:
         return BackendDeploymentResult(
             image_tag=f"acr/{mission_slug}:dev",
             backend_url=f"https://{mission_slug}-backend.example.com",
-            test_backend_url="http://prototype.internal:8000",
+            test_backend_url=f"https://{mission_slug}-backend.example.com",
+            test_access_key="prototype-acceptance-key",
         )
 
     async def configure_gateway_frontend_origin(
@@ -550,14 +551,14 @@ def test_req_001_uses_prototype_authentication():
     assert '__MISSION_ENTRA_SCOPE__ = "api://prototype-client/access_as_user"' in runtime_config
 
 
-async def test_shared_auth_pipeline_uses_internal_endpoint_without_app_token(tmp_path: Path):
+async def test_shared_auth_pipeline_uses_authenticated_proxy(tmp_path: Path):
     test_output = """
 ```python
 # REQ-001
 import os
 
-def test_req_001_uses_internal_acceptance_endpoint():
-    assert os.environ["MISSION_BACKEND_URL"] == "http://prototype.internal:8000"
+def test_req_001_uses_authenticated_acceptance_endpoint():
+    assert os.environ["MISSION_BACKEND_URL"].startswith("http://127.0.0.1:")
     assert os.environ["MISSION_UNAUTHENTICATED_BACKEND_URL"].startswith("https://")
     assert "MISSION_ACCESS_TOKEN" not in os.environ
 ```
