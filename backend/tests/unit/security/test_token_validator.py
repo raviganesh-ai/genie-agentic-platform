@@ -103,6 +103,15 @@ def _entra_mock_client(jwk: dict[str, object]) -> httpx.AsyncClient:
     return httpx.AsyncClient(transport=httpx.MockTransport(handler))
 
 
+def test_entra_validator_rejects_authority_with_tenant_path() -> None:
+    with pytest.raises(TokenValidatorError, match="without a tenant or version path"):
+        EntraTokenValidator(
+            authority="https://login.microsoftonline.com/tenant/v2.0",
+            tenant_id="tenant",
+            client_id="client-1",
+        )
+
+
 @pytest.mark.asyncio
 async def test_entra_validator_verifies_real_signature_issuer_audience_and_lifetime() -> None:
     token, jwk = _entra_test_material(audience="api://client-1")

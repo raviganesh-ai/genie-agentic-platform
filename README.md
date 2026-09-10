@@ -650,6 +650,11 @@ If this identity/RBAC/secrets setup is ever missing or revoked, `deploy-backend`
 
 Every deployment to the shared Azure evaluation environment (backend Container App and/or frontend Static Web App) is recorded here: commit, what changed, and why. Update this section as part of the same commit that ships the fix/feature, before pushing to `master` triggers [Continuous deployment](#continuous-deployment-github-actions).
 
+### 2026-09-09 — Fix corporate Entra discovery after private-network cutover
+
+- **Incident**: authenticated frontend requests such as `GET /models/available` returned `503` because the deployment script configured `GENIE_ENTRA_AUTHORITY` with a tenant `/v2.0` path while `EntraTokenValidator` independently appended that same path.
+- **Fix**: deployments now configure the host-only `https://login.microsoftonline.com` authority. The validator rejects authorities containing tenant, version, query, or fragment components so this configuration error fails during startup instead of surfacing after sign-in.
+
 ### 2026-09-09 — Corporate workforce identity and durable prototype ownership
 
 - **Corporate access**: Genie now targets Microsoft corporate tenant `72f988bf-86f1-41af-91ab-2d7cd011db47`; a real delegated token was verified for the expected audience/scope with canonical user identity and `Genie.Admin`. GitHub's Azure deployment tenant remains separate.

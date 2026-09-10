@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 from typing import Any, Protocol
+from urllib.parse import urlparse
 
 import httpx
 import jwt
@@ -68,7 +69,20 @@ class EntraTokenValidator:
         client_id: str,
         http_client: httpx.AsyncClient | None = None,
     ) -> None:
-        self._authority = authority.rstrip("/")
+        normalized_authority = authority.rstrip("/")
+        parsed_authority = urlparse(normalized_authority)
+        if (
+            parsed_authority.scheme != "https"
+            or not parsed_authority.netloc
+            or parsed_authority.path
+            or parsed_authority.params
+            or parsed_authority.query
+            or parsed_authority.fragment
+        ):
+            raise TokenValidatorError(
+                "Microsoft Entra authority must be an HTTPS origin without a tenant or version path."
+            )
+        self._authority = normalized_authority
         self._tenant_id = tenant_id
         self._client_id = client_id
         self._http_client = http_client or httpx.AsyncClient(timeout=5.0)
