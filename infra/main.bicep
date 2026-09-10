@@ -29,6 +29,15 @@ param location string
 @description('Azure region for Azure AI Search. Defaults to `location`; override this independently if AI Search lacks capacity in the primary region.')
 param aiSearchLocation string = location
 
+@description('Address space reserved for the Genie Container Apps environment and private endpoints.')
+param virtualNetworkAddressPrefix string = '10.20.0.0/16'
+
+@description('Dedicated subnet for the Container Apps workload-profiles environment; must be /27 or larger.')
+param containerAppsInfrastructureSubnetPrefix string = '10.20.0.0/23'
+
+@description('Dedicated subnet for Azure private endpoints.')
+param privateEndpointSubnetPrefix string = '10.20.2.0/24'
+
 @description('Short prefix applied to every resource name (lowercase letters/numbers only).')
 @minLength(2)
 @maxLength(8)
@@ -57,6 +66,9 @@ module foundationalResources 'modules/foundational-resources.bicep' = {
     aiSearchLocation: aiSearchLocation
     resourcePrefix: resourcePrefix
     resourceToken: resourceToken
+    virtualNetworkAddressPrefix: virtualNetworkAddressPrefix
+    containerAppsInfrastructureSubnetPrefix: containerAppsInfrastructureSubnetPrefix
+    privateEndpointSubnetPrefix: privateEndpointSubnetPrefix
     tags: tags
   }
 }

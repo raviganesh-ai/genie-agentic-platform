@@ -7,6 +7,8 @@
 param location string
 param name string
 param managedIdentityPrincipalId string
+param virtualNetworkId string
+param privateEndpointSubnetId string
 param tags object
 
 // Built-in Cosmos DB SQL role definition id for "Cosmos DB Built-in Data
@@ -33,6 +35,20 @@ resource cosmosAccount 'Microsoft.DocumentDB/databaseAccounts@2024-05-15' = {
     ]
     disableLocalAuth: true
     minimalTlsVersion: 'Tls12'
+    publicNetworkAccess: 'Disabled'
+    networkAclBypass: 'None'
+  }
+}
+
+module privateEndpoint 'cosmos-private-endpoint.bicep' = {
+  name: 'genie-cosmos-private-endpoint'
+  params: {
+    location: location
+    cosmosAccountId: cosmosAccount.id
+    cosmosAccountName: cosmosAccount.name
+    virtualNetworkId: virtualNetworkId
+    privateEndpointSubnetId: privateEndpointSubnetId
+    tags: tags
   }
 }
 

@@ -6,6 +6,9 @@ param location string
 param aiSearchLocation string = location
 param resourcePrefix string
 param resourceToken string
+param virtualNetworkAddressPrefix string
+param containerAppsInfrastructureSubnetPrefix string
+param privateEndpointSubnetPrefix string
 param tags object
 
 // Built-in role definition ids - granted to Genie's own runtime managed
@@ -18,12 +21,25 @@ param tags object
 // subscription-scoped Owner/Contributor.
 var managedIdentityContributorRoleId = 'e40ec5ca-96e0-45a2-b4ff-59039f2c2b59'
 var userAccessAdministratorRoleId = '18d7d88d-d35e-4fb5-a5c3-7773c20a72d9'
+var managedIdentityName = '${resourcePrefix}-${resourceToken}-identity'
 
 module logAnalytics 'log-analytics.bicep' = {
   name: 'genie-log-analytics'
   params: {
     location: location
     name: '${resourcePrefix}-${resourceToken}-log'
+    tags: tags
+  }
+}
+
+module virtualNetwork 'virtual-network.bicep' = {
+  name: 'genie-virtual-network'
+  params: {
+    location: location
+    name: '${resourcePrefix}-${resourceToken}-vnet'
+    addressPrefix: virtualNetworkAddressPrefix
+    containerAppsInfrastructureSubnetPrefix: containerAppsInfrastructureSubnetPrefix
+    privateEndpointSubnetPrefix: privateEndpointSubnetPrefix
     tags: tags
   }
 }
@@ -42,13 +58,13 @@ module managedIdentity 'managed-identity.bicep' = {
   name: 'genie-managed-identity'
   params: {
     location: location
-    name: '${resourcePrefix}-${resourceToken}-identity'
+    name: managedIdentityName
     tags: tags
   }
 }
 
 resource managedIdentityContributorRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(resourceGroup().id, managedIdentity.outputs.principalId, managedIdentityContributorRoleId)
+  name: guid(resourceGroup().id, managedIdentityName, managedIdentityContributorRoleId)
   properties: {
     roleDefinitionId: subscriptionResourceId(
       'Microsoft.Authorization/roleDefinitions',
@@ -60,7 +76,7 @@ resource managedIdentityContributorRoleAssignment 'Microsoft.Authorization/roleA
 }
 
 resource userAccessAdministratorRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(resourceGroup().id, managedIdentity.outputs.principalId, userAccessAdministratorRoleId)
+  name: guid(resourceGroup().id, managedIdentityName, userAccessAdministratorRoleId)
   properties: {
     roleDefinitionId: subscriptionResourceId(
       'Microsoft.Authorization/roleDefinitions',
@@ -103,16 +119,6 @@ module aiSearch 'ai-search.bicep' = {
   }
 }
 
-module cosmosDb 'cosmos-db.bicep' = {
-  name: 'genie-cosmos-db'
-  params: {
-    location: location
-    name: '${resourcePrefix}-${resourceToken}-cosmos'
-    managedIdentityPrincipalId: managedIdentity.outputs.principalId
-    tags: tags
-  }
-}
-
 module aiFoundry 'ai-foundry.bicep' = {
   name: 'genie-ai-foundry'
   params: {
@@ -130,6 +136,19 @@ module containerAppsEnvironment 'container-apps-environment.bicep' = {
     location: location
     name: '${resourcePrefix}-${resourceToken}-cae'
     logAnalyticsWorkspaceId: logAnalytics.outputs.workspaceId
+    infrastructureSubnetId: virtualNetwork.outputs.containerAppsInfrastructureSubnetId
+    tags: tags
+  }
+}
+
+module cosmosDb 'cosmos-db.bicep' = {
+  name: 'genie-cosmos-db'
+  params: {
+    location: location
+    name: '${resourcePrefix}-${resourceToken}-cosmos'
+    managedIdentityPrincipalId: managedIdentity.outputs.principalId
+    virtualNetworkId: virtualNetwork.outputs.id
+    privateEndpointSubnetId: virtualNetwork.outputs.privateEndpointSubnetId
     tags: tags
   }
 }

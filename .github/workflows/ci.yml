@@ -204,7 +204,7 @@ jobs:
 
   deploy-frontend:
     name: Deploy frontend (Static Web Apps)
-    needs: [backend, frontend, gateway]
+    needs: [deploy-backend]
     if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
     environment: production
