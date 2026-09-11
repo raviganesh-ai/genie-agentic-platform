@@ -157,6 +157,7 @@ class TestExecutionService:
                 ran=False, summary="No test code was found in the generated test suite."
             )
 
+        build_root = build_root.resolve()
         tests_dir = build_root / "tests"
         if tests_dir.exists():
             shutil.rmtree(tests_dir)

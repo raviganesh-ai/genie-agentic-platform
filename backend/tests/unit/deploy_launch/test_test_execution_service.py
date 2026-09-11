@@ -121,6 +121,25 @@ async def test_run_tests_actually_executes_generated_pytest_module(tmp_path: Pat
     assert (tmp_path / "tests" / "test_generated_0.py").exists()
 
 
+async def test_run_tests_resolves_relative_production_workspace(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.chdir(tmp_path)
+    relative_build_root = Path("var/deploy-launch-builds/run-123/backend")
+    relative_build_root.mkdir(parents=True)
+    service = TestExecutionService(timeout_seconds=60)
+
+    result = await service.run_tests(
+        build_root=relative_build_root,
+        test_output_text=_PASSING_TEST,
+    )
+
+    assert result.success is True
+    assert result.passed_test_names == ("test_always_passes",)
+    assert (relative_build_root / "tests" / "test_generated_0.py").exists()
+    assert not (relative_build_root / relative_build_root / "tests").exists()
+
+
 async def test_run_tests_reports_real_failures_not_fabricated_success(tmp_path: Path):
     service = TestExecutionService(timeout_seconds=60)
 

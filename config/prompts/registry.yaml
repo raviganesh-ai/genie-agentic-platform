@@ -420,6 +420,13 @@ prompts:
         `MISSION_BACKEND_URL` and/or `MISSION_FRONTEND_URL` environment
         variables. Never use mocks, patches, monkeypatch, response
         interceptors, fabricated responses, or static/literal assertions.
+      - at least one deployed backend test must reproduce the exact JSON
+        object assembled by the generated UI's `JSON.stringify` call,
+        including the same field names, casing, nesting, and uploaded
+        attachments, POST it to `/invoke`, and assert mission-specific
+        result fields produced by the specialist pipeline. HTTP 200 alone,
+        non-empty text alone, and a generic conversational response never
+        prove the generated UI-to-orchestrator contract works.
       - backend requests through `MISSION_BACKEND_URL` are authenticated by
         Genie's trusted acceptance-test proxy. Never read, request, print,
         log, persist, or synthesize credentials or an Authorization header;
@@ -474,7 +481,7 @@ prompts:
       - artifact
       - requirements
       - user_message
-    version: "1.8.0"
+    version: "1.9.0"
 
   - id: failure-diagnosis-v1
     name: Failure Diagnosis
@@ -659,6 +666,16 @@ prompts:
       An output artifact location (if any) is one more field alongside
       the real results, never a substitute for them.
 
+      UI/ORCHESTRATOR REQUEST CONTRACT - define one flat JSON object with
+      exactly one key per rendered UI field. The UI's `JSON.stringify`
+      object and every `config.get(...)`/`config[...]` read in the
+      Orchestrator must use the exact same key names and casing. Never
+      rename camelCase to snake_case, wrap fields in zone/group objects,
+      or read a different nesting shape. Before returning either code
+      block, compare every submitted key against every Orchestrator read;
+      any missing, extra, renamed, differently cased, or differently
+      nested key is a broken build and must be corrected.
+
       Every specialist delegation in the Orchestrator must use the same
       deterministic boundary: import `MissionFoundryAgent` only from
       `mission_foundry_runtime`, then construct `MissionFoundryAgent(
@@ -823,7 +840,9 @@ prompts:
         name/purpose
       - a single submit handler that composes one JSON-encoded `message`
         string via `JSON.stringify({{ ...one key per field, using the
-        field's own name }})` - never a human-readable "Key:
+        field's own name }})`; this must be the same flat object and exact
+        key names/casing consumed by the Orchestrator's `config` reads,
+        with no zone/group nesting or alternate aliases - never a human-readable "Key:
         value\nWorking directory: value\n..." string, since this mission's
         Orchestrator Agent parses `message` with `json.loads` to run its
         full deterministic pipeline over every field you submit - and
@@ -928,7 +947,7 @@ prompts:
       - policies
       - excluded_agents
       - user_message
-    version: "5.17.0"
+    version: "5.18.0"
 
   - id: build-generation-component-v1
     name: Build Generation - Single Component
@@ -1027,6 +1046,10 @@ prompts:
       produces) plus a short human-readable "summary" string describing
       what happened. An output artifact location (if any) is one more
       field alongside the real results, never a substitute for them.
+      Use one flat JSON request object with exactly one key per rendered
+      UI field. Every Orchestrator `config` read must use the exact same
+      key names and casing as the UI's `JSON.stringify` object, with no
+      camelCase/snake_case renaming, zone/group nesting, or aliases.
       Every specialist delegation must import `MissionFoundryAgent` only
       from `mission_foundry_runtime`, construct it with the exact mapped
       name as `MissionFoundryAgent(agent_name=AGENT_FOUNDRY_NAMES[<exact
@@ -1163,6 +1186,8 @@ prompts:
       crashes this mission's entire input form on first render. Compose
       one JSON-encoded `message` string
       via `JSON.stringify` (one key per field, using the field's own name
+      and the exact same flat key names/casing consumed by the
+      Orchestrator's `config` reads, with no zone/group nesting or aliases
       - never a human-readable "Key: value\n..." string, since this
       mission's Orchestrator Agent parses `message` with `json.loads`) and
       call `onSubmit` exactly once per user action - the shell's own
@@ -1238,7 +1263,7 @@ prompts:
       - component_name
       - user_message
       - assigned_requirements
-    version: "1.20.0"
+    version: "1.21.0"
 
   - id: build-component-regeneration-v1
     name: Build Generation - Regenerate Single Component

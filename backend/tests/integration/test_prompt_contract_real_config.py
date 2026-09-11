@@ -204,6 +204,23 @@ def test_acceptance_test_prompt_uses_trusted_auth_proxy_without_disclosing_token
     assert "MISSION_UNAUTHENTICATED_BACKEND_URL" in template
 
 
+def test_generation_prompts_fail_closed_on_ui_orchestrator_schema_drift():
+    registry = PromptRegistry.load(_REPO_CONFIG_ROOT / "prompts")
+
+    for prompt_id in ("build-generation-v1", "build-generation-component-v1"):
+        template = " ".join(registry.get(prompt_id).template.split())
+        assert "one flat JSON" in template
+        assert "exact same key names and casing" in template
+        assert "zone/group nesting" in template
+
+    test_generation = " ".join(
+        registry.get("test-generation-v1").template.split()
+    )
+    assert "exact JSON object assembled by the generated UI" in test_generation
+    assert "mission-specific result fields" in test_generation
+    assert "HTTP 200 alone" in test_generation
+
+
 def test_build_generation_prompts_require_self_verification_before_finishing():
     """Regression guard: the build-generation prompts must instruct the
     Build Agent to check its own requirement coverage and fix gaps before

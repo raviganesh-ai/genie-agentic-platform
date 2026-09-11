@@ -196,6 +196,7 @@ class _FakeSharedMemory:
 
     def __init__(self, records_by_key: dict[str, str]) -> None:
         self._records_by_key = records_by_key
+        self.writes: list[dict] = []
 
     async def read(
         self, *, requesting_agent, session_id: str, trace_id: str, key: str | None = None
@@ -203,6 +204,11 @@ class _FakeSharedMemory:
         if key is not None and key in self._records_by_key:
             return [SimpleNamespace(content={"output_text": self._records_by_key[key]})]
         return []
+
+    async def write(self, **kwargs) -> SimpleNamespace:
+        self.writes.append(kwargs)
+        self._records_by_key[kwargs["key"]] = kwargs["content"]["output_text"]
+        return SimpleNamespace(content=kwargs["content"])
 
 
 class _FakeOrchestratorPendingBuild:
@@ -970,6 +976,21 @@ def test_req_001_processes_every_document():
         test_outputs=[failing_suite, passing_suite],
         requirements_output=requirements,
     )
+    orchestrator.agent_registry = AgentRegistry(
+        {
+            "genie-orchestrator": AgentDefinition(
+                id="genie-orchestrator",
+                name="Genie Orchestrator",
+                role="mission_orchestration",
+                description="Drives each mission phase.",
+                allowed_tools=[],
+                memory_access=["shared"],
+                enabled=True,
+            )
+        }
+    )
+    shared_memory = _FakeSharedMemory({})
+    orchestrator.memory_service = SimpleNamespace(shared=shared_memory)
     service = DeploymentPipelineService(
         orchestrator=orchestrator,  # type: ignore[arg-type]
         session_service=_FakeSessionService(),  # type: ignore[arg-type]
@@ -1000,6 +1021,11 @@ def test_req_001_processes_every_document():
     assert run.fidelity_report.pass_percent == 100
     assert run.fidelity_report.repair_attempts == 1
     assert len(orchestrator.resume_calls) == 1
+    assert [write["key"] for write in shared_memory.writes] == [
+        "analyze-requirements",
+        "design-architecture",
+    ]
+    assert all(write["approval_status"] == "approved" for write in shared_memory.writes)
     repair_input = orchestrator.resume_calls[0]["build-solution"]
     assert repair_input.variables["previous_build_output"] == ""
     assert "1 failed" in repair_input.variables["user_message"]

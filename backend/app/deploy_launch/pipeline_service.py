@@ -1832,6 +1832,53 @@ class DeploymentPipelineService:
                 return approved_requirements
         return await self._get_step_output(run, self._requirements_step_id, trace_id=trace_id)
 
+    async def _restore_repair_memory_references(
+        self, run: WorkflowRunResult, *, trace_id: str
+    ) -> None:
+        """Restore missing workflow memory keys from durable completed steps."""
+
+        agent_registry = getattr(self._orchestrator, "agent_registry", None)
+        memory_service = getattr(self._orchestrator, "memory_service", None)
+        if agent_registry is None or memory_service is None:
+            return
+
+        orchestrator_agent = get_enabled_agent(agent_registry, "genie-orchestrator")
+        classifications = {
+            self._requirements_step_id: "requirement",
+            self._architecture_step_id: "architecture_finding",
+        }
+        for step_id, classification in classifications.items():
+            existing = await memory_service.shared.read(
+                requesting_agent=orchestrator_agent,
+                session_id=run.session_id,
+                trace_id=trace_id,
+                key=step_id,
+            )
+            if existing:
+                continue
+            step = next(
+                (
+                    result
+                    for result in run.step_results
+                    if result.step_id == step_id and result.status == "completed"
+                ),
+                None,
+            )
+            if step is None or not step.output_text:
+                raise UnknownWorkflowRunError(
+                    f"Automatic fidelity repair cannot restore required workflow output '{step_id}'."
+                )
+            await memory_service.shared.write(
+                agent=orchestrator_agent,
+                session_id=run.session_id,
+                trace_id=trace_id,
+                key=step_id,
+                classification=classification,
+                content={"output_text": step.output_text},
+                approval_status="approved",
+                evidence_references=[f"workflow-run:{run.workflow_run_id}:{step_id}"],
+            )
+
     async def _repair_prototype(
         self,
         *,
@@ -1848,6 +1895,7 @@ class DeploymentPipelineService:
             f"Approved requirements:\n{approved_requirements}\n\n"
             f"Observed pytest evidence:\n{evidence[-12_000:]}"
         )
+        await self._restore_repair_memory_references(run, trace_id=trace_id)
         repaired = await self._orchestrator.resume_workflow(
             workflow_run_id=run.workflow_run_id,
             session_id=run.session_id,

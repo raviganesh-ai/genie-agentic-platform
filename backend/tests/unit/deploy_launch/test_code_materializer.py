@@ -281,13 +281,12 @@ def test_backend_service_scaffold_main_py_runs_the_real_orchestrator_pipeline():
     assert 'status_code=503' in main_source
 
 
-def test_backend_scaffold_catches_constructor_type_error_before_stream_fallback(monkeypatch):
-    """A generated orchestrator constructor failure must not abort SSE.
+def test_backend_scaffold_rejects_structured_request_when_constructor_fails(monkeypatch):
+    """A structured generated-UI request must expose constructor failure.
 
     DerekPoC exposed this when generated code passed ``FoundryAgent`` a
-    positional argument. The compatibility path previously mistook that
-    constructor TypeError for a missing ``on_progress`` parameter and then
-    repeated the failing construction outside the guarded call.
+    positional argument. Silently converting that failure into a generic
+    conversational response made the broken prototype look successful.
     """
     scaffold = generate_backend_service_scaffold(
         mission_title="Acme Mission",
@@ -306,7 +305,28 @@ def test_backend_scaffold_catches_constructor_type_error_before_stream_fallback(
     generated_module = types.ModuleType("acme_main_constructor_failure")
     exec(compile(scaffold["main.py"], "main.py", "exec"), generated_module.__dict__)  # noqa: S102
 
-    result = asyncio.run(generated_module._run_orchestrator_pipeline("{}"))
+    with pytest.raises(TypeError, match="FoundryAgent"):
+        asyncio.run(generated_module._run_orchestrator_pipeline("{}"))
+
+
+def test_backend_scaffold_keeps_conversational_fallback_for_plain_text(monkeypatch):
+    scaffold = generate_backend_service_scaffold(
+        mission_title="Acme Mission",
+        orchestrator_agent_name="acme-orchestrator",
+        agent_foundry_names={"Requirements Specialist": "acme-requirements-specialist"},
+    )
+    fake_orchestrator_module = types.ModuleType("orchestrator")
+
+    class _StructuredOnlyOrchestratorAgent:
+        async def run(self, _ui_message, on_progress=None):
+            raise ValueError("Expected the generated UI's JSON payload")
+
+    fake_orchestrator_module.OrchestratorAgent = _StructuredOnlyOrchestratorAgent
+    monkeypatch.setitem(sys.modules, "orchestrator", fake_orchestrator_module)
+    generated_module = types.ModuleType("acme_main_plain_text_fallback")
+    exec(compile(scaffold["main.py"], "main.py", "exec"), generated_module.__dict__)  # noqa: S102
+
+    result = asyncio.run(generated_module._run_orchestrator_pipeline("quick question"))
 
     assert result is None
 

@@ -281,6 +281,14 @@ def _compose_message(request: InvokeRequest) -> str:
     return "\\n\\n".join([*sections, request.message])
 
 
+def _is_structured_mission_request(message: str) -> bool:
+    try:
+        json.loads(message)
+    except (json.JSONDecodeError, TypeError):
+        return False
+    return True
+
+
 async def _run_orchestrator_pipeline(
     message: str, *, on_progress: Callable[[str], Awaitable[None]] | None = None
 ) -> str | None:
@@ -303,6 +311,8 @@ async def _run_orchestrator_pipeline(
     try:
         from orchestrator import OrchestratorAgent
     except ImportError:
+        if _is_structured_mission_request(message):
+            raise
         return None
     try:
         orchestrator = OrchestratorAgent()
@@ -320,9 +330,15 @@ async def _run_orchestrator_pipeline(
             result = await orchestrator.run(message)
     except Exception:
         # The Orchestrator is generated code whose exact failure modes
-        # cannot be enumerated in advance (e.g. ``message`` is not the
-        # JSON payload it expects) - fail safe to a conversational reply
-        # rather than a hard 500, and log for operator visibility.
+        # cannot be enumerated in advance. A structured request came from
+        # the generated mission UI and must never be disguised as a
+        # successful conversational response; propagate it so deployed
+        # acceptance tests fail and trigger the bounded repair workflow.
+        if _is_structured_mission_request(message):
+            _logger.exception("Structured mission orchestrator execution failed.")
+            raise
+        # Plain-text quick requests are outside the generated form contract
+        # and may still use the mission's conversational Foundry fallback.
         _logger.warning(
             "Orchestrator pipeline run did not complete; falling back to a "
             "conversational reply.",
