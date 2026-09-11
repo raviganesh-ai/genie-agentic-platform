@@ -72,7 +72,8 @@ def test_cutover_proves_gateway_before_and_after_disabling_public_access():
     assert 'Where-Object { $_ -ne "Approved" }' in script
     assert 'throw "Direct Container Apps ingress still accepts public requests."' in script
     assert "--method patch" in script
-    assert '"$($environment.id)?api-version=2025-01-01"' in script
+    assert '"$($environment.id)?api-version=2025-10-02-preview"' in script
+    assert '"$($environment.id)?api-version=2025-01-01"' not in script
     assert "--public-network-access" not in script
 
 

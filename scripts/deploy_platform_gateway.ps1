@@ -178,7 +178,7 @@ try {
         -Encoding utf8
     & az rest `
         --method patch `
-        --uri "$($environment.id)?api-version=2025-01-01" `
+        --uri "$($environment.id)?api-version=2025-10-02-preview" `
         --body "@$environmentPatchFile" `
         --only-show-errors `
         -o none
