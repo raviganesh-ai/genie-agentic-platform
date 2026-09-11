@@ -73,6 +73,34 @@ class FactoryOrchestratorAgent:
         materialize_build(misnamed_output)
 
 
+def test_materialize_build_rejects_exact_uploaded_filename_gate():
+    output = _SAMPLE_OUTPUT.replace(
+        "export function MissionApp() {",
+        """export function MissionApp() {
+    const validateUpload = (file: File) => {
+        if (file.name !== "blind_mqm_n30_package.json") {
+            return "Please select the expected package";
+        }
+        return "";
+    };""",
+    )
+
+    with pytest.raises(MaterializedCodeError, match="end-user-controlled filename"):
+        materialize_build(output)
+
+
+def test_materialize_build_allows_non_file_name_comparison():
+    output = _SAMPLE_OUTPUT.replace(
+        "export function MissionApp() {",
+        'export function MissionApp() {\n  const isOrchestrator = agent.name === "orchestrator";',
+    )
+
+    build = materialize_build(output)
+
+    assert build.ui_component is not None
+    assert 'agent.name === "orchestrator"' in build.ui_component
+
+
 def test_write_to_directory_creates_expected_files(tmp_path: Path):
     build = materialize_build(_SAMPLE_OUTPUT)
 

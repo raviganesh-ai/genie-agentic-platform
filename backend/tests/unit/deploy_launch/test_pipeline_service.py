@@ -175,6 +175,35 @@ class _RepairingFakeOrchestrator(_FakeOrchestrator):
         return self._run
 
 
+class _BuildValidationRepairingFakeOrchestrator(_RepairingFakeOrchestrator):
+    def __init__(self) -> None:
+        super().__init__(
+            test_outputs=[_PASSING_TEST_OUTPUT],
+            requirements_output=_REQUIREMENTS_OUTPUT,
+        )
+        invalid_build = _BUILD_OUTPUT.replace(
+            "export function MissionApp() {",
+            'export function MissionApp() {\n    const invalid = file.name !== "fixed.json";',
+        )
+        self._run.step_results[-1] = _completed_step(
+            "build-solution", "genie-orchestrator", invalid_build
+        )
+
+    async def resume_workflow(
+        self,
+        *,
+        workflow_run_id: str,
+        session_id: str,
+        trace_id: str,
+        step_inputs: dict[str, WorkflowStepInput],
+    ) -> WorkflowRunResult:
+        self.resume_calls.append(step_inputs)
+        self._run.step_results[-1] = _completed_step(
+            "build-solution", "genie-orchestrator", _BUILD_OUTPUT
+        )
+        return self._run
+
+
 def _completed_step(step_id: str, agent_id: str, output_text: str) -> WorkflowStepResult:
     now = datetime.now(UTC)
     return WorkflowStepResult(
@@ -1029,6 +1058,39 @@ def test_req_001_processes_every_document():
     repair_input = orchestrator.resume_calls[0]["build-solution"]
     assert repair_input.variables["previous_build_output"] == ""
     assert "1 failed" in repair_input.variables["user_message"]
+
+
+async def test_pipeline_repairs_invalid_generated_ui_before_provisioning(
+    tmp_path: Path,
+) -> None:
+    orchestrator = _BuildValidationRepairingFakeOrchestrator()
+    service = DeploymentPipelineService(
+        orchestrator=orchestrator,  # type: ignore[arg-type]
+        session_service=_FakeSessionService(),  # type: ignore[arg-type]
+        event_bus=WorkflowEventBus(),
+        access_policy_service=_access_policy_service(),
+        mission_identity_service=NullMissionIdentityService(),
+        mission_agent_provisioning_service=NullMissionAgentProvisioningService(),
+        backend_deployment_service=NullBackendDeploymentService(),
+        frontend_deployment_service=NullFrontendDeploymentService(),
+        test_execution_service=TestExecutionService(timeout_seconds=60),
+        security_scan_service=SecurityScanService(timeout_seconds=60),
+        build_workspace_root=tmp_path,
+        fidelity_max_repair_attempts=3,
+    )
+
+    run = await service.start(
+        session_id="session-1",
+        requesting_user_id="user-1",
+        workflow_run_id="run-1",
+    )
+    run = await service.wait_for_run(run.id)
+
+    assert run.status == "completed"
+    assert len(orchestrator.resume_calls) == 1
+    repair_input = orchestrator.resume_calls[0]["build-solution"]
+    assert "end-user-controlled filename" in repair_input.variables["user_message"]
+    assert run.steps[1].status == "completed"
 
 
 async def test_pipeline_fails_closed_after_fidelity_repair_budget_is_exhausted(

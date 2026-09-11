@@ -653,6 +653,13 @@ If this identity/RBAC/secrets setup is ever missing or revoked, `deploy-backend`
 
 Every deployment to the shared Azure evaluation environment (backend Container App and/or frontend Static Web App) is recorded here: commit, what changed, and why. Update this section as part of the same commit that ships the fix/feature, before pushing to `master` triggers [Continuous deployment](#continuous-deployment-github-actions).
 
+### 2026-09-11 — Generated upload validation is filename-independent
+
+- **Incident**: DerekPoC parsed an uploaded JSON package successfully and displayed its corpus preview, but kept **Confirm & start run** disabled. Its generated UI compared the end-user-controlled filename to the example `blind_mqm_n30_package.json`, stored the mismatch as a warning, and included any warning in the button's disabled condition. The existing Build Agent prompt already prohibited this exact behavior, proving that a prompt-only rule was insufficient.
+- **Enforced invariant**: build materialization now rejects generated TSX that compares an uploaded file's name to an exact filename-like literal. Legitimate non-file object-name comparisons remain valid. Uploads must be accepted based on content and declared file type, not a sample filename from a requirement document.
+- **Automatic recovery**: deterministic materialization failures enter the existing bounded `build-solution` regeneration path before Foundry agents or Azure prototype infrastructure are provisioned. Genie supplies the precise validation evidence to the Build Agent, retries from provisioning with the repaired build, and fails closed after the configured repair budget instead of deploying an unusable form.
+- **Verification**: focused tests reproduce the exact filename-gated TSX, guard against false positives, and prove the deployment pipeline regenerates the invalid UI and completes from the repaired build.
+
 ### 2026-09-11 — End-to-end generated prototype fidelity recovery
 
 - **Incident**: the rebuilt DerekPoC passed APIM runtime readiness and rendered its frontend, but its generated flat request payload did not match the orchestrator contract. The generated backend caught the resulting structured orchestration exception and returned conversational fallback text as HTTP 200, so the broken mission path looked successful. Its deployed acceptance tests then collected zero tests because a relative workspace path was appended twice. After that fidelity failure, automatic repair could not resume `build-solution`: durable workflow step outputs had survived the Genie rollout, but their required Shared Collaboration Memory records had not.

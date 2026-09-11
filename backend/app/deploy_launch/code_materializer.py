@@ -53,6 +53,10 @@ _DIRECT_FOUNDRY_AGENT_IMPORT_PATTERN: Final = re.compile(
     r"^from agent_framework\.foundry import FoundryAgent(?P<suffix>[^\n]*)$",
     re.MULTILINE,
 )
+_EXACT_FILE_NAME_COMPARISON_PATTERN: Final = re.compile(
+    r"\b[A-Za-z_$][\w$]*\.name\s*(?:===|!==|==|!=)\s*"
+    r"(?P<quote>['\"`])[^'\"`\r\n]*\.[A-Za-z0-9]{1,10}(?P=quote)",
+)
 
 
 class MaterializedCodeError(RuntimeError):
@@ -163,6 +167,13 @@ def materialize_build(output_text: str) -> MaterializedBuild:
             "does 'from orchestrator import OrchestratorAgent', so any other "
             "class name would silently fall back to a generic conversational "
             "reply instead of running this mission's real pipeline."
+        )
+
+    if ui_component is not None and _EXACT_FILE_NAME_COMPARISON_PATTERN.search(ui_component):
+        raise MaterializedCodeError(
+            "The generated mission UI compares an uploaded file's name to an exact "
+            "literal. Generated prototypes must validate uploaded content and file "
+            "type, never an end-user-controlled filename or example filename."
         )
 
     return MaterializedBuild(

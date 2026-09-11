@@ -58,6 +58,7 @@ from app.deploy_launch.backend_deployment_service import (
 )
 from app.deploy_launch.code_materializer import (
     MaterializedBuild,
+    MaterializedCodeError,
     generate_backend_service_scaffold,
     materialize_build,
 )
@@ -1172,6 +1173,14 @@ class _RequirementFidelityRepairNeeded(DeploymentPipelineStepFailedError):
         self.evidence = evidence
 
 
+class _GeneratedBuildRepairNeeded(DeploymentPipelineStepFailedError):
+    """Carries deterministic generated-code validation evidence into a rebuild."""
+
+    def __init__(self, evidence: str) -> None:
+        super().__init__("Generated build validation failed; automatically regenerating it.")
+        self.evidence = evidence
+
+
 @dataclass
 class _RunWorkspace:
     """Filesystem locations materialized for one pipeline run - kept only in memory."""
@@ -1470,6 +1479,7 @@ class DeploymentPipelineService:
         await self._persist_run(pipeline_run)
 
         next_step = resume_from_step
+        generated_build_repair_attempts = 0
         while True:
             try:
                 await self._execute_steps(
@@ -1483,6 +1493,28 @@ class DeploymentPipelineService:
                     resume_from_step=next_step,
                 )
                 break
+            except _GeneratedBuildRepairNeeded as exc:
+                if generated_build_repair_attempts >= self._fidelity_max_repair_attempts:
+                    pipeline_run.status = "failed"
+                    pipeline_run.updated_at = datetime.now(UTC)
+                    await self._persist_run(pipeline_run)
+                    return
+                generated_build_repair_attempts += 1
+                try:
+                    run = await self._repair_prototype(
+                        run=run,
+                        pipeline_run=pipeline_run,
+                        trace_id=trace_id,
+                        evidence=exc.evidence,
+                    )
+                except Exception as repair_exc:  # noqa: BLE001 - fail-closed repair boundary.
+                    step = self._step_result(pipeline_run, "provision-foundry-agents")
+                    step.error = f"Automatic generated-build repair failed: {repair_exc}"
+                    pipeline_run.status = "failed"
+                    pipeline_run.updated_at = datetime.now(UTC)
+                    await self._persist_run(pipeline_run)
+                    return
+                next_step = "provision-foundry-agents"
             except _RequirementFidelityRepairNeeded as exc:
                 report = pipeline_run.fidelity_report
                 if report is None:
@@ -1889,11 +1921,12 @@ class DeploymentPipelineService:
     ) -> WorkflowRunResult:
         approved_requirements = await self._get_approved_requirements(run, trace_id=trace_id)
         instruction = (
-            "Regenerate the prototype to resolve every failing deployed acceptance test below. "
+            "Regenerate the prototype to resolve every deterministic validation or deployed "
+            "acceptance failure below. "
             "Keep every approved requirement in scope, preserve its REQ id, and fix the actual "
             "implementation rather than weakening or removing tests.\n\n"
             f"Approved requirements:\n{approved_requirements}\n\n"
-            f"Observed pytest evidence:\n{evidence[-12_000:]}"
+            f"Observed failure evidence:\n{evidence[-12_000:]}"
         )
         await self._restore_repair_memory_references(run, trace_id=trace_id)
         repaired = await self._orchestrator.resume_workflow(
@@ -1996,7 +2029,10 @@ class DeploymentPipelineService:
                     build_output_text = await self._get_step_output(
                         run, self._build_step_id, trace_id=trace_id
                     )
-                    materialized = materialize_build(build_output_text)
+                    try:
+                        materialized = materialize_build(build_output_text)
+                    except MaterializedCodeError as exc:
+                        raise _GeneratedBuildRepairNeeded(str(exc)) from exc
                     agent_names = list(materialized.agent_modules.keys())
                     if materialized.orchestrator_module is not None:
                         agent_names.append("orchestrator")
