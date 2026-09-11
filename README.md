@@ -653,6 +653,13 @@ If this identity/RBAC/secrets setup is ever missing or revoked, `deploy-backend`
 
 Every deployment to the shared Azure evaluation environment (backend Container App and/or frontend Static Web App) is recorded here: commit, what changed, and why. Update this section as part of the same commit that ships the fix/feature, before pushing to `master` triggers [Continuous deployment](#continuous-deployment-github-actions).
 
+### 2026-09-11 — Generated UI submit payloads are structurally flat
+
+- **Incident**: after the upload filename gate was bypassed in the stale DerekPoC deployment, its mission request failed with `Primary strong-model identifier is required (REQ-011)`. Live bundle inspection proved the UI submitted `evaluation_config.primary_model_id`, while the generated orchestrator read the required flat key with `config.get("primary_model_id")`. The field was present, but hidden from the orchestrator by UI-only grouping objects.
+- **Enforced invariant**: build materialization now extracts every object literal passed directly or through a local variable to `JSON.stringify(...)`, parses its top-level entries with balanced brace and quoted-string handling, and rejects any submit payload whose field values are nested objects. Flat payloads, array-valued fields, and ordinary objects elsewhere in the generated component remain valid.
+- **Automatic recovery**: this deterministic failure uses the existing bounded `build-solution` repair path before Foundry or Azure provisioning. The Build Agent receives the exact structural contract violation and must regenerate the UI/orchestrator pair with identical flat keys; exhausted retries fail closed instead of deploying another mismatched prototype.
+- **Verification**: focused tests reproduce the live DerekPoC nested payload and prove an equivalent flat payload materializes successfully. The full backend suite passes with 573 tests.
+
 ### 2026-09-11 — Generated upload validation is filename-independent
 
 - **Incident**: DerekPoC parsed an uploaded JSON package successfully and displayed its corpus preview, but kept **Confirm & start run** disabled. Its generated UI compared the end-user-controlled filename to the example `blind_mqm_n30_package.json`, stored the mismatch as a warning, and included any warning in the button's disabled condition. The existing Build Agent prompt already prohibited this exact behavior, proving that a prompt-only rule was insufficient.

@@ -101,6 +101,53 @@ def test_materialize_build_allows_non_file_name_comparison():
     assert 'agent.name === "orchestrator"' in build.ui_component
 
 
+def test_materialize_build_rejects_nested_submit_payload():
+    # Observed live: the UI grouped fields under "evaluation_config" while the
+    # orchestrator's flat `config.get("primary_model_id")` read silently found
+    # nothing, surfacing as "Primary strong-model identifier is required".
+    output = _SAMPLE_OUTPUT.replace(
+        "export function MissionApp() {\n    return null;\n}",
+        """export function MissionApp() {
+    const handleSubmit = () => {
+        const payload = {
+            corpus_package: {filename: file.name, user_confirms_factory_package: confirmed},
+            evaluation_config: {primary_model_id: primaryModel, peer_judge_model_ids: peers},
+        };
+        const message = JSON.stringify(payload);
+        onSubmit(message, attachments);
+    };
+    return null;
+}""",
+    )
+
+    with pytest.raises(MaterializedCodeError, match="nested objects"):
+        materialize_build(output)
+
+
+def test_materialize_build_allows_flat_submit_payload():
+    output = _SAMPLE_OUTPUT.replace(
+        "export function MissionApp() {\n    return null;\n}",
+        """export function MissionApp() {
+    const handleSubmit = () => {
+        const payload = {
+            filename: file.name,
+            user_confirms_factory_package: confirmed,
+            primary_model_id: primaryModel,
+            peer_judge_model_ids: peers,
+        };
+        const message = JSON.stringify(payload);
+        onSubmit(message, attachments);
+    };
+    return null;
+}""",
+    )
+
+    build = materialize_build(output)
+
+    assert build.ui_component is not None
+    assert "primary_model_id" in build.ui_component
+
+
 def test_write_to_directory_creates_expected_files(tmp_path: Path):
     build = materialize_build(_SAMPLE_OUTPUT)
 

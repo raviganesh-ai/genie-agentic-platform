@@ -57,6 +57,10 @@ _EXACT_FILE_NAME_COMPARISON_PATTERN: Final = re.compile(
     r"\b[A-Za-z_$][\w$]*\.name\s*(?:===|!==|==|!=)\s*"
     r"(?P<quote>['\"`])[^'\"`\r\n]*\.[A-Za-z0-9]{1,10}(?P=quote)",
 )
+_JSON_STRINGIFY_INLINE_PATTERN: Final = re.compile(r"JSON\.stringify\(\s*(\{)")
+_JSON_STRINGIFY_IDENTIFIER_PATTERN: Final = re.compile(
+    r"JSON\.stringify\(\s*([A-Za-z_$][\w$]*)\s*[,)]"
+)
 
 
 class MaterializedCodeError(RuntimeError):
@@ -75,6 +79,114 @@ def _use_mission_foundry_runtime(code: str) -> str:
         r"from mission_foundry_runtime import MissionFoundryAgent as FoundryAgent\g<suffix>",
         code,
     )
+
+
+def _extract_balanced_braces(text: str, open_index: int) -> str | None:
+    """Returns ``text[open_index:...]`` through its matching ``}``, inclusive.
+
+    String/template literals are skipped while counting depth so a stray
+    ``{``/``}`` inside quoted content (e.g. a label string) never breaks the
+    match.
+    """
+
+    depth = 0
+    in_string: str | None = None
+    i = open_index
+    while i < len(text):
+        ch = text[i]
+        if in_string is not None:
+            if ch == "\\":
+                i += 2
+                continue
+            if ch == in_string:
+                in_string = None
+        elif ch in "'\"`":
+            in_string = ch
+        elif ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return text[open_index : i + 1]
+        i += 1
+    return None
+
+
+def _top_level_object_entries(object_literal: str) -> list[str]:
+    """Splits a ``{...}`` object literal's body into top-level ``key: value`` entries."""
+
+    body = object_literal.strip().removeprefix("{").removesuffix("}")
+
+    entries: list[str] = []
+    current: list[str] = []
+    depth = 0
+    in_string: str | None = None
+    i = 0
+    while i < len(body):
+        ch = body[i]
+        if in_string is not None:
+            current.append(ch)
+            if ch == "\\":
+                if i + 1 < len(body):
+                    current.append(body[i + 1])
+                i += 2
+                continue
+            if ch == in_string:
+                in_string = None
+            i += 1
+            continue
+        if ch in "'\"`":
+            in_string = ch
+            current.append(ch)
+            i += 1
+            continue
+        if ch in "{[(":
+            depth += 1
+        elif ch in "}])":
+            depth -= 1
+        if ch == "," and depth == 0:
+            entries.append("".join(current))
+            current = []
+            i += 1
+            continue
+        current.append(ch)
+        i += 1
+    if current:
+        entries.append("".join(current))
+    return [entry for entry in entries if entry.strip()]
+
+
+def _submit_payload_literals(ui_component: str) -> list[str]:
+    """Extracts every object literal passed (directly or via a local ``const``)
+    to ``JSON.stringify`` in the generated mission UI's submit handler."""
+
+    literals: list[str] = []
+    for match in _JSON_STRINGIFY_INLINE_PATTERN.finditer(ui_component):
+        literal = _extract_balanced_braces(ui_component, match.start(1))
+        if literal is not None:
+            literals.append(literal)
+
+    for match in _JSON_STRINGIFY_IDENTIFIER_PATTERN.finditer(ui_component):
+        identifier = match.group(1)
+        assign_pattern = re.compile(
+            r"\b(?:const|let|var)\s+" + re.escape(identifier) + r"\s*=\s*(\{)"
+        )
+        last_assignment_open_index: int | None = None
+        for assign_match in assign_pattern.finditer(ui_component[: match.start()]):
+            last_assignment_open_index = assign_match.start(1)
+        if last_assignment_open_index is not None:
+            literal = _extract_balanced_braces(ui_component, last_assignment_open_index)
+            if literal is not None:
+                literals.append(literal)
+    return literals
+
+
+def _has_nested_object_value(object_literal: str) -> bool:
+    for entry in _top_level_object_entries(object_literal):
+        _, separator, value = entry.partition(":")
+        if separator and value.strip().startswith("{"):
+            return True
+    return False
 
 
 @dataclass(frozen=True)
@@ -174,6 +286,17 @@ def materialize_build(output_text: str) -> MaterializedBuild:
             "The generated mission UI compares an uploaded file's name to an exact "
             "literal. Generated prototypes must validate uploaded content and file "
             "type, never an end-user-controlled filename or example filename."
+        )
+
+    if ui_component is not None and any(
+        _has_nested_object_value(literal) for literal in _submit_payload_literals(ui_component)
+    ):
+        raise MaterializedCodeError(
+            "The generated mission UI's submit payload groups fields inside nested "
+            "objects (for example {\"evaluation_config\": {\"primary_model_id\": ...}}). "
+            "The UI/orchestrator contract requires one flat JSON object with exactly "
+            "one key per rendered field - a nested payload silently breaks every "
+            "'config.get(...)' read in the orchestrator's json.loads(ui_message)."
         )
 
     return MaterializedBuild(
