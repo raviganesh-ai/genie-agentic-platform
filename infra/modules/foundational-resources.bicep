@@ -9,6 +9,7 @@ param resourceToken string
 param virtualNetworkAddressPrefix string
 param containerAppsInfrastructureSubnetPrefix string
 param privateEndpointSubnetPrefix string
+param apiManagementSubnetPrefix string
 param tags object
 
 // Built-in role definition ids - granted to Genie's own runtime managed
@@ -40,6 +41,7 @@ module virtualNetwork 'virtual-network.bicep' = {
     addressPrefix: virtualNetworkAddressPrefix
     containerAppsInfrastructureSubnetPrefix: containerAppsInfrastructureSubnetPrefix
     privateEndpointSubnetPrefix: privateEndpointSubnetPrefix
+    apiManagementSubnetPrefix: apiManagementSubnetPrefix
     tags: tags
   }
 }

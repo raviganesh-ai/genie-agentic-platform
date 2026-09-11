@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1600" height="960" viewBox="0 0 1600 960" role="img" aria-labelledby="title description">
   <title id="title">Genie Azure platform architecture</title>
-  <desc id="description">Azure architecture diagram showing anonymous internal users, Static Web Apps, a direct Container Apps FastAPI runtime, Foundry Agent Service, data services, managed identity, Container Registry, Application Insights, and Azure Monitor.</desc>
+  <desc id="description">Azure architecture diagram showing anonymous internal users, Static Web Apps, a public API Management edge, a private Container Apps FastAPI runtime, Foundry Agent Service, data services, managed identity, Container Registry, Application Insights, and Azure Monitor.</desc>
   <defs>
     <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
       <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#36566F" flood-opacity="0.16"/>
@@ -35,10 +35,10 @@
     <text x="290" y="214" text-anchor="start" fill="#526575" font-family="Segoe UI, sans-serif" font-size="12.5" font-weight="400"><tspan x="290" dy="0">Public web experience; no sign-in required</tspan></text>
   </g>
     <g>
-    <rect x="730" y="165" width="450" height="380" rx="8" fill="#F1FAF1" stroke="#107C10" stroke-width="1.5"/>
+    <rect x="730" y="165" width="450" height="420" rx="8" fill="#F1FAF1" stroke="#107C10" stroke-width="1.5"/>
     <image href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxOCIgaGVpZ2h0PSIxOCIgdmlld0JveD0iMCAwIDE4IDE4Ij48ZGVmcz48bGluZWFyR3JhZGllbnQgaWQ9ImEzYTQ0MDkzLWIxNTctNDI2ZS1hOGZlLWNlYzlmOWMyMzk3OCIgeDE9IjExLjcyOSIgeTE9IjQuODgiIHgyPSIxMS43MjkiIHkyPSIxMy4wOTkiIGdyYWRpZW50VW5pdHM9InVzZXJTcGFjZU9uVXNlIj48c3RvcCBvZmZzZXQ9IjAuMDAxIiBzdG9wLWNvbG9yPSIjNzczYWRjIiAvPjxzdG9wIG9mZnNldD0iMC41MjgiIHN0b3AtY29sb3I9IiM2NjM1YmIiIC8+PHN0b3Agb2Zmc2V0PSIxIiBzdG9wLWNvbG9yPSIjNTUyZjk5IiAvPjwvbGluZWFyR3JhZGllbnQ+PGxpbmVhckdyYWRpZW50IGlkPSJhZDgzODg1OS0wM2Y0LTQ3MmYtODFiYy1lYmM5MjFkNzEzMzUiIHgxPSI2LjM1IiB5MT0iMTMuOTE0IiB4Mj0iNi4zNSIgeTI9IjQuMTk4IiBncmFkaWVudFVuaXRzPSJ1c2VyU3BhY2VPblVzZSI+PHN0b3Agb2Zmc2V0PSIwLjAwMSIgc3RvcC1jb2xvcj0iIzc3M2FkYyIgLz48c3RvcCBvZmZzZXQ9IjAuMzA3IiBzdG9wLWNvbG9yPSIjNzkzZGRkIiAvPjxzdG9wIG9mZnNldD0iMC41MzIiIHN0b3AtY29sb3I9IiM4MDQ2ZTEiIC8+PHN0b3Agb2Zmc2V0PSIwLjczMSIgc3RvcC1jb2xvcj0iIzhjNTZlNyIgLz48c3RvcCBvZmZzZXQ9IjAuOTE1IiBzdG9wLWNvbG9yPSIjOWM2ZGVmIiAvPjxzdG9wIG9mZnNldD0iMSIgc3RvcC1jb2xvcj0iI2E2N2FmNCIgLz48L2xpbmVhckdyYWRpZW50PjwvZGVmcz48ZyBpZD0iYWU4MjQ3MGQtN2E2Yy00ZGZlLTg1MzMtNTlkOGZmOTQ4NjI5Ij48Zz48cGF0aCBkPSJNOC42MTcsOC42NDRILjYzOVYxLjc4NEExLjE2LDEuMTYsMCwwLDEsMS43ODguNjI0SDguNjE3Wk0xLjYzLDcuNjUzaDZWMS41OTRIMS43ODhhLjE1OC4xNTgsMCwwLDAtLjE1OC4xNThoMFoiIGZpbGw9IiM5NDk0OTQiIC8+PHBhdGggZD0iTTE3LjUsOC42NDRIOS41MjNWLjYyNGg2LjgyOEExLjE2LDEuMTYsMCwwLDEsMTcuNSwxLjc4NFptLTYuOTg3LS45OTFoNlYxLjc4NGEuMTU3LjE1NywwLDAsMC0uMTIzLS4xODcuMi4yLDAsMCwwLS4wMzUsMEgxMC41MTNaIiBmaWxsPSIjOTQ5NDk0IiAvPjxwYXRoIGQ9Ik04LjYxNywxNy40ODVIMS43ODhBMS4xNDksMS4xNDksMCwwLDEsLjYzOSwxNi4zNDdWOS40NzZIOC42MTdaTTEuNjMsMTAuNDY3djUuODhhLjE1OC4xNTgsMCwwLDAsLjE1OC4xNThINy42MjZWMTAuNDY3WiIgZmlsbD0iIzk0OTQ5NCIgLz48cGF0aCBkPSJNMTYuMzUxLDE3LjQ4NUg5LjUyM1Y5LjQ3NkgxNy41djYuODcxQTEuMTQ5LDEuMTQ5LDAsMCwxLDE2LjM1MSwxNy40ODVabS01LjgzOC0uOTkxaDUuODM4YS4xNTcuMTU3LDAsMCwwLC4xNTgtLjE1OFYxMC40NjdoLTZaIiBmaWxsPSIjOTQ5NDk0IiAvPjxwYXRoIGQ9Ik0xNC42LDYuMjk0YS4yOTQuMjk0LDAsMCwwLS4yLS4yNzhMOS4wNDQsNC4yMDVBLjEyOC4xMjgsMCwwLDAsOSw0LjJIOWEuMTMyLjEzMiwwLDAsMC0uMTMzLjEzM3Y5LjQ0NUEuMTMzLjEzMywwLDAsMCw5LDEzLjkxMUg5YS4xMzguMTM4LDAsMCwwLC4wNDktLjAxbDUuMzY1LTIuMTQ1YS4yOTIuMjkyLDAsMCwwLC4xODQtLjI3MloiIGZpbGw9InVybCgjYTNhNDQwOTMtYjE1Ny00MjZlLWE4ZmUtY2VjOWY5YzIzOTc4KSIgLz48cGF0aCBkPSJNOC45NjYsNC4ybC01LjI5My45NjZhLjE2MS4xNjEsMCwwLDAtLjEzLjE1OFYxMi42M2EuMTYuMTYsMCwwLDAsLjEyNi4xNTdMOC45NjIsMTMuOTFhLjE2MS4xNjEsMCwwLDAsLjE5MS0uMTIxLjIyLjIyLDAsMCwwLDAtLjAzNlY0LjM1OEEuMTYuMTYsMCwwLDAsOSw0LjIuMTYzLjE2MywwLDAsMCw4Ljk2Niw0LjJaIiBmaWxsPSJ1cmwoI2FkODM4ODU5LTAzZjQtNDcyZi04MWJjLWViYzkyMWQ3MTMzNSkiIC8+PHBhdGggZD0iTTYuNTIsNS42NTZ2Ni44bDEuODQyLjNWNS4zMzVabS0yLjI2Mi4zNjd2NS45NTVsMS42LjMyNlY1Ljc1NFoiIGZpbGw9IiNiNzk2ZjkiIG9wYWNpdHk9IjAuNSIgLz48L2c+PC9nPjwvc3ZnPg==" x="748" y="181" width="30" height="30" preserveAspectRatio="xMidYMid meet"/>
-    <text x="788" y="194" text-anchor="start" fill="#004578" font-family="Segoe UI, sans-serif" font-size="17" font-weight="600"><tspan x="788" dy="0">Azure Container Apps environment</tspan></text>
-    <text x="788" y="214" text-anchor="start" fill="#526575" font-family="Segoe UI, sans-serif" font-size="12.5" font-weight="400"><tspan x="788" dy="0">Public FastAPI ingress with exact-origin CORS</tspan></text>
+    <text x="788" y="194" text-anchor="start" fill="#004578" font-family="Segoe UI, sans-serif" font-size="17" font-weight="600"><tspan x="788" dy="0">Gateway and private runtime</tspan></text>
+    <text x="788" y="214" text-anchor="start" fill="#526575" font-family="Segoe UI, sans-serif" font-size="12.5" font-weight="400"><tspan x="788" dy="0">Public APIM edge; private Container Apps endpoint</tspan></text>
   </g>
     <g>
     <rect x="1215" y="165" width="295" height="650" rx="8" fill="#F7F3FA" stroke="#5C2D91" stroke-width="1.5"/>
@@ -59,28 +59,31 @@
     <path d="M 470 312 H 490" fill="none" stroke="#5C2D91" stroke-width="2.2" stroke-dasharray="7 5" marker-end="url(#arrowPurple)"/>
     
   </g><g>
-    <path d="M 470 347 H 710 V 306 H 755" fill="none" stroke="#0078D4" stroke-width="2.2"  marker-end="url(#arrow)"/>
-    <rect x="552.8" y="319" width="94.4" height="22" rx="4" fill="#FFFFFF" opacity="0.96"/><text x="600" y="335" text-anchor="middle" fill="#0078D4" font-family="Segoe UI, sans-serif" font-size="12.5" font-weight="600"><tspan x="600" dy="0">Anonymous HTTPS</tspan></text>
+    <path d="M 470 347 H 710 V 270 H 755" fill="none" stroke="#0078D4" stroke-width="2.2"  marker-end="url(#arrow)"/>
+    <rect x="542.75" y="319" width="114.5" height="22" rx="4" fill="#FFFFFF" opacity="0.96"/><text x="600" y="335" text-anchor="middle" fill="#0078D4" font-family="Segoe UI, sans-serif" font-size="12.5" font-weight="600"><tspan x="600" dy="0">Anonymous HTTPS</tspan></text>
   </g><g>
-    <path d="M 1005 306 H 1030" fill="none" stroke="#0078D4" stroke-width="2.2"  marker-end="url(#arrow)"/>
+    <path d="M 955 315 V 340" fill="none" stroke="#0078D4" stroke-width="2.2"  marker-end="url(#arrow)"/>
+    <rect x="959.45" y="319" width="101.10000000000001" height="22" rx="4" fill="#FFFFFF" opacity="0.96"/><text x="1010" y="335" text-anchor="middle" fill="#0078D4" font-family="Segoe UI, sans-serif" font-size="12.5" font-weight="600"><tspan x="1010" dy="0">Private route</tspan></text>
+  </g><g>
+    <path d="M 1005 391 H 1030" fill="none" stroke="#0078D4" stroke-width="2.2"  marker-end="url(#arrow)"/>
     
   </g><g>
-    <path d="M 1093 357 V 395" fill="none" stroke="#0078D4" stroke-width="2.2"  marker-end="url(#arrow)"/>
-    <rect x="1097.9" y="364" width="54.2" height="22" rx="4" fill="#FFFFFF" opacity="0.96"/><text x="1125" y="380" text-anchor="middle" fill="#0078D4" font-family="Segoe UI, sans-serif" font-size="12.5" font-weight="600"><tspan x="1125" dy="0">Invoke</tspan></text>
+    <path d="M 1093 442 V 465" fill="none" stroke="#0078D4" stroke-width="2.2"  marker-end="url(#arrow)"/>
+    <rect x="1097.9" y="442" width="54.2" height="22" rx="4" fill="#FFFFFF" opacity="0.96"/><text x="1125" y="458" text-anchor="middle" fill="#0078D4" font-family="Segoe UI, sans-serif" font-size="12.5" font-weight="600"><tspan x="1125" dy="0">Invoke</tspan></text>
   </g><g>
-    <path d="M 900 507 V 565 H 250 V 720 H 290" fill="none" stroke="#008575" stroke-width="2.2"  marker-end="url(#arrow)"/>
-    <rect x="606.15" y="537" width="87.7" height="22" rx="4" fill="#FFFFFF" opacity="0.96"/><text x="650" y="553" text-anchor="middle" fill="#008575" font-family="Segoe UI, sans-serif" font-size="12.5" font-weight="600"><tspan x="650" dy="0">Agent calls</tspan></text>
+    <path d="M 900 577 V 610 H 250 V 720 H 290" fill="none" stroke="#008575" stroke-width="2.2"  marker-end="url(#arrow)"/>
+    <rect x="606.15" y="587" width="87.7" height="22" rx="4" fill="#FFFFFF" opacity="0.96"/><text x="650" y="603" text-anchor="middle" fill="#008575" font-family="Segoe UI, sans-serif" font-size="12.5" font-weight="600"><tspan x="650" dy="0">Agent calls</tspan></text>
   </g><g>
-    <path d="M 970 507 V 585" fill="none" stroke="#008575" stroke-width="2.2"  marker-end="url(#arrow)"/>
-    <rect x="962.7" y="536" width="134.60000000000002" height="22" rx="4" fill="#FFFFFF" opacity="0.96"/><text x="1030" y="552" text-anchor="middle" fill="#008575" font-family="Segoe UI, sans-serif" font-size="12.5" font-weight="600"><tspan x="1030" dy="0">Memory + artifacts</tspan></text>
+    <path d="M 970 577 V 625" fill="none" stroke="#008575" stroke-width="2.2"  marker-end="url(#arrow)"/>
+    <rect x="962.7" y="594" width="134.60000000000002" height="22" rx="4" fill="#FFFFFF" opacity="0.96"/><text x="1030" y="610" text-anchor="middle" fill="#008575" font-family="Segoe UI, sans-serif" font-size="12.5" font-weight="600"><tspan x="1030" dy="0">Memory + artifacts</tspan></text>
   </g><g>
-    <path d="M 1260 450 H 1188 V 470 H 1155" fill="none" stroke="#5C2D91" stroke-width="2.2" stroke-dasharray="7 5" marker-end="url(#arrowPurple)"/>
-    <rect x="1141.05" y="422" width="127.9" height="22" rx="4" fill="#FFFFFF" opacity="0.96"/><text x="1205" y="438" text-anchor="middle" fill="#5C2D91" font-family="Segoe UI, sans-serif" font-size="12.5" font-weight="600"><tspan x="1205" dy="0">Workload identity</tspan></text>
+    <path d="M 1260 510 H 1188 V 530 H 1155" fill="none" stroke="#5C2D91" stroke-width="2.2" stroke-dasharray="7 5" marker-end="url(#arrowPurple)"/>
+    <rect x="1141.05" y="482" width="127.9" height="22" rx="4" fill="#FFFFFF" opacity="0.96"/><text x="1205" y="498" text-anchor="middle" fill="#5C2D91" font-family="Segoe UI, sans-serif" font-size="12.5" font-weight="600"><tspan x="1205" dy="0">Workload identity</tspan></text>
   </g><g>
-    <path d="M 1260 600 H 1198 V 220 H 1155" fill="none" stroke="#5C2D91" stroke-width="2.2" stroke-dasharray="7 5" marker-end="url(#arrowPurple)"/>
-    <rect x="1158.15" y="192" width="87.7" height="22" rx="4" fill="#FFFFFF" opacity="0.96"/><text x="1202" y="208" text-anchor="middle" fill="#5C2D91" font-family="Segoe UI, sans-serif" font-size="12.5" font-weight="600"><tspan x="1202" dy="0">Pull images</tspan></text>
+    <path d="M 1260 600 H 1200 V 450 H 1015 V 391 H 1005" fill="none" stroke="#5C2D91" stroke-width="2.2" stroke-dasharray="7 5" marker-end="url(#arrowPurple)"/>
+    <rect x="1061.15" y="450" width="87.7" height="22" rx="4" fill="#FFFFFF" opacity="0.96"/><text x="1105" y="466" text-anchor="middle" fill="#5C2D91" font-family="Segoe UI, sans-serif" font-size="12.5" font-weight="600"><tspan x="1105" dy="0">Pull images</tspan></text>
   </g><g>
-    <path d="M 1155 470 H 1198 V 740 H 1260" fill="none" stroke="#107C10" stroke-width="2.2"  marker-end="url(#arrowGreen)"/>
+    <path d="M 1155 530 H 1198 V 740 H 1260" fill="none" stroke="#107C10" stroke-width="2.2"  marker-end="url(#arrowGreen)"/>
     <rect x="1167.85" y="712" width="74.30000000000001" height="22" rx="4" fill="#FFFFFF" opacity="0.96"/><text x="1205" y="728" text-anchor="middle" fill="#107C10" font-family="Segoe UI, sans-serif" font-size="12.5" font-weight="600"><tspan x="1205" dy="0">Telemetry</tspan></text>
   </g><g>
     <path d="M 1372 790 V 830" fill="none" stroke="#107C10" stroke-width="2.2"  marker-end="url(#arrowGreen)"/>
@@ -96,7 +99,7 @@
     <g>
     <rect x="490" y="265" width="180" height="120" rx="8" fill="#FFFFFF" stroke="#B4C7D9" filter="url(#shadow)"/>
     <rect x="490" y="265" width="6" height="120" rx="3" fill="#5C2D91"/>
-    <image href="data:image/svg+xml;base64,PHN2ZyBpZD0iYTc2YTAxMDMtY2UwMy00ZDU4LTg1OWQtNGMyN2UwMjkyNWQyIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxOCIgaGVpZ2h0PSIxOCIgdmlld0JveD0iMCAwIDE4IDE4Ij48ZGVmcz48bGluZWFyR3JhZGllbnQgaWQ9ImVmZWI4ZTk2LTJhZjAtNDY4MS05YTZhLTQ1ZjliMDI2MmYxOSIgeDE9Ii02NTE4Ljc4IiB5MT0iMTExOC44NiIgeDI9Ii02NTE4Ljc4IiB5Mj0iMTA5MC4wNiIgZ3JhZGllbnRUcmFuc2Zvcm09Im1hdHJpeCgwLjUsIDAsIDAsIC0wLjUsIDMyNjcuNDIsIDU1OS45OSkiIGdyYWRpZW50VW5pdHM9InVzZXJTcGFjZU9uVXNlIj48c3RvcCBvZmZzZXQ9IjAiIHN0b3AtY29sb3I9IiM1ZWEwZWYiIC8+PHN0b3Agb2Zmc2V0PSIwLjE4IiBzdG9wLWNvbG9yPSIjNTg5ZWVkIiAvPjxzdG9wIG9mZnNldD0iMC40MSIgc3RvcC1jb2xvcj0iIzQ4OTdlOSIgLz48c3RvcCBvZmZzZXQ9IjAuNjYiIHN0b3AtY29sb3I9IiMyZThjZTEiIC8+PHN0b3Agb2Zmc2V0PSIwLjk0IiBzdG9wLWNvbG9yPSIjMGE3Y2Q3IiAvPjxzdG9wIG9mZnNldD0iMSIgc3RvcC1jb2xvcj0iIzAwNzhkNCIgLz48L2xpbmVhckdyYWRpZW50PjwvZGVmcz48cGF0aCBkPSJNNS42NywxMC42MUgxMHY0LjMySDUuNjdabS01LTUuNzZINVYuNTNIMS4yM2EuNi42LDAsMCwwLS42LjZabS42LDEwLjA4SDVWMTAuNjFILjYzdjMuNzJBLjYuNiwwLDAsMCwxLjIzLDE0LjkzWm0tLjYtNUg1VjUuNTdILjYzWm0xMC4wOCw1aDMuNzJhLjYuNiwwLDAsMCwuNi0uNlYxMC42MUgxMC43MVptLTUtNUgxMFY1LjU3SDUuNjdabTUsMEgxNVY1LjU3SDEwLjcxWm0wLTkuMzZWNC44NUgxNVYxLjEzYS42LjYsMCwwLDAtLjYtLjZabS01LDQuMzJIMTBWLjUzSDUuNjdaIiBmaWxsPSJ1cmwoI2VmZWI4ZTk2LTJhZjAtNDY4MS05YTZhLTQ1ZjliMDI2MmYxOSkiIC8+PHBvbHlnb24gcG9pbnRzPSIxNy4zNyAxMC43IDE3LjM3IDE1LjIxIDEzLjUgMTcuNDcgMTMuNSAxMi45NiAxNy4zNyAxMC43IiBmaWxsPSIjMzJiZWRkIiAvPjxwb2x5Z29uIHBvaW50cz0iMTcuMzcgMTAuNyAxMy41IDEyLjk3IDkuNjMgMTAuNyAxMy41IDguNDQgMTcuMzcgMTAuNyIgZmlsbD0iIzljZWJmZiIgLz48cG9seWdvbiBwb2ludHM9IjEzLjUgMTIuOTcgMTMuNSAxNy40NyA5LjYzIDE1LjIxIDkuNjMgMTAuNyAxMy41IDEyLjk3IiBmaWxsPSIjNTBlNmZmIiAvPjxwb2x5Z29uIHBvaW50cz0iOS42MyAxNS4yMSAxMy41IDEyLjk2IDEzLjUgMTcuNDcgOS42MyAxNS4yMSIgZmlsbD0iIzljZWJmZiIgLz48cG9seWdvbiBwb2ludHM9IjE3LjM3IDE1LjIxIDEzLjUgMTIuOTYgMTMuNSAxNy40NyAxNy4zNyAxNS4yMSIgZmlsbD0iIzUwZTZmZiIgLz48L3N2Zz4=" x="510" y="288" width="54" height="54" preserveAspectRatio="xMidYMid meet"/>
+    <image href="data:image/svg+xml;base64,PHN2ZyBpZD0iZTI0NjcxZjYtZjUwMS00OTUyLWEyZGItOGIwYjFkMzI5YzE3IiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxOCIgaGVpZ2h0PSIxOCIgdmlld0JveD0iMCAwIDE4IDE4Ij48ZGVmcz48bGluZWFyR3JhZGllbnQgaWQ9ImJlOTI5MDFiLWVjMzMtNGM2NS1hZGYxLTliMGVlZDA2ZDY3NyIgeDE9IjkiIHkxPSI2Ljg4IiB4Mj0iOSIgeTI9IjIwLjQ1IiBncmFkaWVudFVuaXRzPSJ1c2VyU3BhY2VPblVzZSI+PHN0b3Agb2Zmc2V0PSIwLjIyIiBzdG9wLWNvbG9yPSIjMzJkNGY1IiAvPjxzdG9wIG9mZnNldD0iMSIgc3RvcC1jb2xvcj0iIzE5OGFiMyIgLz48L2xpbmVhckdyYWRpZW50PjxsaW5lYXJHcmFkaWVudCBpZD0iYjQ2ZmMyNDYtMjVkOC00Mzk4LTg3NzktMTA0MmU4Y2FjYWU3IiB4MT0iOC42MSIgeTE9Ii0wLjQiIHgyPSI5LjYiIHkyPSIxMS45MiIgZ3JhZGllbnRVbml0cz0idXNlclNwYWNlT25Vc2UiPjxzdG9wIG9mZnNldD0iMC4yMiIgc3RvcC1jb2xvcj0iIzMyZDRmNSIgLz48c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiMxOThhYjMiIC8+PC9saW5lYXJHcmFkaWVudD48L2RlZnM+PHRpdGxlPkljb24taWRlbnRpdHktMjMwPC90aXRsZT48cGF0aCBkPSJNMTUuNzIsMThhMS40NSwxLjQ1LDAsMCwwLDEuNDUtMS40NS40Ny40NywwLDAsMCwwLS4xN0MxNi41OSwxMS44MSwxNCw4LjA5LDksOC4wOVMxLjM0LDExLjI0LjgzLDE2LjM5QTEuNDYsMS40NiwwLDAsMCwyLjE0LDE4SDE1LjcyWiIgZmlsbD0idXJsKCNiZTkyOTAxYi1lYzMzLTRjNjUtYWRmMS05YjBlZWQwNmQ2NzcpIiAvPjxwYXRoIGQ9Ik05LDkuMTdhNC41OSw0LjU5LDAsMCwxLTIuNDgtLjczTDksMTQuODZsMi40NC02LjM4QTQuNTMsNC41MywwLDAsMSw5LDkuMTdaIiBmaWxsPSIjZmZmIiBvcGFjaXR5PSIwLjgiIC8+PGNpcmNsZSBjeD0iOS4wMSIgY3k9IjQuNTgiIHI9IjQuNTgiIGZpbGw9InVybCgjYjQ2ZmMyNDYtMjVkOC00Mzk4LTg3NzktMTA0MmU4Y2FjYWU3KSIgLz48L3N2Zz4=" x="510" y="288" width="54" height="54" preserveAspectRatio="xMidYMid meet"/>
     <text x="580" y="299" text-anchor="start" fill="#172B3A" font-family="Segoe UI, sans-serif" font-size="16" font-weight="600"><tspan x="580" dy="0">Anonymous</tspan><tspan x="580" dy="19">internal access</tspan></text>
     <text x="580" y="347" text-anchor="start" fill="#526575" font-family="Segoe UI, sans-serif" font-size="13" font-weight="400"><tspan x="580" dy="0">No sign-in</tspan><tspan x="580" dy="17">Shared principal</tspan></text>
   </g>
@@ -108,22 +111,28 @@
     <text x="140" y="355" text-anchor="start" fill="#526575" font-family="Segoe UI, sans-serif" font-size="13" font-weight="400"><tspan x="140" dy="0">Internal user</tspan></text>
   </g>
     <g>
-    <rect x="755" y="255" width="250" height="102" rx="6" fill="#FFFFFF" stroke="#107C10" stroke-width="1.5"/>
-    <rect x="755" y="255" width="5" height="102" rx="2.5" fill="#107C10"/>
-    <text x="773" y="282" text-anchor="start" fill="#172B3A" font-family="Segoe UI, sans-serif" font-size="15" font-weight="600"><tspan x="773" dy="0">FastAPI API</tspan></text>
-    <text x="773" y="304" text-anchor="start" fill="#526575" font-family="Segoe UI, sans-serif" font-size="12.5" font-weight="400"><tspan x="773" dy="0">Public ingress :8000</tspan><tspan x="773" dy="16">Exact CORS + API routes</tspan></text>
+    <rect x="755" y="225" width="400" height="90" rx="6" fill="#FFFFFF" stroke="#0078D4" stroke-width="1.5"/>
+    <rect x="755" y="225" width="5" height="90" rx="2.5" fill="#0078D4"/>
+    <text x="773" y="252" text-anchor="start" fill="#172B3A" font-family="Segoe UI, sans-serif" font-size="15" font-weight="600"><tspan x="773" dy="0">Azure API Management Standard v2</tspan></text>
+    <text x="773" y="274" text-anchor="start" fill="#526575" font-family="Segoe UI, sans-serif" font-size="12.5" font-weight="400"><tspan x="773" dy="0">Only public API endpoint</tspan><tspan x="773" dy="16">Exact CORS + rate limit + correlation</tspan></text>
   </g>
     <g>
-    <rect x="1030" y="255" width="125" height="102" rx="6" fill="#FFFFFF" stroke="#D83B01" stroke-width="1.5"/>
-    <rect x="1030" y="255" width="5" height="102" rx="2.5" fill="#D83B01"/>
-    <text x="1048" y="282" text-anchor="start" fill="#172B3A" font-family="Segoe UI, sans-serif" font-size="15" font-weight="600"><tspan x="1048" dy="0">Identity</tspan></text>
-    <text x="1048" y="304" text-anchor="start" fill="#526575" font-family="Segoe UI, sans-serif" font-size="12.5" font-weight="400"><tspan x="1048" dy="0">genie-internal-user</tspan><tspan x="1048" dy="16">Genie.Admin</tspan></text>
+    <rect x="755" y="340" width="250" height="102" rx="6" fill="#FFFFFF" stroke="#107C10" stroke-width="1.5"/>
+    <rect x="755" y="340" width="5" height="102" rx="2.5" fill="#107C10"/>
+    <text x="773" y="367" text-anchor="start" fill="#172B3A" font-family="Segoe UI, sans-serif" font-size="15" font-weight="600"><tspan x="773" dy="0">FastAPI API</tspan></text>
+    <text x="773" y="389" text-anchor="start" fill="#526575" font-family="Segoe UI, sans-serif" font-size="12.5" font-weight="400"><tspan x="773" dy="0">Private endpoint :8000</tspan><tspan x="773" dy="16">Private DNS + API routes</tspan></text>
   </g>
     <g>
-    <rect x="755" y="395" width="400" height="112" rx="6" fill="#FFFFFF" stroke="#0078D4" stroke-width="1.5"/>
-    <rect x="755" y="395" width="5" height="112" rx="2.5" fill="#0078D4"/>
-    <text x="773" y="422" text-anchor="start" fill="#172B3A" font-family="Segoe UI, sans-serif" font-size="15" font-weight="600"><tspan x="773" dy="0">Workflow orchestration</tspan></text>
-    <text x="773" y="444" text-anchor="start" fill="#526575" font-family="Segoe UI, sans-serif" font-size="12.5" font-weight="400"><tspan x="773" dy="0">Governance + three-tier memory</tspan><tspan x="773" dy="16">AzureAgentGateway + Deploy &amp; Launch</tspan></text>
+    <rect x="1030" y="340" width="125" height="102" rx="6" fill="#FFFFFF" stroke="#D83B01" stroke-width="1.5"/>
+    <rect x="1030" y="340" width="5" height="102" rx="2.5" fill="#D83B01"/>
+    <text x="1048" y="367" text-anchor="start" fill="#172B3A" font-family="Segoe UI, sans-serif" font-size="15" font-weight="600"><tspan x="1048" dy="0">Identity</tspan></text>
+    <text x="1048" y="389" text-anchor="start" fill="#526575" font-family="Segoe UI, sans-serif" font-size="12.5" font-weight="400"><tspan x="1048" dy="0">genie-internal-user</tspan><tspan x="1048" dy="16">Genie.Admin</tspan></text>
+  </g>
+    <g>
+    <rect x="755" y="465" width="400" height="112" rx="6" fill="#FFFFFF" stroke="#0078D4" stroke-width="1.5"/>
+    <rect x="755" y="465" width="5" height="112" rx="2.5" fill="#0078D4"/>
+    <text x="773" y="492" text-anchor="start" fill="#172B3A" font-family="Segoe UI, sans-serif" font-size="15" font-weight="600"><tspan x="773" dy="0">Workflow orchestration</tspan></text>
+    <text x="773" y="514" text-anchor="start" fill="#526575" font-family="Segoe UI, sans-serif" font-size="12.5" font-weight="400"><tspan x="773" dy="0">Governance + three-tier memory</tspan><tspan x="773" dy="16">AzureAgentGateway + Deploy &amp; Launch</tspan></text>
   </g>
     <g>
     <rect x="1260" y="400" width="225" height="114" rx="8" fill="#FFFFFF" stroke="#B4C7D9" filter="url(#shadow)"/>

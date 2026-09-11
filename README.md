@@ -53,13 +53,13 @@ Genie follows Clean Architecture in application code and uses Azure-native ident
 | Azure concern | Implementation |
 |---|---|
 | **Web experience** | React/TypeScript on Azure Static Web Apps; no sign-in or bearer token is required |
-| **API access boundary** | Public Azure Container Apps ingress reaches FastAPI directly on `8000`; exact-origin CORS allows the configured SPA but is not authentication |
+| **API access boundary** | Public Standard v2 API Management is the only Internet-facing API endpoint; outbound VNet integration, private DNS, and a Container Apps environment private endpoint reach FastAPI on `8000` while environment public access remains disabled |
 | **Agent execution** | `AzureAgentGateway` is the only production execution path to independently provisioned Azure AI Foundry Prompt Agents |
 | **Identity and secrets** | User-assigned managed identity and least-privilege Azure RBAC; secrets belong in Key Vault and are never embedded in images or source |
 | **Memory and artifacts** | Cosmos DB for durable session/memory/lineage state, Azure AI Search for enterprise knowledge, and Azure Storage for uploads and generated artifacts |
 | **Images and hosting** | Commit-pinned FastAPI images in Azure Container Registry, deployed to Azure Container Apps |
 | **Observability** | Application Insights and Azure Monitor receive structured logs, traces, metrics, correlation IDs, and governance telemetry |
-| **Infrastructure** | Subscription-scoped Bicep creates the resource group and foundational Azure resources; GitHub Actions deploys application revisions through Azure OIDC |
+| **Infrastructure** | Subscription-scoped Bicep creates the resource group, foundational Azure resources, and dedicated APIM subnet; GitHub Actions deploys the gateway/private endpoint and application revisions through Azure OIDC |
 
 ### Generated prototype isolation
 
@@ -383,7 +383,7 @@ Frontend (`frontend/.env.production` / `.env.development`, Vite `VITE_` prefix):
 
 | Variable | Purpose |
 |---|---|
-| `VITE_GENIE_API_BASE_URL` | Base URL of the deployed/local Genie backend |
+| `VITE_GENIE_API_BASE_URL` | Platform APIM gateway URL in production; local FastAPI URL in development |
 
 ---
 
@@ -391,7 +391,7 @@ Frontend (`frontend/.env.production` / `.env.development`, Vite `VITE_` prefix):
 
 Genie and every generated prototype are intentionally anonymous:
 
-- **Genie API and frontend**: the SPA opens without a redirect or token. Public Container Apps ingress targets FastAPI on port `8000`; the frontend sends no `Authorization` header. `GENIE_CORS_ALLOWED_ORIGINS` restricts browser calls to configured origins, but CORS does not stop non-browser clients that know the API URL.
+- **Genie API and frontend**: the SPA opens without a redirect or token and sends no `Authorization` header. Public Standard v2 APIM enforces the configured exact-origin CORS policy, rate limit, and correlation header, then reaches FastAPI through outbound VNet integration and the Container Apps private endpoint. Container Apps environment public access is disabled. CORS does not stop non-browser clients that know the public APIM URL.
 - **Internal principal**: every API request resolves to the deterministic `genie-internal-user` principal with `Genie.Admin`. Request headers cannot change that identity. Sessions, governance attribution, prototype ownership, inventory, and cleanup authority are therefore shared across all callers; there is no per-user isolation or meaningful user-role distinction.
 - **Generated prototypes**: every Deploy & Launch run owns a dedicated API Management service, VNet, private DNS zone, internal Container Apps environment, exact CORS policy, resource group, managed identity, RBAC assignments, and Foundry agents. The generated SPA and APIM endpoint require no sign-in or bearer token. APIM enforces exact-origin browser CORS, rate limiting, and correlation before forwarding over the private network; generated FastAPI has no public ingress.
 - **Azure workload identity remains**: removing interactive user authentication does not remove managed identity. `DefaultAzureCredential` still uses the Container App's user-assigned identity for Cosmos DB, Foundry, Azure management, ACR, storage, and other Azure service calls under least-privilege RBAC.
@@ -401,7 +401,7 @@ Genie and every generated prototype are intentionally anonymous:
 
 ## Deployment strategy
 
-The long-lived Genie **evaluation environment** consists of: (1) Bicep infrastructure-as-code that provisions foundational Azure resources, (2) a FastAPI container with direct public Container Apps ingress, and (3) a static React frontend deployed to Azure Static Web Apps. Generated prototypes are separate: each receives its own APIM service and private Container Apps environment. Deployment is split into readiness validation → infrastructure provisioning → agent provisioning → application deployment, matching the repo's fail-closed philosophy: nothing proceeds until the previous step is verified. These deployment instructions reproduce the evaluation environment; they do not supersede the production-readiness work required by the [purpose and use boundary](#purpose-and-use-boundary).
+The long-lived Genie **evaluation environment** consists of: (1) Bicep infrastructure-as-code that provisions foundational Azure resources and a dedicated APIM subnet, (2) a public Standard v2 APIM gateway with outbound VNet integration, (3) a FastAPI Container App reached only through its environment private endpoint, and (4) a static React frontend deployed to Azure Static Web Apps. Generated prototypes are separate: each receives its own APIM service and private Container Apps environment. Deployment is split into readiness validation → infrastructure provisioning → agent provisioning → gateway/private-network cutover → application deployment, matching the repo's fail-closed philosophy: nothing proceeds until the previous step is verified. These deployment instructions reproduce the evaluation environment; they do not supersede the production-readiness work required by the [purpose and use boundary](#purpose-and-use-boundary).
 
 ### Deploying into a brand-new Azure subscription
 
@@ -460,11 +460,14 @@ az deployment sub create `
 | `ai-search.bicep` | Azure AI Search (Enterprise Knowledge Memory) |
 | `cosmos-db.bicep` | Cosmos DB (Shared/Personal Memory, sessions) |
 | `ai-foundry.bicep` | Azure AI Foundry account + project |
+| `virtual-network.bicep` | VNet with dedicated Container Apps, private endpoint, and delegated APIM integration subnets |
 | `container-apps-environment.bicep` | Container Apps environment (hosts the backend) |
 | `static-web-app.bicep` | Azure Static Web App (hosts the frontend) |
 | `log-analytics.bicep` + `app-insights.bicep` | Observability |
 
 Every resource is granted only the specific RBAC role it needs on the shared managed identity (Key Vault Secrets User, Storage Blob Data Contributor, Search Index Data Contributor, Cognitive Services User, Cosmos DB Built-in Data Contributor) — never a broad Owner/Contributor grant.
+
+After the backend Container App exists, `infra/platform-private-gateway.bicep` adds the Standard v2 APIM service and anonymous proxy API, exact-origin policy, private endpoint, and `privatelink.<region>.azurecontainerapps.io` DNS integration. `scripts/deploy_platform_gateway.ps1` controls the safe cutover rather than having foundational provisioning disable access before a gateway can be verified.
 
 Capture the outputs (`aiFoundryEndpoint`, `aiSearchEndpoint`, `keyVaultUri`, `storageAccountName`, `cosmosDbEndpoint`, `managedIdentityPrincipalId`, `containerAppsEnvironmentId`, `staticWebAppDefaultHostname`, `applicationInsightsConnectionString`) via:
 
@@ -530,7 +533,21 @@ All three require `GENIE_AZURE_FOUNDRY_ENDPOINT` / `GENIE_AZURE_FOUNDRY_PROJECT_
 
    `<source>` can be a local directory (`.`) or a git URL (`https://github.com/<org>/<repo>.git#<branch>`, optionally with an embedded token for a private repo: `https://<token>@github.com/...`) — use whichever works reliably in your build environment.
 
-2. Atomically update the backend image, remove retired gateway containers and auth settings, configure CORS/probes, and target FastAPI port `8000`:
+2. Provision APIM, prove it reaches the current backend, create private endpoint/DNS integration, disable Container Apps environment public access, and prove both the private gateway route and direct-route denial:
+
+   ```powershell
+   $gateway = ./scripts/deploy_platform_gateway.ps1 `
+     -SubscriptionId <subscription-id> `
+     -ResourceGroup <rg> `
+     -ContainerAppName genie-backend `
+     -AllowedOrigin https://<static-web-app-host> `
+     -PublisherEmail <publisher-email> `
+     -PublisherName "Genie" | ConvertFrom-Json
+   ```
+
+   The first deployment can take tens of minutes while Standard v2 APIM is created. Public Container Apps access is not changed unless APIM is healthy and private endpoint provisioning succeeds. Repeated runs are idempotent.
+
+3. Atomically update the backend image, remove retired gateway containers and auth settings, configure CORS/probes, target FastAPI port `8000`, and verify the revision through APIM:
 
    ```powershell
    ./scripts/deploy_backend.ps1 `
@@ -539,6 +556,7 @@ All three require `GENIE_AZURE_FOUNDRY_ENDPOINT` / `GENIE_AZURE_FOUNDRY_PROJECT_
      -ContainerAppName genie-backend `
      -BackendImage <acr-name>.azurecr.io/genie-backend:<commit> `
      -AllowedOrigin https://<static-web-app-host> `
+    -GatewayUrl $gateway.gatewayUrl `
      -MemoryStoreEndpoint https://<cosmos-account>.documents.azure.com/ `
      -PrototypeApiGatewayPublisherEmail <publisher-email> `
      -PrototypeApiGatewayPublisherName "Genie" `
@@ -548,25 +566,27 @@ All three require `GENIE_AZURE_FOUNDRY_ENDPOINT` / `GENIE_AZURE_FOUNDRY_PROJECT_
    The script preserves the existing identity, environment, secrets, resources,
    and unrelated containers; removes `genie-auth-gateway`/`mise-sidecar` plus
    stale user-auth settings; and applies the image, CORS, probes, and ingress
-   target in one ARM patch. It waits for the exact revision and verifies readiness
-   plus anonymous `GET /sessions`. Roll back by running the same script with the
-   previous backend image tag and a new revision suffix.
+  target in one ARM patch. It requires environment public access to remain
+  `Disabled`, waits for the exact revision, and verifies readiness plus anonymous
+  `GET /sessions` through APIM. Roll back by running the same script with the
+  previous backend image tag and a new revision suffix.
 
    > If you're using a **user-assigned** managed identity, retain
    > `AZURE_CLIENT_ID=<identity-client-id>` or `DefaultAzureCredential` cannot
    > resolve which identity to use and the container will crash-loop.
 
-3. Verify:
+4. Verify:
 
    ```powershell
-   curl https://<container-app-fqdn>/health/live
-   curl https://<container-app-fqdn>/health/ready
-  curl -i https://<container-app-fqdn>/sessions  # must return 200
+  curl https://<apim-name>.azure-api.net/health/live
+  curl https://<apim-name>.azure-api.net/health/ready
+  curl -i https://<apim-name>.azure-api.net/sessions  # must return 200
+  curl -i https://<container-app-fqdn>/health/ready   # must not return 2xx
    ```
 
 **Frontend (Azure Static Web Apps)**
 
-1. Set `frontend/.env.production` with `VITE_GENIE_API_BASE_URL` (the Container App FQDN from above).
+1. Set `VITE_GENIE_API_BASE_URL` to the APIM gateway URL for the build. Production CI receives this URL directly from the verified `prepare-gateway` job; no production endpoint is committed in an env file.
 2. Build:
 
    ```powershell
@@ -586,19 +606,21 @@ All three require `GENIE_AZURE_FOUNDRY_ENDPOINT` / `GENIE_AZURE_FOUNDRY_PROJECT_
 
 `.github/workflows/ci.yml` runs on every push/PR to `master` (the repo's actual default branch — double-check this before ever pointing it at `main`). On a real push to `master`, once the `backend` and `frontend` CI jobs pass, two deploy jobs run the exact same steps documented above, automatically:
 
-- **`deploy-backend`** — logs into Azure via OIDC federated credential (no client secret), builds the commit-pinned FastAPI image, then runs `deploy_backend.ps1` so the image, retired-sidecar removal, CORS, probes, and ingress are updated atomically in one revision.
-- **`deploy-frontend`** — builds the frontend and deploys it with `@azure/static-web-apps-cli` using a stored deployment token.
+- **`prepare-gateway`** — logs into Azure via OIDC federated credential (no client secret), idempotently provisions Standard v2 APIM and its delegated subnet/NSG, proves the gateway reaches the current backend, and emits the verified URL without changing Container Apps public access.
+- **`deploy-frontend`** — builds the frontend against that exact gateway job output and deploys it with `@azure/static-web-apps-cli` using a stored deployment token. It no longer trusts a separately maintained production API URL variable.
+- **`deploy-backend`** — waits for the frontend cutover, builds the commit-pinned FastAPI image, creates/verifies private endpoint/DNS, disables Container Apps public access, proves APIM still works and direct ingress is denied, then runs `deploy_backend.ps1` so the image, retired-sidecar removal, CORS, probes, and ingress are updated atomically and verified through APIM.
 
 **One-time setup** (already performed for this environment — documented here so it can be reproduced on a new subscription/repo):
 
 1. A dedicated app registration (`genie-github-actions-deploy`, no client secret) holds a **federated identity credential** trusting this repo's GitHub Actions OIDC issuer, scoped to the `production` GitHub Environment — narrower than a branch-based subject, since it also requires the workflow job to declare `environment: production`. **Important**: the subject must match GitHub's *actual* token claim exactly, which is `repo:<org>/<repo>:environment:<env>` only if the org/repo have never been renamed — if either has been renamed, GitHub appends numeric IDs instead (`repo:<org>@<orgId>/<repo>@<repoId>:environment:<env>`). Get the exact value from a failed `azure/login@v2` run's log line `Federated token details: ... subject claim - ...` if login fails with `AADSTS700213`.
-2. That identity's service principal holds exactly two least-privilege, resource-scoped RBAC roles (never a subscription- or resource-group-wide Owner/Contributor grant):
+2. That identity's service principal holds three least-privilege assignments (never a subscription- or resource-group-wide Owner/Contributor grant):
    - **Container Registry Tasks Contributor**, scoped to just the ACR resource — covers `az acr build`'s scheduleRun/upload actions without granting registry data-plane push/pull.
   - **Container Apps Contributor**, scoped to just the `genie-backend-corporate` Container App resource — covers the atomic ARM patch.
+  - **Genie Platform Gateway Deployer**, scoped to the Genie resource group — a custom role containing only resource-group deployment, APIM API, delegated subnet/NSG, private endpoint/DNS, and Container Apps environment update/approval actions. It contains no delete or authorization-management action. Create/update and assign it once with `scripts/configure_platform_gateway_deployer.ps1 -SubscriptionId <id> -ResourceGroup <rg> -PrincipalObjectId <oidc-service-principal-object-id>`.
 3. The **runtime Genie backend managed identity** has the custom `Genie Prototype Resource Group Operator` role plus API Management Service Contributor, Network Contributor, Container Apps Contributor, Managed Identity Contributor, and Managed Identity Operator at subscription scope. The custom role permits only resource-group read/write/delete; the built-in roles are restricted to their respective provider surfaces. Shared ACR and role-assignment permissions remain constrained to existing resource scopes. New prototypes do not require Microsoft Graph application writes.
 4. The repo's **Settings → Secrets and variables → Actions** has:
   - **Secrets**: `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID` (identify the federated deployment app, not credentials by themselves), and `SWA_DEPLOYMENT_TOKEN`.
-  - **Variables**: `AZURE_ACR_NAME`, `AZURE_CONTAINER_APP_NAME`, `AZURE_RESOURCE_GROUP`, `GENIE_GATEWAY_ALLOWED_ORIGIN`, `GENIE_MEMORY_STORE_ENDPOINT`, `GENIE_PROTOTYPE_API_GATEWAY_PUBLISHER_EMAIL`, `GENIE_PROTOTYPE_API_GATEWAY_PUBLISHER_NAME`, and `VITE_GENIE_API_BASE_URL`.
+  - **Variables**: `AZURE_ACR_NAME`, `AZURE_CONTAINER_APP_NAME`, `AZURE_RESOURCE_GROUP`, `GENIE_GATEWAY_ALLOWED_ORIGIN`, `GENIE_MEMORY_STORE_ENDPOINT`, `GENIE_PROTOTYPE_API_GATEWAY_PUBLISHER_EMAIL`, and `GENIE_PROTOTYPE_API_GATEWAY_PUBLISHER_NAME`. `VITE_GENIE_API_BASE_URL` is no longer a production GitHub variable; `prepare-gateway` emits it from the APIM deployment.
 
 If this identity/RBAC/secrets setup is ever missing or revoked, `deploy-backend`/`deploy-frontend` fail fast (within seconds, at an explicit "Check required secrets" step) rather than hanging — the `backend`/`frontend` test jobs are unaffected either way and still gate every PR.
 
@@ -630,6 +652,13 @@ If this identity/RBAC/secrets setup is ever missing or revoked, `deploy-backend`
 ## Deploy log
 
 Every deployment to the shared Azure evaluation environment (backend Container App and/or frontend Static Web App) is recorded here: commit, what changed, and why. Update this section as part of the same commit that ships the fix/feature, before pushing to `master` triggers [Continuous deployment](#continuous-deployment-github-actions).
+
+### 2026-09-11 — Private Genie backend behind platform API Management
+
+- **Network boundary**: Standard v2 APIM remains the anonymous public API edge, while outbound VNet integration resolves the existing Container App FQDN through a Container Apps environment private endpoint and `privatelink.eastus2.azurecontainerapps.io`. Environment public network access is disabled after the gateway route is proven.
+- **Fail-closed cutover**: `deploy_platform_gateway.ps1` verifies APIM before changing public access, requires an explicitly approved private-link connection, verifies APIM again after cutover, and fails if direct Container Apps ingress still returns a successful response. `deploy_backend.ps1` now verifies every revision only through APIM and refuses an environment whose public access is enabled.
+- **CI and least privilege**: `prepare-gateway` emits the verified APIM URL directly to the frontend build; only after that deployment does `deploy-backend` finalize the private-network cutover, avoiding an outage against the old direct-backend bundle. The GitHub OIDC principal receives the resource-group-scoped `Genie Platform Gateway Deployer` custom role with no delete or RBAC-management actions.
+- **Infrastructure and tests**: foundational Bicep reserves a `/24` NSG-associated subnet delegated to `Microsoft.Web/serverFarms`; the platform template owns APIM, anonymous proxy operations/policy, private DNS, and private endpoint resources. Focused deployment-contract tests and Bicep/PowerShell syntax checks protect the topology and cutover ordering.
 
 ### 2026-09-10 — Anonymous Genie control plane and direct FastAPI ingress
 
@@ -740,7 +769,7 @@ This intermediate authenticated-prototype design was replaced the same day by [A
 
 ## Known gaps / next phases
 
-- CI/CD (`.github/workflows/ci.yml`) runs backend pytest/ruff and frontend typecheck/lint/vitest on every push/PR to `master`, then auto-deploys the direct FastAPI Container App and Static Web App on pushes once both pass.
+- CI/CD (`.github/workflows/ci.yml`) runs backend pytest/ruff and frontend typecheck/lint/vitest on every push/PR to `master`, then auto-deploys the public APIM/private Container Apps backend and Static Web App on pushes once both pass.
 - End-to-end Playwright coverage (`e2e/`) is scaffolded but not yet fully built out.
-- Genie and prototype API URLs are callable by non-browser clients without authentication. Exact-origin CORS constrains browsers only; use a network perimeter or reintroduce authentication before handling sensitive or multi-user workloads.
+- Genie and prototype APIM URLs are callable by non-browser clients without authentication. Exact-origin CORS constrains browsers only; the FastAPI backends are network-private, but authentication must be reintroduced before handling sensitive or multi-user workloads.
 - Shared Collaboration Memory currently has no write call sites anywhere in the backend — nothing ever calls `memory_service.shared.write`. The Requirement Discovery Map's main requirements list (which reads from Shared Memory) is therefore likely empty in real usage today; the agentic-workflow qualification check above was deliberately built to read `WorkflowRunResult.step_results` directly instead, so it works independently of this gap.

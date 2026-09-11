@@ -38,6 +38,9 @@ param containerAppsInfrastructureSubnetPrefix string = '10.20.0.0/23'
 @description('Dedicated subnet for Azure private endpoints.')
 param privateEndpointSubnetPrefix string = '10.20.2.0/24'
 
+@description('Dedicated subnet for API Management Standard v2 outbound VNet integration; must be /27 or larger.')
+param apiManagementSubnetPrefix string = '10.20.4.0/24'
+
 @description('Short prefix applied to every resource name (lowercase letters/numbers only).')
 @minLength(2)
 @maxLength(8)
@@ -69,6 +72,7 @@ module foundationalResources 'modules/foundational-resources.bicep' = {
     virtualNetworkAddressPrefix: virtualNetworkAddressPrefix
     containerAppsInfrastructureSubnetPrefix: containerAppsInfrastructureSubnetPrefix
     privateEndpointSubnetPrefix: privateEndpointSubnetPrefix
+    apiManagementSubnetPrefix: apiManagementSubnetPrefix
     tags: tags
   }
 }

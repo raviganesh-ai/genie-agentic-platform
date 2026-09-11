@@ -66,16 +66,75 @@ jobs:
   # fork, and never unless both CI jobs above already passed) - see
   # "Continuous deployment" in README.md for the one-time Azure setup
   # (federated OIDC credential + RBAC) required before these can succeed.
-  deploy-backend:
-    name: Deploy backend (Container Apps)
+  prepare-gateway:
+    name: Prepare platform gateway (API Management)
     needs: [backend, frontend]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    environment: production
+    outputs:
+      gateway-url: ${{ steps.prepare.outputs.gateway-url }}
+    timeout-minutes: 75
+    concurrency:
+      group: prepare-platform-gateway
+      cancel-in-progress: false
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check required secrets
+        run: |
+          missing=()
+          [ -z "${{ secrets.AZURE_CLIENT_ID }}" ] && missing+=("AZURE_CLIENT_ID")
+          [ -z "${{ secrets.AZURE_TENANT_ID }}" ] && missing+=("AZURE_TENANT_ID")
+          [ -z "${{ secrets.AZURE_SUBSCRIPTION_ID }}" ] && missing+=("AZURE_SUBSCRIPTION_ID")
+          [ -z "${{ vars.AZURE_CONTAINER_APP_NAME }}" ] && missing+=("AZURE_CONTAINER_APP_NAME")
+          [ -z "${{ vars.AZURE_RESOURCE_GROUP }}" ] && missing+=("AZURE_RESOURCE_GROUP")
+          [ -z "${{ vars.GENIE_PROTOTYPE_API_GATEWAY_PUBLISHER_EMAIL }}" ] && missing+=("GENIE_PROTOTYPE_API_GATEWAY_PUBLISHER_EMAIL")
+          [ -z "${{ vars.GENIE_PROTOTYPE_API_GATEWAY_PUBLISHER_NAME }}" ] && missing+=("GENIE_PROTOTYPE_API_GATEWAY_PUBLISHER_NAME")
+          [ -z "${{ vars.GENIE_GATEWAY_ALLOWED_ORIGIN }}" ] && missing+=("GENIE_GATEWAY_ALLOWED_ORIGIN")
+          if [ ${#missing[@]} -ne 0 ]; then
+            echo "::error::Missing required settings for prepare-gateway: ${missing[*]}. See README.md 'Continuous deployment' section."
+            exit 1
+          fi
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Provision and verify public API Management edge
+        id: prepare
+        shell: pwsh
+        run: |
+          $result = ./scripts/deploy_platform_gateway.ps1 `
+            -SubscriptionId "${{ secrets.AZURE_SUBSCRIPTION_ID }}" `
+            -ResourceGroup "${{ vars.AZURE_RESOURCE_GROUP }}" `
+            -ContainerAppName "${{ vars.AZURE_CONTAINER_APP_NAME }}" `
+            -AllowedOrigin "${{ vars.GENIE_GATEWAY_ALLOWED_ORIGIN }}" `
+            -PublisherEmail "${{ vars.GENIE_PROTOTYPE_API_GATEWAY_PUBLISHER_EMAIL }}" `
+            -PublisherName "${{ vars.GENIE_PROTOTYPE_API_GATEWAY_PUBLISHER_NAME }}" `
+            -PrepareOnly |
+              ConvertFrom-Json
+          "gateway-url=$($result.gatewayUrl)" | Out-File `
+            -FilePath $env:GITHUB_OUTPUT `
+            -Encoding utf8 `
+            -Append
+
+  deploy-backend:
+    name: Deploy backend (private Container Apps)
+    needs: [backend, frontend, prepare-gateway, deploy-frontend]
     if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
     environment: production
     # Safety net: if a step ever hangs (e.g. a CLI retrying on missing/
     # invalid credentials) this bounds the wasted runner minutes instead of
     # running until the default 6h job timeout.
-    timeout-minutes: 15
+    timeout-minutes: 75
     concurrency:
       group: deploy-backend
       cancel-in-progress: false
@@ -121,8 +180,20 @@ jobs:
             --file backend/Dockerfile \
             .
 
+      - name: Finalize and verify private platform gateway
+        shell: pwsh
+        run: |
+          ./scripts/deploy_platform_gateway.ps1 `
+            -SubscriptionId "${{ secrets.AZURE_SUBSCRIPTION_ID }}" `
+            -ResourceGroup "${{ vars.AZURE_RESOURCE_GROUP }}" `
+            -ContainerAppName "${{ vars.AZURE_CONTAINER_APP_NAME }}" `
+            -AllowedOrigin "${{ vars.GENIE_GATEWAY_ALLOWED_ORIGIN }}" `
+            -PublisherEmail "${{ vars.GENIE_PROTOTYPE_API_GATEWAY_PUBLISHER_EMAIL }}" `
+            -PublisherName "${{ vars.GENIE_PROTOTYPE_API_GATEWAY_PUBLISHER_NAME }}"
+
       # The immutable image, retired-sidecar removal, CORS setting, probes,
-      # and ingress port 8000 are applied in one ARM patch.
+      # and ingress port 8000 are applied in one ARM patch, then verified
+      # through APIM because direct backend ingress is private.
       - name: Roll out anonymous backend revision
         shell: pwsh
         run: |
@@ -132,6 +203,7 @@ jobs:
             -ContainerAppName "${{ vars.AZURE_CONTAINER_APP_NAME }}" `
             -BackendImage "${{ vars.AZURE_ACR_NAME }}.azurecr.io/genie-backend:${{ github.sha }}" `
             -AllowedOrigin "${{ vars.GENIE_GATEWAY_ALLOWED_ORIGIN }}" `
+            -GatewayUrl "${{ needs.prepare-gateway.outputs.gateway-url }}" `
             -MemoryStoreEndpoint "${{ vars.GENIE_MEMORY_STORE_ENDPOINT }}" `
             -PrototypeApiGatewayPublisherEmail "${{ vars.GENIE_PROTOTYPE_API_GATEWAY_PUBLISHER_EMAIL }}" `
             -PrototypeApiGatewayPublisherName "${{ vars.GENIE_PROTOTYPE_API_GATEWAY_PUBLISHER_NAME }}" `
@@ -139,7 +211,7 @@ jobs:
 
   deploy-frontend:
     name: Deploy frontend (Static Web Apps)
-    needs: [deploy-backend]
+    needs: [prepare-gateway]
     if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
     environment: production
@@ -162,8 +234,8 @@ jobs:
       - name: Check required secrets
         run: |
           if [ -z "${{ secrets.SWA_DEPLOYMENT_TOKEN }}" ] || \
-             [ -z "${{ vars.VITE_GENIE_API_BASE_URL }}" ]; then
-            echo "::error::Missing SWA_DEPLOYMENT_TOKEN or VITE_GENIE_API_BASE_URL. See README.md 'Continuous deployment' section."
+             [ -z "${{ needs.prepare-gateway.outputs.gateway-url }}" ]; then
+            echo "::error::Missing SWA_DEPLOYMENT_TOKEN or the verified platform gateway URL. See README.md 'Continuous deployment' section."
             exit 1
           fi
 
@@ -180,7 +252,7 @@ jobs:
       - name: Build
         run: npm run build
         env:
-          VITE_GENIE_API_BASE_URL: ${{ vars.VITE_GENIE_API_BASE_URL }}
+          VITE_GENIE_API_BASE_URL: ${{ needs.prepare-gateway.outputs.gateway-url }}
 
       - name: Deploy to Azure Static Web Apps
         timeout-minutes: 5

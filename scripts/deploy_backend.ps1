@@ -5,7 +5,8 @@
 .DESCRIPTION
     Preserves the existing Container App identity, environment, scaling, and
     Azure service configuration; removes retired authentication sidecars; and
-    moves external ingress directly to FastAPI port 8000.
+    moves ingress to FastAPI port 8000. Readiness is verified only through the
+    platform API Management gateway because the backend environment is private.
 #>
 [CmdletBinding()]
 param(
@@ -23,6 +24,9 @@ param(
 
     [Parameter(Mandatory = $true)]
     [string]$AllowedOrigin,
+
+    [Parameter(Mandatory = $true)]
+    [string]$GatewayUrl,
 
     [Parameter(Mandatory = $true)]
     [string]$MemoryStoreEndpoint,
@@ -78,6 +82,7 @@ function Set-ContainerEnvironmentVariable {
 foreach ($requiredValue in @{
     BackendImage = $BackendImage
     AllowedOrigin = $AllowedOrigin
+    GatewayUrl = $GatewayUrl
     MemoryStoreEndpoint = $MemoryStoreEndpoint
     PrototypeApiGatewayPublisherEmail = $PrototypeApiGatewayPublisherEmail
     PrototypeApiGatewayPublisherName = $PrototypeApiGatewayPublisherName
@@ -85,6 +90,9 @@ foreach ($requiredValue in @{
     if ([string]::IsNullOrWhiteSpace($requiredValue.Value)) {
         throw "$($requiredValue.Key) cannot be blank."
     }
+}
+if (-not $GatewayUrl.StartsWith("https://", [System.StringComparison]::OrdinalIgnoreCase)) {
+    throw "GatewayUrl must use HTTPS."
 }
 
 $app = Invoke-AzJson containerapp show `
@@ -217,10 +225,17 @@ if ($retiredGateways.Count -ne 0) {
     throw "A retired authentication gateway is still deployed."
 }
 if ($current.properties.configuration.ingress.targetPort -ne 8000) {
-    throw "External ingress does not target FastAPI."
+    throw "Container Apps ingress does not target FastAPI."
 }
 
-$baseUri = "https://$($current.properties.configuration.ingress.fqdn)"
+$environment = Invoke-AzJson containerapp env show `
+    --subscription $SubscriptionId `
+    --ids $current.properties.environmentId
+if ($environment.properties.publicNetworkAccess -ne "Disabled") {
+    throw "Container Apps environment public access must be disabled."
+}
+
+$baseUri = $GatewayUrl.TrimEnd("/")
 $health = Invoke-RestMethod -Method Get -Uri "$baseUri/health/ready" -TimeoutSec 30
 if ($health.status -ne "ready") {
     throw "Backend readiness verification failed."
@@ -236,6 +251,8 @@ if ($sessionsResponse.StatusCode -ne 200) {
     runningStatus = $current.properties.runningStatus
     ingressTargetPort = $current.properties.configuration.ingress.targetPort
     backendImage = $deployedBackend[0].image
+    gatewayUrl = $baseUri
+    publicNetworkAccess = $environment.properties.publicNetworkAccess
     anonymousApi = "verified"
     health = $health.status
 } | ConvertTo-Json -Depth 10
