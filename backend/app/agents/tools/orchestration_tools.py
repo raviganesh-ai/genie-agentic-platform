@@ -158,6 +158,12 @@ _DELEGATIONS: tuple[_Delegation, ...] = (
             "policies",
             "excluded_agents",
             "user_message",
+            # The real, live Foundry model catalog (see
+            # config/workflows/registry.yaml's "model-catalog" variable
+            # source) - always present as genie-orchestrator's own resolved
+            # variable, never surfaced to the model as a tool-call argument
+            # it needs to supply - see _delegate's caller_value precedence.
+            "available_models",
             # Sourced from this same step's own prior attempt output (see
             # config/workflows/registry.yaml's self-referential
             # "previous_build_output: step:build-solution") - always present

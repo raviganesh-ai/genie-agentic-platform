@@ -22,6 +22,7 @@ from app.models.workflow_models import WorkflowStepInput, WorkflowStepResult
 from app.models.workflow_stream_models import WorkflowStreamEvent
 from app.orchestration.workflow_event_bus import WorkflowEventBus
 from app.prompts.registry import PromptRegistry
+from app.services.model_catalog_service import ModelCatalogService
 from app.services.requirement_fidelity_service import missing_requirement_ids
 from app.workflows.models import WorkflowStep
 
@@ -31,6 +32,22 @@ _PREVIEW_MAX_LENGTH = 240
 _DELEGATED_OUTPUT_MARKER = "DELEGATED_OUTPUT_STORED"
 _COMPONENT_FAILURE_MARKER = "GENERATION FAILED"
 _REQUIREMENT_COVERAGE_VARIABLES = ("approved_requirements", "requirements")
+_MODEL_CATALOG_SOURCE = "model-catalog"
+
+
+def _format_model_catalog(available_models: list[str], default_model: str) -> str:
+    """Renders a real Foundry model catalog as prompt-ready text.
+
+    Used to satisfy the ``build-solution`` step's ``available_models``
+    variable (see ``config/workflows/registry.yaml``) so the Build Agent is
+    given the exact, real list of model deployments Genie can actually use
+    - the same list Genie's own Landing page model picker offers - instead
+    of inventing fake, ungrounded model-ID strings for any generated
+    model-selection UI.
+    """
+
+    models = ", ".join(available_models) if available_models else default_model
+    return f"{models} (platform default: {default_model})"
 
 
 def _preview(output_text: str | None) -> str | None:
@@ -114,6 +131,7 @@ class WorkflowStepExecutor:
         governance_service: GovernanceService,
         memory_service: MemoryService | None = None,
         event_bus: WorkflowEventBus | None = None,
+        model_catalog_service: ModelCatalogService | None = None,
     ) -> None:
         self._agent_registry = agent_registry
         self._prompt_registry = prompt_registry
@@ -121,6 +139,7 @@ class WorkflowStepExecutor:
         self._governance_service = governance_service
         self._memory_service = memory_service
         self._event_bus = event_bus
+        self._model_catalog_service = model_catalog_service
 
     async def execute_step(
         self,
@@ -418,6 +437,12 @@ class WorkflowStepExecutor:
         for variable_name, source in step.variable_sources.items():
             if source == "transcript":
                 resolved[variable_name] = transcript_text
+            elif source == _MODEL_CATALOG_SOURCE:
+                if self._model_catalog_service is not None:
+                    catalog = await self._model_catalog_service.get_catalog()
+                    resolved[variable_name] = _format_model_catalog(
+                        catalog.available_models, catalog.default_model
+                    )
             elif source.startswith("step-variable:"):
                 _, source_step_id, source_variable_name = source.split(":", maxsplit=2)
                 source_value = (step_variables or {}).get(source_step_id, {}).get(

@@ -109,6 +109,14 @@ workflows:
           # let prototype scope diverge from what the user approved.
           requirements: step-variable:design-architecture:approved_requirements
           architecture: step:design-architecture
+          # Resolves to the real, live Foundry model catalog (the same
+          # list Genie's own Landing page model picker uses - see
+          # app.services.model_catalog_service.ModelCatalogService) so the
+          # Build Agent can offer a genuine model-selection dropdown in
+          # generated UI/config code instead of inventing fake model-ID
+          # strings like "gpt-4o-primary" that reference nothing real. See
+          # WorkflowStepExecutor._resolve_variables's "model-catalog" source.
+          available_models: model-catalog
           # Self-referential: on a retried attempt (see
           # WorkshopPage.tsx's "Re-run UI & Agent Design" ->
           # workflowApi.resumeRun), this resolves to THIS SAME step's own

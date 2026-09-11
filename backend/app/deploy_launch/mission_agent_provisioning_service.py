@@ -126,6 +126,7 @@ class MissionAgentProvisioningService:
         agent_names: list[str],
         architecture_document: str,
         on_agent_provisioned: AgentProvisionedCallback | None = None,
+        model_deployment_ref: str | None = None,
     ) -> list[ProvisionedMissionAgent]:
         """Provisions every named mission agent, rolling back all of them on any failure.
 
@@ -133,6 +134,14 @@ class MissionAgentProvisioningService:
         individual agent is created (in order) - callers can use this to
         reflect real, live per-agent progress rather than waiting for the
         whole batch to finish.
+
+        ``model_deployment_ref``, when given, overrides this service's
+        platform-default model for every agent in this mission - e.g. the
+        model the user actually selected on Genie's own Landing page for
+        this session (see ``DeploymentPipelineService``'s resolution of the
+        discovery workflow run's ``agent_scope_id``), so the generated
+        prototype's orchestrator and specialist agents run on the model the
+        user approved, not always the platform default.
         """
 
         try:
@@ -142,12 +151,13 @@ class MissionAgentProvisioningService:
                 f"Cannot provision mission agents: {exc}"
             ) from exc
 
+        effective_model = (model_deployment_ref or self._model_deployment_ref).strip()
         provisioned: list[ProvisionedMissionAgent] = []
         try:
             for agent_name in agent_names:
                 foundry_agent_name = client.create_agent(
                     name=_build_foundry_agent_name(mission_slug, agent_name),
-                    model=self._model_deployment_ref,
+                    model=effective_model,
                     instructions=_extract_agent_instructions(architecture_document, agent_name),
                     description=agent_name,
                 )
@@ -207,7 +217,9 @@ class NullMissionAgentProvisioningService:
         agent_names: list[str],
         architecture_document: str,
         on_agent_provisioned: AgentProvisionedCallback | None = None,
+        model_deployment_ref: str | None = None,
     ) -> list[ProvisionedMissionAgent]:
+        del model_deployment_ref
         provisioned: list[ProvisionedMissionAgent] = []
         for agent_name in agent_names:
             record = ProvisionedMissionAgent(

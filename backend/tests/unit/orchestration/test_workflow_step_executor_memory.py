@@ -7,6 +7,7 @@ from __future__ import annotations
 from app.agents.models import AgentDefinition
 from app.memory.memory_service import create_memory_service
 from app.orchestration.workflow_step_executor import WorkflowStepExecutor
+from app.services.model_catalog_service import ModelCatalog
 from app.workflows.models import WorkflowStep
 
 
@@ -145,3 +146,74 @@ async def test_resolve_variables_reads_exact_variable_from_completed_step(
     )
 
     assert resolved["requirements"] == "The user's edited and approved requirements."
+
+
+class _FakeModelCatalogService:
+    def __init__(self, *, available_models: list[str], default_model: str) -> None:
+        self._catalog = ModelCatalog(available_models=available_models, default_model=default_model)
+
+    async def get_catalog(self) -> ModelCatalog:
+        return self._catalog
+
+
+async def test_resolve_variables_resolves_model_catalog_source(local_settings) -> None:
+    # Genie must give the Build Agent the real, live Foundry model catalog
+    # (see config/workflows/registry.yaml's build-solution step) instead of
+    # letting it invent fake model-ID strings for any generated dropdown.
+    executor = WorkflowStepExecutor(
+        agent_registry=None,
+        prompt_registry=None,
+        agent_gateway=None,
+        governance_service=None,
+        model_catalog_service=_FakeModelCatalogService(
+            available_models=["gpt-4o", "claude-opus-4"], default_model="gpt-4o"
+        ),
+    )
+    step = WorkflowStep(
+        id="build-solution",
+        agent_id="genie-orchestrator",
+        description="Build the approved solution.",
+        depends_on=["design-architecture"],
+        variable_sources={"available_models": "model-catalog"},
+    )
+
+    resolved = await executor._resolve_variables(
+        step=step,
+        transcript_text="",
+        step_outputs={},
+        step_input=None,
+        agent=_agent(),
+        session_id="session-1",
+        trace_id="trace-1",
+    )
+
+    assert resolved["available_models"] == "gpt-4o, claude-opus-4 (platform default: gpt-4o)"
+
+
+async def test_resolve_variables_omits_model_catalog_when_no_service_is_wired(local_settings) -> None:
+    executor = WorkflowStepExecutor(
+        agent_registry=None,
+        prompt_registry=None,
+        agent_gateway=None,
+        governance_service=None,
+    )
+    step = WorkflowStep(
+        id="build-solution",
+        agent_id="genie-orchestrator",
+        description="Build the approved solution.",
+        depends_on=["design-architecture"],
+        variable_sources={"available_models": "model-catalog"},
+    )
+
+    resolved = await executor._resolve_variables(
+        step=step,
+        transcript_text="",
+        step_outputs={},
+        step_input=None,
+        agent=_agent(),
+        session_id="session-1",
+        trace_id="trace-1",
+    )
+
+    assert "available_models" not in resolved
+

@@ -135,3 +135,37 @@ async def test_provision_truncates_a_long_agent_name_to_stay_within_63_character
     assert created_name[0].isalnum()
     assert created_name[-1].isalnum()
     assert created_name.startswith("sample-mission-c753ba86-")
+
+
+async def test_provision_uses_platform_default_model_when_no_override_given():
+    api_client = _FakeAgentApiClient()
+    service = MissionAgentProvisioningService(
+        project_service=_FakeProjectService(api_client=api_client), model_deployment_ref="gpt-4o"
+    )
+
+    await service.provision(
+        mission_slug="acme-mission",
+        agent_names=["orchestrator"],
+        architecture_document=_ARCHITECTURE_DOCUMENT,
+    )
+
+    assert api_client.created[0]["model"] == "gpt-4o"
+
+
+async def test_provision_uses_approved_model_override_when_given():
+    # The model the user actually selected on Genie's own Landing page for
+    # this session (see pipeline_service._approved_model_deployment_ref)
+    # must win over the platform default for every mission agent.
+    api_client = _FakeAgentApiClient()
+    service = MissionAgentProvisioningService(
+        project_service=_FakeProjectService(api_client=api_client), model_deployment_ref="gpt-4o"
+    )
+
+    await service.provision(
+        mission_slug="acme-mission",
+        agent_names=["requirements-specialist", "orchestrator"],
+        architecture_document=_ARCHITECTURE_DOCUMENT,
+        model_deployment_ref="claude-opus-4",
+    )
+
+    assert {created["model"] for created in api_client.created} == {"claude-opus-4"}

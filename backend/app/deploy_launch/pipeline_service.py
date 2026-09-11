@@ -122,6 +122,24 @@ def _slugify(value: str) -> str:
     return slug or "mission"
 
 
+_APPROVED_MODEL_SCOPE_PREFIX: Final = "model:"
+
+
+def _approved_model_deployment_ref(run: WorkflowRunResult) -> str | None:
+    """Resolves the model the user actually selected on Genie's Landing page
+    for this discovery run (see ``app.api.workflows.run_workflow``'s
+    ``agent_scope_id = f"model:{model_deployment_ref}"``), so mission agent
+    provisioning uses that approved model instead of always the platform
+    default. Returns ``None`` for runs with no such scope (or a scope used
+    for something other than a model override, e.g. a requirement group)."""
+
+    scope_id = run.agent_scope_id or ""
+    if not scope_id.startswith(_APPROVED_MODEL_SCOPE_PREFIX):
+        return None
+    ref = scope_id[len(_APPROVED_MODEL_SCOPE_PREFIX) :].strip()
+    return ref or None
+
+
 _FRONTEND_INDEX_HTML_TEMPLATE = """<!doctype html>
 <html lang="en">
 <head>
@@ -2081,6 +2099,7 @@ class DeploymentPipelineService:
                         agent_names=agent_names,
                         architecture_document=architecture_document,
                         on_agent_provisioned=_on_agent_provisioned,
+                        model_deployment_ref=_approved_model_deployment_ref(run),
                     )
                     provisioned_by_name = {record.agent_name: record for record in provisioned}
                     pipeline_run.provisioned_agents = [

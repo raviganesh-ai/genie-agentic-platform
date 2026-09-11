@@ -596,6 +596,17 @@ prompts:
       Agent a delegation tool for it, and do not mention it anywhere in
       the UI or in the trailing "## Multi-Agent Workflow" summary below.
 
+      REAL MODEL CATALOG - the exact, real Foundry model deployments this
+      platform can actually run (never invent, guess, or fabricate a
+      model-ID string beyond this list): {available_models}. If, and only
+      if, the approved requirements or architecture call for the mission
+      itself to let the end user pick/compare a model (for example an
+      evaluation, benchmarking, or "choose your model" requirement), any
+      such UI dropdown/config field must be populated ONLY from this exact
+      list - never fake names like "gpt-4o-primary" or "claude-opus-primary"
+      that reference nothing real. If no requirement calls for model
+      selection, do not add one - most missions need no such field at all.
+
       (1) Generate EXACTLY ONE agent code block per specialist agent
       literally named in "## Multi-Agent Workflow" below - the EXACT same
       count and names as appear there, excluding the Orchestrator Agent
@@ -946,8 +957,9 @@ prompts:
       - architecture
       - policies
       - excluded_agents
+      - available_models
       - user_message
-    version: "5.18.0"
+    version: "5.19.0"
 
   - id: build-generation-component-v1
     name: Build Generation - Single Component
@@ -1247,6 +1259,17 @@ prompts:
       generate this component exactly as if those agents did not exist
       in the architecture below.
 
+      REAL MODEL CATALOG - the exact, real Foundry model deployments this
+      platform can actually run (never invent, guess, or fabricate a
+      model-ID string beyond this list): {available_models}. If, and only
+      if, the approved requirements or architecture call for the mission
+      itself to let the end user pick/compare a model (for example an
+      evaluation, benchmarking, or "choose your model" requirement), any
+      such UI dropdown/config field in this component must be populated
+      ONLY from this exact list - never fake names like "gpt-4o-primary"
+      or "claude-opus-primary" that reference nothing real. If no
+      requirement calls for model selection, do not add one.
+
       Approved requirements:
       {requirements}
 
@@ -1259,11 +1282,12 @@ prompts:
       - architecture
       - policies
       - excluded_agents
+      - available_models
       - component_kind
       - component_name
       - user_message
       - assigned_requirements
-    version: "1.21.0"
+    version: "1.22.0"
 
   - id: build-component-regeneration-v1
     name: Build Generation - Regenerate Single Component

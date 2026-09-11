@@ -98,7 +98,13 @@ class _FakeSessionService:
 
 
 class _FakeOrchestrator:
-    def __init__(self, *, test_output_text: str, requirements_output: str = _REQUIREMENTS_OUTPUT) -> None:
+    def __init__(
+        self,
+        *,
+        test_output_text: str,
+        requirements_output: str = _REQUIREMENTS_OUTPUT,
+        agent_scope_id: str | None = None,
+    ) -> None:
         self._test_output_text = test_output_text
         self.execute_agent_calls: list[dict] = []
         self._run = WorkflowRunResult(
@@ -106,6 +112,7 @@ class _FakeOrchestrator:
             workflow_id="solution-discovery-workflow",
             session_id="session-1",
             status="completed",
+            agent_scope_id=agent_scope_id,
             step_results=[
                 _completed_step("analyze-requirements", "genie-orchestrator", requirements_output),
                 _completed_step("design-architecture", "architecture-designer", _ARCHITECTURE_DOCUMENT),
@@ -597,6 +604,88 @@ def test_req_001_uses_live_prototype():
 
     assert retried.status == "completed"
     assert retried.status == "completed"
+
+
+class _ModelRecordingMissionAgentService(NullMissionAgentProvisioningService):
+    def __init__(self) -> None:
+        self.model_deployment_refs: list[str | None] = []
+
+    async def provision(
+        self,
+        *,
+        mission_slug: str,
+        agent_names: list[str],
+        architecture_document: str,
+        on_agent_provisioned=None,
+        model_deployment_ref: str | None = None,
+    ):
+        self.model_deployment_refs.append(model_deployment_ref)
+        return await super().provision(
+            mission_slug=mission_slug,
+            agent_names=agent_names,
+            architecture_document=architecture_document,
+            on_agent_provisioned=on_agent_provisioned,
+        )
+
+
+async def test_provisioning_uses_the_landing_page_approved_model(tmp_path: Path):
+    # The discovery workflow run's agent_scope_id carries "model:<ref>" when
+    # the user selected a specific model on Genie's own Landing page (see
+    # app.api.workflows.run_workflow) - Deploy & Launch must forward that
+    # exact model into mission agent provisioning instead of silently
+    # falling back to the platform default.
+    provisioning_service = _ModelRecordingMissionAgentService()
+    service = DeploymentPipelineService(
+        orchestrator=_FakeOrchestrator(
+            test_output_text=_PASSING_TEST_OUTPUT,
+            agent_scope_id="model:claude-opus-4",
+        ),  # type: ignore[arg-type]
+        session_service=_FakeSessionService(),  # type: ignore[arg-type]
+        event_bus=WorkflowEventBus(),
+        access_policy_service=_access_policy_service(),
+        mission_identity_service=NullMissionIdentityService(),
+        mission_agent_provisioning_service=provisioning_service,
+        backend_deployment_service=NullBackendDeploymentService(),
+        frontend_deployment_service=NullFrontendDeploymentService(),
+        test_execution_service=TestExecutionService(timeout_seconds=60),
+        security_scan_service=SecurityScanService(timeout_seconds=60),
+        build_workspace_root=tmp_path,
+    )
+
+    run = await service.start(
+        session_id="session-1", requesting_user_id="user-1", workflow_run_id="run-1"
+    )
+    run = await service.wait_for_run(run.id)
+
+    assert run.status == "completed"
+    assert provisioning_service.model_deployment_refs == ["claude-opus-4"]
+
+
+async def test_provisioning_falls_back_to_default_model_when_no_scope_was_selected(
+    tmp_path: Path,
+):
+    provisioning_service = _ModelRecordingMissionAgentService()
+    service = DeploymentPipelineService(
+        orchestrator=_FakeOrchestrator(test_output_text=_PASSING_TEST_OUTPUT),  # type: ignore[arg-type]
+        session_service=_FakeSessionService(),  # type: ignore[arg-type]
+        event_bus=WorkflowEventBus(),
+        access_policy_service=_access_policy_service(),
+        mission_identity_service=NullMissionIdentityService(),
+        mission_agent_provisioning_service=provisioning_service,
+        backend_deployment_service=NullBackendDeploymentService(),
+        frontend_deployment_service=NullFrontendDeploymentService(),
+        test_execution_service=TestExecutionService(timeout_seconds=60),
+        security_scan_service=SecurityScanService(timeout_seconds=60),
+        build_workspace_root=tmp_path,
+    )
+
+    run = await service.start(
+        session_id="session-1", requesting_user_id="user-1", workflow_run_id="run-1"
+    )
+    run = await service.wait_for_run(run.id)
+
+    assert run.status == "completed"
+    assert provisioning_service.model_deployment_refs == [None]
 
 
 class _RecordingMissionIdentityService(NullMissionIdentityService):

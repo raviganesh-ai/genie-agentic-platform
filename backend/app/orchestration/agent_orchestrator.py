@@ -58,6 +58,7 @@ from app.services.customer_agent_provisioning_service import (
     ProvisionedAgentRecord,
     create_customer_agent_provisioning_service,
 )
+from app.services.model_catalog_service import create_model_catalog_service
 from app.workflows.registry import WorkflowRegistry, WorkflowRegistryError
 
 __all__ = ["AgentOrchestrator", "create_agent_orchestrator"]
@@ -376,6 +377,9 @@ def create_agent_orchestrator(
     resolved_approval_service = approval_service or create_approval_service(
         settings=settings, governance_service=resolved_governance_service
     )
+    model_catalog_service = create_model_catalog_service(
+        settings=settings, agent_registry=agent_registry
+    )
     customer_agent_provisioning_service = create_customer_agent_provisioning_service(
         settings=settings,
         agent_registry=agent_registry,
@@ -421,6 +425,7 @@ def create_agent_orchestrator(
         governance_service=resolved_governance_service,
         memory_service=resolved_memory_service,
         event_bus=resolved_workflow_event_bus,
+        model_catalog_service=model_catalog_service,
     )
     handoff_service = HandoffService(governance_service=resolved_governance_service)
     decision_graph_service = DecisionGraphService()
