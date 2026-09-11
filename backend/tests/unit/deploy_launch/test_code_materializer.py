@@ -148,6 +148,23 @@ def test_materialize_build_allows_flat_submit_payload():
     assert "primary_model_id" in build.ui_component
 
 
+def test_materialize_build_allows_unrelated_nested_serialization():
+    output = _SAMPLE_OUTPUT.replace(
+        "export function MissionApp() {\n    return null;\n}",
+        """export function MissionApp() {
+    const preview = JSON.stringify({counts: {valid: 3, invalid: 0}});
+    const message = JSON.stringify({primary_model_id: primaryModel});
+    onSubmit(message);
+    return null;
+}""",
+    )
+
+    build = materialize_build(output)
+
+    assert build.ui_component is not None
+    assert "counts" in build.ui_component
+
+
 def test_write_to_directory_creates_expected_files(tmp_path: Path):
     build = materialize_build(_SAMPLE_OUTPUT)
 

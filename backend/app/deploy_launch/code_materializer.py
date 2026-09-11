@@ -57,9 +57,11 @@ _EXACT_FILE_NAME_COMPARISON_PATTERN: Final = re.compile(
     r"\b[A-Za-z_$][\w$]*\.name\s*(?:===|!==|==|!=)\s*"
     r"(?P<quote>['\"`])[^'\"`\r\n]*\.[A-Za-z0-9]{1,10}(?P=quote)",
 )
-_JSON_STRINGIFY_INLINE_PATTERN: Final = re.compile(r"JSON\.stringify\(\s*(\{)")
-_JSON_STRINGIFY_IDENTIFIER_PATTERN: Final = re.compile(
-    r"JSON\.stringify\(\s*([A-Za-z_$][\w$]*)\s*[,)]"
+_ON_SUBMIT_INLINE_STRINGIFY_PATTERN: Final = re.compile(
+    r"\bonSubmit\s*\(\s*JSON\.stringify\(\s*(\{)"
+)
+_ON_SUBMIT_IDENTIFIER_PATTERN: Final = re.compile(
+    r"\bonSubmit\s*\(\s*([A-Za-z_$][\w$]*)\s*[,)]"
 )
 
 
@@ -157,25 +159,46 @@ def _top_level_object_entries(object_literal: str) -> list[str]:
 
 
 def _submit_payload_literals(ui_component: str) -> list[str]:
-    """Extracts every object literal passed (directly or via a local ``const``)
-    to ``JSON.stringify`` in the generated mission UI's submit handler."""
+    """Extracts object literals serialized into the ``onSubmit`` message."""
 
     literals: list[str] = []
-    for match in _JSON_STRINGIFY_INLINE_PATTERN.finditer(ui_component):
+    for match in _ON_SUBMIT_INLINE_STRINGIFY_PATTERN.finditer(ui_component):
         literal = _extract_balanced_braces(ui_component, match.start(1))
         if literal is not None:
             literals.append(literal)
 
-    for match in _JSON_STRINGIFY_IDENTIFIER_PATTERN.finditer(ui_component):
-        identifier = match.group(1)
-        assign_pattern = re.compile(
-            r"\b(?:const|let|var)\s+" + re.escape(identifier) + r"\s*=\s*(\{)"
+    for submit_match in _ON_SUBMIT_IDENTIFIER_PATTERN.finditer(ui_component):
+        message_identifier = submit_match.group(1)
+        stringify_assignment_pattern = re.compile(
+            r"\b(?:const|let|var)\s+"
+            + re.escape(message_identifier)
+            + r"\s*=\s*JSON\.stringify\(\s*(\{|[A-Za-z_$][\w$]*)"
         )
-        last_assignment_open_index: int | None = None
-        for assign_match in assign_pattern.finditer(ui_component[: match.start()]):
-            last_assignment_open_index = assign_match.start(1)
-        if last_assignment_open_index is not None:
-            literal = _extract_balanced_braces(ui_component, last_assignment_open_index)
+        stringify_assignment = None
+        for match in stringify_assignment_pattern.finditer(ui_component[: submit_match.start()]):
+            stringify_assignment = match
+        if stringify_assignment is None:
+            continue
+
+        stringify_argument = stringify_assignment.group(1)
+        if stringify_argument == "{":
+            literal = _extract_balanced_braces(ui_component, stringify_assignment.start(1))
+            if literal is not None:
+                literals.append(literal)
+            continue
+
+        payload_assignment_pattern = re.compile(
+            r"\b(?:const|let|var)\s+"
+            + re.escape(stringify_argument)
+            + r"\s*=\s*(\{)"
+        )
+        payload_open_index: int | None = None
+        for match in payload_assignment_pattern.finditer(
+            ui_component[: stringify_assignment.start()]
+        ):
+            payload_open_index = match.start(1)
+        if payload_open_index is not None:
+            literal = _extract_balanced_braces(ui_component, payload_open_index)
             if literal is not None:
                 literals.append(literal)
     return literals
