@@ -279,7 +279,7 @@ function platformDiagram() {
 function prototypeDiagram() {
   const connectors = [
     arrow("M 200 175 H 740 V 253", { label: "Open prototype", labelX: 470, labelY: 161 }),
-    arrow("M 825 315 V 365", { label: "Bearer token", labelX: 882, labelY: 345 }),
+    arrow("M 825 315 V 365", { label: "API request", labelX: 882, labelY: 345 }),
     arrow("M 825 485 V 535", { label: "Private route", labelX: 885, labelY: 515 }),
     arrow("M 1150 605 H 1185 V 307 H 1220", { color: colors.teal }),
     arrow("M 545 230 V 215 H 740 V 270 H 765", { color: colors.purple, dashed: true, marker: "arrowPurple" }),
@@ -298,18 +298,18 @@ function prototypeDiagram() {
     <rect x="1258" y="34" width="294" height="38" rx="5" fill="#FFF4CE" stroke="#D6B656"/>
     ${textBlock(1405, 58, ["MICROSOFT CONFIDENTIAL"], { anchor: "middle", color: "#6B5700", fontSize: 14, fontWeight: 700 })}
     ${boundary({ x: 320, y: 120, width: 1232, height: 780, title: "Azure subscription / dedicated prototype resource group", subtitle: "Gateway, network, runtime, identity, and data delete as one owned boundary" })}
-    ${zone({ x: 365, y: 175, width: 350, height: 630, title: "Identity and authorization", subtitle: "Shared workforce sign-in; prototype workload identity", fill: colors.purpleLight, stroke: colors.purple })}
+    ${zone({ x: 365, y: 175, width: 350, height: 630, title: "Identity and lifecycle", subtitle: "Anonymous user access; prototype workload identity", fill: colors.purpleLight, stroke: colors.purple })}
     ${zone({ x: 740, y: 175, width: 435, height: 630, title: "Dedicated gateway and runtime", subtitle: "Public APIM edge; private FastAPI network", icon: "containerApps", fill: colors.greenLight, stroke: colors.green })}
     ${zone({ x: 1200, y: 175, width: 310, height: 630, title: "Workload dependencies", subtitle: "Prototype-owned agents and evidence", fill: colors.tealLight, stroke: colors.teal })}
     ${connectors}
-    ${serviceCard({ x: 45, y: 120, width: 155, height: 110, icon: "users", title: "Prototype user", subtitle: ["Authorized user"], accent: colors.purple })}
+    ${serviceCard({ x: 45, y: 120, width: 155, height: 110, icon: "users", title: "Prototype user", subtitle: ["No sign-in required"], accent: colors.purple })}
     ${componentCard({ x: 45, y: 300, width: 230, height: 270, title: "Genie Deploy & Launch", subtitle: ["Deterministic provisioning", "90% executable coverage gate", "100% executable tests pass", "Approval and governance trace", "Owner-authorized teardown"], accent: colors.azure })}
-    ${serviceCard({ x: 390, y: 230, width: 310, height: 150, icon: "appRegistration", title: ["Corporate Microsoft Entra", "application registration"], subtitle: ["Shared API audience", "access_as_user delegated scope", "Pre-registered callback slot"], accent: colors.purple })}
+    ${serviceCard({ x: 390, y: 230, width: 310, height: 150, icon: "users", title: ["Anonymous prototype", "access"], subtitle: ["No Entra application", "No MSAL or bearer token", "No shared callback slot"], accent: colors.purple })}
     ${serviceCard({ x: 390, y: 425, width: 310, height: 150, icon: "managedIdentity", title: ["Dedicated mission", "managed identity"], subtitle: ["AcrPull at exact registry scope", "Least-privilege workload RBAC", "RBAC removed before identity"], accent: colors.purple })}
-    ${componentCard({ x: 390, y: 625, width: 310, height: 115, title: "Prototype access policy", subtitle: ["SPA redirect URI + exact CORS origin", "Owner authorization for abandonment"], accent: colors.purple })}
-    ${serviceCard({ x: 765, y: 225, width: 385, height: 90, icon: "containerApps", title: "Prototype frontend Container App", subtitle: ["MSAL runtime configuration + HTTPS ingress"], accent: colors.green })}
-    ${componentCard({ x: 765, y: 365, width: 385, height: 120, title: "Dedicated Azure API Management", subtitle: ["Only public API endpoint", "Entra validation + exact CORS + rate limit"], accent: colors.azure })}
-    ${componentCard({ x: 765, y: 535, width: 385, height: 140, title: "Private VNet + Container Apps environment", subtitle: ["Generated FastAPI has internal ingress only", "Private DNS; token validated again"], accent: colors.orange })}
+    ${componentCard({ x: 390, y: 625, width: 310, height: 115, title: "Prototype access policy", subtitle: ["Exact browser CORS origin", "Owner authorization for abandonment"], accent: colors.purple })}
+    ${serviceCard({ x: 765, y: 225, width: 385, height: 90, icon: "containerApps", title: "Prototype frontend Container App", subtitle: ["Anonymous HTTPS ingress"], accent: colors.green })}
+    ${componentCard({ x: 765, y: 365, width: 385, height: 120, title: "Dedicated Azure API Management", subtitle: ["Only public API endpoint", "Exact CORS + rate limit + correlation"], accent: colors.azure })}
+    ${componentCard({ x: 765, y: 535, width: 385, height: 140, title: "Private VNet + Container Apps environment", subtitle: ["Generated FastAPI has internal ingress only", "Private DNS; no public backend route"], accent: colors.orange })}
     ${serviceCard({ x: 1220, y: 235, width: 265, height: 130, icon: "foundryAgents", title: ["Dedicated Foundry", "Agent Service agents"], subtitle: ["Specialists + orchestrator"], accent: colors.teal })}
     ${serviceCard({ x: 1220, y: 395, width: 265, height: 120, icon: "containerRegistry", title: ["Azure Container", "Registry"], subtitle: ["Immutable prototype images"], accent: colors.teal })}
     ${serviceCard({ x: 1220, y: 545, width: 265, height: 130, icon: "applicationInsights", title: ["Governance and", "operational evidence"], subtitle: ["Approvals, fidelity, tests", "Logs, metrics, traces"], accent: colors.green })}
@@ -319,7 +319,7 @@ function prototypeDiagram() {
 
   return svgDocument({
     title: "Generated prototype Azure isolation architecture",
-    description: "Azure architecture diagram showing shared corporate Entra authentication plus a dedicated API Management service, managed identity, private VNet and Container Apps backend, Foundry Agent Service agents, Container Registry, governance evidence, and Azure Monitor for each generated prototype.",
+    description: "Azure architecture diagram showing anonymous prototype access through a dedicated API Management service, managed identity, private VNet and Container Apps backend, Foundry Agent Service agents, Container Registry, governance evidence, and Azure Monitor for each generated prototype.",
     width: 1600,
     height: 940,
     content,

@@ -9,9 +9,6 @@ from dataclasses import dataclass
 from typing import Any
 from xml.etree import ElementTree
 
-from app.deploy_launch.prototype_authentication_service import (
-    PrototypeAuthenticationConfiguration,
-)
 from app.deploy_launch.resource_naming import prototype_resource_group_name
 
 GatewayProgressCallback = Callable[[str], Awaitable[None]]
@@ -42,9 +39,7 @@ def _resource_name(
     return f"{prefix}-{normalized[:stem_length].rstrip('-')}-{digest}"
 
 
-def _build_api_policy(
-    *, authentication: PrototypeAuthenticationConfiguration, frontend_origin: str
-) -> str:
+def _build_api_policy(*, frontend_origin: str) -> str:
     policies = ElementTree.Element("policies")
     inbound = ElementTree.SubElement(policies, "inbound")
     cors = ElementTree.SubElement(
@@ -61,45 +56,6 @@ def _build_api_policy(
     exposed_headers = ElementTree.SubElement(cors, "expose-headers")
     ElementTree.SubElement(exposed_headers, "header").text = "X-Correlation-Id"
     ElementTree.SubElement(inbound, "base")
-    ElementTree.SubElement(
-        inbound,
-        "set-header",
-        {"name": "X-Genie-Acceptance-Authorized", "exists-action": "delete"},
-    )
-    authentication_choice = ElementTree.SubElement(inbound, "choose")
-    acceptance_test = ElementTree.SubElement(
-        authentication_choice,
-        "when",
-        {
-            "condition": "@(context.Request.Headers.GetValueOrDefault(\"X-Genie-Acceptance-Key\", \"\") == \"{{acceptance-test-key}}\")"
-        },
-    )
-    acceptance_header = ElementTree.SubElement(
-        acceptance_test,
-        "set-header",
-        {"name": "X-Genie-Acceptance-Authorized", "exists-action": "override"},
-    )
-    ElementTree.SubElement(acceptance_header, "value").text = "{{acceptance-test-key}}"
-    interactive_authentication = ElementTree.SubElement(authentication_choice, "otherwise")
-    token_validation = ElementTree.SubElement(
-        interactive_authentication,
-        "validate-azure-ad-token",
-        {
-            "tenant-id": authentication.tenant_id,
-            "header-name": "Authorization",
-            "failed-validation-httpcode": "401",
-            "failed-validation-error-message": "Unauthorized",
-            "require-scheme": "Bearer",
-        },
-    )
-    audiences = ElementTree.SubElement(token_validation, "audiences")
-    ElementTree.SubElement(audiences, "audience").text = authentication.client_id
-    ElementTree.SubElement(audiences, "audience").text = f"api://{authentication.client_id}"
-    ElementTree.SubElement(
-        inbound,
-        "set-header",
-        {"name": "X-Genie-Acceptance-Key", "exists-action": "delete"},
-    )
     ElementTree.SubElement(
         inbound,
         "rate-limit-by-key",
@@ -366,8 +322,6 @@ class PrototypeApiGatewayService:
         *,
         mission_slug: str,
         backend_url: str,
-        acceptance_test_key: str,
-        authentication: PrototypeAuthenticationConfiguration,
         frontend_origin: str = "https://prototype.invalid",
         on_progress: GatewayProgressCallback | None = None,
     ) -> str:
@@ -375,10 +329,8 @@ class PrototypeApiGatewayService:
             raise PrototypeApiGatewayError("Private prototype backend URL must use HTTPS.")
         if not frontend_origin.startswith("https://"):
             raise PrototypeApiGatewayError("Prototype gateway CORS origin must use HTTPS.")
-        if not acceptance_test_key:
-            raise PrototypeApiGatewayError("Prototype acceptance-test key must not be empty.")
         if on_progress is not None:
-            await on_progress("Publishing the authenticated prototype API through its gateway...")
+            await on_progress("Publishing the prototype API through its gateway...")
 
         resource_group = prototype_resource_group_name(mission_slug)
         service_name = _resource_name(
@@ -391,7 +343,6 @@ class PrototypeApiGatewayService:
         try:
             from azure.mgmt.apimanagement.models import (
                 ApiCreateOrUpdateParameter,
-                NamedValueCreateContract,
                 OperationContract,
                 PolicyContract,
             )
@@ -410,16 +361,6 @@ class PrototypeApiGatewayService:
                 ),
             )
             await asyncio.to_thread(api_poller.result)
-            client.named_value.create_or_update(
-                resource_group,
-                service_name,
-                "acceptance-test-key",
-                NamedValueCreateContract(
-                    display_name="acceptance-test-key",
-                    secret=True,
-                    value=acceptance_test_key,
-                ),
-            )
             for method in _PROXY_METHODS:
                 client.api_operation.create_or_update(
                     resource_group,
@@ -439,10 +380,7 @@ class PrototypeApiGatewayService:
                 "policy",
                 PolicyContract(
                     format="rawxml",
-                    value=_build_api_policy(
-                        authentication=authentication,
-                        frontend_origin=frontend_origin,
-                    ),
+                    value=_build_api_policy(frontend_origin=frontend_origin),
                 ),
             )
             service = client.api_management_service.get(resource_group, service_name)
@@ -464,7 +402,6 @@ class PrototypeApiGatewayService:
         *,
         mission_slug: str,
         frontend_origin: str,
-        authentication: PrototypeAuthenticationConfiguration,
     ) -> None:
         if not frontend_origin.startswith("https://"):
             raise PrototypeApiGatewayError("Prototype gateway CORS origin must use HTTPS.")
@@ -485,10 +422,7 @@ class PrototypeApiGatewayService:
                 "policy",
                 PolicyContract(
                     format="rawxml",
-                    value=_build_api_policy(
-                        authentication=authentication,
-                        frontend_origin=frontend_origin,
-                    ),
+                    value=_build_api_policy(frontend_origin=frontend_origin),
                 ),
             )
         except Exception as exc:

@@ -222,9 +222,11 @@ class NullFrontendDeploymentService:
         *,
         ui_root: Path,
         mission_slug: str = "mission",
+        app_name: str | None = None,
+        mission_identity_resource_id: str | None = None,
         on_progress: DeploymentProgressCallback | None = None,
     ) -> FrontendDeploymentResult:
-        del ui_root
+        del ui_root, app_name, mission_identity_resource_id
         if on_progress is not None:
             await on_progress("Deploying frontend (local mode, no real Azure calls)...")
         return FrontendDeploymentResult(

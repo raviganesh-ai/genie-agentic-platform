@@ -22,9 +22,6 @@ from app.deploy_launch.mission_identity_service import (
     MissionIdentityProvisioningError,
     create_mission_identity_service,
 )
-from app.deploy_launch.prototype_authentication_service import (
-    PrototypeAuthenticationConfiguration,
-)
 
 
 def _settings(**overrides: object) -> Settings:
@@ -136,14 +133,6 @@ async def test_protected_backend_deploys_private_backend_without_mise_sidecar(
     from azure.storage.blob import BlobClient
 
     (tmp_path / "Dockerfile").write_text("FROM scratch\n", encoding="utf-8")
-    authentication = PrototypeAuthenticationConfiguration(
-        application_object_id="app-object",
-        service_principal_object_id="prototype-sp",
-        client_id="prototype-client",
-        tenant_id="tenant-1",
-        delegated_scope="api://prototype-client/access_as_user",
-        application_role_id="role-1",
-    )
     gateway_calls = {}
 
     class FakeGatewayService:
@@ -156,16 +145,9 @@ async def test_protected_backend_deploys_private_backend_without_mise_sidecar(
             *,
             mission_slug,
             backend_url,
-            acceptance_test_key,
-            authentication,
             on_progress=None,
         ):
-            gateway_calls["publish"] = (
-                mission_slug,
-                backend_url,
-                authentication.client_id,
-                acceptance_test_key,
-            )
+            gateway_calls["publish"] = (mission_slug, backend_url)
             return "https://claims-1234.azure-api.net"
 
     service = BackendDeploymentService(
@@ -227,39 +209,30 @@ async def test_protected_backend_deploys_private_backend_without_mise_sidecar(
             "/subscriptions/sub-123/resourceGroups/genie-dev-rg/providers/"
             "Microsoft.ManagedIdentity/userAssignedIdentities/claims-1234"
         ),
-        prototype_authentication=authentication,
     )
 
     envelope = captured["envelope"]
     assert result.backend_url == "https://claims-1234.azure-api.net"
-    assert result.test_backend_url == "https://claims-1234.azure-api.net"
-    assert result.test_access_key
     assert envelope.managed_environment_id == "private-env-123"
     assert envelope.configuration.ingress.external is False
     assert envelope.configuration.ingress.target_port == 8000
     assert envelope.configuration.ingress.additional_port_mappings is None
     assert envelope.configuration.registries[0].identity.endswith("/claims-1234")
     assert envelope.configuration.registries[0].username is None
-    assert [secret.name for secret in envelope.configuration.secrets] == [
-        "acceptance-test-key"
-    ]
+    assert envelope.configuration.secrets == []
     assert [container.name for container in envelope.template.containers] == ["backend"]
     backend = next(
         container for container in envelope.template.containers if container.name == "backend"
     )
     backend_environment = {item.name: item.value for item in backend.env}
-    assert backend_environment["ENTRA_CLIENT_ID"] == "prototype-client"
-    acceptance_environment = next(
-        item for item in backend.env if item.name == "GENIE_ACCEPTANCE_TEST_KEY"
-    )
-    assert acceptance_environment.secret_ref == "acceptance-test-key"
+    assert "ENTRA_CLIENT_ID" not in backend_environment
+    assert "ENTRA_TENANT_ID" not in backend_environment
+    assert "GENIE_ACCEPTANCE_TEST_KEY" not in backend_environment
     assert gateway_calls["provision"] == "claims-1234"
-    assert gateway_calls["publish"][:3] == (
+    assert gateway_calls["publish"] == (
         "claims-1234",
         "https://prototype.example.com",
-        "prototype-client",
     )
-    assert gateway_calls["publish"][3] == result.test_access_key
 
 
 async def test_frontend_deployment_uses_mission_identity_for_acr(monkeypatch, tmp_path):
@@ -329,14 +302,6 @@ async def test_frontend_deployment_uses_mission_identity_for_acr(monkeypatch, tm
 
 
 async def test_gateway_origin_finalization_updates_apim_policy():
-    authentication = PrototypeAuthenticationConfiguration(
-        application_object_id="app-object",
-        service_principal_object_id="prototype-sp",
-        client_id="prototype-client",
-        tenant_id="tenant-1",
-        delegated_scope="api://prototype-client/access_as_user",
-        application_role_id="role-1",
-    )
     calls = []
 
     class FakeGatewayService:
@@ -357,13 +322,11 @@ async def test_gateway_origin_finalization_updates_apim_policy():
     await service.configure_gateway_frontend_origin(
         mission_slug="claims-1234",
         frontend_origin="https://prototype.example.com/",
-        prototype_authentication=authentication,
     )
 
     assert calls == [
         {
             "mission_slug": "claims-1234",
             "frontend_origin": "https://prototype.example.com/",
-            "authentication": authentication,
         }
     ]

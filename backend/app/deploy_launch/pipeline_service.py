@@ -80,13 +80,7 @@ from app.deploy_launch.models import (
     DeploymentPipelineRun,
     DeploymentStepId,
     DeploymentStepResult,
-    PrototypeAuthenticationInfo,
     ProvisionedAgentStatus,
-)
-from app.deploy_launch.prototype_authentication_service import (
-    NullPrototypeAuthenticationService,
-    PrototypeAuthenticationConfiguration,
-    PrototypeAuthenticationService,
 )
 from app.deploy_launch.resource_naming import prototype_resource_group_name
 from app.deploy_launch.security_scan_service import SecurityScanService
@@ -147,7 +141,7 @@ _FRONTEND_PACKAGE_JSON = """{
     "private": true,
     "type": "module",
     "scripts": {"build": "npm run design:check && vite build", "design:check": "impeccable detect MissionApp.tsx src/"},
-    "dependencies": {"@azure/msal-browser": "5.18.0", "react": "18.3.1", "react-dom": "18.3.1"},
+    "dependencies": {"react": "18.3.1", "react-dom": "18.3.1"},
     "devDependencies": {"@vitejs/plugin-react": "4.3.4", "@types/react": "18.3.18", "@types/react-dom": "18.3.5", "impeccable": "3.6.0", "typescript": "5.7.2", "vite": "6.4.3"}
 }
 """
@@ -698,7 +692,6 @@ input:focus, textarea:focus, select:focus {
 """
 
 _FRONTEND_MAIN_TSX = """import React, { useRef, useState } from "react";
-import { InteractionRequiredAuthError, PublicClientApplication } from "@azure/msal-browser";
 import { createRoot } from "react-dom/client";
 import * as GeneratedModule from "../MissionApp";
 import "./styles.css";
@@ -755,58 +748,6 @@ const GeneratedMissionApp = moduleValue.default ?? moduleValue.App ?? moduleValu
 // (app.deploy_launch.code_materializer) - checked client-side too so a user
 // gets immediate feedback instead of waiting on a 413 response.
 const MAX_ATTACHMENT_CHARS = 200_000;
-
-let missionAccessToken: string | null = null;
-let missionAuthClient: PublicClientApplication | null = null;
-let missionAuthScope: string | null = null;
-
-async function refreshMissionAccessToken(): Promise<void> {
-    const account = missionAuthClient?.getActiveAccount();
-    if (!missionAuthClient || !account || !missionAuthScope) return;
-    try {
-        missionAccessToken = (
-            await missionAuthClient.acquireTokenSilent({
-                account,
-                scopes: [missionAuthScope],
-            })
-        ).accessToken;
-    } catch (error) {
-        missionAccessToken = null;
-        if (error instanceof InteractionRequiredAuthError) {
-            await missionAuthClient.acquireTokenRedirect({ scopes: [missionAuthScope] });
-            return;
-        }
-        throw error;
-    }
-}
-
-async function initializeAuthentication(): Promise<void> {
-    const clientId = window.__MISSION_ENTRA_CLIENT_ID__;
-    const tenantId = window.__MISSION_ENTRA_TENANT_ID__;
-    const scope = window.__MISSION_ENTRA_SCOPE__;
-    if (!clientId || !tenantId || !scope) {
-        throw new Error("Mission authentication is not configured.");
-    }
-    missionAuthScope = scope;
-    missionAuthClient = new PublicClientApplication({
-        auth: {
-            clientId,
-            authority: `https://login.microsoftonline.com/${tenantId}`,
-            redirectUri: window.location.origin + "/",
-        },
-        cache: { cacheLocation: "sessionStorage" },
-    });
-    await missionAuthClient.initialize();
-    const redirectResult = await missionAuthClient.handleRedirectPromise();
-    const account = redirectResult?.account ?? missionAuthClient.getAllAccounts()[0];
-    if (!account) {
-        await missionAuthClient.loginRedirect({ scopes: [scope] });
-        return;
-    }
-    missionAuthClient.setActiveAccount(account);
-    await refreshMissionAccessToken();
-    window.setInterval(() => void refreshMissionAccessToken(), 5 * 60 * 1000);
-}
 
 type AgentStatus = "pending" | "active" | "complete";
 type QueueItemStatus = "queued" | "running" | "complete" | "error";
@@ -871,11 +812,9 @@ function MissionConsole() {
         try {
             const backendUrl = window.__MISSION_BACKEND_URL__;
             if (!backendUrl) throw new Error("Mission backend URL is not configured.");
-            if (!missionAccessToken) throw new Error("Mission authentication is unavailable.");
             const result = await fetch(`${backendUrl}/invoke/stream`, {
                 method: "POST",
                 headers: {
-                    "Authorization": `Bearer ${missionAccessToken}`,
                     "Content-Type": "application/json",
                 },
                 body: JSON.stringify({ message: item.message, attachments: item.attachments }),
@@ -1210,28 +1149,13 @@ function MissionConsole() {
     </main>;
 }
 
-async function start(): Promise<void> {
-    await initializeAuthentication();
-    if (missionAccessToken) {
-        createRoot(document.getElementById("root")!).render(<MissionConsole />);
-    }
-}
-
-void start().catch((error: unknown) => {
-    const message = error instanceof Error ? error.message : "Microsoft Entra sign-in failed.";
-    createRoot(document.getElementById("root")!).render(
-        <main className="genie-shell"><p className="genie-error" role="alert">{message}</p></main>,
-    );
-});
+createRoot(document.getElementById("root")!).render(<MissionConsole />);
 """
 
 _FRONTEND_ENV_D_TS = """interface Window {
     __MISSION_BACKEND_URL__?: string;
     __MISSION_TITLE__?: string;
     __MISSION_AGENTS__?: string[];
-    __MISSION_ENTRA_CLIENT_ID__?: string;
-    __MISSION_ENTRA_TENANT_ID__?: string;
-    __MISSION_ENTRA_SCOPE__?: string;
 }
 """
 
@@ -1276,14 +1200,9 @@ class DeploymentPipelineService:
         test_execution_service: TestExecutionService,
         security_scan_service: SecurityScanService,
         build_workspace_root: Path,
-        prototype_authentication_service: PrototypeAuthenticationService
-        | NullPrototypeAuthenticationService
-        | None = None,
         run_repository: DeploymentRunRepository | None = None,
         prototype_default_ttl_days: int = 7,
         prototype_max_active_per_owner: int = 3,
-        prototype_authentication_mode: str = "per_prototype",
-        prototype_shared_slot_count: int = 50,
         architecture_step_id: str = "design-architecture",
         build_step_id: str = "build-solution",
         requirements_step_id: str = "analyze-requirements",
@@ -1302,14 +1221,9 @@ class DeploymentPipelineService:
         self._frontend_deployment_service = frontend_deployment_service
         self._test_execution_service = test_execution_service
         self._security_scan_service = security_scan_service
-        self._prototype_authentication_service = (
-            prototype_authentication_service or NullPrototypeAuthenticationService()
-        )
         self._run_repository = run_repository or InMemoryDeploymentRunRepository()
         self._prototype_default_ttl_days = prototype_default_ttl_days
         self._prototype_max_active_per_owner = prototype_max_active_per_owner
-        self._prototype_authentication_mode = prototype_authentication_mode
-        self._prototype_shared_slot_count = prototype_shared_slot_count
         self._build_workspace_root = build_workspace_root
         self._architecture_step_id = architecture_step_id
         self._build_step_id = build_step_id
@@ -1323,11 +1237,6 @@ class DeploymentPipelineService:
         self._materialized_builds: dict[str, MaterializedBuild] = {}
         self._agent_foundry_names: dict[str, dict[str, str]] = {}
         self._generated_test_outputs: dict[str, str] = {}
-        self._test_backend_urls: dict[str, str] = {}
-        self._test_access_keys: dict[str, str] = {}
-        self._prototype_authentications: dict[
-            str, PrototypeAuthenticationConfiguration
-        ] = {}
         self._background_tasks: dict[str, asyncio.Task[None]] = {}
 
     async def initialize(self) -> None:
@@ -1343,28 +1252,10 @@ class DeploymentPipelineService:
                     running_step.error = "Deployment was interrupted by a service restart."
                     running_step.completed_at = run.updated_at
                 await self._run_repository.put(run)
-            if run.prototype_authentication is not None:
-                authentication = PrototypeAuthenticationConfiguration(
-                    **run.prototype_authentication.model_dump()
-                )
-                if authentication.frontend_redirect_uri is None and run.frontend_url:
-                    authentication.frontend_redirect_uri = run.frontend_url.rstrip("/") + "/"
-                self._prototype_authentications[run.id] = authentication
             self._runs[run.id] = run
 
     async def _persist_run(self, run: DeploymentPipelineRun) -> None:
         await self._run_repository.put(run)
-
-    async def _persist_authentication(
-        self,
-        run: DeploymentPipelineRun,
-        configuration: PrototypeAuthenticationConfiguration,
-    ) -> None:
-        run.prototype_authentication = PrototypeAuthenticationInfo(
-            **configuration.__dict__
-        )
-        run.updated_at = datetime.now(UTC)
-        await self._persist_run(run)
 
     def get_run(self, pipeline_run_id: str) -> DeploymentPipelineRun | None:
         return self._runs.get(pipeline_run_id)
@@ -1576,29 +1467,6 @@ class DeploymentPipelineService:
         pipeline_run.mission_title = session.title
         pipeline_run.mission_slug = mission_slug
         pipeline_run.resource_group_name = prototype_resource_group_name(mission_slug)
-        if (
-            self._prototype_authentication_mode == "shared"
-            and pipeline_run.shared_authentication_slot is None
-        ):
-            used_slots = {
-                run.shared_authentication_slot
-                for run in self._runs.values()
-                if run.id != pipeline_run.id
-                and run.cleanup_status == "active"
-                and run.shared_authentication_slot is not None
-            }
-            pipeline_run.shared_authentication_slot = next(
-                (
-                    slot
-                    for slot in range(1, self._prototype_shared_slot_count + 1)
-                    if slot not in used_slots
-                ),
-                None,
-            )
-            if pipeline_run.shared_authentication_slot is None:
-                raise DeploymentPipelineStepFailedError(
-                    "No shared prototype authentication slots are currently available."
-                )
         await self._persist_run(pipeline_run)
 
         next_step = resume_from_step
@@ -1660,19 +1528,6 @@ class DeploymentPipelineService:
         pipeline_run.updated_at = datetime.now(UTC)
         await self._persist_run(pipeline_run)
 
-    async def _cleanup_prototype_authentication(self, pipeline_run_id: str) -> None:
-        authentication = self._prototype_authentications.get(pipeline_run_id)
-        if authentication is None:
-            return
-        try:
-            await self._prototype_authentication_service.delete(authentication)
-        except Exception:  # Preserve the original terminal pipeline failure.
-            _logger.exception(
-                "Failed to clean up prototype Entra application after pipeline failure."
-            )
-            return
-        self._prototype_authentications.pop(pipeline_run_id, None)
-
     async def abandon(
         self,
         *,
@@ -1706,14 +1561,8 @@ class DeploymentPipelineService:
                     )
                 mission_slug = f"{_slugify(resolved_title)}-{pipeline_run.id[:8]}"
             await self._backend_deployment_service.delete(mission_slug=mission_slug)
-            frontend_app_name = (
-                f"genie-prototype-{pipeline_run.shared_authentication_slot:03d}-frontend"
-                if pipeline_run.shared_authentication_slot is not None
-                else None
-            )
             await self._frontend_deployment_service.delete(
                 mission_slug=mission_slug,
-                app_name=frontend_app_name,
             )
             await self._mission_agent_provisioning_service.delete(
                 foundry_agent_names=[
@@ -1730,9 +1579,6 @@ class DeploymentPipelineService:
                     resource_group_name=pipeline_run.resource_group_name,
                     role_assignment_ids=mission_identity.role_assignment_ids,
                 )
-            authentication = self._prototype_authentications.get(pipeline_run.id)
-            if authentication is not None:
-                await self._prototype_authentication_service.delete(authentication)
         except Exception as exc:
             pipeline_run.cleanup_status = "deletion_failed"
             pipeline_run.cleanup_error = str(exc)
@@ -1745,12 +1591,9 @@ class DeploymentPipelineService:
             await asyncio.to_thread(
                 shutil.rmtree, workspace.backend_root.parent, ignore_errors=True
             )
-        self._prototype_authentications.pop(pipeline_run.id, None)
         self._materialized_builds.pop(pipeline_run.id, None)
         self._agent_foundry_names.pop(pipeline_run.id, None)
         self._generated_test_outputs.pop(pipeline_run.id, None)
-        self._test_backend_urls.pop(pipeline_run.id, None)
-        self._test_access_keys.pop(pipeline_run.id, None)
         self._workspaces.pop(pipeline_run.id, None)
         self._runs.pop(pipeline_run.id, None)
         await self._run_repository.delete(pipeline_run_id=pipeline_run.id)
@@ -2181,31 +2024,10 @@ class DeploymentPipelineService:
 
                 elif step_id == "deploy-backend-service":
                     materialized = self._materialized_builds[pipeline_run.id]
-                    prototype_authentication = self._prototype_authentications.get(
-                        pipeline_run.id
-                    )
-                    if prototype_authentication is None:
-                        provisioned_authentication = (
-                            await self._prototype_authentication_service.provision(
-                                mission_slug=mission_slug
-                            )
-                        )
-                        if isinstance(
-                            provisioned_authentication,
-                            PrototypeAuthenticationConfiguration,
-                        ):
-                            prototype_authentication = provisioned_authentication
-                            self._prototype_authentications[pipeline_run.id] = (
-                                prototype_authentication
-                            )
-                            await self._persist_authentication(
-                                pipeline_run, prototype_authentication
-                            )
                     scaffold = generate_backend_service_scaffold(
                         mission_title=mission_title,
                         orchestrator_agent_name=orchestrator_foundry_name,
                         agent_foundry_names=self._agent_foundry_names[pipeline_run.id],
-                        authentication_required=prototype_authentication is not None,
                     )
                     materialized.write_to_directory(backend_root, backend_service_scaffold=scaffold)
 
@@ -2220,26 +2042,13 @@ class DeploymentPipelineService:
                         and pipeline_run.access_policy.mission_identity
                         else None
                     )
-                    deployment_arguments = {
-                        "mission_slug": mission_slug,
-                        "build_root": backend_root,
-                        "mission_identity_resource_id": mission_identity_resource_id,
-                        "on_progress": _on_backend_progress,
-                    }
-                    if prototype_authentication is not None:
-                        deployment_arguments["prototype_authentication"] = (
-                            prototype_authentication
-                        )
                     backend_result = await self._backend_deployment_service.deploy(
-                        **deployment_arguments
+                        mission_slug=mission_slug,
+                        build_root=backend_root,
+                        mission_identity_resource_id=mission_identity_resource_id,
+                        on_progress=_on_backend_progress,
                     )
                     pipeline_run.backend_url = backend_result.backend_url
-                    if backend_result.test_backend_url:
-                        self._test_backend_urls[pipeline_run.id] = (
-                            backend_result.test_backend_url
-                        )
-                    if backend_result.test_access_key:
-                        self._test_access_keys[pipeline_run.id] = backend_result.test_access_key
                     detail = (
                         f"Backend deployed at {backend_result.backend_url}, integrated with "
                         f"orchestrator agent '{orchestrator_foundry_name}'."
@@ -2284,24 +2093,10 @@ class DeploymentPipelineService:
                         for name in self._agent_foundry_names.get(pipeline_run.id, {})
                         if name != "orchestrator"
                     ]
-                    prototype_authentication = self._prototype_authentications.get(
-                        pipeline_run.id
-                    )
-                    authentication_runtime = ""
-                    if prototype_authentication is not None:
-                        authentication_runtime = (
-                            f"window.__MISSION_ENTRA_CLIENT_ID__ = "
-                            f"{json.dumps(prototype_authentication.client_id)};\n"
-                            f"window.__MISSION_ENTRA_TENANT_ID__ = "
-                            f"{json.dumps(prototype_authentication.tenant_id)};\n"
-                            f"window.__MISSION_ENTRA_SCOPE__ = "
-                            f"{json.dumps(prototype_authentication.delegated_scope)};\n"
-                        )
                     (public_root / "runtime-config.js").write_text(
                         f'window.__MISSION_BACKEND_URL__ = "{pipeline_run.backend_url}";\n'
                         f"window.__MISSION_TITLE__ = {json.dumps(mission_title)};\n"
-                        f"window.__MISSION_AGENTS__ = {json.dumps(mission_agent_names)};\n"
-                        + authentication_runtime,
+                        f"window.__MISSION_AGENTS__ = {json.dumps(mission_agent_names)};\n",
                         encoding="utf-8",
                     )
                     detail = f"Frontend wired to real backend URL {pipeline_run.backend_url}."
@@ -2313,42 +2108,25 @@ class DeploymentPipelineService:
                     ) -> None:
                         _step_result.detail = message
 
-                    prototype_authentication = self._prototype_authentications.get(
-                        pipeline_run.id
-                    )
                     frontend_deployment_arguments = {
                         "mission_slug": mission_slug,
                         "ui_root": frontend_root,
                         "on_progress": _on_frontend_progress,
-                    }
-                    if pipeline_run.shared_authentication_slot is not None:
-                        frontend_deployment_arguments["app_name"] = (
-                            f"genie-prototype-{pipeline_run.shared_authentication_slot:03d}-frontend"
-                        )
-                    if prototype_authentication is not None:
-                        frontend_deployment_arguments["mission_identity_resource_id"] = (
+                        "mission_identity_resource_id": (
                             pipeline_run.access_policy.mission_identity.identity_resource_id
                             if pipeline_run.access_policy
                             and pipeline_run.access_policy.mission_identity
                             else None
-                        )
+                        ),
+                    }
                     frontend_result = await self._frontend_deployment_service.deploy(
                         **frontend_deployment_arguments
                     )
                     pipeline_run.frontend_url = frontend_result.frontend_url
-                    if prototype_authentication is not None:
-                        await self._prototype_authentication_service.configure_frontend_redirect(
-                            prototype_authentication,
-                            frontend_url=frontend_result.frontend_url,
-                        )
-                        await self._persist_authentication(
-                            pipeline_run, prototype_authentication
-                        )
-                        await self._backend_deployment_service.configure_gateway_frontend_origin(
-                            mission_slug=mission_slug,
-                            frontend_origin=frontend_result.frontend_url,
-                            prototype_authentication=prototype_authentication,
-                        )
+                    await self._backend_deployment_service.configure_gateway_frontend_origin(
+                        mission_slug=mission_slug,
+                        frontend_origin=frontend_result.frontend_url,
+                    )
                     detail = f"Frontend deployed at {frontend_result.frontend_url}."
 
                 elif step_id == "generate-test-suite":
@@ -2577,34 +2355,6 @@ class DeploymentPipelineService:
                         "MISSION_BACKEND_URL": pipeline_run.backend_url or "",
                         "MISSION_FRONTEND_URL": pipeline_run.frontend_url or "",
                     }
-                    prototype_authentication = self._prototype_authentications.get(
-                        pipeline_run.id
-                    )
-                    if prototype_authentication is not None:
-                        test_backend_url = self._test_backend_urls.get(pipeline_run.id)
-                        if not test_backend_url:
-                            raise DeploymentPipelineStepFailedError(
-                                "The authenticated prototype acceptance-test endpoint is unavailable."
-                            )
-                        runtime_environment["MISSION_UNAUTHENTICATED_BACKEND_URL"] = (
-                            pipeline_run.backend_url or ""
-                        )
-                        runtime_environment["MISSION_BACKEND_URL"] = test_backend_url
-                        test_access_key = self._test_access_keys.pop(
-                            pipeline_run.id, None
-                        )
-                        if self._prototype_authentication_mode == "shared":
-                            if not test_access_key:
-                                raise DeploymentPipelineStepFailedError(
-                                    "The prototype acceptance-test credential is unavailable."
-                                )
-                            runtime_environment["MISSION_ACCEPTANCE_TEST_KEY"] = test_access_key
-                        else:
-                            runtime_environment["MISSION_ACCESS_TOKEN"] = (
-                                await self._prototype_authentication_service.get_test_access_token(
-                                    prototype_authentication
-                                )
-                            )
                     test_result = await self._test_execution_service.run_tests(
                         build_root=backend_root,
                         test_output_text=test_output_text,
@@ -2781,8 +2531,6 @@ def create_deployment_pipeline_service(
     frontend_deployment_service: (
         ContainerAppFrontendDeploymentService | NullContainerAppFrontendDeploymentService
     ),
-    prototype_authentication_service: PrototypeAuthenticationService
-    | NullPrototypeAuthenticationService,
     run_repository: DeploymentRunRepository | None = None,
 ) -> DeploymentPipelineService:
     """Wires a ``DeploymentPipelineService`` from already-constructed collaborators.
@@ -2802,12 +2550,9 @@ def create_deployment_pipeline_service(
         mission_agent_provisioning_service=mission_agent_provisioning_service,
         backend_deployment_service=backend_deployment_service,
         frontend_deployment_service=frontend_deployment_service,
-        prototype_authentication_service=prototype_authentication_service,
         run_repository=run_repository,
         prototype_default_ttl_days=settings.prototype_default_ttl_days,
         prototype_max_active_per_owner=settings.prototype_max_active_per_owner,
-        prototype_authentication_mode=settings.prototype_authentication_mode,
-        prototype_shared_slot_count=settings.prototype_shared_slot_count,
         test_execution_service=TestExecutionService(
             timeout_seconds=settings.deployment_test_execution_timeout_seconds
         ),

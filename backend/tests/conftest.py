@@ -171,7 +171,6 @@ def foundry_configured_settings(valid_config_root: Path) -> Settings:
         prototype_api_gateway_enabled=True,
         prototype_api_gateway_publisher_email="genie@example.com",
         prototype_api_gateway_publisher_name="Genie",
-        prototype_test_principal_client_id="00000000-0000-0000-0000-000000000001",
         entra_tenant_id="00000000-0000-0000-0000-000000000002",
         config_root=valid_config_root,
     )

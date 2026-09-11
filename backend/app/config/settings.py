@@ -167,15 +167,6 @@ class Settings(BaseSettings):
     prototype_api_gateway_publisher_name: str | None = None
     prototype_api_gateway_sku_name: Literal["StandardV2", "PremiumV2"] = "StandardV2"
     prototype_api_gateway_capacity: int = Field(default=1, ge=1, le=10)
-    prototype_test_principal_client_id: str | None = None
-    prototype_authentication_mode: Literal["per_prototype", "shared"] = "per_prototype"
-    prototype_shared_application_object_id: str | None = None
-    prototype_shared_service_principal_object_id: str | None = None
-    prototype_shared_client_id: str | None = None
-    prototype_shared_delegated_scope: str | None = None
-    prototype_shared_application_role_id: str | None = None
-    prototype_shared_frontend_domain: str | None = None
-    prototype_shared_slot_count: int = Field(default=50, ge=1, le=200)
     deployment_fidelity_max_repair_attempts: int = 3
     deployment_fidelity_min_coverage_percent: float = Field(default=90.0, gt=0, le=100)
     # How long the Requirement Fidelity Gate's real pytest subprocess is
@@ -240,7 +231,6 @@ class Settings(BaseSettings):
         "deployment_location",
         "prototype_api_gateway_publisher_email",
         "prototype_api_gateway_publisher_name",
-        "prototype_test_principal_client_id",
         mode="after",
     )
     @classmethod

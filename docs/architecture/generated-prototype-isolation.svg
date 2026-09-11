@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1600" height="940" viewBox="0 0 1600 940" role="img" aria-labelledby="title description">
   <title id="title">Generated prototype Azure isolation architecture</title>
-  <desc id="description">Azure architecture diagram showing shared corporate Entra authentication plus a dedicated API Management service, managed identity, private VNet and Container Apps backend, Foundry Agent Service agents, Container Registry, governance evidence, and Azure Monitor for each generated prototype.</desc>
+  <desc id="description">Azure architecture diagram showing anonymous prototype access through a dedicated API Management service, managed identity, private VNet and Container Apps backend, Foundry Agent Service agents, Container Registry, governance evidence, and Azure Monitor for each generated prototype.</desc>
   <defs>
     <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
       <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#36566F" flood-opacity="0.16"/>
@@ -31,8 +31,8 @@
     <g>
     <rect x="365" y="175" width="350" height="630" rx="8" fill="#F7F3FA" stroke="#5C2D91" stroke-width="1.5"/>
     
-    <text x="385" y="204" text-anchor="start" fill="#004578" font-family="Segoe UI, sans-serif" font-size="17" font-weight="600"><tspan x="385" dy="0">Identity and authorization</tspan></text>
-    <text x="385" y="224" text-anchor="start" fill="#526575" font-family="Segoe UI, sans-serif" font-size="12.5" font-weight="400"><tspan x="385" dy="0">Shared workforce sign-in; prototype workload identity</tspan></text>
+    <text x="385" y="204" text-anchor="start" fill="#004578" font-family="Segoe UI, sans-serif" font-size="17" font-weight="600"><tspan x="385" dy="0">Identity and lifecycle</tspan></text>
+    <text x="385" y="224" text-anchor="start" fill="#526575" font-family="Segoe UI, sans-serif" font-size="12.5" font-weight="400"><tspan x="385" dy="0">Anonymous user access; prototype workload identity</tspan></text>
   </g>
     <g>
     <rect x="740" y="175" width="435" height="630" rx="8" fill="#F1FAF1" stroke="#107C10" stroke-width="1.5"/>
@@ -51,7 +51,7 @@
     <rect x="416.1" y="147" width="107.8" height="22" rx="4" fill="#FFFFFF" opacity="0.96"/><text x="470" y="163" text-anchor="middle" fill="#0078D4" font-family="Segoe UI, sans-serif" font-size="12.5" font-weight="600"><tspan x="470" dy="0">Open prototype</tspan></text>
   </g><g>
     <path d="M 825 315 V 365" fill="none" stroke="#0078D4" stroke-width="2.2"  marker-end="url(#arrow)"/>
-    <rect x="834.8" y="331" width="94.4" height="22" rx="4" fill="#FFFFFF" opacity="0.96"/><text x="882" y="347" text-anchor="middle" fill="#0078D4" font-family="Segoe UI, sans-serif" font-size="12.5" font-weight="600"><tspan x="882" dy="0">Bearer token</tspan></text>
+    <rect x="834.8" y="331" width="94.4" height="22" rx="4" fill="#FFFFFF" opacity="0.96"/><text x="882" y="347" text-anchor="middle" fill="#0078D4" font-family="Segoe UI, sans-serif" font-size="12.5" font-weight="600"><tspan x="882" dy="0">API request</tspan></text>
   </g><g>
     <path d="M 825 485 V 535" fill="none" stroke="#0078D4" stroke-width="2.2"  marker-end="url(#arrow)"/>
     <rect x="834.45" y="501" width="101.10000000000001" height="22" rx="4" fill="#FFFFFF" opacity="0.96"/><text x="885" y="517" text-anchor="middle" fill="#0078D4" font-family="Segoe UI, sans-serif" font-size="12.5" font-weight="600"><tspan x="885" dy="0">Private route</tspan></text>
@@ -88,7 +88,7 @@
     <rect x="45" y="120" width="6" height="110" rx="3" fill="#5C2D91"/>
     <image href="data:image/svg+xml;base64,PHN2ZyBpZD0iZTI0NjcxZjYtZjUwMS00OTUyLWEyZGItOGIwYjFkMzI5YzE3IiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxOCIgaGVpZ2h0PSIxOCIgdmlld0JveD0iMCAwIDE4IDE4Ij48ZGVmcz48bGluZWFyR3JhZGllbnQgaWQ9ImJlOTI5MDFiLWVjMzMtNGM2NS1hZGYxLTliMGVlZDA2ZDY3NyIgeDE9IjkiIHkxPSI2Ljg4IiB4Mj0iOSIgeTI9IjIwLjQ1IiBncmFkaWVudFVuaXRzPSJ1c2VyU3BhY2VPblVzZSI+PHN0b3Agb2Zmc2V0PSIwLjIyIiBzdG9wLWNvbG9yPSIjMzJkNGY1IiAvPjxzdG9wIG9mZnNldD0iMSIgc3RvcC1jb2xvcj0iIzE5OGFiMyIgLz48L2xpbmVhckdyYWRpZW50PjxsaW5lYXJHcmFkaWVudCBpZD0iYjQ2ZmMyNDYtMjVkOC00Mzk4LTg3NzktMTA0MmU4Y2FjYWU3IiB4MT0iOC42MSIgeTE9Ii0wLjQiIHgyPSI5LjYiIHkyPSIxMS45MiIgZ3JhZGllbnRVbml0cz0idXNlclNwYWNlT25Vc2UiPjxzdG9wIG9mZnNldD0iMC4yMiIgc3RvcC1jb2xvcj0iIzMyZDRmNSIgLz48c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiMxOThhYjMiIC8+PC9saW5lYXJHcmFkaWVudD48L2RlZnM+PHRpdGxlPkljb24taWRlbnRpdHktMjMwPC90aXRsZT48cGF0aCBkPSJNMTUuNzIsMThhMS40NSwxLjQ1LDAsMCwwLDEuNDUtMS40NS40Ny40NywwLDAsMCwwLS4xN0MxNi41OSwxMS44MSwxNCw4LjA5LDksOC4wOVMxLjM0LDExLjI0LjgzLDE2LjM5QTEuNDYsMS40NiwwLDAsMCwyLjE0LDE4SDE1LjcyWiIgZmlsbD0idXJsKCNiZTkyOTAxYi1lYzMzLTRjNjUtYWRmMS05YjBlZWQwNmQ2NzcpIiAvPjxwYXRoIGQ9Ik05LDkuMTdhNC41OSw0LjU5LDAsMCwxLTIuNDgtLjczTDksMTQuODZsMi40NC02LjM4QTQuNTMsNC41MywwLDAsMSw5LDkuMTdaIiBmaWxsPSIjZmZmIiBvcGFjaXR5PSIwLjgiIC8+PGNpcmNsZSBjeD0iOS4wMSIgY3k9IjQuNTgiIHI9IjQuNTgiIGZpbGw9InVybCgjYjQ2ZmMyNDYtMjVkOC00Mzk4LTg3NzktMTA0MmU4Y2FjYWU3KSIgLz48L3N2Zz4=" x="65" y="143" width="54" height="54" preserveAspectRatio="xMidYMid meet"/>
     <text x="135" y="154" text-anchor="start" fill="#172B3A" font-family="Segoe UI, sans-serif" font-size="16" font-weight="600"><tspan x="135" dy="0">Prototype user</tspan></text>
-    <text x="135" y="183" text-anchor="start" fill="#526575" font-family="Segoe UI, sans-serif" font-size="13" font-weight="400"><tspan x="135" dy="0">Authorized user</tspan></text>
+    <text x="135" y="183" text-anchor="start" fill="#526575" font-family="Segoe UI, sans-serif" font-size="13" font-weight="400"><tspan x="135" dy="0">No sign-in required</tspan></text>
   </g>
     <g>
     <rect x="45" y="300" width="230" height="270" rx="6" fill="#FFFFFF" stroke="#0078D4" stroke-width="1.5"/>
@@ -100,8 +100,8 @@
     <rect x="390" y="230" width="310" height="150" rx="8" fill="#FFFFFF" stroke="#B4C7D9" filter="url(#shadow)"/>
     <rect x="390" y="230" width="6" height="150" rx="3" fill="#5C2D91"/>
     <image href="data:image/svg+xml;base64,PHN2ZyBpZD0iYTc2YTAxMDMtY2UwMy00ZDU4LTg1OWQtNGMyN2UwMjkyNWQyIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxOCIgaGVpZ2h0PSIxOCIgdmlld0JveD0iMCAwIDE4IDE4Ij48ZGVmcz48bGluZWFyR3JhZGllbnQgaWQ9ImVmZWI4ZTk2LTJhZjAtNDY4MS05YTZhLTQ1ZjliMDI2MmYxOSIgeDE9Ii02NTE4Ljc4IiB5MT0iMTExOC44NiIgeDI9Ii02NTE4Ljc4IiB5Mj0iMTA5MC4wNiIgZ3JhZGllbnRUcmFuc2Zvcm09Im1hdHJpeCgwLjUsIDAsIDAsIC0wLjUsIDMyNjcuNDIsIDU1OS45OSkiIGdyYWRpZW50VW5pdHM9InVzZXJTcGFjZU9uVXNlIj48c3RvcCBvZmZzZXQ9IjAiIHN0b3AtY29sb3I9IiM1ZWEwZWYiIC8+PHN0b3Agb2Zmc2V0PSIwLjE4IiBzdG9wLWNvbG9yPSIjNTg5ZWVkIiAvPjxzdG9wIG9mZnNldD0iMC40MSIgc3RvcC1jb2xvcj0iIzQ4OTdlOSIgLz48c3RvcCBvZmZzZXQ9IjAuNjYiIHN0b3AtY29sb3I9IiMyZThjZTEiIC8+PHN0b3Agb2Zmc2V0PSIwLjk0IiBzdG9wLWNvbG9yPSIjMGE3Y2Q3IiAvPjxzdG9wIG9mZnNldD0iMSIgc3RvcC1jb2xvcj0iIzAwNzhkNCIgLz48L2xpbmVhckdyYWRpZW50PjwvZGVmcz48cGF0aCBkPSJNNS42NywxMC42MUgxMHY0LjMySDUuNjdabS01LTUuNzZINVYuNTNIMS4yM2EuNi42LDAsMCwwLS42LjZabS42LDEwLjA4SDVWMTAuNjFILjYzdjMuNzJBLjYuNiwwLDAsMCwxLjIzLDE0LjkzWm0tLjYtNUg1VjUuNTdILjYzWm0xMC4wOCw1aDMuNzJhLjYuNiwwLDAsMCwuNi0uNlYxMC42MUgxMC43MVptLTUtNUgxMFY1LjU3SDUuNjdabTUsMEgxNVY1LjU3SDEwLjcxWm0wLTkuMzZWNC44NUgxNVYxLjEzYS42LjYsMCwwLDAtLjYtLjZabS01LDQuMzJIMTBWLjUzSDUuNjdaIiBmaWxsPSJ1cmwoI2VmZWI4ZTk2LTJhZjAtNDY4MS05YTZhLTQ1ZjliMDI2MmYxOSkiIC8+PHBvbHlnb24gcG9pbnRzPSIxNy4zNyAxMC43IDE3LjM3IDE1LjIxIDEzLjUgMTcuNDcgMTMuNSAxMi45NiAxNy4zNyAxMC43IiBmaWxsPSIjMzJiZWRkIiAvPjxwb2x5Z29uIHBvaW50cz0iMTcuMzcgMTAuNyAxMy41IDEyLjk3IDkuNjMgMTAuNyAxMy41IDguNDQgMTcuMzcgMTAuNyIgZmlsbD0iIzljZWJmZiIgLz48cG9seWdvbiBwb2ludHM9IjEzLjUgMTIuOTcgMTMuNSAxNy40NyA5LjYzIDE1LjIxIDkuNjMgMTAuNyAxMy41IDEyLjk3IiBmaWxsPSIjNTBlNmZmIiAvPjxwb2x5Z29uIHBvaW50cz0iOS42MyAxNS4yMSAxMy41IDEyLjk2IDEzLjUgMTcuNDcgOS42MyAxNS4yMSIgZmlsbD0iIzljZWJmZiIgLz48cG9seWdvbiBwb2ludHM9IjE3LjM3IDE1LjIxIDEzLjUgMTIuOTYgMTMuNSAxNy40NyAxNy4zNyAxNS4yMSIgZmlsbD0iIzUwZTZmZiIgLz48L3N2Zz4=" x="410" y="253" width="54" height="54" preserveAspectRatio="xMidYMid meet"/>
-    <text x="480" y="264" text-anchor="start" fill="#172B3A" font-family="Segoe UI, sans-serif" font-size="16" font-weight="600"><tspan x="480" dy="0">Corporate Microsoft Entra</tspan><tspan x="480" dy="19">application registration</tspan></text>
-    <text x="480" y="312" text-anchor="start" fill="#526575" font-family="Segoe UI, sans-serif" font-size="13" font-weight="400"><tspan x="480" dy="0">Shared API audience</tspan><tspan x="480" dy="17">access_as_user delegated scope</tspan><tspan x="480" dy="17">Pre-registered callback slot</tspan></text>
+    <text x="480" y="264" text-anchor="start" fill="#172B3A" font-family="Segoe UI, sans-serif" font-size="16" font-weight="600"><tspan x="480" dy="0">Anonymous prototype</tspan><tspan x="480" dy="19">access</tspan></text>
+    <text x="480" y="312" text-anchor="start" fill="#526575" font-family="Segoe UI, sans-serif" font-size="13" font-weight="400"><tspan x="480" dy="0">No Entra application</tspan><tspan x="480" dy="17">No MSAL or bearer token</tspan><tspan x="480" dy="17">No shared callback slot</tspan></text>
   </g>
     <g>
     <rect x="390" y="425" width="310" height="150" rx="8" fill="#FFFFFF" stroke="#B4C7D9" filter="url(#shadow)"/>
@@ -114,26 +114,26 @@
     <rect x="390" y="625" width="310" height="115" rx="6" fill="#FFFFFF" stroke="#5C2D91" stroke-width="1.5"/>
     <rect x="390" y="625" width="5" height="115" rx="2.5" fill="#5C2D91"/>
     <text x="408" y="652" text-anchor="start" fill="#172B3A" font-family="Segoe UI, sans-serif" font-size="15" font-weight="600"><tspan x="408" dy="0">Prototype access policy</tspan></text>
-    <text x="408" y="674" text-anchor="start" fill="#526575" font-family="Segoe UI, sans-serif" font-size="12.5" font-weight="400"><tspan x="408" dy="0">SPA redirect URI + exact CORS origin</tspan><tspan x="408" dy="16">Owner authorization for abandonment</tspan></text>
+    <text x="408" y="674" text-anchor="start" fill="#526575" font-family="Segoe UI, sans-serif" font-size="12.5" font-weight="400"><tspan x="408" dy="0">Exact browser CORS origin</tspan><tspan x="408" dy="16">Owner authorization for abandonment</tspan></text>
   </g>
     <g>
     <rect x="765" y="225" width="385" height="90" rx="8" fill="#FFFFFF" stroke="#B4C7D9" filter="url(#shadow)"/>
     <rect x="765" y="225" width="6" height="90" rx="3" fill="#107C10"/>
     <image href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxOCIgaGVpZ2h0PSIxOCIgdmlld0JveD0iMCAwIDE4IDE4Ij48ZGVmcz48bGluZWFyR3JhZGllbnQgaWQ9ImEzYTQ0MDkzLWIxNTctNDI2ZS1hOGZlLWNlYzlmOWMyMzk3OCIgeDE9IjExLjcyOSIgeTE9IjQuODgiIHgyPSIxMS43MjkiIHkyPSIxMy4wOTkiIGdyYWRpZW50VW5pdHM9InVzZXJTcGFjZU9uVXNlIj48c3RvcCBvZmZzZXQ9IjAuMDAxIiBzdG9wLWNvbG9yPSIjNzczYWRjIiAvPjxzdG9wIG9mZnNldD0iMC41MjgiIHN0b3AtY29sb3I9IiM2NjM1YmIiIC8+PHN0b3Agb2Zmc2V0PSIxIiBzdG9wLWNvbG9yPSIjNTUyZjk5IiAvPjwvbGluZWFyR3JhZGllbnQ+PGxpbmVhckdyYWRpZW50IGlkPSJhZDgzODg1OS0wM2Y0LTQ3MmYtODFiYy1lYmM5MjFkNzEzMzUiIHgxPSI2LjM1IiB5MT0iMTMuOTE0IiB4Mj0iNi4zNSIgeTI9IjQuMTk4IiBncmFkaWVudFVuaXRzPSJ1c2VyU3BhY2VPblVzZSI+PHN0b3Agb2Zmc2V0PSIwLjAwMSIgc3RvcC1jb2xvcj0iIzc3M2FkYyIgLz48c3RvcCBvZmZzZXQ9IjAuMzA3IiBzdG9wLWNvbG9yPSIjNzkzZGRkIiAvPjxzdG9wIG9mZnNldD0iMC41MzIiIHN0b3AtY29sb3I9IiM4MDQ2ZTEiIC8+PHN0b3Agb2Zmc2V0PSIwLjczMSIgc3RvcC1jb2xvcj0iIzhjNTZlNyIgLz48c3RvcCBvZmZzZXQ9IjAuOTE1IiBzdG9wLWNvbG9yPSIjOWM2ZGVmIiAvPjxzdG9wIG9mZnNldD0iMSIgc3RvcC1jb2xvcj0iI2E2N2FmNCIgLz48L2xpbmVhckdyYWRpZW50PjwvZGVmcz48ZyBpZD0iYWU4MjQ3MGQtN2E2Yy00ZGZlLTg1MzMtNTlkOGZmOTQ4NjI5Ij48Zz48cGF0aCBkPSJNOC42MTcsOC42NDRILjYzOVYxLjc4NEExLjE2LDEuMTYsMCwwLDEsMS43ODguNjI0SDguNjE3Wk0xLjYzLDcuNjUzaDZWMS41OTRIMS43ODhhLjE1OC4xNTgsMCwwLDAtLjE1OC4xNThoMFoiIGZpbGw9IiM5NDk0OTQiIC8+PHBhdGggZD0iTTE3LjUsOC42NDRIOS41MjNWLjYyNGg2LjgyOEExLjE2LDEuMTYsMCwwLDEsMTcuNSwxLjc4NFptLTYuOTg3LS45OTFoNlYxLjc4NGEuMTU3LjE1NywwLDAsMC0uMTIzLS4xODcuMi4yLDAsMCwwLS4wMzUsMEgxMC41MTNaIiBmaWxsPSIjOTQ5NDk0IiAvPjxwYXRoIGQ9Ik04LjYxNywxNy40ODVIMS43ODhBMS4xNDksMS4xNDksMCwwLDEsLjYzOSwxNi4zNDdWOS40NzZIOC42MTdaTTEuNjMsMTAuNDY3djUuODhhLjE1OC4xNTgsMCwwLDAsLjE1OC4xNThINy42MjZWMTAuNDY3WiIgZmlsbD0iIzk0OTQ5NCIgLz48cGF0aCBkPSJNMTYuMzUxLDE3LjQ4NUg5LjUyM1Y5LjQ3NkgxNy41djYuODcxQTEuMTQ5LDEuMTQ5LDAsMCwxLDE2LjM1MSwxNy40ODVabS01LjgzOC0uOTkxaDUuODM4YS4xNTcuMTU3LDAsMCwwLC4xNTgtLjE1OFYxMC40NjdoLTZaIiBmaWxsPSIjOTQ5NDk0IiAvPjxwYXRoIGQ9Ik0xNC42LDYuMjk0YS4yOTQuMjk0LDAsMCwwLS4yLS4yNzhMOS4wNDQsNC4yMDVBLjEyOC4xMjgsMCwwLDAsOSw0LjJIOWEuMTMyLjEzMiwwLDAsMC0uMTMzLjEzM3Y5LjQ0NUEuMTMzLjEzMywwLDAsMCw5LDEzLjkxMUg5YS4xMzguMTM4LDAsMCwwLC4wNDktLjAxbDUuMzY1LTIuMTQ1YS4yOTIuMjkyLDAsMCwwLC4xODQtLjI3MloiIGZpbGw9InVybCgjYTNhNDQwOTMtYjE1Ny00MjZlLWE4ZmUtY2VjOWY5YzIzOTc4KSIgLz48cGF0aCBkPSJNOC45NjYsNC4ybC01LjI5My45NjZhLjE2MS4xNjEsMCwwLDAtLjEzLjE1OFYxMi42M2EuMTYuMTYsMCwwLDAsLjEyNi4xNTdMOC45NjIsMTMuOTFhLjE2MS4xNjEsMCwwLDAsLjE5MS0uMTIxLjIyLjIyLDAsMCwwLDAtLjAzNlY0LjM1OEEuMTYuMTYsMCwwLDAsOSw0LjIuMTYzLjE2MywwLDAsMCw4Ljk2Niw0LjJaIiBmaWxsPSJ1cmwoI2FkODM4ODU5LTAzZjQtNDcyZi04MWJjLWViYzkyMWQ3MTMzNSkiIC8+PHBhdGggZD0iTTYuNTIsNS42NTZ2Ni44bDEuODQyLjNWNS4zMzVabS0yLjI2Mi4zNjd2NS45NTVsMS42LjMyNlY1Ljc1NFoiIGZpbGw9IiNiNzk2ZjkiIG9wYWNpdHk9IjAuNSIgLz48L2c+PC9nPjwvc3ZnPg==" x="785" y="248" width="54" height="54" preserveAspectRatio="xMidYMid meet"/>
     <text x="855" y="259" text-anchor="start" fill="#172B3A" font-family="Segoe UI, sans-serif" font-size="16" font-weight="600"><tspan x="855" dy="0">Prototype frontend Container App</tspan></text>
-    <text x="855" y="288" text-anchor="start" fill="#526575" font-family="Segoe UI, sans-serif" font-size="13" font-weight="400"><tspan x="855" dy="0">MSAL runtime configuration + HTTPS ingress</tspan></text>
+    <text x="855" y="288" text-anchor="start" fill="#526575" font-family="Segoe UI, sans-serif" font-size="13" font-weight="400"><tspan x="855" dy="0">Anonymous HTTPS ingress</tspan></text>
   </g>
     <g>
     <rect x="765" y="365" width="385" height="120" rx="6" fill="#FFFFFF" stroke="#0078D4" stroke-width="1.5"/>
     <rect x="765" y="365" width="5" height="120" rx="2.5" fill="#0078D4"/>
     <text x="783" y="392" text-anchor="start" fill="#172B3A" font-family="Segoe UI, sans-serif" font-size="15" font-weight="600"><tspan x="783" dy="0">Dedicated Azure API Management</tspan></text>
-    <text x="783" y="414" text-anchor="start" fill="#526575" font-family="Segoe UI, sans-serif" font-size="12.5" font-weight="400"><tspan x="783" dy="0">Only public API endpoint</tspan><tspan x="783" dy="16">Entra validation + exact CORS + rate limit</tspan></text>
+    <text x="783" y="414" text-anchor="start" fill="#526575" font-family="Segoe UI, sans-serif" font-size="12.5" font-weight="400"><tspan x="783" dy="0">Only public API endpoint</tspan><tspan x="783" dy="16">Exact CORS + rate limit + correlation</tspan></text>
   </g>
     <g>
     <rect x="765" y="535" width="385" height="140" rx="6" fill="#FFFFFF" stroke="#D83B01" stroke-width="1.5"/>
     <rect x="765" y="535" width="5" height="140" rx="2.5" fill="#D83B01"/>
     <text x="783" y="562" text-anchor="start" fill="#172B3A" font-family="Segoe UI, sans-serif" font-size="15" font-weight="600"><tspan x="783" dy="0">Private VNet + Container Apps environment</tspan></text>
-    <text x="783" y="584" text-anchor="start" fill="#526575" font-family="Segoe UI, sans-serif" font-size="12.5" font-weight="400"><tspan x="783" dy="0">Generated FastAPI has internal ingress only</tspan><tspan x="783" dy="16">Private DNS; token validated again</tspan></text>
+    <text x="783" y="584" text-anchor="start" fill="#526575" font-family="Segoe UI, sans-serif" font-size="12.5" font-weight="400"><tspan x="783" dy="0">Generated FastAPI has internal ingress only</tspan><tspan x="783" dy="16">Private DNS; no public backend route</tspan></text>
   </g>
     <g>
     <rect x="1220" y="235" width="265" height="130" rx="8" fill="#FFFFFF" stroke="#B4C7D9" filter="url(#shadow)"/>

@@ -63,7 +63,7 @@ resource_providers:
 
   - namespace: Microsoft.ApiManagement
     display_name: Azure API Management
-    reason: Provides each generated prototype with a dedicated authenticated public API gateway.
+    reason: Provides each generated prototype with a dedicated public API gateway to its private backend.
     required: true
 
   - namespace: Microsoft.Web

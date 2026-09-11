@@ -36,11 +36,10 @@ from __future__ import annotations
 
 import asyncio
 import io
-import secrets
 import tarfile
 import time
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -48,9 +47,6 @@ from uuid import NAMESPACE_URL, uuid5
 
 from app.config.settings import Settings
 from app.deploy_launch.prototype_api_gateway_service import PrototypeApiGatewayService
-from app.deploy_launch.prototype_authentication_service import (
-    PrototypeAuthenticationConfiguration,
-)
 from app.deploy_launch.resource_naming import prototype_resource_group_name
 
 # Invoked with a short human-readable message right before each real,
@@ -83,8 +79,6 @@ class BackendDeploymentError(RuntimeError):
 class BackendDeploymentResult:
     image_tag: str
     backend_url: str
-    test_backend_url: str | None = None
-    test_access_key: str | None = field(default=None, repr=False)
 
 
 def _tar_gzip_directory(source_dir: Path) -> bytes:
@@ -275,7 +269,6 @@ class BackendDeploymentService:
         mission_slug: str,
         build_root: Path,
         mission_identity_resource_id: str | None = None,
-        prototype_authentication: PrototypeAuthenticationConfiguration | None = None,
         on_progress: DeploymentProgressCallback | None = None,
     ) -> BackendDeploymentResult:
         """Builds ``build_root`` (must contain its own ``Dockerfile``) in ACR and
@@ -302,13 +295,10 @@ class BackendDeploymentService:
             raise BackendDeploymentError(
                 f"No Dockerfile found in materialized build directory '{build_root}'."
             )
-        if prototype_authentication is not None and not mission_identity_resource_id:
+        private_gateway_enabled = self._prototype_api_gateway_service is not None
+        if private_gateway_enabled and not mission_identity_resource_id:
             raise BackendDeploymentError(
-                "Protected prototype deployment requires its mission user-assigned identity."
-            )
-        if prototype_authentication is not None and self._prototype_api_gateway_service is None:
-            raise BackendDeploymentError(
-                "Protected prototype deployment requires a dedicated API gateway service."
+                "Private prototype deployment requires its mission user-assigned identity."
             )
 
         acr_client = self._acr_client()
@@ -410,11 +400,8 @@ class BackendDeploymentService:
 
         registry_username: str | None = None
         registry_password: str | None = None
-        acceptance_test_key = (
-            secrets.token_urlsafe(32) if prototype_authentication is not None else None
-        )
         managed_environment_id = self._container_apps_environment_id
-        if prototype_authentication is not None:
+        if private_gateway_enabled:
             try:
                 gateway_infrastructure = (
                     await self._prototype_api_gateway_service.provision_infrastructure(
@@ -427,7 +414,7 @@ class BackendDeploymentService:
                 raise BackendDeploymentError(
                     f"Failed to provision private prototype infrastructure: {exc}"
                 ) from exc
-        if prototype_authentication is None:
+        if not private_gateway_enabled:
             try:
                 await _report("Reading Azure Container Registry credentials...")
                 credentials_client = self._acr_credentials_client()
@@ -468,25 +455,6 @@ class BackendDeploymentService:
                 EnvironmentVar(name="FOUNDRY_PROJECT_NAME", value=self._foundry_project_name),
                 EnvironmentVar(name="FOUNDRY_ORCHESTRATOR_AGENT_VERSION", value="1"),
             ]
-            if prototype_authentication is not None:
-                env_vars.extend(
-                    [
-                        EnvironmentVar(
-                            name="ENTRA_AUTHORITY", value="https://login.microsoftonline.com"
-                        ),
-                        EnvironmentVar(
-                            name="ENTRA_TENANT_ID", value=prototype_authentication.tenant_id
-                        ),
-                        EnvironmentVar(
-                            name="ENTRA_CLIENT_ID", value=prototype_authentication.client_id
-                        ),
-                        EnvironmentVar(
-                            name="GENIE_ACCEPTANCE_TEST_KEY",
-                            secret_ref="acceptance-test-key",
-                        ),
-                    ]
-                )
-            
             # Build the Container App envelope with mission-specific managed identity.
             # If mission_identity_resource_id is provided, assign the user-assigned
             # identity to the Container App - this identity has been pre-provisioned
@@ -509,7 +477,7 @@ class BackendDeploymentService:
                 server=f"{self._acr_name}.azurecr.io",
                 identity=(
                     mission_identity_resource_id
-                    if prototype_authentication is not None
+                    if private_gateway_enabled
                     else None
                 ),
                 username=registry_username,
@@ -522,11 +490,7 @@ class BackendDeploymentService:
                 if registry_password is not None
                 else []
             )
-            if acceptance_test_key is not None:
-                registry_secrets.append(
-                    Secret(name="acceptance-test-key", value=acceptance_test_key)
-                )
-            
+
             containers = [Container(name="backend", image=image_tag, env=env_vars)]
             envelope = ContainerApp(
                 location=self._location,
@@ -535,7 +499,7 @@ class BackendDeploymentService:
                 identity=identity_config,
                 configuration=Configuration(
                     ingress=Ingress(
-                        external=prototype_authentication is None,
+                        external=not private_gateway_enabled,
                         target_port=8000,
                         additional_port_mappings=None,
                     ),
@@ -557,13 +521,11 @@ class BackendDeploymentService:
         fqdn = getattr(getattr(result.configuration, "ingress", None), "fqdn", None)
         private_backend_url = f"https://{fqdn}" if fqdn else ""
         backend_url = private_backend_url
-        if prototype_authentication is not None:
+        if private_gateway_enabled:
             try:
                 backend_url = await self._prototype_api_gateway_service.publish_api(
                     mission_slug=mission_slug,
                     backend_url=private_backend_url,
-                    acceptance_test_key=acceptance_test_key or "",
-                    authentication=prototype_authentication,
                     on_progress=on_progress,
                 )
             except Exception as exc:
@@ -573,8 +535,6 @@ class BackendDeploymentService:
         return BackendDeploymentResult(
             image_tag=image_tag,
             backend_url=backend_url,
-            test_backend_url=backend_url if prototype_authentication is not None else None,
-            test_access_key=acceptance_test_key,
         )
 
     async def configure_gateway_frontend_origin(
@@ -582,21 +542,15 @@ class BackendDeploymentService:
         *,
         mission_slug: str,
         frontend_origin: str,
-        prototype_authentication: PrototypeAuthenticationConfiguration | None = None,
     ) -> None:
         """Replaces the bootstrap-deny APIM origin with the deployed SPA origin."""
 
-        if prototype_authentication is None:
-            return
         if self._prototype_api_gateway_service is None:
-            raise BackendDeploymentError(
-                "Protected prototype deployment requires a dedicated API gateway service."
-            )
+            return
         try:
             await self._prototype_api_gateway_service.configure_frontend_origin(
                 mission_slug=mission_slug,
                 frontend_origin=frontend_origin,
-                authentication=prototype_authentication,
             )
         except Exception as exc:
             raise BackendDeploymentError(
@@ -613,10 +567,9 @@ class NullBackendDeploymentService:
         mission_slug: str,
         build_root: Path,
         mission_identity_resource_id: str | None = None,
-        prototype_authentication: PrototypeAuthenticationConfiguration | None = None,
         on_progress: DeploymentProgressCallback | None = None,
     ) -> BackendDeploymentResult:
-        del build_root, mission_identity_resource_id, prototype_authentication
+        del build_root, mission_identity_resource_id
         if on_progress is not None:
             await on_progress("Deploying backend service (local mode, no real Azure calls)...")
         return BackendDeploymentResult(
@@ -629,9 +582,8 @@ class NullBackendDeploymentService:
         *,
         mission_slug: str,
         frontend_origin: str,
-        prototype_authentication: PrototypeAuthenticationConfiguration | None = None,
     ) -> None:
-        del mission_slug, frontend_origin, prototype_authentication
+        del mission_slug, frontend_origin
 
     async def delete(self, *, mission_slug: str) -> None:
         del mission_slug

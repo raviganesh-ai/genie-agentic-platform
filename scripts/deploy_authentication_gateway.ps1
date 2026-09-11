@@ -44,23 +44,6 @@ param(
     [string]$PrototypeApiGatewayPublisherName,
 
     [Parameter(Mandatory = $true)]
-    [string]$SharedApplicationObjectId,
-
-    [Parameter(Mandatory = $true)]
-    [string]$SharedServicePrincipalObjectId,
-
-    [Parameter(Mandatory = $true)]
-    [string]$SharedApplicationRoleId,
-
-    [Parameter(Mandatory = $true)]
-    [string]$SharedFrontendDomain,
-
-    [int]$SharedSlotCount = 50,
-
-    [Parameter(Mandatory = $true)]
-    [string]$DelegatedScope,
-
-    [Parameter(Mandatory = $true)]
     [ValidatePattern('^[a-z0-9-]{1,10}$')]
     [string]$RevisionSuffix,
 
@@ -112,11 +95,6 @@ foreach ($requiredValue in @{
     MemoryStoreEndpoint = $MemoryStoreEndpoint
     PrototypeApiGatewayPublisherEmail = $PrototypeApiGatewayPublisherEmail
     PrototypeApiGatewayPublisherName = $PrototypeApiGatewayPublisherName
-    SharedApplicationObjectId = $SharedApplicationObjectId
-    SharedServicePrincipalObjectId = $SharedServicePrincipalObjectId
-    SharedApplicationRoleId = $SharedApplicationRoleId
-    SharedFrontendDomain = $SharedFrontendDomain
-    DelegatedScope = $DelegatedScope
 }.GetEnumerator()) {
     if ([string]::IsNullOrWhiteSpace($requiredValue.Value)) {
         throw "$($requiredValue.Key) cannot be blank."
@@ -137,20 +115,21 @@ if ($backend.Count -ne 1) {
 $backend = $backend[0]
 $backend.image = $BackendImage
 Remove-ContainerEnvironmentVariable -Container $backend -Name "GENIE_MISE_ENDPOINT"
-$backendIdentityClientIds = @($backend.env | Where-Object {
-    $_.name -eq "AZURE_CLIENT_ID" -and -not [string]::IsNullOrWhiteSpace($_.value)
-})
-if ($backendIdentityClientIds.Count -ne 1) {
-    throw "Expected exactly one non-empty AZURE_CLIENT_ID on '$BackendContainerName'; found $($backendIdentityClientIds.Count)."
-}
-$backendIdentityClientId = $backendIdentityClientIds[0].value
 Remove-ContainerEnvironmentVariable -Container $backend -Name "GENIE_PROTOTYPE_MISE_ENABLED"
 Remove-ContainerEnvironmentVariable -Container $backend -Name "GENIE_PROTOTYPE_MISE_GATEWAY_IMAGE"
 Remove-ContainerEnvironmentVariable -Container $backend -Name "GENIE_PROTOTYPE_MISE_TEST_PRINCIPAL_CLIENT_ID"
+Remove-ContainerEnvironmentVariable -Container $backend -Name "GENIE_PROTOTYPE_TEST_PRINCIPAL_CLIENT_ID"
+Remove-ContainerEnvironmentVariable -Container $backend -Name "GENIE_PROTOTYPE_AUTHENTICATION_MODE"
+Remove-ContainerEnvironmentVariable -Container $backend -Name "GENIE_PROTOTYPE_SHARED_APPLICATION_OBJECT_ID"
+Remove-ContainerEnvironmentVariable -Container $backend -Name "GENIE_PROTOTYPE_SHARED_SERVICE_PRINCIPAL_OBJECT_ID"
+Remove-ContainerEnvironmentVariable -Container $backend -Name "GENIE_PROTOTYPE_SHARED_CLIENT_ID"
+Remove-ContainerEnvironmentVariable -Container $backend -Name "GENIE_PROTOTYPE_SHARED_DELEGATED_SCOPE"
+Remove-ContainerEnvironmentVariable -Container $backend -Name "GENIE_PROTOTYPE_SHARED_APPLICATION_ROLE_ID"
+Remove-ContainerEnvironmentVariable -Container $backend -Name "GENIE_PROTOTYPE_SHARED_FRONTEND_DOMAIN"
+Remove-ContainerEnvironmentVariable -Container $backend -Name "GENIE_PROTOTYPE_SHARED_SLOT_COUNT"
 Set-ContainerEnvironmentVariable -Container $backend -Name "GENIE_PROTOTYPE_API_GATEWAY_ENABLED" -Value "true"
 Set-ContainerEnvironmentVariable -Container $backend -Name "GENIE_PROTOTYPE_API_GATEWAY_PUBLISHER_EMAIL" -Value $PrototypeApiGatewayPublisherEmail
 Set-ContainerEnvironmentVariable -Container $backend -Name "GENIE_PROTOTYPE_API_GATEWAY_PUBLISHER_NAME" -Value $PrototypeApiGatewayPublisherName
-Set-ContainerEnvironmentVariable -Container $backend -Name "GENIE_PROTOTYPE_TEST_PRINCIPAL_CLIENT_ID" -Value $backendIdentityClientId
 Set-ContainerEnvironmentVariable -Container $backend -Name "GENIE_ENTRA_AUTHORITY" -Value "https://login.microsoftonline.com"
 Set-ContainerEnvironmentVariable -Container $backend -Name "GENIE_ENTRA_TENANT_ID" -Value $ApplicationTenantId
 Set-ContainerEnvironmentVariable -Container $backend -Name "GENIE_ENTRA_CLIENT_ID" -Value $ClientId
@@ -158,14 +137,6 @@ Set-ContainerEnvironmentVariable -Container $backend -Name "GENIE_MEMORY_STORE_B
 Set-ContainerEnvironmentVariable -Container $backend -Name "GENIE_MEMORY_STORE_ENDPOINT" -Value $MemoryStoreEndpoint
 Set-ContainerEnvironmentVariable -Container $backend -Name "GENIE_MEMORY_STORE_DATABASE_NAME" -Value "genie"
 Set-ContainerEnvironmentVariable -Container $backend -Name "GENIE_MEMORY_STORE_CONTAINER_NAME" -Value "memory"
-Set-ContainerEnvironmentVariable -Container $backend -Name "GENIE_PROTOTYPE_AUTHENTICATION_MODE" -Value "shared"
-Set-ContainerEnvironmentVariable -Container $backend -Name "GENIE_PROTOTYPE_SHARED_APPLICATION_OBJECT_ID" -Value $SharedApplicationObjectId
-Set-ContainerEnvironmentVariable -Container $backend -Name "GENIE_PROTOTYPE_SHARED_SERVICE_PRINCIPAL_OBJECT_ID" -Value $SharedServicePrincipalObjectId
-Set-ContainerEnvironmentVariable -Container $backend -Name "GENIE_PROTOTYPE_SHARED_CLIENT_ID" -Value $ClientId
-Set-ContainerEnvironmentVariable -Container $backend -Name "GENIE_PROTOTYPE_SHARED_DELEGATED_SCOPE" -Value $DelegatedScope
-Set-ContainerEnvironmentVariable -Container $backend -Name "GENIE_PROTOTYPE_SHARED_APPLICATION_ROLE_ID" -Value $SharedApplicationRoleId
-Set-ContainerEnvironmentVariable -Container $backend -Name "GENIE_PROTOTYPE_SHARED_FRONTEND_DOMAIN" -Value $SharedFrontendDomain
-Set-ContainerEnvironmentVariable -Container $backend -Name "GENIE_PROTOTYPE_SHARED_SLOT_COUNT" -Value $SharedSlotCount.ToString()
 
 $gateway = [pscustomobject]@{
     name = $GatewayContainerName

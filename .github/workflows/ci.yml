@@ -148,10 +148,6 @@ jobs:
           [ -z "${{ vars.GENIE_MEMORY_STORE_ENDPOINT }}" ] && missing+=("GENIE_MEMORY_STORE_ENDPOINT")
           [ -z "${{ vars.GENIE_PROTOTYPE_API_GATEWAY_PUBLISHER_EMAIL }}" ] && missing+=("GENIE_PROTOTYPE_API_GATEWAY_PUBLISHER_EMAIL")
           [ -z "${{ vars.GENIE_PROTOTYPE_API_GATEWAY_PUBLISHER_NAME }}" ] && missing+=("GENIE_PROTOTYPE_API_GATEWAY_PUBLISHER_NAME")
-          [ -z "${{ vars.GENIE_PROTOTYPE_SHARED_APPLICATION_OBJECT_ID }}" ] && missing+=("GENIE_PROTOTYPE_SHARED_APPLICATION_OBJECT_ID")
-          [ -z "${{ vars.GENIE_PROTOTYPE_SHARED_SERVICE_PRINCIPAL_OBJECT_ID }}" ] && missing+=("GENIE_PROTOTYPE_SHARED_SERVICE_PRINCIPAL_OBJECT_ID")
-          [ -z "${{ vars.GENIE_PROTOTYPE_SHARED_APPLICATION_ROLE_ID }}" ] && missing+=("GENIE_PROTOTYPE_SHARED_APPLICATION_ROLE_ID")
-          [ -z "${{ vars.GENIE_PROTOTYPE_SHARED_FRONTEND_DOMAIN }}" ] && missing+=("GENIE_PROTOTYPE_SHARED_FRONTEND_DOMAIN")
           [ -z "${{ vars.GENIE_GATEWAY_ALLOWED_ORIGIN }}" ] && missing+=("GENIE_GATEWAY_ALLOWED_ORIGIN")
           if [ ${#missing[@]} -ne 0 ]; then
             echo "::error::Missing required secrets for deploy-backend: ${missing[*]}. See README.md 'Continuous deployment' section for one-time Azure OIDC setup."
@@ -199,11 +195,6 @@ jobs:
             -MemoryStoreEndpoint "${{ vars.GENIE_MEMORY_STORE_ENDPOINT }}" `
             -PrototypeApiGatewayPublisherEmail "${{ vars.GENIE_PROTOTYPE_API_GATEWAY_PUBLISHER_EMAIL }}" `
             -PrototypeApiGatewayPublisherName "${{ vars.GENIE_PROTOTYPE_API_GATEWAY_PUBLISHER_NAME }}" `
-            -SharedApplicationObjectId "${{ vars.GENIE_PROTOTYPE_SHARED_APPLICATION_OBJECT_ID }}" `
-            -SharedServicePrincipalObjectId "${{ vars.GENIE_PROTOTYPE_SHARED_SERVICE_PRINCIPAL_OBJECT_ID }}" `
-            -SharedApplicationRoleId "${{ vars.GENIE_PROTOTYPE_SHARED_APPLICATION_ROLE_ID }}" `
-            -SharedFrontendDomain "${{ vars.GENIE_PROTOTYPE_SHARED_FRONTEND_DOMAIN }}" `
-            -DelegatedScope "${{ vars.VITE_ENTRA_API_SCOPE }}" `
             -RevisionSuffix "gh${{ github.run_number }}"
 
   deploy-frontend:

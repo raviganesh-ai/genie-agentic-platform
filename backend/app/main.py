@@ -53,9 +53,6 @@ from app.deploy_launch.mission_agent_provisioning_service import (
 )
 from app.deploy_launch.mission_identity_service import create_mission_identity_service
 from app.deploy_launch.pipeline_service import create_deployment_pipeline_service
-from app.deploy_launch.prototype_authentication_service import (
-    create_prototype_authentication_service,
-)
 from app.governance.replay_service import ReplayService
 from app.governance.traceability_service import TraceabilityService
 from app.orchestration.agent_orchestrator import create_agent_orchestrator
@@ -275,10 +272,6 @@ def create_app(
             approval_service=orchestrator.approval_service,
             governance_service=orchestrator.governance_service,
         )
-        prototype_authentication_service = create_prototype_authentication_service(
-            settings=resolved_settings
-        )
-        app.state.prototype_authentication_service = prototype_authentication_service
         app.state.deployment_pipeline_service = create_deployment_pipeline_service(
             settings=resolved_settings,
             orchestrator=orchestrator,
@@ -312,7 +305,6 @@ def create_app(
             frontend_deployment_service=create_container_app_frontend_deployment_service(
                 settings=resolved_settings
             ),
-            prototype_authentication_service=prototype_authentication_service,
             run_repository=deployment_run_repository,
         )
         await app.state.deployment_pipeline_service.initialize()
@@ -336,7 +328,6 @@ def create_app(
             app.state.prototype_cleanup_task.cancel()
             with suppress(asyncio.CancelledError):
                 await app.state.prototype_cleanup_task
-            await app.state.prototype_authentication_service.close()
             await app.state.token_validator.close()
             if app.state.document_store is not None:
                 await app.state.document_store.close()

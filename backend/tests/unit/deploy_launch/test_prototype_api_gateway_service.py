@@ -7,31 +7,14 @@ from app.deploy_launch.prototype_api_gateway_service import (
     PrototypeApiGatewayService,
     _build_api_policy,
 )
-from app.deploy_launch.prototype_authentication_service import (
-    PrototypeAuthenticationConfiguration,
-)
-
-
-def _authentication() -> PrototypeAuthenticationConfiguration:
-    return PrototypeAuthenticationConfiguration(
-        application_object_id="application-object",
-        service_principal_object_id="service-principal",
-        client_id="prototype-client",
-        tenant_id="prototype-tenant",
-        delegated_scope="api://prototype-client/access_as_user",
-        application_role_id="application-role",
-    )
 
 
 def _poller(result):
     return SimpleNamespace(result=lambda: result)
 
 
-def test_api_policy_enforces_exact_origin_entra_audience_and_rate_limit():
-    policy = _build_api_policy(
-        authentication=_authentication(),
-        frontend_origin="https://prototype.example.com/",
-    )
+def test_api_policy_enforces_exact_origin_and_rate_limit_without_entra():
+    policy = _build_api_policy(frontend_origin="https://prototype.example.com/")
 
     root = ElementTree.fromstring(policy)
 
@@ -39,13 +22,8 @@ def test_api_policy_enforces_exact_origin_entra_audience_and_rate_limit():
     assert root.findtext("./inbound/cors/allowed-origins/origin") == (
         "https://prototype.example.com"
     )
-    token_validation = root.find("./inbound/choose/otherwise/validate-azure-ad-token")
-    assert token_validation is not None
-    assert token_validation.attrib["tenant-id"] == "prototype-tenant"
-    assert [item.text for item in token_validation.findall("./audiences/audience")] == [
-        "prototype-client",
-        "api://prototype-client",
-    ]
+    assert root.find(".//validate-azure-ad-token") is None
+    assert root.find(".//choose") is None
     rate_limit = root.find("./inbound/rate-limit-by-key")
     assert rate_limit is not None
     assert rate_limit.attrib["calls"] == "120"
@@ -173,9 +151,6 @@ async def test_publish_api_routes_supported_methods_to_private_backend(monkeypat
     policy_client = SimpleNamespace(
         create_or_update=lambda *args: captured.update(policy=args)
     )
-    named_value_client = SimpleNamespace(
-        create_or_update=lambda *args: captured.update(named_value=args)
-    )
     service_client = SimpleNamespace(
         get=lambda *_: SimpleNamespace(gateway_url="https://claims.azure-api.net/")
     )
@@ -186,7 +161,6 @@ async def test_publish_api_routes_supported_methods_to_private_backend(monkeypat
             api=api_client,
             api_operation=operation_client,
             api_policy=policy_client,
-            named_value=named_value_client,
             api_management_service=service_client,
         ),
     )
@@ -194,8 +168,6 @@ async def test_publish_api_routes_supported_methods_to_private_backend(monkeypat
     gateway_url = await service.publish_api(
         mission_slug="claims-1234",
         backend_url="https://claims.private.internal",
-        acceptance_test_key="acceptance-secret",
-        authentication=_authentication(),
     )
 
     assert gateway_url == "https://claims.azure-api.net"
@@ -211,10 +183,7 @@ async def test_publish_api_routes_supported_methods_to_private_backend(monkeypat
         "HEAD",
     }
     assert all(args[4].url_template == "/*" for args in captured["operations"])
-    named_value = captured["named_value"][3]
-    assert named_value.secret is True
-    assert named_value.value == "acceptance-secret"
     policy = captured["policy"][4].value
-    assert "validate-azure-ad-token" in policy
-    assert "{{acceptance-test-key}}" in policy
+    assert "validate-azure-ad-token" not in policy
+    assert "acceptance-test-key" not in policy
     assert "https://prototype.invalid" in policy

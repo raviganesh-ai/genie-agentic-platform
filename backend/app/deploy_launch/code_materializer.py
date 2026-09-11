@@ -191,10 +191,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 app = FastAPI(title={mission_title!r})
-if {authentication_required!r}:
-    from token_validation import authenticate_request
-
-    app.middleware("http")(authenticate_request)
+{authentication_middleware}
 
 _logger = logging.getLogger("mission.backend")
 
@@ -422,115 +419,6 @@ async def invoke_stream(request: InvokeRequest) -> StreamingResponse:
     return StreamingResponse(_stream_agent_response(request), media_type="text/event-stream")
 '''
 
-_TOKEN_VALIDATION_PY = '''"""Microsoft Entra JWT validation for this prototype's private backend."""
-from __future__ import annotations
-
-import asyncio
-import os
-import secrets
-from typing import Any
-
-import httpx
-import jwt
-from fastapi import Request
-from fastapi.responses import JSONResponse
-
-_authority = os.environ["ENTRA_AUTHORITY"].rstrip("/")
-_tenant_id = os.environ["ENTRA_TENANT_ID"]
-_client_id = os.environ["ENTRA_CLIENT_ID"]
-_http_client = httpx.AsyncClient(timeout=5.0)
-_metadata_lock = asyncio.Lock()
-_issuer: str | None = None
-_keys_by_id: dict[str, Any] = {}
-
-
-async def _refresh_metadata() -> None:
-    global _issuer, _keys_by_id
-    discovery = await _http_client.get(
-        f"{_authority}/{_tenant_id}/v2.0/.well-known/openid-configuration"
-    )
-    discovery.raise_for_status()
-    metadata = discovery.json()
-    jwks = await _http_client.get(metadata["jwks_uri"])
-    jwks.raise_for_status()
-    keys = {
-        key["kid"]: jwt.PyJWK.from_dict(key)
-        for key in jwks.json()["keys"]
-        if isinstance(key, dict) and isinstance(key.get("kid"), str)
-    }
-    if not keys or not isinstance(metadata.get("issuer"), str):
-        raise ValueError("Microsoft Entra signing metadata is incomplete.")
-    _issuer = metadata["issuer"]
-    _keys_by_id = keys
-
-
-async def _validate(token: str) -> dict[str, object]:
-    header = jwt.get_unverified_header(token)
-    key_id = header.get("kid")
-    if not isinstance(key_id, str) or header.get("alg") != "RS256":
-        raise jwt.InvalidTokenError("An Entra RS256 signing key is required.")
-    if key_id not in _keys_by_id:
-        async with _metadata_lock:
-            if key_id not in _keys_by_id:
-                await _refresh_metadata()
-    signing_key = _keys_by_id.get(key_id)
-    if signing_key is None or _issuer is None:
-        raise jwt.InvalidTokenError("The signing key is unknown.")
-    claims = jwt.decode(
-        token,
-        key=signing_key.key,
-        algorithms=["RS256"],
-        audience=[_client_id, f"api://{_client_id}"],
-        issuer=_issuer,
-        options={"require": ["exp", "iat", "iss", "aud"]},
-    )
-    if not (claims.get("oid") or claims.get("sub")):
-        raise jwt.InvalidTokenError("The token has no subject.")
-    if claims.get("idtyp") == "app":
-        roles = claims.get("roles", [])
-        if not isinstance(roles, list) or "Prototype.Invoke" not in roles:
-            raise jwt.InvalidTokenError("The application lacks Prototype.Invoke.")
-    elif "access_as_user" not in str(claims.get("scp", "")).split():
-        raise jwt.InvalidTokenError("The user token lacks access_as_user.")
-    return claims
-
-
-async def authenticate_request(request: Request, call_next):
-    if request.url.path in {"/health", "/health/ready"}:
-        return await call_next(request)
-    expected_acceptance_key = os.environ.get("GENIE_ACCEPTANCE_TEST_KEY", "")
-    presented_acceptance_key = request.headers.get("X-Genie-Acceptance-Authorized", "")
-    if (
-        expected_acceptance_key
-        and presented_acceptance_key
-        and secrets.compare_digest(expected_acceptance_key, presented_acceptance_key)
-    ):
-        request.state.identity = {"idtyp": "app", "roles": ["Prototype.Invoke"]}
-        return await call_next(request)
-    authorization = request.headers.get("Authorization", "")
-    scheme, _, token = authorization.partition(" ")
-    if scheme.lower() != "bearer" or not token.strip():
-        return JSONResponse(
-            status_code=401,
-            content={"detail": "A Microsoft Entra bearer token is required."},
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    try:
-        request.state.identity = await _validate(token.strip())
-    except (httpx.HTTPError, KeyError, TypeError, ValueError):
-        return JSONResponse(
-            status_code=503,
-            content={"detail": "Microsoft Entra signing metadata is unavailable."},
-        )
-    except jwt.PyJWTError:
-        return JSONResponse(
-            status_code=401,
-            content={"detail": "The Microsoft Entra bearer token is invalid."},
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    return await call_next(request)
-'''
-
 _AGENT_CONFIG_PY_TEMPLATE = '''"""Deterministically generated agent-name configuration - never LLM-authored.
 
 Maps this mission's own logical specialist agent names (exactly as named in
@@ -551,8 +439,6 @@ uvicorn>=0.32,<1.0
 azure-ai-projects>=2.3,<3.0
 azure-identity>=1.19,<2.0
 agent-framework>=1.0
-httpx>=0.27,<1.0
-pyjwt[crypto]>=2.10,<3.0
 """
 
 _DOCKERFILE = """FROM python:3.12-slim
@@ -582,7 +468,6 @@ def generate_backend_service_scaffold(
     mission_title: str,
     orchestrator_agent_name: str,
     agent_foundry_names: dict[str, str],
-    authentication_required: bool = False,
 ) -> dict[str, str]:
     """Returns the real, deterministic ``{main.py, requirements.txt, Dockerfile,
     agent_config.py}`` scaffold every mission's backend service is built from -
@@ -593,10 +478,9 @@ def generate_backend_service_scaffold(
         "main.py": _MAIN_PY_TEMPLATE.format(
             mission_title=f"{mission_title} Backend",
             orchestrator_agent_name=orchestrator_agent_name,
-            authentication_required=authentication_required,
+            authentication_middleware="",
         ),
         "requirements.txt": _REQUIREMENTS_TXT,
         "Dockerfile": _DOCKERFILE,
         "agent_config.py": generate_agent_config_module(agent_foundry_names),
-        "token_validation.py": _TOKEN_VALIDATION_PY,
     }

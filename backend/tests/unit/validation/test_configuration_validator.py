@@ -117,30 +117,17 @@ def test_prototype_api_gateway_fails_closed_when_required_settings_are_missing(l
     messages = {issue.message for issue in result.issues}
     assert any("prototype_api_gateway_publisher_email" in message for message in messages)
     assert any("prototype_api_gateway_publisher_name" in message for message in messages)
-    assert any("entra_tenant_id" in message for message in messages)
-    assert any("prototype_test_principal_client_id" in message for message in messages)
 
 
-def test_shared_prototype_authentication_does_not_require_test_principal(local_settings):
+def test_prototype_api_gateway_does_not_require_entra(local_settings):
     configured = local_settings.model_copy(
         update={
             "prototype_api_gateway_enabled": True,
             "prototype_api_gateway_publisher_email": "genie@example.com",
             "prototype_api_gateway_publisher_name": "Genie",
-            "prototype_authentication_mode": "shared",
-            "entra_tenant_id": "corporate-tenant",
-            "prototype_shared_application_object_id": "application-object",
-            "prototype_shared_service_principal_object_id": "service-principal",
-            "prototype_shared_client_id": "client-id",
-            "prototype_shared_delegated_scope": "api://client-id/access_as_user",
-            "prototype_shared_application_role_id": "role-id",
-            "prototype_shared_frontend_domain": "prototype.example.com",
-            "prototype_shared_slot_count": 50,
         }
     )
 
     result = ConfigurationValidator().validate(configured)
 
-    assert not any(
-        "prototype_test_principal_client_id" in issue.message for issue in result.issues
-    )
+    assert result.passed

@@ -12,9 +12,7 @@ failure, not silently treated as success.
 The subprocess runs with a stripped environment (only ``PATH``, on Windows
 ``SYSTEMROOT``, and explicitly allow-listed mission URLs), a bounded timeout,
 and its own dedicated working directory. It is process isolation, not an OS
-sandbox: generated acceptance tests need network access. Prototype bearer
-tokens remain exclusively in a trusted parent-side loopback proxy that can
-forward only to the fixed deployed backend origin.
+sandbox: generated acceptance tests need network access.
 """
 
 from __future__ import annotations
@@ -24,14 +22,10 @@ import os
 import re
 import shutil
 import sys
-import threading
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Final
-
-import httpx
 
 __all__ = ["TestExecutionResult", "TestExecutionService", "extract_test_modules"]
 
@@ -97,91 +91,6 @@ def validate_real_action_tests(modules: list[str]) -> tuple[str, ...]:
             "Acceptance tests do not reference MISSION_BACKEND_URL or MISSION_FRONTEND_URL."
         )
     return tuple(reasons)
-
-
-class _AuthenticatedTestProxy:
-    """Trusted loopback proxy; generated tests never receive upstream credentials."""
-
-    def __init__(
-        self,
-        *,
-        backend_url: str,
-        access_token: str | None = None,
-        acceptance_test_key: str | None = None,
-    ) -> None:
-        if bool(access_token) == bool(acceptance_test_key):
-            raise ValueError("Exactly one prototype test credential is required.")
-        target_origin = backend_url.rstrip("/")
-        token = access_token or ""
-        acceptance_key = acceptance_test_key or ""
-
-        class Handler(BaseHTTPRequestHandler):
-            def _forward(self) -> None:
-                content_length = int(self.headers.get("Content-Length", "0"))
-                body = self.rfile.read(content_length) if content_length else b""
-                request_headers = {
-                    name: value
-                    for name, value in self.headers.items()
-                    if name.lower()
-                    not in {"authorization", "connection", "content-length", "host"}
-                }
-                if token:
-                    request_headers["Authorization"] = f"Bearer {token}"
-                else:
-                    request_headers["X-Genie-Acceptance-Key"] = acceptance_key
-                try:
-                    with httpx.Client(
-                        transport=httpx.HTTPTransport(retries=2),
-                        timeout=120.0,
-                    ) as client:
-                        response = client.request(
-                            self.command,
-                            target_origin + self.path,
-                            headers=request_headers,
-                            content=body,
-                        )
-                except httpx.HTTPError:
-                    self.send_error(502, "Prototype backend unavailable")
-                    return
-                self.send_response(response.status_code)
-                for name, value in response.headers.items():
-                    if name.lower() not in {
-                        "connection",
-                        "content-encoding",
-                        "content-length",
-                        "transfer-encoding",
-                    }:
-                        self.send_header(name, value)
-                self.send_header("Content-Length", str(len(response.content)))
-                self.end_headers()
-                self.wfile.write(response.content)
-
-            do_DELETE = _forward
-            do_GET = _forward
-            do_OPTIONS = _forward
-            do_PATCH = _forward
-            do_POST = _forward
-            do_PUT = _forward
-
-            def log_message(self, format: str, *args: object) -> None:
-                del format, args
-
-        self._server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-        self._server.daemon_threads = True
-        self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
-
-    @property
-    def url(self) -> str:
-        host, port = self._server.server_address
-        return f"http://{host}:{port}"
-
-    def start(self) -> None:
-        self._thread.start()
-
-    def close(self) -> None:
-        self._server.shutdown()
-        self._server.server_close()
-        self._thread.join(timeout=5)
 
 
 @dataclass(frozen=True)
@@ -260,70 +169,41 @@ class TestExecutionService:
         if sys.platform == "win32":
             env["SYSTEMROOT"] = os.environ.get("SYSTEMROOT", "")
         explicit_environment = dict(runtime_environment or {})
-        access_token = explicit_environment.pop("MISSION_ACCESS_TOKEN", None)
-        acceptance_test_key = explicit_environment.pop(
-            "MISSION_ACCEPTANCE_TEST_KEY", None
-        )
-        authenticated_proxy: _AuthenticatedTestProxy | None = None
-        if access_token or acceptance_test_key:
-            backend_url = explicit_environment.get("MISSION_BACKEND_URL", "")
-            if not backend_url.startswith("https://"):
-                return TestExecutionResult(
-                    ran=False,
-                    summary="Authenticated tests require an HTTPS prototype backend URL.",
-                )
-            authenticated_proxy = _AuthenticatedTestProxy(
-                backend_url=backend_url,
-                access_token=access_token,
-                acceptance_test_key=acceptance_test_key,
-            )
-            authenticated_proxy.start()
-            explicit_environment["MISSION_UNAUTHENTICATED_BACKEND_URL"] = backend_url
-            explicit_environment["MISSION_BACKEND_URL"] = authenticated_proxy.url
         env.update(explicit_environment)
 
         junit_path = tests_dir / "pytest-results.xml"
+        process = await asyncio.create_subprocess_exec(
+            sys.executable,
+            "-m",
+            "pytest",
+            str(tests_dir),
+            "-q",
+            f"--junitxml={junit_path}",
+            # Without this, pytest's default behavior is to run NO tests at
+            # all when ANY generated module fails to collect (e.g. one
+            # module imports a package that isn't installed) - silently
+            # turning one bad module into "no JUnit result" for every
+            # requirement, not just the ones covered by that module.
+            "--continue-on-collection-errors",
+            cwd=str(build_root),
+            env=env,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
         try:
-            process = await asyncio.create_subprocess_exec(
-                sys.executable,
-                "-m",
-                "pytest",
-                str(tests_dir),
-                "-q",
-                f"--junitxml={junit_path}",
-                # Without this, pytest's default behavior is to run NO tests at
-                # all when ANY generated module fails to collect (e.g. one
-                # module imports a package that isn't installed) - silently
-                # turning one bad module into "no JUnit result" for every
-                # requirement, not just the ones covered by that module.
-                "--continue-on-collection-errors",
-                cwd=str(build_root),
-                env=env,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.STDOUT,
+            stdout, _ = await asyncio.wait_for(
+                process.communicate(), timeout=self._timeout_seconds
             )
-        except Exception:
-            if authenticated_proxy is not None:
-                await asyncio.to_thread(authenticated_proxy.close)
-            raise
-        try:
-            try:
-                stdout, _ = await asyncio.wait_for(
-                    process.communicate(), timeout=self._timeout_seconds
-                )
-            except TimeoutError:
-                # A hanging generated test must never be left running as an
-                # orphaned subprocess after this reports back to the caller.
-                process.kill()
-                await process.wait()
-                return TestExecutionResult(
-                    ran=True,
-                    timed_out=True,
-                    summary=f"Test execution timed out after {self._timeout_seconds}s.",
-                )
-        finally:
-            if authenticated_proxy is not None:
-                await asyncio.to_thread(authenticated_proxy.close)
+        except TimeoutError:
+            # A hanging generated test must never be left running as an
+            # orphaned subprocess after this reports back to the caller.
+            process.kill()
+            await process.wait()
+            return TestExecutionResult(
+                ran=True,
+                timed_out=True,
+                summary=f"Test execution timed out after {self._timeout_seconds}s.",
+            )
 
         raw_output = stdout.decode("utf-8", errors="replace")
         sensitive_values = {
