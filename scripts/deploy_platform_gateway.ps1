@@ -73,6 +73,40 @@ function Wait-ForGatewayReadiness {
     throw "API Management did not reach the Genie readiness endpoint within $WaitTimeoutSeconds seconds."
 }
 
+function Invoke-PrivateEndpointDeployment {
+    param(
+        [Parameter(Mandatory = $true)][string]$SubscriptionId,
+        [Parameter(Mandatory = $true)][string]$ResourceGroup,
+        [Parameter(Mandatory = $true)][string]$DeploymentName,
+        [Parameter(Mandatory = $true)][string]$TemplateFile,
+        [Parameter(Mandatory = $true)][string[]]$CommonParameters,
+        [Parameter(Mandatory = $true)][datetime]$Deadline
+    )
+
+    do {
+        $deploymentOutput = & az deployment group create `
+            --subscription $SubscriptionId `
+            --resource-group $ResourceGroup `
+            --name $DeploymentName `
+            --template-file $TemplateFile `
+            --parameters @CommonParameters enablePrivateDns=true enablePrivateEndpoint=true `
+            --only-show-errors `
+            -o none 2>&1
+        if ($LASTEXITCODE -eq 0) {
+            return
+        }
+
+        $deploymentError = $deploymentOutput -join [Environment]::NewLine
+        if ($deploymentError -notmatch "ManagedEnvironmentNotHealthy") {
+            throw "Container Apps private endpoint deployment failed: $deploymentError"
+        }
+        Write-Host "Container Apps environment is still settling; retrying private endpoint deployment..."
+        Start-Sleep -Seconds 30
+    } while ((Get-Date) -lt $Deadline)
+
+    throw "Container Apps private endpoint deployment did not succeed before the cutover deadline."
+}
+
 foreach ($requiredValue in @{
     SubscriptionId = $SubscriptionId
     ResourceGroup = $ResourceGroup
@@ -136,6 +170,17 @@ $deployment = Invoke-AzJson deployment group show `
     --name $deploymentName
 $gatewayUrl = $deployment.properties.outputs.gatewayUrl.value.TrimEnd("/")
 $deadline = (Get-Date).AddSeconds($WaitTimeoutSeconds)
+
+if ($environment.properties.publicNetworkAccess -eq "Disabled") {
+    Write-Host "Resuming the fail-closed private endpoint cutover..." -ForegroundColor Cyan
+    Invoke-PrivateEndpointDeployment `
+        -SubscriptionId $SubscriptionId `
+        -ResourceGroup $ResourceGroup `
+        -DeploymentName $deploymentName `
+        -TemplateFile $templateFile `
+        -CommonParameters $commonParameters `
+        -Deadline $deadline
+}
 Wait-ForGatewayReadiness -GatewayUrl $gatewayUrl -Deadline $deadline
 
 if ($PrepareOnly) {
@@ -193,17 +238,13 @@ finally {
 }
 
 Write-Host "Creating the Container Apps private endpoint..." -ForegroundColor Cyan
-& az deployment group create `
-    --subscription $SubscriptionId `
-    --resource-group $ResourceGroup `
-    --name $deploymentName `
-    --template-file $templateFile `
-    --parameters @commonParameters enablePrivateDns=true enablePrivateEndpoint=true `
-    --only-show-errors `
-    -o none
-if ($LASTEXITCODE -ne 0) {
-    throw "Container Apps private endpoint deployment failed; public access remains disabled."
-}
+Invoke-PrivateEndpointDeployment `
+    -SubscriptionId $SubscriptionId `
+    -ResourceGroup $ResourceGroup `
+    -DeploymentName $deploymentName `
+    -TemplateFile $templateFile `
+    -CommonParameters $commonParameters `
+    -Deadline $deadline
 
 $privateEndpointName = "$($environment.name)-private-endpoint"
 $privateEndpoint = Invoke-AzJson network private-endpoint show `

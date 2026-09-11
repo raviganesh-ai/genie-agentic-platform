@@ -51,13 +51,9 @@ def test_cutover_proves_gateway_before_and_after_disabling_public_access():
 
     gateway_probe = "Wait-ForGatewayReadiness -GatewayUrl $gatewayUrl -Deadline $deadline"
     first_probe = script.index(gateway_probe)
-    private_dns_deploy = script.index(
-        "enablePrivateDns=true enablePrivateEndpoint=false"
-    )
+    private_dns_deploy = script.index("Preparing private DNS for")
     disable_public_access = script.index('publicNetworkAccess = "Disabled"')
-    private_endpoint_deploy = script.index(
-        "enablePrivateDns=true enablePrivateEndpoint=true"
-    )
+    private_endpoint_deploy = script.index("Creating the Container Apps private endpoint")
     second_probe = script.rindex(gateway_probe)
 
     assert (
@@ -75,6 +71,10 @@ def test_cutover_proves_gateway_before_and_after_disabling_public_access():
     assert '"$($environment.id)?api-version=2025-10-02-preview"' in script
     assert '"$($environment.id)?api-version=2025-01-01"' not in script
     assert "--public-network-access" not in script
+    assert 'if ($environment.properties.publicNetworkAccess -eq "Disabled")' in script
+    assert "Resuming the fail-closed private endpoint cutover" in script
+    assert '$deploymentError -notmatch "ManagedEnvironmentNotHealthy"' in script
+    assert "Start-Sleep -Seconds 30" in script
 
 
 def test_ci_passes_the_verified_gateway_to_backend_and_frontend():
