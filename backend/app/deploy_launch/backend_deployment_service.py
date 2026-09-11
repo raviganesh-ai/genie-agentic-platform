@@ -189,6 +189,31 @@ class BackendDeploymentService:
         except Exception as exc:
             raise BackendDeploymentError(f"Failed to construct Container Apps client: {exc}") from exc
 
+    async def _wait_for_readiness(self, backend_url: str) -> None:
+        """Wait until the deployed generated orchestrator can be constructed."""
+
+        import httpx
+
+        readiness_url = f"{backend_url.rstrip('/')}/health/ready"
+        deadline = time.monotonic() + 300
+        last_error = "no response"
+        async with httpx.AsyncClient(timeout=15) as client:
+            while time.monotonic() < deadline:
+                try:
+                    response = await client.get(readiness_url)
+                    if response.status_code == 200:
+                        payload = response.json()
+                        if payload.get("status") == "ready":
+                            return
+                    last_error = f"HTTP {response.status_code}"
+                except (httpx.HTTPError, ValueError) as exc:
+                    last_error = str(exc)
+                await asyncio.sleep(5)
+        raise BackendDeploymentError(
+            "Generated mission backend did not become ready through its API gateway "
+            f"within 300 seconds ({last_error})."
+        )
+
     async def delete(self, *, mission_slug: str) -> None:
         """Deletes the Container App that owns the generated backend."""
 
@@ -532,6 +557,8 @@ class BackendDeploymentService:
                 raise BackendDeploymentError(
                     f"Failed to publish protected prototype API: {exc}"
                 ) from exc
+        await _report("Validating the generated orchestrator through the prototype API gateway...")
+        await self._wait_for_readiness(backend_url)
         return BackendDeploymentResult(
             image_tag=image_tag,
             backend_url=backend_url,

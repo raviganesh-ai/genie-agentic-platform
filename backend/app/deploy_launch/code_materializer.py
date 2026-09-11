@@ -49,6 +49,10 @@ _ORCHESTRATOR_MARKER: Final = "orchestrator"
 # reply instead of ever running its real business logic - fail this
 # earlier, at build time, with an actionable error instead.
 _ORCHESTRATOR_CLASS_PATTERN: Final = re.compile(r"^class\s+OrchestratorAgent\b", re.MULTILINE)
+_DIRECT_FOUNDRY_AGENT_IMPORT_PATTERN: Final = re.compile(
+    r"^from agent_framework\.foundry import FoundryAgent(?P<suffix>[^\n]*)$",
+    re.MULTILINE,
+)
 
 
 class MaterializedCodeError(RuntimeError):
@@ -58,6 +62,15 @@ class MaterializedCodeError(RuntimeError):
 def _slugify(name: str) -> str:
     slug = re.sub(r"[^a-z0-9]+", "_", name.strip().lower()).strip("_")
     return slug or "agent"
+
+
+def _use_mission_foundry_runtime(code: str) -> str:
+    """Routes generated Foundry calls through Genie's deterministic adapter."""
+
+    return _DIRECT_FOUNDRY_AGENT_IMPORT_PATTERN.sub(
+        r"from mission_foundry_runtime import MissionFoundryAgent as FoundryAgent\g<suffix>",
+        code,
+    )
 
 
 @dataclass(frozen=True)
@@ -86,12 +99,14 @@ class MaterializedBuild:
         written: list[Path] = []
         for agent_name, code in self.agent_modules.items():
             path = agents_dir / f"{_slugify(agent_name)}.py"
-            path.write_text(code, encoding="utf-8")
+            path.write_text(_use_mission_foundry_runtime(code), encoding="utf-8")
             written.append(path)
 
         if self.orchestrator_module is not None:
             path = root / "orchestrator.py"
-            path.write_text(self.orchestrator_module, encoding="utf-8")
+            path.write_text(
+                _use_mission_foundry_runtime(self.orchestrator_module), encoding="utf-8"
+            )
             written.append(path)
 
         if self.ui_component is not None:
@@ -177,6 +192,7 @@ Orchestrator Agent itself is never reachable directly from the browser.
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import logging
 import os
@@ -289,12 +305,19 @@ async def _run_orchestrator_pipeline(
     except ImportError:
         return None
     try:
-        result = await OrchestratorAgent().run(message, on_progress=on_progress)
-    except TypeError:
-        # An orchestrator generated before the on_progress contract (or one
-        # that never calls it) will not accept the keyword - run it without
-        # progress narration rather than failing the whole request.
-        result = await OrchestratorAgent().run(message)
+        orchestrator = OrchestratorAgent()
+        run_parameters = inspect.signature(orchestrator.run).parameters.values()
+        supports_progress = any(
+            parameter.name == "on_progress"
+            or parameter.kind is inspect.Parameter.VAR_KEYWORD
+            for parameter in run_parameters
+        )
+        if supports_progress:
+            result = await orchestrator.run(message, on_progress=on_progress)
+        else:
+            # An orchestrator generated before the on_progress contract can
+            # still run; it simply cannot emit specialist hand-off narration.
+            result = await orchestrator.run(message)
     except Exception:
         # The Orchestrator is generated code whose exact failure modes
         # cannot be enumerated in advance (e.g. ``message`` is not the
@@ -330,6 +353,16 @@ async def health() -> dict[str, str]:
 
 @app.get("/health/ready")
 async def ready() -> dict[str, str]:
+    try:
+        from orchestrator import OrchestratorAgent
+
+        OrchestratorAgent()
+    except Exception as exc:
+        _logger.exception("Generated mission orchestrator failed readiness validation.")
+        raise HTTPException(
+            status_code=503,
+            detail="Generated mission orchestrator is not ready.",
+        ) from exc
     return {{"status": "ready"}}
 
 
@@ -434,6 +467,79 @@ from __future__ import annotations
 AGENT_FOUNDRY_NAMES: dict[str, str] = {agent_foundry_names!r}
 '''
 
+_MISSION_FOUNDRY_RUNTIME_PY = '''"""Stable runtime boundary for generated mission agents.
+
+Generated code depends on this small Genie-owned API instead of coupling itself
+to changing Azure AI Projects and Microsoft Agent Framework constructor and
+response details.
+"""
+from __future__ import annotations
+
+import json
+import os
+from typing import Any
+
+from agent_framework.foundry import FoundryAgent as _SdkFoundryAgent
+from azure.ai.projects.aio import AIProjectClient
+from azure.identity.aio import DefaultAzureCredential
+
+
+class MissionAgentResult(dict[str, Any]):
+    """Dictionary result that also exposes Agent Framework-style attributes."""
+
+    def __init__(self, *, raw_text: str, value: Any) -> None:
+        mapping = value if isinstance(value, dict) else {"output_text": raw_text}
+        super().__init__(mapping)
+        self.text = raw_text
+        self.value = value
+
+
+class MissionFoundryAgent:
+    """Runs one existing mission agent using verified keyword-only SDK calls."""
+
+    def __init__(
+        self,
+        agent_name: str | None = None,
+        *,
+        agent_version: str | None = None,
+        **_: Any,
+    ) -> None:
+        if not agent_name:
+            raise ValueError("A non-empty mission Foundry agent name is required.")
+        self._agent_name = agent_name
+        self._agent_version = agent_version
+
+    async def run(self, messages: Any, **kwargs: Any) -> MissionAgentResult:
+        if kwargs.get("stream"):
+            raise ValueError("MissionFoundryAgent streaming is not supported inside delegation tools.")
+
+        input_text = messages if isinstance(messages, str) else json.dumps(messages)
+        endpoint = os.environ["FOUNDRY_ENDPOINT"]
+        async with DefaultAzureCredential() as credential:
+            async with AIProjectClient(endpoint=endpoint, credential=credential) as project_client:
+                agent_version = self._agent_version
+                if not agent_version:
+                    details = await project_client.agents.get(self._agent_name)
+                    agent_version = details.versions.latest.version
+                agent = _SdkFoundryAgent(
+                    project_client=project_client,
+                    agent_name=self._agent_name,
+                    agent_version=agent_version,
+                )
+                response = await agent.run(input_text, tools=kwargs.get("tools"))
+
+        raw_text = (getattr(response, "text", None) or "").strip()
+        if not raw_text:
+            raise RuntimeError(
+                f"Mission Foundry agent '{self._agent_name}' returned no output text."
+            )
+        try:
+            value: Any = json.loads(raw_text)
+        except json.JSONDecodeError:
+            value = {"output_text": raw_text}
+        return MissionAgentResult(raw_text=raw_text, value=value)
+'''
+
 _REQUIREMENTS_TXT = """fastapi>=0.115,<1.0
 uvicorn>=0.32,<1.0
 azure-ai-projects>=2.3,<3.0
@@ -469,8 +575,11 @@ def generate_backend_service_scaffold(
     orchestrator_agent_name: str,
     agent_foundry_names: dict[str, str],
 ) -> dict[str, str]:
-    """Returns the real, deterministic ``{main.py, requirements.txt, Dockerfile,
-    agent_config.py}`` scaffold every mission's backend service is built from -
+    """Returns the real, deterministic mission backend service scaffold.
+
+    This includes ``mission_foundry_runtime.py``, the stable boundary between
+    LLM-generated orchestration logic and version-sensitive SDK behavior. The
+    scaffold is
     never LLM-authored, so every deployed mission's backend proxy is
     consistent and auditable."""
 
@@ -483,4 +592,5 @@ def generate_backend_service_scaffold(
         "requirements.txt": _REQUIREMENTS_TXT,
         "Dockerfile": _DOCKERFILE,
         "agent_config.py": generate_agent_config_module(agent_foundry_names),
+        "mission_foundry_runtime.py": _MISSION_FOUNDRY_RUNTIME_PY,
     }

@@ -4,9 +4,11 @@ from __future__ import annotations
 import sys
 from types import ModuleType, SimpleNamespace
 
+import httpx
 import pytest
 
 from app.config.settings import Settings
+from app.deploy_launch import backend_deployment_service as backend_deployment_module
 from app.deploy_launch.backend_deployment_service import (
     BackendDeploymentError,
     BackendDeploymentService,
@@ -127,6 +129,87 @@ def test_configure_mission_identity_accepts_valid_resource_id_casing(monkeypatch
     assert assignment_calls
 
 
+async def test_wait_for_readiness_accepts_generated_orchestrator_through_gateway(
+    monkeypatch,
+):
+    requested_urls = []
+
+    class FakeAsyncClient:
+        def __init__(self, *, timeout):
+            assert timeout == 15
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def get(self, url):
+            requested_urls.append(url)
+            return SimpleNamespace(
+                status_code=200,
+                json=lambda: {"status": "ready"},
+            )
+
+    monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
+    service = BackendDeploymentService(
+        subscription_id="sub-123",
+        resource_group="genie-dev-rg",
+        acr_name="acr123",
+        container_apps_environment_id="env-123",
+        location="eastus2",
+        foundry_endpoint="https://foundry.example.com/api/projects/demo",
+        foundry_project_name="demo",
+    )
+
+    await service._wait_for_readiness("https://claims-1234.azure-api.net/")
+
+    assert requested_urls == ["https://claims-1234.azure-api.net/health/ready"]
+
+
+async def test_wait_for_readiness_fails_closed_on_gateway_error(monkeypatch):
+    class FakeAsyncClient:
+        def __init__(self, *, timeout):
+            assert timeout == 15
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def get(self, _url):
+            return SimpleNamespace(status_code=503, json=lambda: {"status": "error"})
+
+    async def no_sleep(_seconds):
+        return None
+
+    clock = iter((0, 0, 301))
+    monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr(
+        backend_deployment_module,
+        "time",
+        SimpleNamespace(monotonic=lambda: next(clock)),
+    )
+    monkeypatch.setattr(
+        backend_deployment_module,
+        "asyncio",
+        SimpleNamespace(sleep=no_sleep),
+    )
+    service = BackendDeploymentService(
+        subscription_id="sub-123",
+        resource_group="genie-dev-rg",
+        acr_name="acr123",
+        container_apps_environment_id="env-123",
+        location="eastus2",
+        foundry_endpoint="https://foundry.example.com/api/projects/demo",
+        foundry_project_name="demo",
+    )
+
+    with pytest.raises(BackendDeploymentError, match=r"HTTP 503"):
+        await service._wait_for_readiness("https://claims-1234.azure-api.net")
+
+
 async def test_protected_backend_deploys_private_backend_without_mise_sidecar(
     monkeypatch, tmp_path
 ):
@@ -196,6 +279,12 @@ async def test_protected_backend_deploys_private_backend_without_mise_sidecar(
     )
     monkeypatch.setattr(service, "_container_apps_client", lambda: container_apps_client)
     monkeypatch.setattr(service, "_configure_mission_identity", lambda *_: "mission-client")
+    readiness_urls = []
+
+    async def wait_for_readiness(backend_url):
+        readiness_urls.append(backend_url)
+
+    monkeypatch.setattr(service, "_wait_for_readiness", wait_for_readiness)
     monkeypatch.setattr(
         BlobClient,
         "from_blob_url",
@@ -233,6 +322,7 @@ async def test_protected_backend_deploys_private_backend_without_mise_sidecar(
         "claims-1234",
         "https://prototype.example.com",
     )
+    assert readiness_urls == ["https://claims-1234.azure-api.net"]
 
 
 async def test_frontend_deployment_uses_mission_identity_for_acr(monkeypatch, tmp_path):

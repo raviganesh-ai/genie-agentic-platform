@@ -612,13 +612,18 @@ prompts:
       - comments: explain HOW this agent's work connects to solving the
         must-have requirements from the approved requirements
 
-      Build on the Microsoft Agent Framework (`agent_framework`): construct
-      an `agent_framework.foundry.FoundryAgent`, reference that agent's
-      Foundry agent name via `AGENT_FOUNDRY_NAMES` from `agent_config`,
-      and call `.run(...)` on it. Never a hardcoded literal name. Never
-      invent a different SDK. Never combine two agents. Return each as its
-      own fenced ```python code block, first line `# agent: <exact name
-      from architecture>`.
+      Build on the Microsoft Agent Framework through Genie's deterministic
+      runtime boundary: import `MissionFoundryAgent` only from
+      `mission_foundry_runtime`, import `AGENT_FOUNDRY_NAMES` from
+      `agent_config`, construct it exactly as `MissionFoundryAgent(
+      agent_name=AGENT_FOUNDRY_NAMES[agent_name])`, and await `.run(...)`.
+      That call returns a dictionary-compatible result. Never import or
+      construct `agent_framework.foundry.FoundryAgent` directly: its
+      keyword-only constructor, project client, version lookup,
+      authentication, and response parsing are owned by the deterministic
+      runtime scaffold. Never hardcode a Foundry name, invent a different
+      SDK, or combine two agents. Return each as its own fenced ```python
+      code block, first line `# agent: <exact name from architecture>`.
 
       (2) Generate EXACTLY ONE orchestrator agent code block - no more.
       Python 3.12 on the Microsoft Agent Framework (`agent_framework`).
@@ -653,6 +658,15 @@ prompts:
       a short human-readable "summary" string describing what happened.
       An output artifact location (if any) is one more field alongside
       the real results, never a substitute for them.
+
+      Every specialist delegation in the Orchestrator must use the same
+      deterministic boundary: import `MissionFoundryAgent` only from
+      `mission_foundry_runtime`, then construct `MissionFoundryAgent(
+      agent_name=AGENT_FOUNDRY_NAMES[<exact specialist name>])`. Never
+      import or construct `agent_framework.foundry.FoundryAgent` directly.
+      Wrap each adapter call in the required `agent_framework.FunctionTool`;
+      the adapter's awaited `.run(payload)` result is already dictionary-
+      compatible and must not be treated as a raw SDK response.
 
       LIVE HAND-OFF NARRATION - `on_progress` is how the mission UI's
       Agent Pipeline panel actually lights up node by node WHILE the
@@ -914,7 +928,7 @@ prompts:
       - policies
       - excluded_agents
       - user_message
-    version: "5.16.0"
+    version: "5.17.0"
 
   - id: build-generation-component-v1
     name: Build Generation - Single Component
@@ -968,10 +982,16 @@ prompts:
       agent named "{component_name}", literally from the architecture's
       "## Multi-Agent Workflow". Implement ONLY its described responsibility
       - no extra utilities, no placeholder code, no "nice-to-have" helpers.
-      On the Microsoft Agent Framework: construct `agent_framework.foundry
-      .FoundryAgent`, reference Foundry agent name via `AGENT_FOUNDRY_NAMES`
-      from `agent_config`, call `.run(...)`. Never hardcode a literal name.
-      Never invent a different SDK.
+      On the Microsoft Agent Framework through Genie's deterministic
+      runtime boundary: import `MissionFoundryAgent` only from
+      `mission_foundry_runtime`, import `AGENT_FOUNDRY_NAMES` from
+      `agent_config`, construct exactly `MissionFoundryAgent(agent_name=
+      AGENT_FOUNDRY_NAMES["{component_name}"])`, and await `.run(...)`.
+      The result is dictionary-compatible. Never import or construct
+      `agent_framework.foundry.FoundryAgent` directly; the platform
+      scaffold owns its keyword-only constructor, project client,
+      authentication, version lookup, and response parsing. Never
+      hardcode a literal Foundry name or invent a different SDK.
       Return one fenced ```python code block, first line `# agent:
       {component_name}`.
 
@@ -1007,6 +1027,13 @@ prompts:
       produces) plus a short human-readable "summary" string describing
       what happened. An output artifact location (if any) is one more
       field alongside the real results, never a substitute for them.
+      Every specialist delegation must import `MissionFoundryAgent` only
+      from `mission_foundry_runtime`, construct it with the exact mapped
+      name as `MissionFoundryAgent(agent_name=AGENT_FOUNDRY_NAMES[<exact
+      specialist name>])`, and wrap its awaited, dictionary-compatible
+      `.run(payload)` call in the required `agent_framework.FunctionTool`.
+      Never import or construct `agent_framework.foundry.FoundryAgent`
+      directly.
       LIVE HAND-OFF NARRATION - `on_progress` is how the mission UI's
       Agent Pipeline panel actually lights up node by node WHILE the
       pipeline runs, instead of jumping straight from all-pending to
@@ -1211,7 +1238,7 @@ prompts:
       - component_name
       - user_message
       - assigned_requirements
-    version: "1.19.0"
+    version: "1.20.0"
 
   - id: build-component-regeneration-v1
     name: Build Generation - Regenerate Single Component

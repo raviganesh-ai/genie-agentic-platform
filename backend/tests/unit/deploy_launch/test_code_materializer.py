@@ -98,6 +98,7 @@ def test_write_to_directory_includes_backend_service_scaffold(tmp_path: Path):
     assert (tmp_path / "Dockerfile").exists()
     assert (tmp_path / "requirements.txt").exists()
     assert (tmp_path / "agent_config.py").exists()
+    assert (tmp_path / "mission_foundry_runtime.py").exists()
     assert not (tmp_path / "token_validation.py").exists()
     main_source = (tmp_path / "main.py").read_text(encoding="utf-8")
     assert "acme-orchestrator" in main_source
@@ -109,6 +110,111 @@ def test_write_to_directory_includes_backend_service_scaffold(tmp_path: Path):
     requirements = (tmp_path / "requirements.txt").read_text(encoding="utf-8")
     assert "httpx" not in requirements
     assert "pyjwt" not in requirements
+
+
+def test_write_to_directory_routes_generated_foundry_imports_through_runtime(tmp_path: Path):
+    output = '''
+```python
+# agent: Requirements Specialist
+from agent_framework.foundry import FoundryAgent
+agent = FoundryAgent("requirements-specialist")
+```
+```python
+# agent: orchestrator
+from agent_framework.foundry import FoundryAgent  # type: ignore
+class OrchestratorAgent:
+    pass
+```
+'''
+    build = materialize_build(output)
+
+    build.write_to_directory(
+        tmp_path,
+        backend_service_scaffold=generate_backend_service_scaffold(
+            mission_title="Acme Mission",
+            orchestrator_agent_name="acme-orchestrator",
+            agent_foundry_names={"Requirements Specialist": "acme-requirements-specialist"},
+        ),
+    )
+
+    specialist_source = (tmp_path / "agents" / "requirements_specialist.py").read_text(
+        encoding="utf-8"
+    )
+    orchestrator_source = (tmp_path / "orchestrator.py").read_text(encoding="utf-8")
+    assert "from mission_foundry_runtime import MissionFoundryAgent as FoundryAgent" in specialist_source
+    assert "from mission_foundry_runtime import MissionFoundryAgent as FoundryAgent" in orchestrator_source
+    assert "from agent_framework.foundry import FoundryAgent" not in specialist_source
+    assert "from agent_framework.foundry import FoundryAgent" not in orchestrator_source
+
+
+def test_mission_foundry_runtime_resolves_version_and_returns_dictionary_result():
+    scaffold = generate_backend_service_scaffold(
+        mission_title="Acme Mission",
+        orchestrator_agent_name="acme-orchestrator",
+        agent_foundry_names={"Requirements Specialist": "acme-requirements-specialist"},
+    )
+    runtime_module = types.ModuleType("mission_foundry_runtime_test")
+    exec(  # noqa: S102 - executes Genie's own deterministic template in isolation.
+        compile(scaffold["mission_foundry_runtime.py"], "mission_foundry_runtime.py", "exec"),
+        runtime_module.__dict__,
+    )
+    captured = {}
+
+    class _FakeCredential:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+    class _FakeAgents:
+        async def get(self, agent_name):
+            captured["resolved_name"] = agent_name
+            return types.SimpleNamespace(
+                versions=types.SimpleNamespace(
+                    latest=types.SimpleNamespace(version="7")
+                )
+            )
+
+    class _FakeProjectClient:
+        def __init__(self, *, endpoint, credential):
+            captured["endpoint"] = endpoint
+            captured["credential"] = credential
+            self.agents = _FakeAgents()
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+    class _FakeSdkFoundryAgent:
+        def __init__(self, **kwargs):
+            captured["agent_kwargs"] = kwargs
+
+        async def run(self, input_text, *, tools=None):
+            captured["input_text"] = input_text
+            captured["tools"] = tools
+            return types.SimpleNamespace(text='{"verdict": "pass"}')
+
+    runtime_module.DefaultAzureCredential = _FakeCredential
+    runtime_module.AIProjectClient = _FakeProjectClient
+    runtime_module._SdkFoundryAgent = _FakeSdkFoundryAgent
+
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setenv("FOUNDRY_ENDPOINT", "https://foundry.example.com/projects/acme")
+        result = asyncio.run(
+            runtime_module.MissionFoundryAgent("acme-requirements-specialist").run(
+                {"document_count": 30}
+            )
+        )
+
+    assert result == {"verdict": "pass"}
+    assert result.text == '{"verdict": "pass"}'
+    assert captured["resolved_name"] == "acme-requirements-specialist"
+    assert captured["agent_kwargs"]["agent_name"] == "acme-requirements-specialist"
+    assert captured["agent_kwargs"]["agent_version"] == "7"
+    assert json.loads(captured["input_text"]) == {"document_count": 30}
 
 
 def test_backend_scaffold_has_no_prototype_authentication_runtime():
@@ -165,11 +271,44 @@ def test_backend_service_scaffold_main_py_runs_the_real_orchestrator_pipeline():
     # The real generated Orchestrator (orchestrator.py, sibling module) is
     # imported and actually invoked - not bypassed.
     assert "from orchestrator import OrchestratorAgent" in main_source
-    assert "await OrchestratorAgent().run(message, on_progress=on_progress)" in main_source
+    assert "orchestrator = OrchestratorAgent()" in main_source
+    assert "await orchestrator.run(message, on_progress=on_progress)" in main_source
     # A direct conversational reply remains only as a fallback for requests
     # the real pipeline cannot accept (e.g. free-form chat).
     assert "_run_orchestrator_pipeline" in main_source
     assert "_conversational_reply" in main_source
+    assert "OrchestratorAgent()" in main_source
+    assert 'status_code=503' in main_source
+
+
+def test_backend_scaffold_catches_constructor_type_error_before_stream_fallback(monkeypatch):
+    """A generated orchestrator constructor failure must not abort SSE.
+
+    DerekPoC exposed this when generated code passed ``FoundryAgent`` a
+    positional argument. The compatibility path previously mistook that
+    constructor TypeError for a missing ``on_progress`` parameter and then
+    repeated the failing construction outside the guarded call.
+    """
+    scaffold = generate_backend_service_scaffold(
+        mission_title="Acme Mission",
+        orchestrator_agent_name="acme-orchestrator",
+        agent_foundry_names={"Requirements Specialist": "acme-requirements-specialist"},
+    )
+    fake_orchestrator_module = types.ModuleType("orchestrator")
+
+    class _BrokenOrchestratorAgent:
+        def __init__(self):
+            raise TypeError("FoundryAgent.__init__() takes 1 positional argument")
+
+    fake_orchestrator_module.OrchestratorAgent = _BrokenOrchestratorAgent
+    monkeypatch.setitem(sys.modules, "orchestrator", fake_orchestrator_module)
+
+    generated_module = types.ModuleType("acme_main_constructor_failure")
+    exec(compile(scaffold["main.py"], "main.py", "exec"), generated_module.__dict__)  # noqa: S102
+
+    result = asyncio.run(generated_module._run_orchestrator_pipeline("{}"))
+
+    assert result is None
 
 
 def test_generate_agent_config_module_embeds_the_real_agent_foundry_name_mapping():
