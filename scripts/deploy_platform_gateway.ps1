@@ -107,6 +107,36 @@ function Invoke-PrivateEndpointDeployment {
     throw "Container Apps private endpoint deployment did not succeed before the cutover deadline."
 }
 
+function Wait-ForPrivateEndpointApproval {
+    param(
+        [Parameter(Mandatory = $true)][string]$SubscriptionId,
+        [Parameter(Mandatory = $true)][string]$ResourceGroup,
+        [Parameter(Mandatory = $true)][string]$PrivateEndpointName,
+        [Parameter(Mandatory = $true)][datetime]$Deadline
+    )
+
+    do {
+        $privateEndpoint = Invoke-AzJson network private-endpoint show `
+            --subscription $SubscriptionId `
+            --resource-group $ResourceGroup `
+            --name $PrivateEndpointName
+        $connectionStatuses = @(
+            $privateEndpoint.properties.privateLinkServiceConnections |
+                ForEach-Object { $_.properties.privateLinkServiceConnectionState.status }
+        )
+        if ($connectionStatuses.Count -gt 0 -and @($connectionStatuses | Where-Object { $_ -ne "Approved" }).Count -eq 0) {
+            return $privateEndpoint
+        }
+        if (@($connectionStatuses | Where-Object { $_ -in @("Rejected", "Disconnected") }).Count -gt 0) {
+            throw "The Container Apps private endpoint connection was rejected or disconnected."
+        }
+        Write-Host "Waiting for Container Apps private endpoint approval..."
+        Start-Sleep -Seconds 15
+    } while ((Get-Date) -lt $Deadline)
+
+    throw "The Container Apps private endpoint connection was not approved before the cutover deadline."
+}
+
 foreach ($requiredValue in @{
     SubscriptionId = $SubscriptionId
     ResourceGroup = $ResourceGroup
@@ -247,17 +277,11 @@ Invoke-PrivateEndpointDeployment `
     -Deadline $deadline
 
 $privateEndpointName = "$($environment.name)-private-endpoint"
-$privateEndpoint = Invoke-AzJson network private-endpoint show `
-    --subscription $SubscriptionId `
-    --resource-group $ResourceGroup `
-    --name $privateEndpointName
-$connectionStatuses = @(
-    $privateEndpoint.properties.privateLinkServiceConnections |
-        ForEach-Object { $_.properties.privateLinkServiceConnectionState.status }
-)
-if ($connectionStatuses.Count -eq 0 -or @($connectionStatuses | Where-Object { $_ -ne "Approved" }).Count -ne 0) {
-    throw "The Container Apps private endpoint connection is not approved."
-}
+$privateEndpoint = Wait-ForPrivateEndpointApproval `
+    -SubscriptionId $SubscriptionId `
+    -ResourceGroup $ResourceGroup `
+    -PrivateEndpointName $privateEndpointName `
+    -Deadline $deadline
 
 $environment = Invoke-AzJson containerapp env show `
     --subscription $SubscriptionId `

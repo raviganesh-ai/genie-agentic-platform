@@ -65,7 +65,10 @@ def test_cutover_proves_gateway_before_and_after_disabling_public_access():
     )
     assert "if ($PrepareOnly)" in script
     assert 'cutover = "pending"' in script
+    assert "Wait-ForPrivateEndpointApproval" in script
     assert 'Where-Object { $_ -ne "Approved" }' in script
+    assert '$_ -in @("Rejected", "Disconnected")' in script
+    assert "Waiting for Container Apps private endpoint approval" in script
     assert 'throw "Direct Container Apps ingress still accepts public requests."' in script
     assert "--method patch" in script
     assert '"$($environment.id)?api-version=2025-10-02-preview"' in script
