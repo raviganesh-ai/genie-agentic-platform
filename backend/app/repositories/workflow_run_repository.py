@@ -23,8 +23,25 @@ import asyncio
 from typing import Protocol
 
 from app.models.workflow_models import WorkflowRunResult
+from app.repositories.document_store import DocumentStore
 
-__all__ = ["InMemoryWorkflowRunRepository", "WorkflowRunRepository"]
+__all__ = [
+    "CosmosWorkflowRunRepository",
+    "InMemoryWorkflowRunRepository",
+    "WorkflowRunRepository",
+]
+
+_PARTITION_KEY = "workflow-runs"
+_METADATA_FIELDS = {
+    "id",
+    "partitionKey",
+    "recordType",
+    "_rid",
+    "_self",
+    "_etag",
+    "_attachments",
+    "_ts",
+}
 
 
 class WorkflowRunRepository(Protocol):
@@ -75,3 +92,50 @@ class InMemoryWorkflowRunRepository:
                 for run_id in self._run_ids_by_session.get(session_id, [])
                 if run_id in self._runs
             ]
+
+
+class CosmosWorkflowRunRepository:
+    """Durable workflow checkpoints in Genie's managed-identity Cosmos container."""
+
+    def __init__(self, *, store: DocumentStore) -> None:
+        self._store = store
+
+    async def put(self, result: WorkflowRunResult) -> None:
+        document = result.model_dump(mode="json")
+        document.update(
+            {
+                "id": result.workflow_run_id,
+                "partitionKey": _PARTITION_KEY,
+                "recordType": "workflow-run",
+            }
+        )
+        await self._store.upsert(document)
+
+    async def get(self, *, workflow_run_id: str) -> WorkflowRunResult | None:
+        document = await self._store.read(
+            document_id=workflow_run_id,
+            partition_key=_PARTITION_KEY,
+        )
+        if document is None:
+            return None
+        return self._to_model(document)
+
+    async def list_for_session(self, *, session_id: str) -> list[WorkflowRunResult]:
+        documents = await self._store.query(
+            query=(
+                "SELECT * FROM c WHERE c.recordType = @recordType "
+                "AND c.session_id = @sessionId"
+            ),
+            parameters=[
+                {"name": "@recordType", "value": "workflow-run"},
+                {"name": "@sessionId", "value": session_id},
+            ],
+            partition_key=_PARTITION_KEY,
+        )
+        return [self._to_model(document) for document in documents]
+
+    @staticmethod
+    def _to_model(document: dict[str, object]) -> WorkflowRunResult:
+        return WorkflowRunResult.model_validate(
+            {key: value for key, value in document.items() if key not in _METADATA_FIELDS}
+        )
