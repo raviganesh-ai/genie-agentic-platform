@@ -214,7 +214,7 @@ async def test_protected_backend_deploys_private_backend_without_mise_sidecar(
     envelope = captured["envelope"]
     assert result.backend_url == "https://claims-1234.azure-api.net"
     assert envelope.managed_environment_id == "private-env-123"
-    assert envelope.configuration.ingress.external is False
+    assert envelope.configuration.ingress.external is True
     assert envelope.configuration.ingress.target_port == 8000
     assert envelope.configuration.ingress.additional_port_mappings is None
     assert envelope.configuration.registries[0].identity.endswith("/claims-1234")
@@ -243,7 +243,6 @@ async def test_frontend_deployment_uses_mission_identity_for_acr(monkeypatch, tm
         subscription_id="sub-123",
         resource_group="genie-dev-rg",
         acr_name="acr123",
-        container_apps_environment_id="env-123",
         location="eastus2",
     )
     acr_client = SimpleNamespace(
@@ -259,7 +258,16 @@ async def test_frontend_deployment_uses_mission_identity_for_acr(monkeypatch, tm
     )
     captured = {}
 
+    def create_environment(resource_group, environment_name, environment):
+        captured["environment_resource_group"] = resource_group
+        captured["environment_name"] = environment_name
+        captured["environment"] = environment
+        return SimpleNamespace(
+            result=lambda: SimpleNamespace(id="/prototype/public-frontend-environment")
+        )
+
     def begin_create_or_update(resource_group, app_name, envelope):
+        captured["app_resource_group"] = resource_group
         captured["envelope"] = envelope
         return SimpleNamespace(
             result=lambda: SimpleNamespace(
@@ -274,6 +282,7 @@ async def test_frontend_deployment_uses_mission_identity_for_acr(monkeypatch, tm
         service,
         "_container_apps_client",
         lambda: SimpleNamespace(
+            managed_environments=SimpleNamespace(begin_create_or_update=create_environment),
             container_apps=SimpleNamespace(begin_create_or_update=begin_create_or_update)
         ),
     )
@@ -295,6 +304,11 @@ async def test_frontend_deployment_uses_mission_identity_for_acr(monkeypatch, tm
 
     envelope = captured["envelope"]
     assert result.frontend_url == "https://frontend.example.com"
+    assert captured["environment_resource_group"] == "genie-proto-claims-1234"
+    assert captured["app_resource_group"] == "genie-proto-claims-1234"
+    assert captured["environment_name"].startswith("genie-fe-")
+    assert captured["environment"].vnet_configuration is None
+    assert envelope.managed_environment_id == "/prototype/public-frontend-environment"
     assert mission_identity_resource_id in envelope.identity.user_assigned_identities
     assert envelope.configuration.registries[0].identity == mission_identity_resource_id
     assert envelope.configuration.registries[0].username is None

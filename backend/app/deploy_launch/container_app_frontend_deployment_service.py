@@ -16,7 +16,10 @@ from pathlib import Path
 from typing import Any
 
 from app.config.settings import Settings
-from app.deploy_launch.resource_naming import prototype_resource_group_name
+from app.deploy_launch.resource_naming import (
+    prototype_frontend_environment_name,
+    prototype_resource_group_name,
+)
 
 DeploymentProgressCallback = Callable[[str], Awaitable[None]]
 _ACR_RUN_FAILURE_STATUSES = frozenset({"failed", "canceled", "cancelled", "error", "timeout"})
@@ -66,13 +69,11 @@ class ContainerAppFrontendDeploymentService:
         subscription_id: str,
         resource_group: str,
         acr_name: str,
-        container_apps_environment_id: str,
         location: str,
     ) -> None:
         self._subscription_id = subscription_id
         self._resource_group = resource_group
         self._acr_name = acr_name
-        self._container_apps_environment_id = container_apps_environment_id
         self._location = location
 
     def _acr_client(self) -> Any:
@@ -197,6 +198,7 @@ class ContainerAppFrontendDeploymentService:
                 Container,
                 ContainerApp,
                 Ingress,
+                ManagedEnvironment,
                 ManagedServiceIdentity,
                 RegistryCredentials,
                 Scale,
@@ -204,10 +206,29 @@ class ContainerAppFrontendDeploymentService:
                 UserAssignedIdentity,
             )
 
+            resource_group = prototype_resource_group_name(mission_slug)
+            environment_name = prototype_frontend_environment_name(mission_slug)
+            tags = {"genie-managed-by": "genie", "genie-mission-id": mission_slug}
+            container_apps_client = self._container_apps_client()
+            await report("Provisioning the mission's public frontend environment...")
+            environment_poller = container_apps_client.managed_environments.begin_create_or_update(
+                resource_group,
+                environment_name,
+                ManagedEnvironment(
+                    location=self._location,
+                    tags=tags,
+                ),
+            )
+            environment = await asyncio.to_thread(environment_poller.result)
+            if not environment.id:
+                raise ContainerAppFrontendDeploymentError(
+                    "Frontend Container Apps environment returned no resource ID."
+                )
+
             envelope = ContainerApp(
                 location=self._location,
-                tags={"genie-managed-by": "genie", "genie-mission-id": mission_slug},
-                managed_environment_id=self._container_apps_environment_id,
+                tags=tags,
+                managed_environment_id=environment.id,
                 identity=ManagedServiceIdentity(
                     type="UserAssigned",
                     user_assigned_identities={
@@ -230,8 +251,8 @@ class ContainerAppFrontendDeploymentService:
                 ),
             )
             await report("Creating/updating the mission frontend Container App...")
-            result = self._container_apps_client().container_apps.begin_create_or_update(
-                prototype_resource_group_name(mission_slug), app_name, envelope
+            result = container_apps_client.container_apps.begin_create_or_update(
+                resource_group, app_name, envelope
             ).result()
         except Exception as exc:
             raise ContainerAppFrontendDeploymentError(
@@ -297,19 +318,17 @@ def create_container_app_frontend_deployment_service(
         settings.azure_subscription_id,
         settings.deployment_resource_group,
         settings.deployment_acr_name,
-        settings.deployment_container_apps_environment_id,
         settings.deployment_location,
     )
     if not all(required):
         raise ContainerAppFrontendDeploymentError(
-            "azure_subscription_id, deployment_resource_group, deployment_acr_name, "
-            "deployment_container_apps_environment_id, and deployment_location must "
-            "all be configured; local/fake frontend deployment is not permitted."
+            "azure_subscription_id, deployment_resource_group, deployment_acr_name, and "
+            "deployment_location must all be configured; local/fake frontend deployment "
+            "is not permitted."
         )
     return ContainerAppFrontendDeploymentService(
         subscription_id=settings.azure_subscription_id,  # type: ignore[arg-type]
         resource_group=settings.deployment_resource_group,  # type: ignore[arg-type]
         acr_name=settings.deployment_acr_name,  # type: ignore[arg-type]
-        container_apps_environment_id=settings.deployment_container_apps_environment_id,  # type: ignore[arg-type]
         location=settings.deployment_location,  # type: ignore[arg-type]
     )

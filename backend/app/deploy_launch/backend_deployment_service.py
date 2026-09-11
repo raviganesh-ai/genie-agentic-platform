@@ -499,7 +499,7 @@ class BackendDeploymentService:
                 identity=identity_config,
                 configuration=Configuration(
                     ingress=Ingress(
-                        external=not private_gateway_enabled,
+                        external=True,
                         target_port=8000,
                         additional_port_mappings=None,
                     ),

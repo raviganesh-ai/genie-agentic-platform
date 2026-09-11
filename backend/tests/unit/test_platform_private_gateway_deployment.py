@@ -115,3 +115,25 @@ def test_gateway_deployer_role_is_resource_group_scoped_and_has_no_delete_action
     actions = script.split("Actions = @(", maxsplit=1)[1].split("    )", maxsplit=1)[0]
     assert "Microsoft.Authorization/" not in actions
     assert '/delete"' not in actions
+
+
+def test_prototype_operator_can_create_environments_without_broad_contributor():
+    script = (_repo_root() / "scripts" / "configure_prototype_operator.ps1").read_text(
+        encoding="utf-8"
+    )
+
+    assert '$subscriptionScope = "/subscriptions/$SubscriptionId"' in script
+    assert "Microsoft.Resources/subscriptions/resourceGroups/write" in script
+    assert "Microsoft.App/managedEnvironments/read" in script
+    assert "Microsoft.App/managedEnvironments/write" in script
+    assert "Microsoft.App/locations/managedEnvironmentOperationStatuses/read" in script
+    assert "Microsoft.App/locations/managedEnvironmentOperationResults/read" in script
+    assert "& az rest" in script
+    assert "api-version=2022-04-01" in script
+    assert "$savedRole.properties.permissions[0].actions" in script
+    assert "$missingActions" in script
+    assert "did not persist required" in script
+    actions = script.split("Actions = @(", maxsplit=1)[1].split("    )", maxsplit=1)[0]
+    assert '"*"' not in actions
+    assert "Microsoft.Authorization/" not in actions
+    assert "Microsoft.App/containerApps/" not in actions
