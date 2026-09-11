@@ -236,6 +236,7 @@ async def test_protected_backend_deploys_private_backend_without_mise_sidecar(
 
 
 async def test_frontend_deployment_uses_mission_identity_for_acr(monkeypatch, tmp_path):
+    from azure.mgmt.appcontainers._serialization import Serializer
     from azure.storage.blob import BlobClient
 
     (tmp_path / "package.json").write_text("{}\n", encoding="utf-8")
@@ -308,6 +309,11 @@ async def test_frontend_deployment_uses_mission_identity_for_acr(monkeypatch, tm
     assert captured["app_resource_group"] == "genie-proto-claims-1234"
     assert captured["environment_name"].startswith("genie-fe-")
     assert captured["environment"].vnet_configuration is None
+    assert captured["environment"].as_dict()["zone_redundant"] is False
+    serializer = Serializer({"ManagedEnvironment": type(captured["environment"])})
+    assert serializer.serialize_data(captured["environment"], "ManagedEnvironment")[
+        "properties"
+    ] == {"zoneRedundant": False}
     assert envelope.managed_environment_id == "/prototype/public-frontend-environment"
     assert mission_identity_resource_id in envelope.identity.user_assigned_identities
     assert envelope.configuration.registries[0].identity == mission_identity_resource_id

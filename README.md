@@ -653,6 +653,12 @@ If this identity/RBAC/secrets setup is ever missing or revoked, `deploy-backend`
 
 Every deployment to the shared Azure evaluation environment (backend Container App and/or frontend Static Web App) is recorded here: commit, what changed, and why. Update this section as part of the same commit that ships the fix/feature, before pushing to `master` triggers [Continuous deployment](#continuous-deployment-github-actions).
 
+### 2026-09-11 — Valid public prototype Container Apps environment payload
+
+- **Incident**: DerekPoC deployment `80f64d5a` successfully provisioned its mission identity, Foundry agents, private backend environment, APIM, and backend Container App, then failed at `deploy-frontend-app`. `azure-mgmt-appcontainers` flattened an otherwise empty `ManagedEnvironment` model to only `location` and `tags`, while the Azure control plane requires every managed-environment request body to contain `properties`.
+- **Fix**: public prototype environments now explicitly set `zone_redundant=False`. This preserves the intended single-region Consumption environment while forcing the typed SDK model to serialize `properties: { zoneRedundant: false }`; private backend environments already serialize a populated `properties.vnetConfiguration` object.
+- **Verification**: the focused deployment-service suite asserts the exact payload produced by the installed Azure SDK serializer, preventing a future model or SDK refactor from silently dropping `properties`. The failed partial deployment is cleaned through Genie's owned prototype cleanup path before a fresh retry.
+
 ### 2026-09-11 — Durable workflow checkpoints across backend rollouts
 
 - **Incident**: a corrected prototype deployment rollout restarted Genie after DerekPoC's approved requirements, architecture, and generated build had completed. Deployment-run inventory rehydrated from Cosmos, but the source `WorkflowRunResult` still used `InMemoryWorkflowRunRepository`; the next fresh Deploy & Launch run therefore failed at `generate-access-policy` with `No workflow run ... found.` before provisioning resources.

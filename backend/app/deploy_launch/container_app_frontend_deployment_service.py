@@ -217,6 +217,7 @@ class ContainerAppFrontendDeploymentService:
                 ManagedEnvironment(
                     location=self._location,
                     tags=tags,
+                    zone_redundant=False,
                 ),
             )
             environment = await asyncio.to_thread(environment_poller.result)
