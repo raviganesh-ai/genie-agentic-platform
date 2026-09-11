@@ -60,6 +60,7 @@ from app.prompts.registry import PromptRegistry
 from app.repositories.deployment_run_repository import CosmosDeploymentRunRepository
 from app.repositories.document_store import CosmosDocumentStore
 from app.repositories.session_repository import CosmosSessionRepository
+from app.repositories.upload_repository import CosmosUploadRepository
 from app.repositories.workflow_run_repository import CosmosWorkflowRunRepository
 from app.services.architecture_service import create_architecture_service
 from app.services.foundry_agent_inventory_service import FoundryAgentInventoryService
@@ -158,6 +159,7 @@ def create_app(
         document_store: CosmosDocumentStore | None = None
         session_repository = None
         deployment_run_repository = None
+        upload_repository = None
         workflow_run_repository = None
         if resolved_settings.memory_store_backend == "cosmos_db":
             document_store = CosmosDocumentStore(
@@ -167,6 +169,7 @@ def create_app(
             )
             session_repository = CosmosSessionRepository(store=document_store)
             deployment_run_repository = CosmosDeploymentRunRepository(store=document_store)
+            upload_repository = CosmosUploadRepository(store=document_store)
             workflow_run_repository = CosmosWorkflowRunRepository(store=document_store)
         app.state.document_store = document_store
         orchestrator = create_agent_orchestrator(
@@ -243,6 +246,7 @@ def create_app(
         session_service = create_session_service(
             orchestrator=orchestrator,
             session_repository=session_repository,
+            upload_repository=upload_repository,
         )
         app.state.session_service = session_service
         app.state.speech_to_text_service = create_speech_to_text_service(resolved_settings)

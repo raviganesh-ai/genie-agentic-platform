@@ -5,9 +5,11 @@ from typing import Any
 
 from app.deploy_launch.models import DeploymentPipelineRun
 from app.models.session_models import Session
+from app.models.upload_models import UploadRecord
 from app.models.workflow_models import WorkflowRunResult, WorkflowStepResult
 from app.repositories.deployment_run_repository import CosmosDeploymentRunRepository
 from app.repositories.session_repository import CosmosSessionRepository
+from app.repositories.upload_repository import CosmosUploadRepository
 from app.repositories.workflow_run_repository import CosmosWorkflowRunRepository
 
 
@@ -121,4 +123,29 @@ async def test_cosmos_workflow_repository_survives_repository_recreation() -> No
 
     assert await restarted_repository.get(workflow_run_id=run.workflow_run_id) == run
     assert await restarted_repository.list_for_session(session_id=run.session_id) == [run]
+    assert await restarted_repository.list_for_session(session_id="session-2") == []
+
+
+async def test_cosmos_upload_repository_preserves_extracted_text_after_restart() -> None:
+    store = _FakeDocumentStore()
+    now = datetime.now(UTC)
+    upload = UploadRecord(
+        id="upload-1",
+        session_id="session-1",
+        upload_type="transcript",
+        file_name="discovery.txt",
+        content_type="text/plain",
+        size_bytes=18,
+        uploaded_by="genie-internal-user",
+        status="completed",
+        transcript_text="Original transcript",
+        uploaded_at=now,
+        updated_at=now,
+    )
+
+    await CosmosUploadRepository(store=store).put(upload)
+    restarted_repository = CosmosUploadRepository(store=store)
+
+    assert await restarted_repository.get(upload_id=upload.id) == upload
+    assert await restarted_repository.list_for_session(session_id=upload.session_id) == [upload]
     assert await restarted_repository.list_for_session(session_id="session-2") == []

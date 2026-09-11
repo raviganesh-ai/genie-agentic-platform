@@ -356,7 +356,7 @@ All backend configuration is via environment variables prefixed `GENIE_` (pydant
 | `GENIE_AZURE_FOUNDRY_PROJECT_NAME` | *(none)* | Foundry project name |
 | `GENIE_MEMORY_STORE_BACKEND` | `in_memory` | `in_memory` \| `cosmos_db` — production requires `cosmos_db` |
 | `GENIE_MEMORY_STORE_ENDPOINT` | *(none)* | Required in production when backend is `cosmos_db` |
-| `GENIE_MEMORY_STORE_DATABASE_NAME` | `genie` | Cosmos database containing durable sessions, workflow checkpoints, and prototype inventory |
+| `GENIE_MEMORY_STORE_DATABASE_NAME` | `genie` | Cosmos database containing durable sessions, upload text, workflow checkpoints, and prototype inventory |
 | `GENIE_MEMORY_STORE_CONTAINER_NAME` | `memory` | Shared Cosmos container partitioned by record family |
 | `GENIE_LINEAGE_STORE_BACKEND` | `in_memory` | Same pattern as memory store, for governance/lineage |
 | `GENIE_LINEAGE_STORE_ENDPOINT` | *(none)* | Required in production |
@@ -395,7 +395,7 @@ Genie and every generated prototype are intentionally anonymous:
 - **Internal principal**: every API request resolves to the deterministic `genie-internal-user` principal with `Genie.Admin`. Request headers cannot change that identity. Sessions, governance attribution, prototype ownership, inventory, and cleanup authority are therefore shared across all callers; there is no per-user isolation or meaningful user-role distinction.
 - **Generated prototypes**: every Deploy & Launch run owns a dedicated API Management service, VNet, private DNS zone, internal Container Apps environment, exact CORS policy, resource group, managed identity, RBAC assignments, and Foundry agents. The generated SPA and APIM endpoint require no sign-in or bearer token. APIM enforces exact-origin browser CORS, rate limiting, and correlation before forwarding over the private network; generated FastAPI has no public ingress.
 - **Azure workload identity remains**: removing interactive user authentication does not remove managed identity. `DefaultAzureCredential` still uses the Container App's user-assigned identity for Cosmos DB, Foundry, Azure management, ACR, storage, and other Azure service calls under least-privilege RBAC.
-- **Durable workflow and prototype state**: production uses managed-identity Cosmos access. Workflow runs checkpoint their full step results after each completed wave, so requirements, architecture, and generated build outputs remain available after a backend revision rollout. Startup also hydrates deployment runs before readiness and marks interrupted deployment work failed rather than pretending it completed. A cancellable hourly reconciler deletes expired terminal prototypes, stores `deletion_pending`/`deletion_failed` state, and preserves failures for retry.
+- **Durable workflow and prototype state**: production uses managed-identity Cosmos access. Upload records retain extracted transcript/document text, and workflow runs checkpoint their full step results after each completed wave, so source material, requirements, architecture, and generated build outputs remain available after a backend revision rollout. Startup also hydrates deployment runs before readiness and marks interrupted deployment work failed rather than pretending it completed. A cancellable hourly reconciler deletes expired terminal prototypes, stores `deletion_pending`/`deletion_failed` state, and preserves failures for retry.
 
 ---
 
@@ -656,8 +656,8 @@ Every deployment to the shared Azure evaluation environment (backend Container A
 ### 2026-09-11 — Durable workflow checkpoints across backend rollouts
 
 - **Incident**: a corrected prototype deployment rollout restarted Genie after DerekPoC's approved requirements, architecture, and generated build had completed. Deployment-run inventory rehydrated from Cosmos, but the source `WorkflowRunResult` still used `InMemoryWorkflowRunRepository`; the next fresh Deploy & Launch run therefore failed at `generate-access-policy` with `No workflow run ... found.` before provisioning resources.
-- **Fix**: production now injects `CosmosWorkflowRunRepository` through the existing managed-identity `CosmosDocumentStore`. Every workflow wave already called the repository checkpoint hook, so no orchestration behavior changed; those complete step-result snapshots now survive process and revision restarts and remain queryable by run id or session.
-- **Verification**: the focused Cosmos repository test writes a completed workflow checkpoint, recreates the repository to simulate a backend restart, then verifies both direct lookup and session listing recover the exact typed result. Local development and tests continue to use the in-memory repository unless `GENIE_MEMORY_STORE_BACKEND=cosmos_db` is configured.
+- **Fix**: production now injects `CosmosWorkflowRunRepository` and `CosmosUploadRepository` through the existing managed-identity `CosmosDocumentStore`. Every workflow wave already called the repository checkpoint hook, so no orchestration behavior changed; complete step-result snapshots, upload metadata, and extracted transcript/document text now survive process and revision restarts and remain queryable by run id or session.
+- **Verification**: focused Cosmos repository tests recreate repository instances to simulate a backend restart, then verify exact typed workflow recovery and exact upload-text recovery through both direct lookup and session listing. Local development and tests continue to use the in-memory repositories unless `GENIE_MEMORY_STORE_BACKEND=cosmos_db` is configured.
 
 ### 2026-09-11 — Private Genie backend behind platform API Management
 
