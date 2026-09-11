@@ -51,11 +51,22 @@ def test_cutover_proves_gateway_before_and_after_disabling_public_access():
 
     gateway_probe = "Wait-ForGatewayReadiness -GatewayUrl $gatewayUrl -Deadline $deadline"
     first_probe = script.index(gateway_probe)
-    private_endpoint_deploy = script.index("enablePrivateEndpoint=true")
+    private_dns_deploy = script.index(
+        "enablePrivateDns=true enablePrivateEndpoint=false"
+    )
     disable_public_access = script.index("--public-network-access Disabled")
+    private_endpoint_deploy = script.index(
+        "enablePrivateDns=true enablePrivateEndpoint=true"
+    )
     second_probe = script.rindex(gateway_probe)
 
-    assert first_probe < private_endpoint_deploy < disable_public_access < second_probe
+    assert (
+        first_probe
+        < private_dns_deploy
+        < disable_public_access
+        < private_endpoint_deploy
+        < second_probe
+    )
     assert "if ($PrepareOnly)" in script
     assert 'cutover = "pending"' in script
     assert 'Where-Object { $_ -ne "Approved" }' in script
@@ -83,8 +94,11 @@ def test_gateway_deployer_role_is_resource_group_scoped_and_has_no_delete_action
     assert '$resourceGroupScope = "$subscriptionScope/resourceGroups/$ResourceGroup"' in script
     assert "Microsoft.Resources/deployments/write" in script
     assert "Microsoft.ApiManagement/service/apis/policies/write" in script
+    assert "Microsoft.Network/virtualNetworks/join/action" in script
     assert "Microsoft.Network/privateEndpoints/write" in script
     assert "Microsoft.App/managedEnvironments/write" in script
+    assert "& az rest" in script
+    assert "api-version=2022-04-01" in script
     actions = script.split("Actions = @(", maxsplit=1)[1].split("    )", maxsplit=1)[0]
     assert "Microsoft.Authorization/" not in actions
     assert '/delete"' not in actions

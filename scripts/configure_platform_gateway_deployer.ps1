@@ -49,6 +49,7 @@ $roleDefinition = @{
         "Microsoft.ApiManagement/service/apis/policies/read"
         "Microsoft.ApiManagement/service/apis/policies/write"
         "Microsoft.Network/virtualNetworks/read"
+        "Microsoft.Network/virtualNetworks/join/action"
         "Microsoft.Network/virtualNetworks/subnets/read"
         "Microsoft.Network/virtualNetworks/subnets/write"
         "Microsoft.Network/virtualNetworks/subnets/join/action"
@@ -101,27 +102,28 @@ try {
     }
     else {
         $updateRoleDefinition = @{
-            id = $existingRole[0].id
-            name = $existingRole[0].name
-            roleName = $RoleName
-            description = $roleDefinition.Description
-            type = "Microsoft.Authorization/roleDefinitions"
-            permissions = @(
-                @{
-                    actions = $roleDefinition.Actions
-                    notActions = @()
-                    dataActions = @()
-                    notDataActions = @()
-                }
-            )
-            assignableScopes = @($subscriptionScope)
+            properties = @{
+                roleName = $RoleName
+                description = $roleDefinition.Description
+                type = "CustomRole"
+                permissions = @(
+                    @{
+                        actions = $roleDefinition.Actions
+                        notActions = @()
+                        dataActions = @()
+                        notDataActions = @()
+                    }
+                )
+                assignableScopes = @($subscriptionScope)
+            }
         }
         $updateRoleDefinition | ConvertTo-Json -Depth 10 | Set-Content `
             -Path $roleDefinitionPath `
             -Encoding utf8
-        $savedRole = & az role definition update `
-            --subscription $SubscriptionId `
-            --role-definition $roleDefinitionPath `
+        $savedRole = & az rest `
+            --method put `
+            --url "https://management.azure.com$($existingRole[0].id)?api-version=2022-04-01" `
+            --body "@$roleDefinitionPath" `
             --only-show-errors `
             -o json | ConvertFrom-Json
     }

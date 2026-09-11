@@ -30,6 +30,9 @@ param publisherName string
 @description('Exact public Static Web Apps origin allowed by the API policy.')
 param allowedOrigin string
 
+@description('Creates the private DNS zone and VNet link before the network cutover.')
+param enablePrivateDns bool = false
+
 @description('Creates the Container Apps private endpoint and private DNS after public access is disabled.')
 param enablePrivateEndpoint bool = false
 
@@ -156,13 +159,13 @@ resource genieApiPolicy 'Microsoft.ApiManagement/service/apis/policies@2024-05-0
   }
 }
 
-resource privateDnsZone 'Microsoft.Network/privateDnsZones@2024-06-01' = if (enablePrivateEndpoint) {
+resource privateDnsZone 'Microsoft.Network/privateDnsZones@2024-06-01' = if (enablePrivateDns || enablePrivateEndpoint) {
   name: privateDnsZoneName
   location: 'global'
   tags: tags
 }
 
-resource privateDnsZoneLink 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2024-06-01' = if (enablePrivateEndpoint) {
+resource privateDnsZoneLink 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2024-06-01' = if (enablePrivateDns || enablePrivateEndpoint) {
   parent: privateDnsZone
   name: 'genie-platform-vnet-link'
   location: 'global'

@@ -5,11 +5,11 @@
 
 .DESCRIPTION
     Provisions the public Standard v2 API Management edge with outbound VNet
-    integration, verifies it against the current backend, creates the Container
-    Apps private endpoint and DNS zone, disables environment public access, and
-    then verifies both the private gateway route and direct-route denial. Use
-    PrepareOnly to stop after APIM verification so the frontend can be switched
-    to the gateway before the private-backend cutover.
+    integration, verifies it against the current backend, prepares private DNS,
+    disables environment public access, creates the Container Apps private
+    endpoint, and then verifies both the private gateway route and direct-route
+    denial. Use PrepareOnly to stop after APIM verification so the frontend can
+    be switched to the gateway before the private-backend cutover.
 #>
 [CmdletBinding()]
 param(
@@ -124,7 +124,7 @@ Write-Host "Provisioning the public API Management edge..." -ForegroundColor Cya
     --resource-group $ResourceGroup `
     --name $deploymentName `
     --template-file $templateFile `
-    --parameters @commonParameters enablePrivateEndpoint=false `
+    --parameters @commonParameters enablePrivateDns=false enablePrivateEndpoint=false `
     --only-show-errors `
     -o none
 if ($LASTEXITCODE -ne 0) {
@@ -150,17 +150,17 @@ if ($PrepareOnly) {
     return
 }
 
-Write-Host "Creating the Container Apps private endpoint and DNS integration..." -ForegroundColor Cyan
+Write-Host "Preparing private DNS for the Container Apps environment..." -ForegroundColor Cyan
 & az deployment group create `
     --subscription $SubscriptionId `
     --resource-group $ResourceGroup `
     --name $deploymentName `
     --template-file $templateFile `
-    --parameters @commonParameters enablePrivateEndpoint=true `
+    --parameters @commonParameters enablePrivateDns=true enablePrivateEndpoint=false `
     --only-show-errors `
     -o none
 if ($LASTEXITCODE -ne 0) {
-    throw "Container Apps private endpoint deployment failed; public access was not changed."
+    throw "Private DNS preparation failed; public access was not changed."
 }
 
 Write-Host "Disabling public access to the Container Apps environment..." -ForegroundColor Cyan
@@ -172,6 +172,19 @@ Write-Host "Disabling public access to the Container Apps environment..." -Foreg
     -o none
 if ($LASTEXITCODE -ne 0) {
     throw "Failed to disable Container Apps environment public access."
+}
+
+Write-Host "Creating the Container Apps private endpoint..." -ForegroundColor Cyan
+& az deployment group create `
+    --subscription $SubscriptionId `
+    --resource-group $ResourceGroup `
+    --name $deploymentName `
+    --template-file $templateFile `
+    --parameters @commonParameters enablePrivateDns=true enablePrivateEndpoint=true `
+    --only-show-errors `
+    -o none
+if ($LASTEXITCODE -ne 0) {
+    throw "Container Apps private endpoint deployment failed; public access remains disabled."
 }
 
 $privateEndpointName = "$($environment.name)-private-endpoint"

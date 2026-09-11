@@ -533,7 +533,7 @@ All three require `GENIE_AZURE_FOUNDRY_ENDPOINT` / `GENIE_AZURE_FOUNDRY_PROJECT_
 
    `<source>` can be a local directory (`.`) or a git URL (`https://github.com/<org>/<repo>.git#<branch>`, optionally with an embedded token for a private repo: `https://<token>@github.com/...`) — use whichever works reliably in your build environment.
 
-2. Provision APIM, prove it reaches the current backend, create private endpoint/DNS integration, disable Container Apps environment public access, and prove both the private gateway route and direct-route denial:
+2. Provision APIM, prove it reaches the current backend, prepare private DNS, disable Container Apps environment public access, create the private endpoint, and prove both the private gateway route and direct-route denial:
 
    ```powershell
    $gateway = ./scripts/deploy_platform_gateway.ps1 `
@@ -545,7 +545,7 @@ All three require `GENIE_AZURE_FOUNDRY_ENDPOINT` / `GENIE_AZURE_FOUNDRY_PROJECT_
      -PublisherName "Genie" | ConvertFrom-Json
    ```
 
-   The first deployment can take tens of minutes while Standard v2 APIM is created. Public Container Apps access is not changed unless APIM is healthy and private endpoint provisioning succeeds. Repeated runs are idempotent.
+    The first deployment can take tens of minutes while Standard v2 APIM is created. Public Container Apps access is not changed unless APIM is healthy and private DNS preparation succeeds. Azure requires environment public access to be disabled before private endpoint creation, so an endpoint failure leaves the backend closed rather than restoring public ingress. Repeated runs are idempotent.
 
 3. Atomically update the backend image, remove retired gateway containers and auth settings, configure CORS/probes, target FastAPI port `8000`, and verify the revision through APIM:
 
@@ -608,7 +608,7 @@ All three require `GENIE_AZURE_FOUNDRY_ENDPOINT` / `GENIE_AZURE_FOUNDRY_PROJECT_
 
 - **`prepare-gateway`** — logs into Azure via OIDC federated credential (no client secret), idempotently provisions Standard v2 APIM and its delegated subnet/NSG, proves the gateway reaches the current backend, and emits the verified URL without changing Container Apps public access.
 - **`deploy-frontend`** — builds the frontend against that exact gateway job output and deploys it with `@azure/static-web-apps-cli` using a stored deployment token. It no longer trusts a separately maintained production API URL variable.
-- **`deploy-backend`** — waits for the frontend cutover, builds the commit-pinned FastAPI image, creates/verifies private endpoint/DNS, disables Container Apps public access, proves APIM still works and direct ingress is denied, then runs `deploy_backend.ps1` so the image, retired-sidecar removal, CORS, probes, and ingress are updated atomically and verified through APIM.
+- **`deploy-backend`** — waits for the frontend cutover, builds the commit-pinned FastAPI image, prepares private DNS, disables Container Apps public access, creates/verifies the private endpoint, proves APIM still works and direct ingress is denied, then runs `deploy_backend.ps1` so the image, retired-sidecar removal, CORS, probes, and ingress are updated atomically and verified through APIM.
 
 **One-time setup** (already performed for this environment — documented here so it can be reproduced on a new subscription/repo):
 
@@ -616,7 +616,7 @@ All three require `GENIE_AZURE_FOUNDRY_ENDPOINT` / `GENIE_AZURE_FOUNDRY_PROJECT_
 2. That identity's service principal holds three least-privilege assignments (never a subscription- or resource-group-wide Owner/Contributor grant):
    - **Container Registry Tasks Contributor**, scoped to just the ACR resource — covers `az acr build`'s scheduleRun/upload actions without granting registry data-plane push/pull.
   - **Container Apps Contributor**, scoped to just the `genie-backend-corporate` Container App resource — covers the atomic ARM patch.
-  - **Genie Platform Gateway Deployer**, scoped to the Genie resource group — a custom role containing only resource-group deployment, APIM API, delegated subnet/NSG, private endpoint/DNS, and Container Apps environment update/approval actions. It contains no delete or authorization-management action. Create/update and assign it once with `scripts/configure_platform_gateway_deployer.ps1 -SubscriptionId <id> -ResourceGroup <rg> -PrincipalObjectId <oidc-service-principal-object-id>`.
+  - **Genie Platform Gateway Deployer**, scoped to the Genie resource group — a custom role containing only resource-group deployment, APIM API, delegated subnet/NSG, VNet join, private endpoint/DNS, and Container Apps environment update/approval actions. It contains no delete or authorization-management action. Create/update and assign it once with `scripts/configure_platform_gateway_deployer.ps1 -SubscriptionId <id> -ResourceGroup <rg> -PrincipalObjectId <oidc-service-principal-object-id>`.
 3. The **runtime Genie backend managed identity** has the custom `Genie Prototype Resource Group Operator` role plus API Management Service Contributor, Network Contributor, Container Apps Contributor, Managed Identity Contributor, and Managed Identity Operator at subscription scope. The custom role permits only resource-group read/write/delete; the built-in roles are restricted to their respective provider surfaces. Shared ACR and role-assignment permissions remain constrained to existing resource scopes. New prototypes do not require Microsoft Graph application writes.
 4. The repo's **Settings → Secrets and variables → Actions** has:
   - **Secrets**: `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID` (identify the federated deployment app, not credentials by themselves), and `SWA_DEPLOYMENT_TOKEN`.
@@ -656,8 +656,8 @@ Every deployment to the shared Azure evaluation environment (backend Container A
 ### 2026-09-11 — Private Genie backend behind platform API Management
 
 - **Network boundary**: Standard v2 APIM remains the anonymous public API edge, while outbound VNet integration resolves the existing Container App FQDN through a Container Apps environment private endpoint and `privatelink.eastus2.azurecontainerapps.io`. Environment public network access is disabled after the gateway route is proven.
-- **Fail-closed cutover**: `deploy_platform_gateway.ps1` verifies APIM before changing public access, requires an explicitly approved private-link connection, verifies APIM again after cutover, and fails if direct Container Apps ingress still returns a successful response. `deploy_backend.ps1` now verifies every revision only through APIM and refuses an environment whose public access is enabled.
-- **CI and least privilege**: `prepare-gateway` emits the verified APIM URL directly to the frontend build; only after that deployment does `deploy-backend` finalize the private-network cutover, avoiding an outage against the old direct-backend bundle. The GitHub OIDC principal receives the resource-group-scoped `Genie Platform Gateway Deployer` custom role with no delete or RBAC-management actions.
+- **Fail-closed cutover**: `deploy_platform_gateway.ps1` verifies APIM and prepares private DNS before changing public access, then disables public access before creating the private endpoint as required by Azure. It requires an explicitly approved private-link connection, verifies APIM again after cutover, and fails if direct Container Apps ingress still returns a successful response. An endpoint failure leaves public ingress disabled. `deploy_backend.ps1` verifies every revision only through APIM and refuses an environment whose public access is enabled.
+- **CI and least privilege**: `prepare-gateway` emits the verified APIM URL directly to the frontend build; only after that deployment does `deploy-backend` finalize the private-network cutover, avoiding an outage against the old direct-backend bundle. The GitHub OIDC principal receives the resource-group-scoped `Genie Platform Gateway Deployer` custom role, including the VNet join action required by private DNS links, with no delete or RBAC-management actions.
 - **Infrastructure and tests**: foundational Bicep reserves a `/24` NSG-associated subnet delegated to `Microsoft.Web/serverFarms`; the platform template owns APIM, anonymous proxy operations/policy, private DNS, and private endpoint resources. Focused deployment-contract tests and Bicep/PowerShell syntax checks protect the topology and cutover ordering.
 
 ### 2026-09-10 — Anonymous Genie control plane and direct FastAPI ingress
