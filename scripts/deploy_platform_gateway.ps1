@@ -80,8 +80,23 @@ function Invoke-PrivateEndpointDeployment {
         [Parameter(Mandatory = $true)][string]$DeploymentName,
         [Parameter(Mandatory = $true)][string]$TemplateFile,
         [Parameter(Mandatory = $true)][string[]]$CommonParameters,
+        [Parameter(Mandatory = $true)][string]$PrivateEndpointName,
         [Parameter(Mandatory = $true)][datetime]$Deadline
     )
+
+    $existingEndpointOutput = & az network private-endpoint show `
+        --subscription $SubscriptionId `
+        --resource-group $ResourceGroup `
+        --name $PrivateEndpointName `
+        --only-show-errors `
+        -o json 2>$null
+    if ($LASTEXITCODE -eq 0) {
+        $existingEndpoint = $existingEndpointOutput | ConvertFrom-Json -Depth 100
+        if ($existingEndpoint.properties.provisioningState -eq "Succeeded") {
+            Write-Host "Private endpoint already exists; preserving its connection state."
+            return
+        }
+    }
 
     do {
         $deploymentOutput = & az deployment group create `
@@ -199,6 +214,7 @@ $deployment = Invoke-AzJson deployment group show `
     --resource-group $ResourceGroup `
     --name $deploymentName
 $gatewayUrl = $deployment.properties.outputs.gatewayUrl.value.TrimEnd("/")
+$privateEndpointName = "$($environment.name)-private-endpoint"
 $deadline = (Get-Date).AddSeconds($WaitTimeoutSeconds)
 
 if ($environment.properties.publicNetworkAccess -eq "Disabled") {
@@ -209,6 +225,7 @@ if ($environment.properties.publicNetworkAccess -eq "Disabled") {
         -DeploymentName $deploymentName `
         -TemplateFile $templateFile `
         -CommonParameters $commonParameters `
+        -PrivateEndpointName $privateEndpointName `
         -Deadline $deadline
 }
 Wait-ForGatewayReadiness -GatewayUrl $gatewayUrl -Deadline $deadline
@@ -274,9 +291,9 @@ Invoke-PrivateEndpointDeployment `
     -DeploymentName $deploymentName `
     -TemplateFile $templateFile `
     -CommonParameters $commonParameters `
+    -PrivateEndpointName $privateEndpointName `
     -Deadline $deadline
 
-$privateEndpointName = "$($environment.name)-private-endpoint"
 $privateEndpoint = Wait-ForPrivateEndpointApproval `
     -SubscriptionId $SubscriptionId `
     -ResourceGroup $ResourceGroup `

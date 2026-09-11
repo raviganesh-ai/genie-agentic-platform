@@ -77,6 +77,8 @@ def test_cutover_proves_gateway_before_and_after_disabling_public_access():
     assert 'if ($environment.properties.publicNetworkAccess -eq "Disabled")' in script
     assert "Resuming the fail-closed private endpoint cutover" in script
     assert '$deploymentError -notmatch "ManagedEnvironmentNotHealthy"' in script
+    assert '$existingEndpoint.properties.provisioningState -eq "Succeeded"' in script
+    assert "Private endpoint already exists; preserving its connection state" in script
     assert "Start-Sleep -Seconds 30" in script
 
 
