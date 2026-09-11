@@ -111,7 +111,6 @@ def local_settings(valid_config_root: Path) -> Settings:
         governance_provider="local",
         allow_mock_agents=True,
         allow_local_agents=True,
-        allow_local_token_validation=True,
         use_synthetic_data=True,
         config_root=valid_config_root,
     )
@@ -150,7 +149,6 @@ def foundry_configured_settings(valid_config_root: Path) -> Settings:
         governance_provider="agent365",
         allow_mock_agents=False,
         allow_local_agents=False,
-        allow_local_token_validation=False,
         use_synthetic_data=False,
         azure_foundry_endpoint="https://genie-foundry.example-project.azure.com",
         azure_foundry_project_name="genie-prod-project",
@@ -171,6 +169,5 @@ def foundry_configured_settings(valid_config_root: Path) -> Settings:
         prototype_api_gateway_enabled=True,
         prototype_api_gateway_publisher_email="genie@example.com",
         prototype_api_gateway_publisher_name="Genie",
-        entra_tenant_id="00000000-0000-0000-0000-000000000002",
         config_root=valid_config_root,
     )

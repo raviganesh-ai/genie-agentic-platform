@@ -62,57 +62,13 @@ jobs:
       - name: Test
         run: npm run test
 
-  gateway:
-    name: Gateway (.NET build + test)
-    runs-on: ubuntu-latest
-    env:
-      VSS_NUGET_EXTERNAL_FEED_ENDPOINTS: >-
-        {"endpointCredentials":[{"endpoint":"https://pkgs.dev.azure.com/MicrosoftIT/OneITVSO/_packaging/PS-GCM-FieldExperiencePlatform/nuget/v3/index.json","username":"AzureDevOps","password":"${{ secrets.AZURE_DEVOPS_TOKEN }}"}]}
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Check MISE feed credential
-        run: |
-          if [ -z "${{ secrets.AZURE_DEVOPS_TOKEN }}" ]; then
-            echo "::error::Missing AZURE_DEVOPS_TOKEN with MicrosoftIT Packaging Read access."
-            exit 1
-          fi
-
-      - name: Set up .NET
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: "8.0.x"
-
-      - name: Install Azure Artifacts Credential Provider
-        run: sh -c "$(curl -fsSL https://aka.ms/install-artifacts-credprovider.sh)"
-
-      - name: Restore gateway
-        run: >-
-          dotnet restore
-          gateway/Genie.AuthenticationGateway.Tests/Genie.AuthenticationGateway.Tests.csproj
-          --configfile gateway/NuGet.config
-
-      - name: Build gateway
-        run: >-
-          dotnet build
-          gateway/Genie.AuthenticationGateway.Tests/Genie.AuthenticationGateway.Tests.csproj
-          --configuration Release
-          --no-restore
-
-      - name: Test gateway
-        run: >-
-          dotnet test
-          gateway/Genie.AuthenticationGateway.Tests/Genie.AuthenticationGateway.Tests.csproj
-          --configuration Release
-          --no-build
-
   # Deploy jobs only run on a real push to master (never on a PR from a
   # fork, and never unless both CI jobs above already passed) - see
   # "Continuous deployment" in README.md for the one-time Azure setup
   # (federated OIDC credential + RBAC) required before these can succeed.
   deploy-backend:
-    name: Deploy backend + gateway (Container Apps)
-    needs: [backend, frontend, gateway]
+    name: Deploy backend (Container Apps)
+    needs: [backend, frontend]
     if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
     environment: production
@@ -138,13 +94,9 @@ jobs:
           [ -z "${{ secrets.AZURE_CLIENT_ID }}" ] && missing+=("AZURE_CLIENT_ID")
           [ -z "${{ secrets.AZURE_TENANT_ID }}" ] && missing+=("AZURE_TENANT_ID")
           [ -z "${{ secrets.AZURE_SUBSCRIPTION_ID }}" ] && missing+=("AZURE_SUBSCRIPTION_ID")
-          [ -z "${{ secrets.AZURE_DEVOPS_TOKEN }}" ] && missing+=("AZURE_DEVOPS_TOKEN")
           [ -z "${{ vars.AZURE_ACR_NAME }}" ] && missing+=("AZURE_ACR_NAME")
           [ -z "${{ vars.AZURE_CONTAINER_APP_NAME }}" ] && missing+=("AZURE_CONTAINER_APP_NAME")
           [ -z "${{ vars.AZURE_RESOURCE_GROUP }}" ] && missing+=("AZURE_RESOURCE_GROUP")
-          [ -z "${{ vars.VITE_ENTRA_CLIENT_ID }}" ] && missing+=("VITE_ENTRA_CLIENT_ID")
-          [ -z "${{ vars.VITE_ENTRA_TENANT_ID }}" ] && missing+=("VITE_ENTRA_TENANT_ID")
-          [ -z "${{ vars.VITE_ENTRA_API_SCOPE }}" ] && missing+=("VITE_ENTRA_API_SCOPE")
           [ -z "${{ vars.GENIE_MEMORY_STORE_ENDPOINT }}" ] && missing+=("GENIE_MEMORY_STORE_ENDPOINT")
           [ -z "${{ vars.GENIE_PROTOTYPE_API_GATEWAY_PUBLISHER_EMAIL }}" ] && missing+=("GENIE_PROTOTYPE_API_GATEWAY_PUBLISHER_EMAIL")
           [ -z "${{ vars.GENIE_PROTOTYPE_API_GATEWAY_PUBLISHER_NAME }}" ] && missing+=("GENIE_PROTOTYPE_API_GATEWAY_PUBLISHER_NAME")
@@ -169,28 +121,16 @@ jobs:
             --file backend/Dockerfile \
             .
 
-      - name: Build and push authentication gateway image (ACR)
-        run: |
-          az acr build \
-            --registry "${{ vars.AZURE_ACR_NAME }}" \
-            --image "genie-auth-gateway:${{ github.sha }}" \
-            --file gateway/Dockerfile \
-            --secret-build-arg AZURE_DEVOPS_TOKEN="${{ secrets.AZURE_DEVOPS_TOKEN }}" \
-            .
-
-      # Both immutable images and ingress port 8080 are applied in one ARM
-      # patch, so no revision can expose FastAPI directly or mix image tags.
-      - name: Roll out gateway-protected Container App revision
+      # The immutable image, retired-sidecar removal, CORS setting, probes,
+      # and ingress port 8000 are applied in one ARM patch.
+      - name: Roll out anonymous backend revision
         shell: pwsh
         run: |
-          ./scripts/deploy_authentication_gateway.ps1 `
+          ./scripts/deploy_backend.ps1 `
             -SubscriptionId "${{ secrets.AZURE_SUBSCRIPTION_ID }}" `
             -ResourceGroup "${{ vars.AZURE_RESOURCE_GROUP }}" `
             -ContainerAppName "${{ vars.AZURE_CONTAINER_APP_NAME }}" `
-            -ApplicationTenantId "${{ vars.VITE_ENTRA_TENANT_ID }}" `
-            -ClientId "${{ vars.VITE_ENTRA_CLIENT_ID }}" `
             -BackendImage "${{ vars.AZURE_ACR_NAME }}.azurecr.io/genie-backend:${{ github.sha }}" `
-            -GatewayImage "${{ vars.AZURE_ACR_NAME }}.azurecr.io/genie-auth-gateway:${{ github.sha }}" `
             -AllowedOrigin "${{ vars.GENIE_GATEWAY_ALLOWED_ORIGIN }}" `
             -MemoryStoreEndpoint "${{ vars.GENIE_MEMORY_STORE_ENDPOINT }}" `
             -PrototypeApiGatewayPublisherEmail "${{ vars.GENIE_PROTOTYPE_API_GATEWAY_PUBLISHER_EMAIL }}" `
@@ -222,10 +162,8 @@ jobs:
       - name: Check required secrets
         run: |
           if [ -z "${{ secrets.SWA_DEPLOYMENT_TOKEN }}" ] || \
-             [ -z "${{ vars.VITE_ENTRA_CLIENT_ID }}" ] || \
-             [ -z "${{ vars.VITE_ENTRA_TENANT_ID }}" ] || \
-             [ -z "${{ vars.VITE_ENTRA_API_SCOPE }}" ]; then
-            echo "::error::Missing frontend deployment authentication configuration. See README.md 'Continuous deployment' section."
+             [ -z "${{ vars.VITE_GENIE_API_BASE_URL }}" ]; then
+            echo "::error::Missing SWA_DEPLOYMENT_TOKEN or VITE_GENIE_API_BASE_URL. See README.md 'Continuous deployment' section."
             exit 1
           fi
 
@@ -243,9 +181,6 @@ jobs:
         run: npm run build
         env:
           VITE_GENIE_API_BASE_URL: ${{ vars.VITE_GENIE_API_BASE_URL }}
-          VITE_ENTRA_CLIENT_ID: ${{ vars.VITE_ENTRA_CLIENT_ID }}
-          VITE_ENTRA_TENANT_ID: ${{ vars.VITE_ENTRA_TENANT_ID }}
-          VITE_ENTRA_API_SCOPE: ${{ vars.VITE_ENTRA_API_SCOPE }}
 
       - name: Deploy to Azure Static Web Apps
         timeout-minutes: 5

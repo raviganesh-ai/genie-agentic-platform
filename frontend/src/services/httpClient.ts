@@ -1,4 +1,3 @@
-import { getAccessToken } from "./authProvider";
 import type { SafeError } from "@/types/common";
 
 /**
@@ -69,8 +68,6 @@ export async function apiFetch<TResponse>(
   const headers: Record<string, string> = {
     "X-Correlation-Id": correlationId,
   };
-  const token = getAccessToken();
-  if (token) headers.Authorization = `Bearer ${token}`;
   if (!isFormData && body !== undefined) headers["Content-Type"] = "application/json";
 
   let response: Response;
@@ -115,14 +112,10 @@ export async function apiFetch<TResponse>(
  * rule (see tests/no_foundry_direct_access.test.tsx) still holds: this is
  * the one place in the app that needs raw `fetch` + a `ReadableStream` body
  * (SSE) instead of `apiFetch`'s buffered JSON response handling. Auth still
- * goes through the same in-memory bearer token as every other call - never
- * a query string, which would otherwise leak the token into server/proxy
- * access logs (OWASP A02/A09).
+ * remains centralized with every other backend request.
  */
 export async function openEventStream(path: string, signal: AbortSignal): Promise<Response> {
   const headers: Record<string, string> = { Accept: "text/event-stream" };
-  const token = getAccessToken();
-  if (token) headers.Authorization = `Bearer ${token}`;
 
   let response: Response;
   try {
@@ -140,16 +133,13 @@ export async function openEventStream(path: string, signal: AbortSignal): Promis
 
 /**
  * Downloads a binary response (currently only the Deploy & Launch code +
- * access-policy zip archive) as a `Blob`, using the same in-memory bearer
- * token as every other call. Kept here - rather than in the calling
+ * access-policy zip archive) as a `Blob`. Kept here - rather than in the calling
  * service - for the same "every HTTP call goes through httpClient" reason
  * as `openEventStream` above: `apiFetch` always parses its response body as
  * JSON, which would corrupt a binary zip archive.
  */
 export async function downloadBinary(path: string): Promise<{ blob: Blob; filename: string }> {
   const headers: Record<string, string> = {};
-  const token = getAccessToken();
-  if (token) headers.Authorization = `Bearer ${token}`;
 
   let response: Response;
   try {

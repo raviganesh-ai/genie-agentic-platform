@@ -1,6 +1,6 @@
 """Integration test: ``GET /sessions/{id}/workflow-events/stream`` (SSE).
 
-Exercises the route's auth and session-ownership wiring through the real
+Exercises the route's internal identity and session-validation wiring through the real
 ASGI app (same pattern as every other per-session route test). The
 streaming generator's own event-delivery/keepalive/disconnect behavior is
 covered directly (and more reliably) by
@@ -12,35 +12,27 @@ worth the added weight/fragility here.
 """
 from __future__ import annotations
 
-import jwt
 from httpx import ASGITransport, AsyncClient
 
 from app.main import create_app
 
 
-def _bearer_token(user_id: str) -> str:
-    return jwt.encode({"sub": user_id}, "unit-test-secret", algorithm="HS256")
-
-
-async def test_stream_requires_authentication(app_local_settings) -> None:
+async def test_stream_allows_anonymous_internal_access(app_local_settings) -> None:
     app = create_app(settings=app_local_settings)
 
     async with app.router.lifespan_context(app):
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             resp = await client.get("/sessions/does-not-exist/workflow-events/stream")
-            assert resp.status_code == 401
+            assert resp.status_code == 404
 
 
-async def test_stream_requires_a_session_owned_by_the_caller(app_local_settings) -> None:
+async def test_stream_requires_a_valid_session(app_local_settings) -> None:
     app = create_app(settings=app_local_settings)
-    headers = {"Authorization": f"Bearer {_bearer_token('user-1')}"}
 
     async with app.router.lifespan_context(app):
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
-            resp = await client.get(
-                "/sessions/does-not-exist/workflow-events/stream", headers=headers
-            )
+            resp = await client.get("/sessions/does-not-exist/workflow-events/stream")
             assert resp.status_code == 404
 

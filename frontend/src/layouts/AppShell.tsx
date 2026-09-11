@@ -2,7 +2,6 @@ import type { ReactNode } from "react";
 import { useCallback, useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { Button, MessageBar, MessageBarBody, MessageBarTitle, Switch, Text } from "@fluentui/react-components";
-import { getActiveAccountName, isAuthenticated, onAccessTokenChange, signOut } from "@/services/authProvider";
 import { useSessionContext } from "@/state/SessionContext";
 import { useAsyncResource } from "@/hooks/useAsyncResource";
 import { workflowApi } from "@/services/workflowApi";
@@ -209,7 +208,6 @@ function navLinkStyle(isActive: boolean): React.CSSProperties {
 const MISSION_FLOW_POLL_MS = Number(import.meta.env.VITE_MISSION_FLOW_POLL_MS ?? 0);
 
 export function AppShell(): JSX.Element {
-  const [signedIn, setSignedIn] = useState(isAuthenticated());
   // Default to on: without this, starting a workflow run gives no visual
   // feedback at all until the user discovers and manually flips the
   // sidebar switch, leaving them wondering if anything is happening.
@@ -240,8 +238,6 @@ export function AppShell(): JSX.Element {
       setMaxReachedIndex(currentIndex);
     }
   }, [currentIndex, maxReachedIndex]);
-
-  useEffect(() => onAccessTokenChange((token) => setSignedIn(token !== null)), []);
 
   const runFetcher = useCallback(
     () =>
@@ -406,20 +402,6 @@ export function AppShell(): JSX.Element {
               Gamified live agent call traceability
             </Text>
           </div>
-          {signedIn ? (
-            <>
-              <Text size={200} style={{ display: "block", marginBottom: 8, opacity: 0.85 }}>
-                👋 Welcome back, {getActiveAccountName() ?? "there"}
-              </Text>
-              <Button size="small" appearance="secondary" onClick={signOut}>
-                Sign out
-              </Button>
-            </>
-          ) : (
-            <Text size={200} style={{ opacity: 0.7 }}>
-              Not signed in
-            </Text>
-          )}
         </div>
       </nav>
       <main

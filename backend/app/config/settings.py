@@ -63,12 +63,6 @@ class Settings(BaseSettings):
     allow_mock_agents: bool = False
     allow_local_agents: bool = False
     use_synthetic_data: bool = False
-    # Controls whether create_token_validator() may fall back to
-    # LocalDevTokenValidator (unverified-signature JWT decode). Independent
-    # of allow_local_agents (which selects LocalAgentGateway vs
-    # AzureAgentGateway for agent *execution*) so the two concerns can be
-    # configured independently.
-    allow_local_token_validation: bool = False
 
     # --- Azure AI Foundry ---------------------------------------------------------
     azure_foundry_endpoint: str | None = None
@@ -84,11 +78,6 @@ class Settings(BaseSettings):
     # - either a dedicated Speech resource or a unified AIServices account that
     # also hosts Foundry. Never a hardcoded real endpoint (Configuration Rules).
     azure_speech_endpoint: str | None = None
-
-    # --- Microsoft Entra ID -----------------------------------------------------
-    entra_authority: str | None = None
-    entra_tenant_id: str | None = None
-    entra_client_id: str | None = None
 
     # --- Memory store backend ----------------------------------------------------
     # "in_memory" is the only backend implemented in Phase 4 and is safe only
@@ -217,9 +206,6 @@ class Settings(BaseSettings):
     @field_validator(
         "azure_foundry_endpoint",
         "azure_speech_endpoint",
-        "entra_authority",
-        "entra_tenant_id",
-        "entra_client_id",
         "key_vault_uri",
         "memory_store_endpoint",
         "lineage_store_endpoint",

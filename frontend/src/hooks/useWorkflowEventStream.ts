@@ -39,10 +39,8 @@ export function workflowStepDeltaKey(stepId: string, agentId: string): string {
  * refresh it sooner.
  *
  * Uses `fetch` + a manual `ReadableStream`/SSE-frame parser (via
- * `openEventStream`) rather than the native `EventSource` API, because
- * `EventSource` cannot send an `Authorization` header - and putting the
- * bearer token in the URL as a query string would leak it into server/proxy
- * logs (OWASP A02/A09).
+ * `openEventStream`) rather than the native `EventSource` API so stream
+ * errors and cancellation follow the shared HTTP client behavior.
  */
 export function useWorkflowEventStream(sessionId: string | null): WorkflowEventStreamState {
   const [events, setEvents] = useState<WorkflowStreamEvent[]>([]);

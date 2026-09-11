@@ -60,7 +60,6 @@ from app.prompts.registry import PromptRegistry
 from app.repositories.deployment_run_repository import CosmosDeploymentRunRepository
 from app.repositories.document_store import CosmosDocumentStore
 from app.repositories.session_repository import CosmosSessionRepository
-from app.security.token_validator import create_token_validator
 from app.services.architecture_service import create_architecture_service
 from app.services.foundry_agent_inventory_service import FoundryAgentInventoryService
 from app.services.foundry_agent_lifecycle_service import FoundryAgentLifecycleService
@@ -155,7 +154,6 @@ def create_app(
         # Build the Phase 7 service graph once at startup. Every service
         # below wraps the single AgentOrchestrator instance, so every
         # request sees consistent orchestration/governance/memory state.
-        app.state.token_validator = create_token_validator(resolved_settings)
         document_store: CosmosDocumentStore | None = None
         session_repository = None
         deployment_run_repository = None
@@ -328,7 +326,6 @@ def create_app(
             app.state.prototype_cleanup_task.cancel()
             with suppress(asyncio.CancelledError):
                 await app.state.prototype_cleanup_task
-            await app.state.token_validator.close()
             if app.state.document_store is not None:
                 await app.state.document_store.close()
 

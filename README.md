@@ -46,30 +46,30 @@ Genie follows Clean Architecture in application code and uses Azure-native ident
 
 ### Genie Azure platform
 
-[![Genie Azure platform architecture showing Azure service boundaries, identity, runtime, data, AI, registry, and observability](docs/architecture/genie-azure-platform.png)](docs/architecture/genie-azure-platform.svg)
+[![Genie Azure platform architecture showing Azure service boundaries, identity, runtime, data, AI, registry, and observability](docs/architecture/genie-azure-platform.svg)](docs/architecture/genie-azure-platform.svg)
 
 *Figure 1. Genie evaluation platform. Select the diagram to open the scalable SVG. The service symbols come from the [official Microsoft Azure Architecture Icons](https://learn.microsoft.com/azure/architecture/icons/).*
 
 | Azure concern | Implementation |
 |---|---|
-| **Web experience** | React/TypeScript on Azure Static Web Apps; MSAL authenticates internal collaborators with Microsoft Entra ID |
-| **API security boundary** | Public Azure Container Apps ingress reaches only the .NET 8 MISE gateway on `8080`; FastAPI remains private on `localhost:8000` and validates the token again |
+| **Web experience** | React/TypeScript on Azure Static Web Apps; no sign-in or bearer token is required |
+| **API access boundary** | Public Azure Container Apps ingress reaches FastAPI directly on `8000`; exact-origin CORS allows the configured SPA but is not authentication |
 | **Agent execution** | `AzureAgentGateway` is the only production execution path to independently provisioned Azure AI Foundry Prompt Agents |
 | **Identity and secrets** | User-assigned managed identity and least-privilege Azure RBAC; secrets belong in Key Vault and are never embedded in images or source |
 | **Memory and artifacts** | Cosmos DB for durable session/memory/lineage state, Azure AI Search for enterprise knowledge, and Azure Storage for uploads and generated artifacts |
-| **Images and hosting** | Commit-pinned backend and gateway images in Azure Container Registry, deployed together to Azure Container Apps |
+| **Images and hosting** | Commit-pinned FastAPI images in Azure Container Registry, deployed to Azure Container Apps |
 | **Observability** | Application Insights and Azure Monitor receive structured logs, traces, metrics, correlation IDs, and governance telemetry |
 | **Infrastructure** | Subscription-scoped Bicep creates the resource group and foundational Azure resources; GitHub Actions deploys application revisions through Azure OIDC |
 
 ### Generated prototype isolation
 
-Deploy & Launch creates a separate runtime and ownership boundary for every newly generated prototype. Generated prototypes do **not** use Microsoft Entra ID or inherit Genie's gateway instance, managed identity, Container Apps environment, resource group, network, or data ownership. Genie's own control plane remains protected by corporate Entra and MISE.
+Deploy & Launch creates a separate runtime boundary for every newly generated prototype. Generated prototypes do **not** use Microsoft Entra ID or inherit Genie's managed identity, Container Apps environment, resource group, network, or data ownership. Genie and generated prototypes require no sign-in.
 
 [![Generated prototype Azure isolation architecture showing dedicated API Management, private Container Apps, identity, Foundry agents, registry, and monitoring](docs/architecture/generated-prototype-isolation.svg)](docs/architecture/generated-prototype-isolation.svg)
 
 *Figure 2. Per-prototype security and runtime isolation. Select the diagram to open the scalable SVG.*
 
-Each prototype receives a tagged `genie-proto-<mission-slug>` resource group, dedicated APIM service, VNet and private DNS, internal Container Apps environment, exact CORS origin, backend/frontend Container Apps, mission managed identity, RBAC assignments, and generated Foundry agents. The generated frontend and APIM endpoint are anonymous; APIM enforces exact-origin browser CORS, per-client rate limiting, and correlation IDs before forwarding over the private network. CORS is not authentication, so non-browser clients that know the APIM URL can call it. The durable Cosmos inventory records canonical owner identity as `<tid>:<oid>`, raw tenant/object IDs, mission metadata, URLs, resource group, TTL, and cleanup state. Owners can abandon their own terminal runs, while `Genie.Admin` can inventory and clean up all prototypes by deleting external Foundry/identity artifacts and then the complete resource group.
+Each prototype receives a tagged `genie-proto-<mission-slug>` resource group, dedicated APIM service, VNet and private DNS, internal Container Apps environment, exact CORS origin, backend/frontend Container Apps, mission managed identity, RBAC assignments, and generated Foundry agents. The generated frontend and APIM endpoint are anonymous; APIM enforces exact-origin browser CORS, per-client rate limiting, and correlation IDs before forwarding over the private network. CORS is not authentication, so non-browser clients that know the APIM URL can call it. The durable Cosmos inventory records the shared `genie-internal-user` owner, mission metadata, URLs, resource group, TTL, and cleanup state. The fixed internal principal has `Genie.Admin`, so all callers share inventory and cleanup authority.
 
 ### Layering rules (enforced by tests)
 
@@ -252,7 +252,7 @@ backend/           FastAPI application (Python 3.12+)
     outputs/        Final Output Center services
     prompts/        PromptRegistry
     repositories/   Protocol + in-memory repository implementations
-    security/       Entra ID token validation, auth dependencies
+    security/       Fixed internal principal and authorization dependencies
     services/       Session / Requirements / Workshop / Architecture / Peer Review / Output /
                     Foundry agent provisioning & lifecycle services
     transcription/  Upload/recording transcription (speech-to-text) service
@@ -263,7 +263,7 @@ backend/           FastAPI application (Python 3.12+)
 
 frontend/           React + TypeScript Mission Control UI (Vite)
   src/
-    app/            App bootstrap (MSAL init, router)
+    app/            App bootstrap and router
     components/     Shared UI components
     features/       9 feature pages (landing, upload, requirement-map,
                      architecture-studio, workshop-center, deploy-launch,
@@ -272,8 +272,8 @@ frontend/           React + TypeScript Mission Control UI (Vite)
                      OutputsHubPage) that group related pages under one
                      linear nav step via sub-tabs
     hooks/          Data-fetching hooks per feature
-    layouts/        AppShell (nav + auth status)
-    services/        httpClient, authProvider (MSAL), one API client per backend router
+    layouts/        AppShell and navigation
+    services/        httpClient and one API client per backend router
     state/           SessionContext, trace id registry
     types/           TypeScript types mirroring backend Pydantic models
   tests/            Vitest component + static-scan tests
@@ -335,7 +335,7 @@ npm run typecheck
 npm run lint
 ```
 
-Set `frontend/.env.development` (or `.env.local`) with at least `VITE_GENIE_API_BASE_URL` pointing at your local backend. Leave the `VITE_ENTRA_*` variables unset locally to use the manual-token fallback in `authProvider.ts` instead of a full Entra redirect login (useful for backend-only development).
+Set `frontend/.env.development` (or `.env.local`) with `VITE_GENIE_API_BASE_URL` pointing at your local backend. No authentication variables are required.
 
 ---
 
@@ -375,10 +375,6 @@ All backend configuration is via environment variables prefixed `GENIE_` (pydant
 | `GENIE_PROTOTYPE_MAX_ACTIVE_PER_OWNER` | `3` | Per-owner active prototype quota |
 | `GENIE_PROTOTYPE_CLEANUP_INTERVAL_SECONDS` | `3600` | Expired-prototype reconciliation interval; failed deletion remains visible and retryable |
 | `GENIE_KEY_VAULT_URI` | *(none)* | Required in production |
-| `GENIE_ENTRA_AUTHORITY` | *(none)* | Microsoft Entra ID authority, e.g. `https://login.microsoftonline.com` |
-| `GENIE_ENTRA_TENANT_ID` | *(none)* | Microsoft Entra ID tenant for token validation + login |
-| `GENIE_ENTRA_CLIENT_ID` | *(none)* | App registration (API) client id |
-| `GENIE_ALLOW_LOCAL_TOKEN_VALIDATION` | `false` | Allows `LocalDevTokenValidator` (unverified-signature JWT decode) when Entra isn't configured; must be `false` in production |
 | `GENIE_CORS_ALLOWED_ORIGINS` | *(empty)* | Comma-separated browser origins allowed to call the API (e.g. the deployed frontend's URL) |
 | `GENIE_CONFIG_ROOT` | `config` | Root directory for agents/prompts/workflows/policies |
 | `AZURE_CLIENT_ID` | *(none)* | **Required** when running under a Container App / VM with a **user-assigned** managed identity — tells `DefaultAzureCredential` which identity to use |
@@ -388,28 +384,24 @@ Frontend (`frontend/.env.production` / `.env.development`, Vite `VITE_` prefix):
 | Variable | Purpose |
 |---|---|
 | `VITE_GENIE_API_BASE_URL` | Base URL of the deployed/local Genie backend |
-| `VITE_ENTRA_CLIENT_ID` | SPA/API app registration client id (leave unset to fall back to manual token entry) |
-| `VITE_ENTRA_TENANT_ID` | Microsoft Entra ID tenant id |
-| `VITE_ENTRA_API_SCOPE` | `api://<client-id>/access_as_user` scope requested at login |
 
 ---
 
 ## Authentication
 
-Genie's control plane uses **Microsoft Entra ID**. Generated prototypes are intentionally anonymous:
+Genie and every generated prototype are intentionally anonymous:
 
-- **Authentication gateway**: every external API request first reaches the .NET 8 gateway in `gateway/Genie.AuthenticationGateway`. The gateway uses `Microsoft.Identity.ServiceEssentials.AspNetCore` (MISE) to validate Entra bearer tokens, allows both delegated user and application access tokens for the configured API audiences, and proxies accepted requests to `http://localhost:8000`. Public Container App ingress targets gateway port `8080`; FastAPI port `8000` is reachable only inside the replica. Liveness/readiness probes and configured CORS preflight requests are anonymous; all API routes require authentication.
-- **Backend defense in depth**: `EntraTokenValidator` (see `backend/app/security/token_validator.py`) validates the bearer token again against the tenant's Microsoft Entra ID OpenID metadata and JWKS (RS256 signature, issuer, audience, `exp`/`iat`). The gateway preserves the original `Authorization` header when proxying. Validation activates once `GENIE_ENTRA_AUTHORITY`, `GENIE_ENTRA_TENANT_ID`, and `GENIE_ENTRA_CLIENT_ID` are all set. `LocalDevTokenValidator` is available only when `GENIE_ALLOW_LOCAL_TOKEN_VALIDATION=true` and Entra isn't configured — never in production. `create_token_validator()` fails closed otherwise.
-- **Frontend**: MSAL (`@azure/msal-browser`) drives an automatic redirect sign-in flow — on load, the app silently acquires a token if a session exists, or redirects to the Microsoft sign-in page if not, then redirects back with no manual steps. Silent token refresh runs on a 5-minute timer via `acquireTokenSilent`, falling back to `acquireTokenRedirect` on `InteractionRequiredAuthError`. If the three `VITE_ENTRA_*` variables aren't set, the app transparently falls back to the pre-existing manual token-entry seam (`setAccessToken()`), so local/backend-only development never requires an Entra app registration.
-- **App registration and workforce identity**: one corporate single-tenant registration acts as the SPA client and API for Genie itself. Its `access_as_user` scope, `idtyp` optional claim, and `Genie.Admin` user role are centrally owned. Backend identity is canonicalized as `<tid>:<oid>`; display name/email are never used as authorization keys. Normal users remain owner-scoped, while `Genie.Admin` unlocks `GET/DELETE /api/admin/prototypes`.
-- **Generated prototypes**: every new Deploy & Launch run owns a dedicated API Management service, VNet, private DNS zone, internal Container Apps environment, exact CORS policy, resource group, managed identity, RBAC assignments, and Foundry agents. The generated SPA and APIM endpoint require no Entra sign-in or bearer token. APIM enforces exact-origin browser CORS, rate limiting, and correlation before forwarding over the private network; generated FastAPI has no public ingress. Because CORS is a browser control rather than authentication, possession of the APIM URL is sufficient for a non-browser caller. Owner or admin cleanup removes external Foundry/identity artifacts first and then deletes the resource group containing the complete runtime boundary.
-- **Durable inventory and lifecycle**: production uses managed-identity Cosmos access. Startup hydrates deployment runs before readiness and marks interrupted work failed rather than pretending it completed. A cancellable hourly reconciler deletes expired terminal prototypes, stores `deletion_pending`/`deletion_failed` state, and preserves failures for retry. The current environment had zero legacy `Genie Prototype - *` registrations at migration time, so no active Entra registrations were deleted.
+- **Genie API and frontend**: the SPA opens without a redirect or token. Public Container Apps ingress targets FastAPI on port `8000`; the frontend sends no `Authorization` header. `GENIE_CORS_ALLOWED_ORIGINS` restricts browser calls to configured origins, but CORS does not stop non-browser clients that know the API URL.
+- **Internal principal**: every API request resolves to the deterministic `genie-internal-user` principal with `Genie.Admin`. Request headers cannot change that identity. Sessions, governance attribution, prototype ownership, inventory, and cleanup authority are therefore shared across all callers; there is no per-user isolation or meaningful user-role distinction.
+- **Generated prototypes**: every Deploy & Launch run owns a dedicated API Management service, VNet, private DNS zone, internal Container Apps environment, exact CORS policy, resource group, managed identity, RBAC assignments, and Foundry agents. The generated SPA and APIM endpoint require no sign-in or bearer token. APIM enforces exact-origin browser CORS, rate limiting, and correlation before forwarding over the private network; generated FastAPI has no public ingress.
+- **Azure workload identity remains**: removing interactive user authentication does not remove managed identity. `DefaultAzureCredential` still uses the Container App's user-assigned identity for Cosmos DB, Foundry, Azure management, ACR, storage, and other Azure service calls under least-privilege RBAC.
+- **Durable inventory and lifecycle**: production uses managed-identity Cosmos access. Startup hydrates deployment runs before readiness and marks interrupted work failed rather than pretending it completed. A cancellable hourly reconciler deletes expired terminal prototypes, stores `deletion_pending`/`deletion_failed` state, and preserves failures for retry.
 
 ---
 
 ## Deployment strategy
 
-The long-lived Genie **evaluation environment** consists of: (1) Bicep infrastructure-as-code that provisions foundational Azure resources, (2) a .NET 8 MISE gateway and private FastAPI container deployed together for the Genie control plane, and (3) a static React frontend deployed to Azure Static Web Apps. Generated prototypes are separate: each receives its own APIM service and private Container Apps environment. Deployment is split into readiness validation → infrastructure provisioning → agent provisioning → application deployment, matching the repo's fail-closed philosophy: nothing proceeds until the previous step is verified. These deployment instructions reproduce the evaluation environment; they do not supersede the production-readiness work required by the [purpose and use boundary](#purpose-and-use-boundary).
+The long-lived Genie **evaluation environment** consists of: (1) Bicep infrastructure-as-code that provisions foundational Azure resources, (2) a FastAPI container with direct public Container Apps ingress, and (3) a static React frontend deployed to Azure Static Web Apps. Generated prototypes are separate: each receives its own APIM service and private Container Apps environment. Deployment is split into readiness validation → infrastructure provisioning → agent provisioning → application deployment, matching the repo's fail-closed philosophy: nothing proceeds until the previous step is verified. These deployment instructions reproduce the evaluation environment; they do not supersede the production-readiness work required by the [purpose and use boundary](#purpose-and-use-boundary).
 
 ### Deploying into a brand-new Azure subscription
 
@@ -527,69 +519,54 @@ All three require `GENIE_AZURE_FOUNDRY_ENDPOINT` / `GENIE_AZURE_FOUNDRY_PROJECT_
 
 ### Deploying application code (backend + frontend)
 
-**Backend and authentication gateway (Azure Container Apps)**
+**Backend (Azure Container Apps)**
 
-1. Configure a MicrosoftIT Azure DevOps PAT with **Packaging Read** access as `AZURE_DEVOPS_TOKEN`. MISE `2.5.3` is distributed through the restricted `PS-GCM-FieldExperiencePlatform` feed, while public .NET dependencies resolve through Microsoft's `packagefeedproxy.microsoft.io` proxy. Never write the PAT into `NuGet.config`, a Docker layer, logs, or command output.
-
-2. Build and push both immutable images to Azure Container Registry. Pass the feed credential as a secret build argument:
+1. Build and push the immutable FastAPI image to Azure Container Registry:
 
    ```powershell
    az acr build --registry <acr-name> --image genie-backend:<commit> `
      --file backend/Dockerfile <source>
-   az acr build --registry <acr-name> --image genie-auth-gateway:<commit> `
-     --file gateway/Dockerfile --secret-build-arg AZURE_DEVOPS_TOKEN=$env:AZURE_DEVOPS_TOKEN <source>
    ```
 
    `<source>` can be a local directory (`.`) or a git URL (`https://github.com/<org>/<repo>.git#<branch>`, optionally with an embedded token for a private repo: `https://<token>@github.com/...`) — use whichever works reliably in your build environment.
 
-3. Create the Container App initially with the FastAPI container and its existing managed-identity configuration. Before exposing it to users, atomically install the gateway, update both images, and move ingress to port `8080`:
+2. Atomically update the backend image, remove retired gateway containers and auth settings, configure CORS/probes, and target FastAPI port `8000`:
 
    ```powershell
-   ./scripts/deploy_authentication_gateway.ps1 `
+   ./scripts/deploy_backend.ps1 `
      -SubscriptionId <subscription-id> `
      -ResourceGroup <rg> `
      -ContainerAppName genie-backend `
-    -ApplicationTenantId <tenant-id> `
-     -ClientId <api-client-id> `
      -BackendImage <acr-name>.azurecr.io/genie-backend:<commit> `
-     -GatewayImage <acr-name>.azurecr.io/genie-auth-gateway:<commit> `
      -AllowedOrigin https://<static-web-app-host> `
-    -MemoryStoreEndpoint https://<cosmos-account>.documents.azure.com/ `
-    -PrototypeApiGatewayPublisherEmail <publisher-email> `
-    -PrototypeApiGatewayPublisherName "Genie" `
-    -SharedApplicationObjectId <application-object-id> `
-    -SharedServicePrincipalObjectId <service-principal-object-id> `
-    -SharedApplicationRoleId <application-role-id> `
-    -SharedFrontendDomain <container-apps-domain> `
-    -DelegatedScope api://<api-client-id>/access_as_user `
+     -MemoryStoreEndpoint https://<cosmos-account>.documents.azure.com/ `
+     -PrototypeApiGatewayPublisherEmail <publisher-email> `
+     -PrototypeApiGatewayPublisherName "Genie" `
      -RevisionSuffix <unique-suffix>
    ```
 
-   The script preserves the existing FastAPI environment, secrets, probes, and
-   resources; removes the obsolete validation-sidecar setting; adds exactly one
-   gateway container per replica; and changes external ingress from `8000` to
-  `8080` in the same ARM patch. It also enables dedicated per-prototype APIM,
-  supplies its publisher metadata, and derives the acceptance-test principal from
-  the backend's existing `AZURE_CLIENT_ID`. It waits for the new revision, verifies gateway
-   readiness, and confirms that an unauthenticated API request returns `401`.
-   Roll back by running the same script with the previous backend and gateway
-   image tags and a new revision suffix. Never roll back ingress to port `8000`.
+   The script preserves the existing identity, environment, secrets, resources,
+   and unrelated containers; removes `genie-auth-gateway`/`mise-sidecar` plus
+   stale user-auth settings; and applies the image, CORS, probes, and ingress
+   target in one ARM patch. It waits for the exact revision and verifies readiness
+   plus anonymous `GET /sessions`. Roll back by running the same script with the
+   previous backend image tag and a new revision suffix.
 
    > If you're using a **user-assigned** managed identity, retain
    > `AZURE_CLIENT_ID=<identity-client-id>` or `DefaultAzureCredential` cannot
    > resolve which identity to use and the container will crash-loop.
 
-4. Verify:
+3. Verify:
 
    ```powershell
    curl https://<container-app-fqdn>/health/live
    curl https://<container-app-fqdn>/health/ready
-  curl -i https://<container-app-fqdn>/sessions  # must return 401
+  curl -i https://<container-app-fqdn>/sessions  # must return 200
    ```
 
 **Frontend (Azure Static Web Apps)**
 
-1. Set `frontend/.env.production` with `VITE_GENIE_API_BASE_URL` (the Container App FQDN from above) and, for automatic Entra login, `VITE_ENTRA_CLIENT_ID` / `VITE_ENTRA_TENANT_ID` / `VITE_ENTRA_API_SCOPE`.
+1. Set `frontend/.env.production` with `VITE_GENIE_API_BASE_URL` (the Container App FQDN from above).
 2. Build:
 
    ```powershell
@@ -605,14 +582,11 @@ All three require `GENIE_AZURE_FOUNDRY_ENDPOINT` / `GENIE_AZURE_FOUNDRY_PROJECT_
    npx @azure/static-web-apps-cli deploy dist --deployment-token $token --env production
    ```
 
-4. Update the app registration's SPA redirect URIs to include the deployed Static Web App URL (and `http://localhost:5173` for local dev), and grant admin consent for the API's self-referencing scope (see [Authentication](#authentication)).
-
 ### Continuous deployment (GitHub Actions)
 
-`.github/workflows/ci.yml` runs on every push/PR to `master` (the repo's actual default branch — double-check this before ever pointing it at `main`). On a real push to `master`, once the `backend`, `frontend`, and `gateway` CI jobs pass, two deploy jobs run the exact same steps documented above, automatically:
+`.github/workflows/ci.yml` runs on every push/PR to `master` (the repo's actual default branch — double-check this before ever pointing it at `main`). On a real push to `master`, once the `backend` and `frontend` CI jobs pass, two deploy jobs run the exact same steps documented above, automatically:
 
-- **`gateway`** — restores MISE from the authenticated MicrosoftIT feed, builds the .NET 8 gateway, and runs its host-level security tests.
-- **`deploy-backend`** — logs into Azure via OIDC federated credential (no client secret), builds commit-pinned FastAPI and gateway images, then runs `deploy_authentication_gateway.ps1` so both containers and ingress are updated atomically in one revision.
+- **`deploy-backend`** — logs into Azure via OIDC federated credential (no client secret), builds the commit-pinned FastAPI image, then runs `deploy_backend.ps1` so the image, retired-sidecar removal, CORS, probes, and ingress are updated atomically in one revision.
 - **`deploy-frontend`** — builds the frontend and deploys it with `@azure/static-web-apps-cli` using a stored deployment token.
 
 **One-time setup** (already performed for this environment — documented here so it can be reproduced on a new subscription/repo):
@@ -623,8 +597,8 @@ All three require `GENIE_AZURE_FOUNDRY_ENDPOINT` / `GENIE_AZURE_FOUNDRY_PROJECT_
   - **Container Apps Contributor**, scoped to just the `genie-backend-corporate` Container App resource — covers the atomic ARM patch.
 3. The **runtime Genie backend managed identity** has the custom `Genie Prototype Resource Group Operator` role plus API Management Service Contributor, Network Contributor, Container Apps Contributor, Managed Identity Contributor, and Managed Identity Operator at subscription scope. The custom role permits only resource-group read/write/delete; the built-in roles are restricted to their respective provider surfaces. Shared ACR and role-assignment permissions remain constrained to existing resource scopes. New prototypes do not require Microsoft Graph application writes.
 4. The repo's **Settings → Secrets and variables → Actions** has:
-  - **Secrets**: `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID` (identify the federated deployment app — not credentials by themselves), `AZURE_DEVOPS_TOKEN` (MicrosoftIT PAT with Packaging Read only), and `SWA_DEPLOYMENT_TOKEN`.
-  - **Variables**: `AZURE_ACR_NAME`, `AZURE_CONTAINER_APP_NAME`, `AZURE_RESOURCE_GROUP`, `GENIE_GATEWAY_ALLOWED_ORIGIN`, `GENIE_MEMORY_STORE_ENDPOINT`, `GENIE_PROTOTYPE_API_GATEWAY_PUBLISHER_EMAIL`, `GENIE_PROTOTYPE_API_GATEWAY_PUBLISHER_NAME`, `VITE_GENIE_API_BASE_URL`, `VITE_ENTRA_CLIENT_ID`, `VITE_ENTRA_TENANT_ID`, `VITE_ENTRA_API_SCOPE`. `AZURE_TENANT_ID` remains the GitHub OIDC/deployment tenant; `VITE_ENTRA_TENANT_ID` is independently the corporate workforce sign-in tenant used only by Genie.
+  - **Secrets**: `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID` (identify the federated deployment app, not credentials by themselves), and `SWA_DEPLOYMENT_TOKEN`.
+  - **Variables**: `AZURE_ACR_NAME`, `AZURE_CONTAINER_APP_NAME`, `AZURE_RESOURCE_GROUP`, `GENIE_GATEWAY_ALLOWED_ORIGIN`, `GENIE_MEMORY_STORE_ENDPOINT`, `GENIE_PROTOTYPE_API_GATEWAY_PUBLISHER_EMAIL`, `GENIE_PROTOTYPE_API_GATEWAY_PUBLISHER_NAME`, and `VITE_GENIE_API_BASE_URL`.
 
 If this identity/RBAC/secrets setup is ever missing or revoked, `deploy-backend`/`deploy-frontend` fail fast (within seconds, at an explicit "Check required secrets" step) rather than hanging — the `backend`/`frontend` test jobs are unaffected either way and still gate every PR.
 
@@ -639,7 +613,6 @@ If this identity/RBAC/secrets setup is ever missing or revoked, `deploy-backend`
 | Frontend component tests | `npm run test` (Vitest) | Includes static-scan tests guarding against hardcoded demo data and direct Foundry access |
 | Frontend type check | `npm run typecheck` | |
 | Frontend lint | `npm run lint` | `--max-warnings=0` |
-| Authentication gateway | `dotnet test gateway/Genie.AuthenticationGateway.Tests/Genie.AuthenticationGateway.Tests.csproj` | Requires `AZURE_DEVOPS_TOKEN` with MicrosoftIT Packaging Read access |
 | End-to-end | Playwright (`e2e/`) | Scaffolding present; expand per feature as needed |
 
 ---
@@ -658,12 +631,21 @@ If this identity/RBAC/secrets setup is ever missing or revoked, `deploy-backend`
 
 Every deployment to the shared Azure evaluation environment (backend Container App and/or frontend Static Web App) is recorded here: commit, what changed, and why. Update this section as part of the same commit that ships the fix/feature, before pushing to `master` triggers [Continuous deployment](#continuous-deployment-github-actions).
 
+### 2026-09-10 — Anonymous Genie control plane and direct FastAPI ingress
+
+- **No interactive authentication**: removed MSAL, the Entra token validator, bearer headers, app-registration configuration, the .NET MISE project, its private package-feed dependency, and all associated CI jobs. Genie opens directly and generated prototypes remain anonymous.
+- **Shared identity semantics**: every request receives the fixed `genie-internal-user` principal with `Genie.Admin`; caller headers cannot influence identity. Session ownership, governance attribution, prototype inventory, and cleanup authority are shared across all callers.
+- **Direct backend rollout**: `deploy_backend.ps1` atomically removes retired gateway containers and auth settings, deploys the commit-pinned FastAPI image, configures exact-origin CORS and health probes, moves ingress to port `8000`, waits for the exact ready revision, and verifies anonymous API access.
+- **Workload identity retained**: the Container App's user-assigned managed identity and least-privilege RBAC remain the production path to Cosmos DB, Foundry, Azure management, ACR, and other Azure services. CORS is not authentication; the public Genie API URL is intentionally callable outside a browser.
+
 ### 2026-09-10 — Anonymous prototypes behind dedicated API gateways
+
+This prototype-only change was extended later the same day by [Anonymous Genie control plane and direct FastAPI ingress](#2026-09-10--anonymous-genie-control-plane-and-direct-fastapi-ingress). The details below remain as deployment history.
 
 - **Authentication boundary**: Genie itself remains protected by corporate Microsoft Entra ID and its MISE gateway. Newly generated prototype frontends and APIs no longer provision, configure, or require Entra applications, MSAL, bearer tokens, shared callback slots, or acceptance keys.
 - **Private backend**: each prototype still owns a dedicated Standard v2 APIM service, VNet, private DNS zone, and internal Container Apps environment. Generated FastAPI ingress remains private; APIM is the only public API endpoint.
 - **Gateway policy and tests**: APIM retains exact-origin CORS, per-client rate limiting, correlation IDs, and private forwarding. Acceptance tests call the APIM URL directly without credentials. Exact-origin CORS protects browser use but does not authenticate non-browser callers.
-- **Deployment cleanup**: CI no longer requires shared-prototype Entra variables. The rollout script removes stale prototype-auth environment variables while preserving Genie's corporate Entra and MISE settings.
+- **Deployment cleanup**: CI no longer requires shared-prototype Entra variables. At this point the rollout still preserved Genie's corporate Entra and MISE settings; the later entry removes them.
 
 ### 2026-09-10 — Superseded: acceptance testing across APIM and tenant isolation
 
@@ -757,7 +739,7 @@ This intermediate authenticated-prototype design was replaced the same day by [A
 
 ## Known gaps / next phases
 
-- CI/CD (`.github/workflows/ci.yml`) runs backend pytest/ruff, frontend typecheck/lint/vitest, and gateway build/tests on every push/PR to `master`, then auto-deploys the gateway-protected Container App and Static Web App on pushes once all pass. The MISE build/deploy remains fail-closed until `AZURE_DEVOPS_TOKEN` is configured with MicrosoftIT Packaging Read access.
+- CI/CD (`.github/workflows/ci.yml`) runs backend pytest/ruff and frontend typecheck/lint/vitest on every push/PR to `master`, then auto-deploys the direct FastAPI Container App and Static Web App on pushes once both pass.
 - End-to-end Playwright coverage (`e2e/`) is scaffolded but not yet fully built out.
-- Corporate tenant consent policy may require an administrator to approve the production SPA's delegated `access_as_user` permission; the application never bypasses Conditional Access or falls back to another tenant.
+- Genie and prototype API URLs are callable by non-browser clients without authentication. Exact-origin CORS constrains browsers only; use a network perimeter or reintroduce authentication before handling sensitive or multi-user workloads.
 - Shared Collaboration Memory currently has no write call sites anywhere in the backend — nothing ever calls `memory_service.shared.write`. The Requirement Discovery Map's main requirements list (which reads from Shared Memory) is therefore likely empty in real usage today; the agentic-workflow qualification check above was deliberately built to read `WorkflowRunResult.step_results` directly instead, so it works independently of this gap.

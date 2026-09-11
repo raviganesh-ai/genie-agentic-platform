@@ -227,7 +227,7 @@ function platformDiagram() {
   const connectors = [
     arrow("M 190 347 H 290", { label: "HTTPS", labelX: 238, labelY: 333 }),
     arrow("M 470 312 H 490", { color: colors.purple, dashed: true, marker: "arrowPurple" }),
-    arrow("M 470 347 H 710 V 306 H 755", { label: "Bearer token", labelX: 600, labelY: 333 }),
+    arrow("M 470 347 H 710 V 306 H 755", { label: "Anonymous HTTPS", labelX: 600, labelY: 333 }),
     arrow("M 1005 306 H 1030"),
     arrow("M 1093 357 V 395", { label: "Invoke", labelX: 1125, labelY: 378 }),
     arrow("M 900 507 V 565 H 250 V 720 H 290", { color: colors.teal, label: "Agent calls", labelX: 650, labelY: 551 }),
@@ -244,16 +244,16 @@ function platformDiagram() {
     <rect x="1258" y="34" width="294" height="38" rx="5" fill="#FFF4CE" stroke="#D6B656"/>
     ${textBlock(1405, 58, ["MICROSOFT CONFIDENTIAL"], { anchor: "middle", color: "#6B5700", fontSize: 14, fontWeight: 700 })}
     ${boundary({ x: 230, y: 120, width: 1322, height: 796, title: "Azure subscription / Genie resource group", subtitle: "Foundational resources provisioned with Bicep" })}
-    ${zone({ x: 270, y: 165, width: 420, height: 250, title: "Experience and identity", subtitle: "Public web experience; tenant-controlled access", fill: colors.azureLight })}
-    ${zone({ x: 730, y: 165, width: 450, height: 380, title: "Azure Container Apps environment", subtitle: "Public MISE ingress; private application process", icon: "containerApps", fill: colors.greenLight, stroke: colors.green })}
+    ${zone({ x: 270, y: 165, width: 420, height: 250, title: "Experience and access", subtitle: "Public web experience; no sign-in required", fill: colors.azureLight })}
+    ${zone({ x: 730, y: 165, width: 450, height: 380, title: "Azure Container Apps environment", subtitle: "Public FastAPI ingress with exact-origin CORS", icon: "containerApps", fill: colors.greenLight, stroke: colors.green })}
     ${zone({ x: 1215, y: 165, width: 295, height: 650, title: "Platform operations", subtitle: "Identity, images, and telemetry", fill: colors.purpleLight, stroke: colors.purple })}
     ${zone({ x: 270, y: 585, width: 910, height: 275, title: "Azure AI and data services", subtitle: "Private workload dependencies reached with managed identity", fill: colors.tealLight, stroke: colors.teal })}
     ${connectors}
     ${serviceCard({ x: 290, y: 265, width: 180, height: 120, icon: "staticWebApps", title: ["Azure Static", "Web Apps"], subtitle: ["React Mission", "Control UI"] })}
-    ${serviceCard({ x: 490, y: 265, width: 180, height: 120, icon: "appRegistration", title: ["Microsoft", "Entra ID"], subtitle: ["SPA sign-in", "API audiences"], accent: colors.purple })}
+    ${serviceCard({ x: 490, y: 265, width: 180, height: 120, icon: "users", title: ["Anonymous", "internal access"], subtitle: ["No sign-in", "Shared principal"], accent: colors.purple })}
     ${serviceCard({ x: 50, y: 292, width: 140, height: 110, icon: "users", title: "Collaborator", subtitle: ["Internal user"], accent: colors.purple })}
-    ${componentCard({ x: 755, y: 255, width: 250, height: 102, title: ".NET 8 MISE gateway", subtitle: ["Public ingress :8080", "JWT validation + exact CORS"], accent: colors.green })}
-    ${componentCard({ x: 1030, y: 255, width: 125, height: 102, title: "FastAPI", subtitle: ["Private :8000", "JWT validated again"], accent: colors.orange })}
+    ${componentCard({ x: 755, y: 255, width: 250, height: 102, title: "FastAPI API", subtitle: ["Public ingress :8000", "Exact CORS + API routes"], accent: colors.green })}
+    ${componentCard({ x: 1030, y: 255, width: 125, height: 102, title: "Identity", subtitle: ["genie-internal-user", "Genie.Admin"], accent: colors.orange })}
     ${componentCard({ x: 755, y: 395, width: 400, height: 112, title: "Workflow orchestration", subtitle: ["Governance + three-tier memory", "AzureAgentGateway + Deploy & Launch"], accent: colors.azure })}
     ${serviceCard({ x: 1260, y: 400, width: 225, height: 114, icon: "managedIdentity", title: ["User-assigned", "managed identity"], subtitle: ["Least-privilege RBAC"], accent: colors.purple })}
     ${serviceCard({ x: 1260, y: 545, width: 225, height: 114, icon: "containerRegistry", title: ["Azure Container", "Registry"], subtitle: ["Commit-pinned images"], accent: colors.purple })}
@@ -269,7 +269,7 @@ function platformDiagram() {
 
   return svgDocument({
     title: "Genie Azure platform architecture",
-    description: "Azure architecture diagram showing internal users, Static Web Apps, Microsoft Entra ID, a Container Apps MISE and FastAPI runtime, Foundry Agent Service, data services, managed identity, Container Registry, Application Insights, and Azure Monitor.",
+    description: "Azure architecture diagram showing anonymous internal users, Static Web Apps, a direct Container Apps FastAPI runtime, Foundry Agent Service, data services, managed identity, Container Registry, Application Insights, and Azure Monitor.",
     width: 1600,
     height: 960,
     content,

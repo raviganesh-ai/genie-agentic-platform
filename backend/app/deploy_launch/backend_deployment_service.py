@@ -190,7 +190,7 @@ class BackendDeploymentService:
             raise BackendDeploymentError(f"Failed to construct Container Apps client: {exc}") from exc
 
     async def delete(self, *, mission_slug: str) -> None:
-        """Deletes the Container App that owns the backend and MISE gateway."""
+        """Deletes the Container App that owns the generated backend."""
 
         app_name = f"genie-{mission_slug}-backend"
         client = self._container_apps_client()
