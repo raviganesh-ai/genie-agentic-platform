@@ -164,14 +164,32 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Host "Disabling public access to the Container Apps environment..." -ForegroundColor Cyan
-& az containerapp env update `
-    --subscription $SubscriptionId `
-    --ids $environment.id `
-    --public-network-access Disabled `
-    --only-show-errors `
-    -o none
-if ($LASTEXITCODE -ne 0) {
-    throw "Failed to disable Container Apps environment public access."
+$environmentPatch = @{
+    properties = @{
+        publicNetworkAccess = "Disabled"
+    }
+}
+$environmentPatchFile = Join-Path `
+    ([System.IO.Path]::GetTempPath()) `
+    "genie-environment-network-$([guid]::NewGuid().ToString('N')).json"
+try {
+    $environmentPatch | ConvertTo-Json -Depth 10 | Set-Content `
+        -Path $environmentPatchFile `
+        -Encoding utf8
+    & az rest `
+        --method patch `
+        --uri "$($environment.id)?api-version=2025-01-01" `
+        --body "@$environmentPatchFile" `
+        --only-show-errors `
+        -o none
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to disable Container Apps environment public access."
+    }
+}
+finally {
+    if (Test-Path $environmentPatchFile) {
+        Remove-Item -Path $environmentPatchFile -Force
+    }
 }
 
 Write-Host "Creating the Container Apps private endpoint..." -ForegroundColor Cyan

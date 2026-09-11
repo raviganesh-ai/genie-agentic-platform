@@ -54,7 +54,7 @@ def test_cutover_proves_gateway_before_and_after_disabling_public_access():
     private_dns_deploy = script.index(
         "enablePrivateDns=true enablePrivateEndpoint=false"
     )
-    disable_public_access = script.index("--public-network-access Disabled")
+    disable_public_access = script.index('publicNetworkAccess = "Disabled"')
     private_endpoint_deploy = script.index(
         "enablePrivateDns=true enablePrivateEndpoint=true"
     )
@@ -71,6 +71,9 @@ def test_cutover_proves_gateway_before_and_after_disabling_public_access():
     assert 'cutover = "pending"' in script
     assert 'Where-Object { $_ -ne "Approved" }' in script
     assert 'throw "Direct Container Apps ingress still accepts public requests."' in script
+    assert "--method patch" in script
+    assert '"$($environment.id)?api-version=2025-01-01"' in script
+    assert "--public-network-access" not in script
 
 
 def test_ci_passes_the_verified_gateway_to_backend_and_frontend():
