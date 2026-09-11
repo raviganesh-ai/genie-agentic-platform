@@ -92,7 +92,7 @@ function Invoke-PrivateEndpointDeployment {
         -o json 2>$null
     if ($LASTEXITCODE -eq 0) {
         $existingEndpoint = $existingEndpointOutput | ConvertFrom-Json -Depth 100
-        if ($existingEndpoint.properties.provisioningState -eq "Succeeded") {
+        if ($existingEndpoint.provisioningState -eq "Succeeded") {
             Write-Host "Private endpoint already exists; preserving its connection state."
             return
         }
@@ -136,8 +136,8 @@ function Wait-ForPrivateEndpointApproval {
             --resource-group $ResourceGroup `
             --name $PrivateEndpointName
         $connectionStatuses = @(
-            $privateEndpoint.properties.privateLinkServiceConnections |
-                ForEach-Object { $_.properties.privateLinkServiceConnectionState.status }
+            $privateEndpoint.privateLinkServiceConnections |
+                ForEach-Object { $_.privateLinkServiceConnectionState.status }
         )
         if ($connectionStatuses.Count -gt 0 -and @($connectionStatuses | Where-Object { $_ -ne "Approved" }).Count -eq 0) {
             return $privateEndpoint
