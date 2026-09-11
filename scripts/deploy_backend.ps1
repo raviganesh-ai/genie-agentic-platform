@@ -128,7 +128,7 @@ Set-ContainerEnvironmentVariable -Container $backend -Name "GENIE_MEMORY_STORE_B
 Set-ContainerEnvironmentVariable -Container $backend -Name "GENIE_MEMORY_STORE_ENDPOINT" -Value $MemoryStoreEndpoint
 Set-ContainerEnvironmentVariable -Container $backend -Name "GENIE_MEMORY_STORE_DATABASE_NAME" -Value "genie"
 Set-ContainerEnvironmentVariable -Container $backend -Name "GENIE_MEMORY_STORE_CONTAINER_NAME" -Value "memory"
-$backend.probes = @(
+$probes = @(
     [pscustomobject]@{
         type = "Liveness"
         httpGet = [pscustomobject]@{ path = "/health/live"; port = 8000; scheme = "HTTP" }
@@ -146,6 +146,7 @@ $backend.probes = @(
         failureThreshold = 6
     }
 )
+$backend | Add-Member -MemberType NoteProperty -Name probes -Value $probes -Force
 
 $otherContainers = @($app.properties.template.containers | Where-Object {
     $_.name -ne $BackendContainerName -and
