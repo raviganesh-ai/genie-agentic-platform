@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { DiscoveryPage } from "@/features/discovery/DiscoveryPage";
@@ -104,5 +104,105 @@ describe("DiscoveryPage", () => {
       );
       expect(uploadCalls).toHaveLength(2);
     });
+  });
+
+  it("counts only completed files and lets the user remove failed uploads", async () => {
+    const discoveryCase = {
+      id: "discovery-1",
+      session_id: "session-1",
+      owner_user_id: "user-1",
+      model_deployment_ref: "gpt-5-mini",
+      status: "created",
+      source_upload_ids: [],
+      analyzed_upload_ids: [],
+      analysis_revision: 0,
+      personas: [],
+      selected_persona_id: null,
+      deep_dive_findings: [],
+      gap_analysis: null,
+      qa_mode: null,
+      questions: [],
+      proposed_solutions: [],
+      selected_solution_id: null,
+      build_workflow_run_id: null,
+      last_error: null,
+      version: 1,
+      created_at: "2026-09-12T10:00:00Z",
+      updated_at: "2026-09-12T10:00:00Z",
+    };
+    let uploads = [
+      {
+        id: "upload-completed",
+        session_id: "session-1",
+        upload_type: "transcript",
+        file_name: "customer.docx",
+        content_type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        size_bytes: 100,
+        uploaded_by: "user-1",
+        status: "completed",
+        detail: "",
+        uploaded_at: "2026-09-12T10:01:00Z",
+        updated_at: "2026-09-12T10:01:00Z",
+      },
+      {
+        id: "upload-failed",
+        session_id: "session-1",
+        upload_type: "transcript",
+        file_name: "broken.docx",
+        content_type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        size_bytes: 50,
+        uploaded_by: "user-1",
+        status: "failed",
+        detail: "Unable to parse DOCX 'broken.docx'.",
+        uploaded_at: "2026-09-12T10:02:00Z",
+        updated_at: "2026-09-12T10:02:00Z",
+      },
+    ];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const pathname = new URL(input.toString()).pathname;
+      const method = init?.method ?? "GET";
+      if (pathname.endsWith("/workflow-events/stream")) {
+        return new Response(new ReadableStream({ start: (controller) => controller.close() }));
+      }
+      if (pathname.endsWith("/sessions/session-1/uploads/upload-failed") && method === "DELETE") {
+        uploads = uploads.filter((item) => item.id !== "upload-failed");
+        return new Response(null, { status: 204 });
+      }
+      if (pathname.endsWith("/sessions/session-1/uploads") && method === "GET") {
+        return Response.json(uploads);
+      }
+      if (pathname.endsWith("/sessions/session-1/discovery/analyze") && method === "POST") {
+        return Response.json(discoveryCase);
+      }
+      if (pathname.endsWith("/sessions/session-1/discovery")) {
+        return Response.json(discoveryCase, { status: method === "POST" ? 201 : 200 });
+      }
+      throw new Error(`Unexpected request: ${method} ${pathname}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+
+    renderWithProviders(<DiscoveryPage />, { sessionId: "session-1" });
+
+    expect(await screen.findByText("1 source file ready")).toBeInTheDocument();
+    expect(screen.getByText("Unable to parse DOCX 'broken.docx'.")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Find personas" }));
+    await waitFor(() => {
+      const createCall = fetchMock.mock.calls.find(([input, init]) =>
+        new URL(input.toString()).pathname.endsWith("/sessions/session-1/discovery")
+        && init?.method === "POST",
+      );
+      expect(JSON.parse(String(createCall?.[1]?.body))).toMatchObject({
+        source_upload_ids: ["upload-completed"],
+      });
+    });
+
+    await user.click(screen.getByRole("button", { name: "Remove broken.docx" }));
+
+    await waitFor(() => expect(screen.queryByText("broken.docx")).not.toBeInTheDocument());
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining("/sessions/session-1/uploads/upload-failed"),
+      expect.objectContaining({ method: "DELETE" }),
+    );
   });
 });

@@ -12,9 +12,14 @@ is what every downstream agent actually needs.
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, UploadFile
+from fastapi import APIRouter, Depends, Response, UploadFile, status
 
-from app.api.dependencies import get_session_service, get_speech_to_text_service
+from app.api.dependencies import (
+    get_discovery_service,
+    get_session_service,
+    get_speech_to_text_service,
+)
+from app.discovery.service import DiscoveryService
 from app.models.upload_models import UploadMetadata, UploadType
 from app.security.auth_models import AuthenticatedUser
 from app.security.dependencies import get_current_user
@@ -94,3 +99,29 @@ async def get_upload(
     return await session_service.get_upload(
         session_id=session_id, upload_id=upload_id, requesting_user_id=user.user_id
     )
+
+
+@router.delete("/{upload_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_upload(
+    session_id: str,
+    upload_id: str,
+    user: AuthenticatedUser = Depends(get_current_user),
+    session_service: SessionService = Depends(get_session_service),
+    discovery_service: DiscoveryService = Depends(get_discovery_service),
+) -> Response:
+    await session_service.get_upload(
+        session_id=session_id,
+        upload_id=upload_id,
+        requesting_user_id=user.user_id,
+    )
+    await discovery_service.remove_source_upload(
+        session_id=session_id,
+        upload_id=upload_id,
+        requesting_user_id=user.user_id,
+    )
+    await session_service.delete_upload(
+        session_id=session_id,
+        upload_id=upload_id,
+        requesting_user_id=user.user_id,
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

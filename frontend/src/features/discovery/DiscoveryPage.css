@@ -118,9 +118,22 @@
   gap: 12px;
 }
 
-.discovery-upload-list li > span:first-child {
+.discovery-upload-file {
+  display: grid;
+  gap: 2px;
   min-width: 0;
   overflow-wrap: anywhere;
+}
+
+.discovery-upload-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+.discovery-upload-error {
+  color: var(--colorPaletteRedForeground1);
 }
 
 .discovery-upload-next {

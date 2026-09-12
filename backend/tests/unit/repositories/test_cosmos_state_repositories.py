@@ -175,12 +175,18 @@ async def test_cosmos_upload_repository_chunks_transcripts_larger_than_one_item(
         updated_at=now,
     )
 
-    await CosmosUploadRepository(store=store).put(upload)
+    repository = CosmosUploadRepository(store=store)
+    await repository.put(upload)
 
     metadata = store.documents[("uploads", upload.id)]
     assert metadata["transcript_text"] is None
     assert metadata["transcriptChunkCount"] > 1
-    assert await CosmosUploadRepository(store=store).get(upload_id=upload.id) == upload
+    assert await repository.get(upload_id=upload.id) == upload
+
+    await repository.delete(upload_id=upload.id)
+
+    assert await repository.get(upload_id=upload.id) is None
+    assert not any(document.get("upload_id") == upload.id for document in store.documents.values())
 
 
 async def test_cosmos_discovery_repository_survives_restart_and_deletes() -> None:

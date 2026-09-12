@@ -663,6 +663,13 @@ If this identity/RBAC/secrets setup is ever missing or revoked, `deploy-backend`
 
 Every deployment to the shared Azure evaluation environment (backend Container App and/or frontend Static Web App) is recorded here: commit, what changed, and why. Update this section as part of the same commit that ships the fix/feature, before pushing to `master` triggers [Continuous deployment](#continuous-deployment-github-actions).
 
+### 2026-09-12 — Discovery: evidence readiness and file removal
+
+- **Truthful readiness**: Discovery counts only uploads with `completed` ingestion status as ready and sends only those upload IDs to persona analysis. Failed files remain visible with their extraction error so users can diagnose them without treating them as usable evidence.
+- **File-level removal**: every evidence row in Discovery and Uploads now has an accessible remove action. The authenticated DELETE endpoint verifies session ownership and removes both upload metadata and any chunked Cosmos transcript documents.
+- **Derived-state safety**: deleting evidence used by the current Discovery analysis returns the case to evidence gathering and clears personas, questions, proposed solutions, selections, and Build linkage derived from the removed source. Removing evidence that has not been analyzed preserves completed Discovery work.
+- **Verification**: backend repository, API, and state-machine coverage verifies chunk cleanup, record/reference deletion, and derived-state invalidation; frontend component coverage verifies mixed completed/failed readiness, completed-only persona requests, error details, and row removal.
+
 ### 2026-09-12 — Discovery: real DOCX extraction
 
 - **Production diagnosis**: correlation ID `bd16a2a4-ca33-4be5-96b1-e8f9e7004136` reached backend revision `gh77` but Foundry rejected persona extraction with HTTP 429. The four inputs were DOCX files; the upload layer only parsed PDF and otherwise UTF-8-decoded bytes, so ZIP-based Word documents were marked completed and several megabytes of binary mojibake were sent to `gpt-5-1`.

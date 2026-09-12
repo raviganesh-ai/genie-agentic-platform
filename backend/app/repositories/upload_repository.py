@@ -47,6 +47,10 @@ class UploadRepository(Protocol):
         """List every upload recorded for ``session_id``."""
         ...
 
+    async def delete(self, *, upload_id: str) -> None:
+        """Delete an upload and any storage records owned by it."""
+        ...
+
 
 class InMemoryUploadRepository:
     """Process-local ``UploadRepository`` for local development and tests.
@@ -72,6 +76,10 @@ class InMemoryUploadRepository:
             return [
                 record for record in self._records.values() if record.session_id == session_id
             ]
+
+    async def delete(self, *, upload_id: str) -> None:
+        async with self._lock:
+            self._records.pop(upload_id, None)
 
 
 class CosmosUploadRepository:
@@ -130,6 +138,25 @@ class CosmosUploadRepository:
             partition_key=_PARTITION_KEY,
         )
         return list(await asyncio.gather(*(self._to_model(document) for document in documents)))
+
+    async def delete(self, *, upload_id: str) -> None:
+        document = await self._store.read(
+            document_id=upload_id,
+            partition_key=_PARTITION_KEY,
+        )
+        if document is None:
+            return
+        chunk_count = int(document.get(_TRANSCRIPT_CHUNK_COUNT_FIELD, 0))
+        await asyncio.gather(
+            *(
+                self._store.delete(
+                    document_id=self._chunk_id(upload_id, index),
+                    partition_key=_PARTITION_KEY,
+                )
+                for index in range(chunk_count)
+            )
+        )
+        await self._store.delete(document_id=upload_id, partition_key=_PARTITION_KEY)
 
     async def _to_model(self, document: dict[str, object]) -> UploadRecord:
         model_data = {

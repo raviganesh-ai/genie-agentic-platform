@@ -178,6 +178,43 @@ class DiscoveryService:
     async def list_cases(self, *, owner_user_id: str) -> list[DiscoveryCase]:
         return await self._repository.list_for_owner(owner_user_id=owner_user_id)
 
+    async def remove_source_upload(
+        self, *, session_id: str, upload_id: str, requesting_user_id: str
+    ) -> None:
+        discovery_case = await self._repository.get_for_session(session_id=session_id)
+        if discovery_case is None:
+            return
+        self._assert_owner(discovery_case, requesting_user_id)
+        if upload_id not in discovery_case.source_upload_ids:
+            return
+        updates: dict[str, Any] = {
+            "source_upload_ids": [
+                source_id
+                for source_id in discovery_case.source_upload_ids
+                if source_id != upload_id
+            ],
+            "analyzed_upload_ids": [
+                source_id
+                for source_id in discovery_case.analyzed_upload_ids
+                if source_id != upload_id
+            ],
+        }
+        if upload_id in discovery_case.analyzed_upload_ids:
+            updates.update(
+                status="created",
+                personas=[],
+                selected_persona_id=None,
+                deep_dive_findings=[],
+                gap_analysis=None,
+                qa_mode=None,
+                questions=[],
+                proposed_solutions=[],
+                selected_solution_id=None,
+                build_workflow_run_id=None,
+                last_error=None,
+            )
+        await self._save(discovery_case, **updates)
+
     async def analyze_personas(
         self, *, session_id: str, requesting_user_id: str
     ) -> DiscoveryCase:

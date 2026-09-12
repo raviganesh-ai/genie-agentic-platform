@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button, Dropdown, Option, Table, TableBody, TableCell, TableHeader, TableHeaderCell, TableRow } from "@fluentui/react-components";
+import { Delete24Regular } from "@fluentui/react-icons";
 import { PageHeader } from "@/layouts/AppShell";
 import { LoadingState } from "@/components/LoadingState";
 import { ErrorState } from "@/components/ErrorState";
@@ -42,7 +43,13 @@ export function UploadPage(): JSX.Element {
   const [uploadType, setUploadType] = useState<UploadType>("transcript");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const { upload, uploading, error: uploadError } = useUploadAction(sessionId);
+  const {
+    upload,
+    remove: removeUpload,
+    uploading,
+    removingUploadIds,
+    error: uploadError,
+  } = useUploadAction(sessionId);
   const { data: uploads, loading, error, refresh } = useUploads(sessionId);
   // Errors from this run are surfaced via SessionContext's missionError (see
   // handleGeneratePrototype below) since this page navigates away before
@@ -58,6 +65,18 @@ export function UploadPage(): JSX.Element {
       event.target.value = "";
     },
     [upload, uploadType, refresh],
+  );
+
+  const handleRemoveUpload = useCallback(
+    async (uploadId: string) => {
+      try {
+        await removeUpload(uploadId);
+        refresh();
+      } catch {
+        return;
+      }
+    },
+    [refresh, removeUpload],
   );
 
   // `clicked` flips true the instant the button is pressed so the button
@@ -156,6 +175,7 @@ export function UploadPage(): JSX.Element {
               <TableHeaderCell>Type</TableHeaderCell>
               <TableHeaderCell>Status</TableHeaderCell>
               <TableHeaderCell>Uploaded</TableHeaderCell>
+              <TableHeaderCell>Actions</TableHeaderCell>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -165,6 +185,16 @@ export function UploadPage(): JSX.Element {
                 <TableCell>{record.upload_type.replace(/_/g, " ")}</TableCell>
                 <TableCell>{record.status}</TableCell>
                 <TableCell>{new Date(record.uploaded_at).toLocaleString()}</TableCell>
+                <TableCell>
+                  <Button
+                    appearance="subtle"
+                    icon={<Delete24Regular />}
+                    aria-label={`Remove ${record.file_name}`}
+                    title={`Remove ${record.file_name}`}
+                    disabled={removingUploadIds.has(record.id)}
+                    onClick={() => void handleRemoveUpload(record.id)}
+                  />
+                </TableCell>
               </TableRow>
             ))}
           </TableBody>

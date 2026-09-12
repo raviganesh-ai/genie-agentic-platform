@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Badge,
@@ -196,7 +196,17 @@ export function DiscoveryPage(): JSX.Element {
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { data: uploads, loading: loadingUploads, refresh } = useUploads(sessionId);
-  const { upload, uploading, error: uploadError } = useUploadAction(sessionId);
+  const {
+    upload,
+    remove: removeUpload,
+    uploading,
+    removingUploadIds,
+    error: uploadError,
+  } = useUploadAction(sessionId);
+  const readyUploads = useMemo(
+    () => uploads?.filter((item) => item.status === "completed") ?? [],
+    [uploads],
+  );
 
   useEffect(() => {
     let mounted = true;
@@ -271,16 +281,28 @@ export function DiscoveryPage(): JSX.Element {
   }, [refresh, upload, uploadType]);
 
   const analyze = useCallback(async () => {
-    if (!sessionId || !uploads?.length) return;
+    if (!sessionId || !readyUploads.length) return;
     await perform("analyze customer material", async () => {
       await discoveryApi.createOrResume(
         sessionId,
-        uploads.map((item) => item.id),
+        readyUploads.map((item) => item.id),
         selectedModelDeploymentRef ?? undefined,
       );
       return discoveryApi.analyze(sessionId);
     });
-  }, [perform, selectedModelDeploymentRef, sessionId, uploads]);
+  }, [perform, readyUploads, selectedModelDeploymentRef, sessionId]);
+
+  const handleRemoveUpload = useCallback(
+    async (uploadId: string) => {
+      try {
+        await removeUpload(uploadId);
+        await refresh();
+      } catch {
+        return;
+      }
+    },
+    [refresh, removeUpload],
+  );
 
   const startPrototype = useCallback(async () => {
     if (!sessionId) return;
@@ -418,8 +440,23 @@ export function DiscoveryPage(): JSX.Element {
               <ul className="discovery-upload-list" aria-label="Uploaded customer material">
                 {uploads.map((item) => (
                   <li key={item.id}>
-                    <Text>{item.file_name}</Text>
-                    <Badge appearance="outline">{item.status}</Badge>
+                    <div className="discovery-upload-file">
+                      <Text>{item.file_name}</Text>
+                      {item.status === "failed" && item.detail ? (
+                        <Text className="discovery-upload-error" size={200}>{item.detail}</Text>
+                      ) : null}
+                    </div>
+                    <div className="discovery-upload-actions">
+                      <Badge appearance="outline">{item.status}</Badge>
+                      <Button
+                        appearance="subtle"
+                        icon={<Delete24Regular />}
+                        aria-label={`Remove ${item.file_name}`}
+                        title={`Remove ${item.file_name}`}
+                        disabled={Boolean(busy) || removingUploadIds.has(item.id)}
+                        onClick={() => void handleRemoveUpload(item.id)}
+                      />
+                    </div>
                   </li>
                 ))}
               </ul>
@@ -431,9 +468,9 @@ export function DiscoveryPage(): JSX.Element {
           </div>
           <div className="discovery-upload-next">
             <Text>
-              {uploads?.length ?? 0} {(uploads?.length ?? 0) === 1 ? "source file" : "source files"} ready
+              {readyUploads.length} {readyUploads.length === 1 ? "source file" : "source files"} ready
             </Text>
-            <Button appearance="secondary" disabled={Boolean(busy) || !uploads?.length} onClick={() => void analyze()}>
+            <Button appearance="secondary" disabled={Boolean(busy) || !readyUploads.length} onClick={() => void analyze()}>
               {discoveryCase?.analysis_revision ? "Analyze new revision" : "Find personas"}
             </Button>
           </div>

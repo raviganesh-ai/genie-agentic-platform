@@ -17,6 +17,11 @@ export const uploadApi = {
   get(sessionId: string, uploadId: string): Promise<UploadRecord> {
     return apiFetch<UploadRecord>(`/sessions/${sessionId}/uploads/${uploadId}`);
   },
+  delete(sessionId: string, uploadId: string): Promise<void> {
+    return apiFetch<void>(`/sessions/${sessionId}/uploads/${uploadId}`, {
+      method: "DELETE",
+    });
+  },
   getIngestionStatus(sessionId: string, uploadId: string): Promise<UploadRecord> {
     return apiFetch<UploadRecord>(`/sessions/${sessionId}/ingestion/${uploadId}`);
   },

@@ -157,6 +157,16 @@ class SessionService:
         )
         return await self._upload_repository.list_for_session(session_id=session_id)
 
+    async def delete_upload(
+        self, *, session_id: str, upload_id: str, requesting_user_id: str
+    ) -> None:
+        await self.get_upload(
+            session_id=session_id,
+            upload_id=upload_id,
+            requesting_user_id=requesting_user_id,
+        )
+        await self._upload_repository.delete(upload_id=upload_id)
+
     async def get_combined_transcript_text(
         self, *, session_id: str, requesting_user_id: str
     ) -> str:

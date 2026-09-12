@@ -196,6 +196,35 @@ async def test_skip_requires_consent_before_recommendation_and_state_is_durable(
     assert reloaded.proposed_solutions[0].cost_estimate.coverage == "complete"
 
 
+async def test_removing_analyzed_upload_invalidates_derived_discovery_state() -> None:
+    service, _, session_id = await _create_service()
+    analyzed = await service.analyze_personas(
+        session_id=session_id, requesting_user_id="user-1"
+    )
+
+    await service.remove_source_upload(
+        session_id=session_id,
+        upload_id=analyzed.source_upload_ids[0],
+        requesting_user_id="user-1",
+    )
+
+    reloaded = await service.get_case(
+        session_id=session_id, requesting_user_id="user-1"
+    )
+    assert reloaded.status == "created"
+    assert reloaded.source_upload_ids == []
+    assert reloaded.analyzed_upload_ids == []
+    assert reloaded.personas == []
+    assert reloaded.selected_persona_id is None
+    assert reloaded.deep_dive_findings == []
+    assert reloaded.gap_analysis is None
+    assert reloaded.qa_mode is None
+    assert reloaded.questions == []
+    assert reloaded.proposed_solutions == []
+    assert reloaded.selected_solution_id is None
+    assert reloaded.build_workflow_run_id is None
+
+
 async def test_pricing_without_queries_is_unavailable_not_synthetic() -> None:
     estimate = await AzureRetailPricingService(
         endpoint="https://prices.azure.com/api/retail/prices"

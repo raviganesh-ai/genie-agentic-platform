@@ -16,12 +16,15 @@ export function useUploads(sessionId: string | null): AsyncResourceState<UploadR
 
 export interface UploadController {
   upload: (uploadType: UploadType, file: File) => Promise<UploadRecord>;
+  remove: (uploadId: string) => Promise<void>;
   uploading: boolean;
+  removingUploadIds: ReadonlySet<string>;
   error: SafeError | null;
 }
 
 export function useUploadAction(sessionId: string | null): UploadController {
   const [uploading, setUploading] = useState(false);
+  const [removingUploadIds, setRemovingUploadIds] = useState<Set<string>>(new Set());
   const [error, setError] = useState<SafeError | null>(null);
 
   const upload = useCallback(
@@ -41,5 +44,26 @@ export function useUploadAction(sessionId: string | null): UploadController {
     [sessionId],
   );
 
-  return { upload, uploading, error };
+  const remove = useCallback(
+    async (uploadId: string) => {
+      if (!sessionId) throw new Error("No active session");
+      setRemovingUploadIds((current) => new Set(current).add(uploadId));
+      setError(null);
+      try {
+        await uploadApi.delete(sessionId, uploadId);
+      } catch (err) {
+        setError(err instanceof ApiError ? err : { message: "Unable to remove this file." });
+        throw err;
+      } finally {
+        setRemovingUploadIds((current) => {
+          const next = new Set(current);
+          next.delete(uploadId);
+          return next;
+        });
+      }
+    },
+    [sessionId],
+  );
+
+  return { upload, remove, uploading, removingUploadIds, error };
 }
