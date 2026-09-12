@@ -294,14 +294,19 @@ export function DiscoveryPage(): JSX.Element {
 
   const handleRemoveUpload = useCallback(
     async (uploadId: string) => {
+      if (!sessionId) return;
       try {
         await removeUpload(uploadId);
-        await refresh();
+        const [, updatedCase] = await Promise.all([
+          refresh(),
+          discoveryApi.get(sessionId),
+        ]);
+        setDiscoveryCase(updatedCase);
       } catch {
         return;
       }
     },
-    [refresh, removeUpload],
+    [refresh, removeUpload, sessionId],
   );
 
   const startPrototype = useCallback(async () => {

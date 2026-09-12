@@ -204,5 +204,11 @@ describe("DiscoveryPage", () => {
       expect.stringContaining("/sessions/session-1/uploads/upload-failed"),
       expect.objectContaining({ method: "DELETE" }),
     );
+    expect(
+      fetchMock.mock.calls.filter(([input, init]) =>
+        new URL(input.toString()).pathname.endsWith("/sessions/session-1/discovery")
+        && (init?.method ?? "GET") === "GET",
+      ),
+    ).toHaveLength(2);
   });
 });
