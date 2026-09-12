@@ -51,17 +51,7 @@ async def _create_service(
 ) -> tuple[DiscoveryService, _FakeOrchestrator, str]:
     outputs: list[dict[str, object]] = [
         {
-            "personas": [
-                {
-                    "id": extracted_name.casefold().replace(" ", "-"),
-                    "name": extracted_name,
-                    "role_or_context": "Claims reviewer",
-                    "description": "Operations specialist who resolves claims",
-                    "pain_points": ["Manual document review"],
-                    "evidence_references": ["call.txt: claims review"],
-                    "confidence_score": 0.9,
-                }
-            ]
+            "people": [{"name": extracted_name}]
         },
         {
             "deep_dive_findings": ["Review latency is the primary constraint"],
@@ -157,11 +147,11 @@ async def _create_service(
 
 
 async def test_persona_extraction_rejects_role_archetype_not_named_in_evidence() -> None:
-    service, _, session_id = await _create_service(extracted_name="Claims Reviewer")
+    service, _, session_id = await _create_service(extracted_name="Operations Manager")
 
     with pytest.raises(
         DiscoveryStateConflictError,
-        match="not explicitly named people in the evidence: Claims Reviewer",
+        match="not explicitly named people in the evidence: Operations Manager",
     ):
         await service.analyze_personas(
             session_id=session_id,
@@ -175,7 +165,53 @@ async def test_persona_extraction_rejects_role_archetype_not_named_in_evidence()
     assert reloaded.status == "created"
     assert reloaded.personas == []
     assert reloaded.last_error is not None
-    assert "Claims Reviewer" in reloaded.last_error
+    assert "Operations Manager" in reloaded.last_error
+
+
+async def test_find_people_persists_only_unique_names_before_selection() -> None:
+    service, _, session_id = await _create_service()
+
+    case = await service.analyze_personas(
+        session_id=session_id,
+        requesting_user_id="user-1",
+    )
+
+    assert case.status == "awaiting_persona_selection"
+    assert len(case.personas) == 1
+    assert case.personas[0].model_dump() == {
+        "id": "jordan-lee",
+        "name": "Jordan Lee",
+        "role_or_context": None,
+        "description": None,
+        "pain_points": [],
+        "evidence_references": [],
+        "confidence_score": None,
+    }
+
+
+async def test_find_people_accepts_prior_personas_shape_but_discards_analysis() -> None:
+    service, orchestrator, session_id = await _create_service()
+    orchestrator.outputs[0] = json.dumps(
+        {
+            "personas": [
+                {
+                    "id": "model-generated-id",
+                    "name": "Jordan Lee",
+                    "description": "Premature analysis",
+                    "pain_points": ["Premature pain point"],
+                }
+            ]
+        }
+    )
+
+    case = await service.analyze_personas(
+        session_id=session_id,
+        requesting_user_id="user-1",
+    )
+
+    assert case.personas[0].id == "jordan-lee"
+    assert case.personas[0].description is None
+    assert case.personas[0].pain_points == []
 
 
 async def test_skip_requires_consent_before_recommendation_and_state_is_durable() -> None:

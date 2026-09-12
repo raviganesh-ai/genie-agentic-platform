@@ -526,18 +526,14 @@ export function DiscoveryPage(): JSX.Element {
         <section className="discovery-section" aria-labelledby="discovery-personas">
           <div className="discovery-section-header">
             <div>
-              <h2 id="discovery-personas" className="discovery-section-heading">2. People in the evidence</h2>
-              <Text className="discovery-muted">Choose the named person whose situation and pain points Genie should investigate.</Text>
+              <h2 id="discovery-personas" className="discovery-section-heading">2. People named in the files</h2>
+              <Text className="discovery-muted">Select a person to investigate only the situation and pain points they stated.</Text>
             </div>
           </div>
           <div className="discovery-persona-grid">
             {discoveryCase.personas.map((persona) => (
               <article key={persona.id} className={`discovery-card${persona.id === discoveryCase.selected_persona_id ? " selected" : ""}`}>
                 <h3>{persona.name}</h3>
-                {persona.role_or_context ? <Text weight="semibold">{persona.role_or_context}</Text> : null}
-                <Text className="discovery-muted">{persona.description}</Text>
-                <Text weight="semibold" style={{ display: "block", marginTop: 14 }}>Pain points</Text>
-                <ul>{persona.pain_points.map((pain) => <li key={pain}>{pain}</li>)}</ul>
                 <Button
                   appearance={persona.id === discoveryCase.selected_persona_id ? "primary" : "secondary"}
                   disabled={Boolean(busy)}
@@ -555,7 +551,7 @@ export function DiscoveryPage(): JSX.Element {
         <section className="discovery-section" aria-labelledby="discovery-gaps">
           <div>
             <h2 id="discovery-gaps" className="discovery-section-heading">3. Pain points and gaps</h2>
-            <Text className="discovery-muted">Focused on {selectedPersona.name}.</Text>
+            <Text className="discovery-muted">Based only on evidence attributable to {selectedPersona.name}.</Text>
           </div>
           <ul>{discoveryCase.deep_dive_findings.map((finding) => <li key={finding}>{finding}</li>)}</ul>
           <div className="discovery-gap-grid">

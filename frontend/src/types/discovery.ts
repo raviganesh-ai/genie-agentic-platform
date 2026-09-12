@@ -24,10 +24,10 @@ export interface PersonaProfile {
   id: string;
   name: string;
   role_or_context?: string | null;
-  description: string;
+  description?: string | null;
   pain_points: string[];
   evidence_references: string[];
-  confidence_score: number;
+  confidence_score?: number | null;
 }
 
 export interface GapAnalysis {

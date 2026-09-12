@@ -2,11 +2,12 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 from app.discovery.models import (
     AiFeasibility,
@@ -50,19 +51,15 @@ class DiscoveryStateConflictError(RuntimeError):
 
 
 class _NamedPersonDraft(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    id: str = Field(min_length=1)
+    model_config = ConfigDict(extra="ignore")
     name: str = Field(min_length=1)
-    role_or_context: str = Field(min_length=1)
-    description: str = Field(min_length=1)
-    pain_points: list[str] = Field(default_factory=list)
-    evidence_references: list[str] = Field(min_length=1)
-    confidence_score: float = Field(ge=0, le=1)
 
 
-class _PersonasEnvelope(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    personas: list[_NamedPersonDraft]
+class _PeopleEnvelope(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    people: list[_NamedPersonDraft] = Field(
+        validation_alias=AliasChoices("people", "personas")
+    )
 
 
 class _DeepDiveEnvelope(BaseModel):
@@ -260,9 +257,9 @@ class DiscoveryService:
                 variables={"source_material": source_material},
                 discovery_case=discovery_case,
             )
-            parsed = parse_agent_response(result, _PersonasEnvelope)
+            parsed = parse_agent_response(result, _PeopleEnvelope)
             personas = self._validated_named_people(
-                parsed.personas,
+                parsed.people,
                 source_material=source_material,
             )
         except DiscoveryStateConflictError as exc:
@@ -318,11 +315,7 @@ class DiscoveryService:
         invalid_names = [
             draft.name
             for draft in drafts
-            if (
-                " ".join(draft.name.casefold().split()) not in normalized_source
-                or " ".join(draft.name.casefold().split())
-                == " ".join(draft.role_or_context.casefold().split())
-            )
+            if " ".join(draft.name.casefold().split()) not in normalized_source
         ]
         if invalid_names:
             raise DiscoveryStateConflictError(
@@ -330,7 +323,22 @@ class DiscoveryService:
                 + ", ".join(invalid_names)
                 + ". Re-run analysis with evidence that explicitly identifies each person."
             )
-        return [PersonaProfile.model_validate(draft.model_dump()) for draft in drafts]
+        people: list[PersonaProfile] = []
+        seen_names: set[str] = set()
+        for index, draft in enumerate(drafts):
+            normalized_name = " ".join(draft.name.split())
+            comparison_name = normalized_name.casefold()
+            if comparison_name in seen_names:
+                continue
+            seen_names.add(comparison_name)
+            person_id = re.sub(r"[^a-z0-9]+", "-", comparison_name).strip("-")
+            people.append(
+                PersonaProfile(
+                    id=person_id or f"person-{index + 1}",
+                    name=normalized_name,
+                )
+            )
+        return people
 
     async def select_persona(
         self,

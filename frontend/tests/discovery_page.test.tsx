@@ -86,9 +86,11 @@ describe("DiscoveryPage", () => {
     renderWithProviders(<DiscoveryPage />, { sessionId: "session-1" });
 
     await waitFor(() => expect(screen.getByText("Jordan Lee")).toBeInTheDocument());
-    expect(screen.getByText("Claims reviewer")).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "2. People in the evidence" })).toBeInTheDocument();
+    expect(screen.queryByText("Claims reviewer")).not.toBeInTheDocument();
+    expect(screen.queryByText("Manual evidence checks")).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "2. People named in the files" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Selected" })).toBeInTheDocument();
+    expect(screen.getByText("Based only on evidence attributable to Jordan Lee.")).toBeInTheDocument();
     expect(screen.getByText("Manual review may breach the response target")).toBeInTheDocument();
     expect(screen.getByText("The stated SLA conflicts with the manual queue")).toBeInTheDocument();
     expect(screen.getByText("What is the peak monthly volume?")).toBeInTheDocument();
