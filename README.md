@@ -663,6 +663,12 @@ If this identity/RBAC/secrets setup is ever missing or revoked, `deploy-backend`
 
 Every deployment to the shared Azure evaluation environment (backend Container App and/or frontend Static Web App) is recorded here: commit, what changed, and why. Update this section as part of the same commit that ships the fix/feature, before pushing to `master` triggers [Continuous deployment](#continuous-deployment-github-actions).
 
+### 2026-09-11 — Discovery upload usability
+
+- Replaced the detached material button with one visible upload panel that groups material type, a prominent **Choose files** action, empty-state guidance, uploaded filenames/statuses, and the next **Find personas** action.
+- The picker accepts multiple files in one selection and uploads them sequentially through the existing authenticated upload API before refreshing the durable evidence list.
+- Component coverage verifies that the upload action is discoverable and that selecting two files produces two real multipart upload requests.
+
 ### 2026-09-11 — Discovery: complete persona-to-prototype experience
 
 - **Durable domain**: added strongly typed Discovery case state for source/analyzed uploads, revision tracking, personas, persona-scoped findings, gap analysis, consent-aware Q&A, priced solution options, structured Azure architecture graphs, selected solution, and eventual Build handoff.

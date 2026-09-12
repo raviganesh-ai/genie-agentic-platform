@@ -44,6 +44,18 @@ import type { UploadType } from "@/types/upload";
 import { getAzureServiceIcon } from "./azureIconManifest";
 
 const UPLOAD_TYPES: UploadType[] = ["transcript", "audio", "video", "supporting_document"];
+const UPLOAD_TYPE_LABELS: Record<UploadType, string> = {
+  transcript: "Transcript",
+  audio: "Audio recording",
+  video: "Video recording",
+  supporting_document: "Supporting document",
+};
+const UPLOAD_TYPE_ACCEPT: Record<UploadType, string> = {
+  transcript: ".txt,.md,.pdf,text/plain,text/markdown,application/pdf",
+  audio: "audio/*",
+  video: "video/*",
+  supporting_document: ".txt,.md,.pdf,text/plain,text/markdown,application/pdf",
+};
 
 interface AzureNodeData {
   label: string;
@@ -236,11 +248,16 @@ export function DiscoveryPage(): JSX.Element {
   );
 
   const handleUpload = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    await upload(uploadType, file);
-    refresh();
-    event.target.value = "";
+    const files = Array.from(event.target.files ?? []);
+    if (!files.length) return;
+    try {
+      for (const file of files) await upload(uploadType, file);
+    } catch {
+      return;
+    } finally {
+      await refresh();
+      event.target.value = "";
+    }
   }, [refresh, upload, uploadType]);
 
   const analyze = useCallback(async () => {
@@ -343,30 +360,74 @@ export function DiscoveryPage(): JSX.Element {
         <div className="discovery-section-header">
           <div>
             <h2 id="discovery-evidence" className="discovery-section-heading">1. Customer evidence</h2>
-            <Text className="discovery-muted">Add transcripts, recordings, and supporting documents at any time.</Text>
+            <Text className="discovery-muted">Upload the customer material Genie should analyze.</Text>
           </div>
-          <Button
-            appearance="primary"
-            icon={<DocumentAdd24Regular />}
-            disabled={uploading}
-            onClick={() => fileInputRef.current?.click()}
-          >
-            {uploading ? "Uploading..." : "Add material"}
-          </Button>
         </div>
-        <div className="discovery-upload-row">
-          <Dropdown
-            value={uploadType.replace(/_/g, " ")}
-            selectedOptions={[uploadType]}
-            onOptionSelect={(_, data) => setUploadType(data.optionValue as UploadType)}
-          >
-            {UPLOAD_TYPES.map((type) => <Option key={type} value={type}>{type.replace(/_/g, " ")}</Option>)}
-          </Dropdown>
-          <input ref={fileInputRef} type="file" hidden onChange={(event) => void handleUpload(event)} />
-          <Text>{loadingUploads ? "Loading material..." : `${uploads?.length ?? 0} source file(s)`}</Text>
-          <Button appearance="secondary" disabled={Boolean(busy) || !uploads?.length} onClick={() => void analyze()}>
-            {discoveryCase?.analysis_revision ? "Analyze new revision" : "Find personas"}
-          </Button>
+        <div className="discovery-upload-panel">
+          <div className="discovery-upload-row">
+            <div className="discovery-upload-type">
+              <label htmlFor="discovery-upload-type">
+                <Text size={200} weight="semibold">Material type</Text>
+              </label>
+              <Dropdown
+                id="discovery-upload-type"
+                value={UPLOAD_TYPE_LABELS[uploadType]}
+                selectedOptions={[uploadType]}
+                disabled={uploading}
+                onOptionSelect={(_, data) => setUploadType(data.optionValue as UploadType)}
+              >
+                {UPLOAD_TYPES.map((type) => <Option key={type} value={type}>{UPLOAD_TYPE_LABELS[type]}</Option>)}
+              </Dropdown>
+            </div>
+            <div className="discovery-upload-prompt">
+              <DocumentAdd24Regular aria-hidden="true" />
+              <div>
+                <Text weight="semibold" style={{ display: "block" }}>Add customer material</Text>
+                <Text className="discovery-muted" size={200}>Select one or more files. You can add more at any time.</Text>
+              </div>
+            </div>
+            <Button
+              appearance="primary"
+              icon={<DocumentAdd24Regular />}
+              disabled={uploading}
+              onClick={() => fileInputRef.current?.click()}
+            >
+              {uploading ? "Uploading files..." : "Choose files"}
+            </Button>
+            <input
+              ref={fileInputRef}
+              aria-label="Choose customer material files"
+              type="file"
+              accept={UPLOAD_TYPE_ACCEPT[uploadType]}
+              multiple
+              hidden
+              onChange={(event) => void handleUpload(event)}
+            />
+          </div>
+          <div aria-live="polite">
+            {uploads?.length ? (
+              <ul className="discovery-upload-list" aria-label="Uploaded customer material">
+                {uploads.map((item) => (
+                  <li key={item.id}>
+                    <Text>{item.file_name}</Text>
+                    <Badge appearance="outline">{item.status}</Badge>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <Text className="discovery-muted" size={200}>
+                {loadingUploads ? "Loading uploaded material..." : "No files uploaded yet."}
+              </Text>
+            )}
+          </div>
+          <div className="discovery-upload-next">
+            <Text>
+              {uploads?.length ?? 0} {(uploads?.length ?? 0) === 1 ? "source file" : "source files"} ready
+            </Text>
+            <Button appearance="secondary" disabled={Boolean(busy) || !uploads?.length} onClick={() => void analyze()}>
+              {discoveryCase?.analysis_revision ? "Analyze new revision" : "Find personas"}
+            </Button>
+          </div>
         </div>
       </section>
 

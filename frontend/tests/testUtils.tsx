@@ -55,7 +55,7 @@ export function mockFetchSequence(
     sseChunks?: string[];
   }>,
 ) {
-  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
     const url = typeof input === "string" ? input : input.toString();
     const pathname = new URL(url).pathname;
     const handler = handlers.find((h) => pathname.endsWith(h.match));

@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { DiscoveryPage } from "@/features/discovery/DiscoveryPage";
 import { mockFetchSequence, renderWithProviders } from "./testUtils";
 
 describe("DiscoveryPage", () => {
   it("renders resumable persona analysis and asks consent before a recommendation", async () => {
-    mockFetchSequence([
+    const fetchMock = mockFetchSequence([
       {
         match: "/sessions/session-1/discovery",
         response: {
@@ -61,6 +62,22 @@ describe("DiscoveryPage", () => {
         match: "/sessions/session-1/uploads",
         response: [],
       },
+      {
+        match: "/sessions/session-1/uploads/transcript",
+        response: {
+          id: "upload-new",
+          session_id: "session-1",
+          upload_type: "transcript",
+          file_name: "customer-call.txt",
+          content_type: "text/plain",
+          size_bytes: 16,
+          uploaded_by: "user-1",
+          status: "received",
+          detail: "",
+          uploaded_at: "2026-09-01T10:06:00Z",
+          updated_at: "2026-09-01T10:06:00Z",
+        },
+      },
     ]);
 
     renderWithProviders(<DiscoveryPage />, { sessionId: "session-1" });
@@ -69,5 +86,20 @@ describe("DiscoveryPage", () => {
     expect(screen.getByText("What is the peak monthly volume?")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Yes, recommend" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "No, leave unanswered" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Choose files" })).toBeInTheDocument();
+    expect(screen.getByText("No files uploaded yet.")).toBeInTheDocument();
+
+    await userEvent.setup().upload(screen.getByLabelText("Choose customer material files"), [
+      new File(["first transcript"], "customer-call.txt", { type: "text/plain" }),
+      new File(["second transcript"], "workshop.txt", { type: "text/plain" }),
+    ]);
+
+    await waitFor(() => {
+      const uploadCalls = fetchMock.mock.calls.filter(([input, init]) =>
+        new URL(input.toString()).pathname.endsWith("/uploads/transcript")
+        && init?.method === "POST",
+      );
+      expect(uploadCalls).toHaveLength(2);
+    });
   });
 });
