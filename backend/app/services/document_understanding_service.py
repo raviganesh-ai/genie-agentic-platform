@@ -24,6 +24,9 @@ __all__ = [
 
 _COGNITIVE_SERVICES_SCOPE = "https://cognitiveservices.azure.com/.default"
 _IMAGE_EXTENSIONS = {".bmp", ".heic", ".heif", ".jpe", ".jpeg", ".jpg", ".png"}
+_OPEN_XML_EXTENSIONS = {".docm", ".docx", ".pptm", ".pptx", ".xlsm", ".xlsx"}
+_OLE_COMPOUND_MAGIC = bytes.fromhex("d0cf11e0a1b11ae1")
+_ENCRYPTED_PACKAGE_MARKER = "EncryptedPackage".encode("utf-16-le")
 _SUPPORTED_EXTENSIONS = _IMAGE_EXTENSIONS | {
     ".csv",
     ".doc",
@@ -69,6 +72,20 @@ class DocumentUnderstandingService(Protocol):
     ) -> str: ...
 
 
+def _reject_protected_open_xml(*, content: bytes, file_name: str) -> None:
+    extension = Path(file_name).suffix.lower()
+    if (
+        extension in _OPEN_XML_EXTENSIONS
+        and content.startswith(_OLE_COMPOUND_MAGIC)
+        and _ENCRYPTED_PACKAGE_MARKER in content
+    ):
+        raise DocumentUnderstandingError(
+            f"Office document '{file_name}' is encrypted or rights-protected and cannot be "
+            "analyzed. Open it in Microsoft Office with authorized access and, if policy "
+            "permits, save an unprotected PDF or Office copy before uploading it again."
+        )
+
+
 class LocalDocumentUnderstandingService:
     """Deterministic extraction for local development and tests only."""
 
@@ -76,6 +93,7 @@ class LocalDocumentUnderstandingService:
         return None
 
     async def extract(self, *, content: bytes, content_type: str, file_name: str) -> str:
+        _reject_protected_open_xml(content=content, file_name=file_name)
         try:
             return extract_text(content=content, content_type=content_type, file_name=file_name)
         except DocumentTextExtractionError as exc:
@@ -200,6 +218,7 @@ class AzureContentUnderstandingService:
             )
         if not content:
             raise DocumentUnderstandingError(f"Evidence file '{file_name}' is empty.")
+        _reject_protected_open_xml(content=content, file_name=file_name)
 
         credential = self._credential
         owns_credential = credential is None

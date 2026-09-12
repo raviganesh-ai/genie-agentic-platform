@@ -224,6 +224,49 @@ async def test_unsupported_binary_type_is_rejected_before_azure_call() -> None:
     await service._http_client.aclose()  # type: ignore[union-attr]
 
 
+async def test_protected_docx_is_rejected_with_actionable_message_before_azure_call() -> None:
+    async def handler(_: httpx.Request) -> httpx.Response:
+        pytest.fail("Protected Office content must not be sent to Azure")
+
+    protected_docx = (
+        bytes.fromhex("d0cf11e0a1b11ae1")
+        + b"\x00" * 64
+        + "EncryptedPackage".encode("utf-16-le")
+    )
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    service = _service(client._transport)
+
+    with pytest.raises(
+        DocumentUnderstandingError,
+        match="encrypted or rights-protected.*save an unprotected PDF or Office copy",
+    ):
+        await service.extract(
+            content=protected_docx,
+            content_type=(
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            ),
+            file_name="protected.docx",
+        )
+    await service._http_client.aclose()  # type: ignore[union-attr]
+
+
+async def test_local_service_rejects_protected_docx_with_same_actionable_message() -> None:
+    protected_docx = (
+        bytes.fromhex("d0cf11e0a1b11ae1")
+        + b"\x00" * 64
+        + "EncryptedPackage".encode("utf-16-le")
+    )
+
+    with pytest.raises(DocumentUnderstandingError, match="encrypted or rights-protected"):
+        await LocalDocumentUnderstandingService().extract(
+            content=protected_docx,
+            content_type=(
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            ),
+            file_name="protected.docx",
+        )
+
+
 def test_factory_uses_local_extraction_only_when_explicitly_allowed() -> None:
     local = create_document_understanding_service(Settings(allow_local_agents=True))
     production = create_document_understanding_service(
