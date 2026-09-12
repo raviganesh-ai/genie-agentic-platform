@@ -225,8 +225,7 @@ Deploy & Launch is deliberately **not** an LLM-narrative workflow step — it is
 | 5 | `deploy-frontend-app` | Deploy Frontend | Builds the mission UI under Node 22, runs the pinned Apache-2.0 Impeccable `3.6.0` detector over generated TSX/CSS, fails closed on deterministic design anti-patterns, provisions a prototype-owned public Consumption Container Apps environment, then deploys a mission-specific frontend Container App. APIM's deny-by-default bootstrap CORS origin is replaced with the returned exact HTTPS origin |
 | 6 | `generate-test-suite` | Generate Requirement Acceptance Tests | Test Generation Agent writes real black-box tests against the deployed prototype's actual mission URLs (no mocks/patches), targeting every approved requirement id. `MISSION_BACKEND_URL` is the dedicated HTTPS APIM endpoint and generated code receives no authentication credential. A requirement-coverage repair loop retries omitted IDs up to `GENIE_DEPLOYMENT_FIDELITY_MAX_REPAIR_ATTEMPTS`; after that, executable coverage must meet `GENIE_DEPLOYMENT_FIDELITY_MIN_COVERAGE_PERCENT` (default 90%) and every omitted ID remains an explicit fidelity gap. For a real deployed backend, `validate_real_action_tests` also rejects test doubles in place of real HTTP calls |
 | 7 | `execute-test-suite` | Requirement Fidelity Gate | Generated tests call the dedicated APIM endpoint directly without Entra or an acceptance key. Launch requires the configured executable-coverage threshold and 100% passing evidence for all executable requirement tests. Failed, errored, skipped, timed-out, or unobserved executable tests still trigger automatic regeneration and redeployment up to `GENIE_DEPLOYMENT_FIDELITY_MAX_REPAIR_ATTEMPTS` times (default 3), then fail closed |
-| 8 | `run-security-scan` | Security Scan (Backend & Frontend) | Real security scan of the deployed backend and frontend artifacts |
-| 9 | `launch-mission` | Launch | Mints the customer-facing launch link once every prior step has passed |
+| 8 | `launch-mission` | Launch | Mints the customer-facing launch link immediately after executable coverage meets the configured threshold (default 90%) and all executable evidence passes |
 
 Each step's real status (`pending` → `running` → `completed`/`failed`/`skipped`) streams live to the Deploy & Launch page so the human watches actual provisioning happen — never a simulated progress bar. The **Requirement Fidelity Gate** (step 7) is Genie's last line of defense: it never trusts the Build Agent's or Test Generation Agent's own claims of completeness, it only trusts pytest actually passing against the real running prototype.
 
@@ -652,6 +651,13 @@ If this identity/RBAC/secrets setup is ever missing or revoked, `deploy-backend`
 ## Deploy log
 
 Every deployment to the shared Azure evaluation environment (backend Container App and/or frontend Static Web App) is recorded here: commit, what changed, and why. Update this section as part of the same commit that ships the fix/feature, before pushing to `master` triggers [Continuous deployment](#continuous-deployment-github-actions).
+
+### 2026-09-11 — Fidelity launches directly; generated UIs use Impeccable
+
+- **Direct launch decision**: a Deploy & Launch run now proceeds directly from the Requirement Fidelity Gate to Launch once executable coverage meets the configured threshold (default 90%) and all generated executable evidence passes. `run-security-scan` remains a legacy deserialization value for historical persisted runs, but is no longer created or executed for new runs, so it cannot block or appear to loop an otherwise working prototype.
+- **Security posture**: the earlier independent Security Assessment Agent review remains part of build governance. Runtime readiness and black-box acceptance tests still fail closed before launch; this change removes only the redundant post-fidelity static-scan gate from the provisioning sequence.
+- **Professional prototype UI decision**: generated mission UIs must follow the [Impeccable](https://impeccable.style/) design methodology. Both Build Agent generation paths and targeted UI regeneration already carry the Impeccable design contract, and every generated frontend pins `impeccable@3.6.0` and runs `impeccable detect MissionApp.tsx src/` before Vite builds it. This is an executable quality gate, not a styling suggestion.
+- **Verification**: focused pipeline tests prove that an injected blocking scanner is never called and that the final two steps are Requirement Fidelity Gate → Launch. Frontend type checking and build verify the displayed mission trace matches the backend order.
 
 ### 2026-09-11 — Mission agents use the user's approved model; the Build Agent gets a real model catalog
 

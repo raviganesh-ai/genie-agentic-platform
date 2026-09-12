@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { renderWithProviders, mockFetchSequence } from "./testUtils";
 import { FIXTURE_SESSION_ID, FIXTURE_WORKFLOW_RUN_ID } from "./fixtures";
 import { DeployLaunchPage } from "@/features/deploy-launch/DeployLaunchPage";
-import { DEPLOYMENT_STEP_NAMES } from "@/types/deployLaunch";
+import { DEPLOYMENT_STEP_NAMES, DEPLOYMENT_STEP_ORDER } from "@/types/deployLaunch";
 import type { DeploymentPipelineRun } from "@/types/deployLaunch";
 
 function buildPipelineRun(overrides: Partial<DeploymentPipelineRun> = {}): DeploymentPipelineRun {
@@ -63,10 +63,11 @@ describe("DeployLaunchPage", () => {
     // The whole plan is visible immediately - no generic "Starting..."
     // spinner - every step name shows up front with a "Not Started" status.
     await waitFor(() => {
-      for (const name of Object.values(DEPLOYMENT_STEP_NAMES)) {
-        expect(screen.getByText(name)).toBeInTheDocument();
+      for (const stepId of DEPLOYMENT_STEP_ORDER) {
+        expect(screen.getByText(DEPLOYMENT_STEP_NAMES[stepId])).toBeInTheDocument();
       }
     });
+    expect(screen.queryByText("Security Scan (Backend & Frontend)")).not.toBeInTheDocument();
     expect(screen.getAllByText("Not Started").length).toBeGreaterThan(0);
     expect(screen.queryByText("Starting Deploy & Launch automatically...")).not.toBeInTheDocument();
   });

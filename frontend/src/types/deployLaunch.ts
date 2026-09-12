@@ -20,7 +20,6 @@ export const DEPLOYMENT_STEP_ORDER: DeploymentStepId[] = [
   "deploy-frontend-app",
   "generate-test-suite",
   "execute-test-suite",
-  "run-security-scan",
   "launch-mission",
 ];
 

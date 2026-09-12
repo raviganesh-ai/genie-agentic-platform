@@ -51,8 +51,9 @@ DeploymentStepId = Literal[
     "launch-mission",
 ]
 
-# The fixed, ordered pipeline - every run executes exactly these nine steps,
-# in this exact order, each with a meaningful customer-facing name.
+# The fixed, ordered pipeline for new runs. ``run-security-scan`` remains a
+# valid legacy step id so persisted historical runs still deserialize, but a
+# passing Requirement Fidelity Gate now proceeds directly to Launch.
 DEPLOYMENT_STEP_ORDER: tuple[DeploymentStepId, ...] = (
     "generate-access-policy",
     "provision-foundry-agents",
@@ -61,7 +62,6 @@ DEPLOYMENT_STEP_ORDER: tuple[DeploymentStepId, ...] = (
     "deploy-frontend-app",
     "generate-test-suite",
     "execute-test-suite",
-    "run-security-scan",
     "launch-mission",
 )
 

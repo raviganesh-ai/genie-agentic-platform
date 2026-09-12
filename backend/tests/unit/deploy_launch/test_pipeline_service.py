@@ -402,7 +402,7 @@ async def test_full_pipeline_runs_every_step(tmp_path: Path):
     service = _build_service(test_output_text=_PASSING_TEST_OUTPUT, tmp_path=tmp_path)
 
     # start() returns as soon as the run is created (status "running") - the
-    # nine steps execute in a background task, exactly like Architecture
+    # Eight steps execute in a background task, exactly like Architecture
     # Studio's build-solution kickoff - so tests must await that background
     # work to finish rather than expecting the steps to have already run by
     # the time start() itself returns.
@@ -416,7 +416,7 @@ async def test_full_pipeline_runs_every_step(tmp_path: Path):
     assert run.frontend_url is not None
     assert run.launch_url == run.frontend_url
     assert run.test_summary is not None
-    assert run.security_findings_count is not None
+    assert run.security_findings_count is None
 
     # Per-agent Foundry provisioning progress must be reported on the run
     # itself (not just an aggregate step status), each landing "completed"
@@ -539,29 +539,27 @@ def test_req_001_uses_public_gateway():
     assert "authenticate_request" not in generated_main
 
 
-class _FailOnceSecurityScanService:
+class _BlockingSecurityScanService:
     def __init__(self) -> None:
         self.calls = 0
 
     async def scan(self, *, build_root: Path) -> SecurityScanResult:
         del build_root
         self.calls += 1
-        if self.calls == 1:
-            return SecurityScanResult(
-                ran=True,
-                findings=[
-                    SecurityFinding(
-                        file="generated.py",
-                        severity="high",
-                        description="simulated blocking finding",
-                    )
-                ],
-                summary="simulated blocking finding",
-            )
-        return SecurityScanResult(ran=True, summary="No findings.")
+        return SecurityScanResult(
+            ran=True,
+            findings=[
+                SecurityFinding(
+                    file="generated.py",
+                    severity="high",
+                    description="simulated blocking finding",
+                )
+            ],
+            summary="simulated blocking finding",
+        )
 
 
-async def test_retry_after_deployment_reuses_anonymous_prototype(tmp_path: Path):
+async def test_passing_fidelity_launches_without_running_security_scan(tmp_path: Path):
     test_output = '''
 ```python
 # REQ-001
@@ -571,7 +569,7 @@ def test_req_001_uses_live_prototype():
     assert os.environ["MISSION_BACKEND_URL"].startswith("https://")
 ```
 '''
-    security_scan_service = _FailOnceSecurityScanService()
+    security_scan_service = _BlockingSecurityScanService()
     service = DeploymentPipelineService(
         orchestrator=_FakeOrchestrator(test_output_text=test_output),  # type: ignore[arg-type]
         session_service=_FakeSessionService(),  # type: ignore[arg-type]
@@ -586,24 +584,18 @@ def test_req_001_uses_live_prototype():
         build_workspace_root=tmp_path,
     )
 
-    first_attempt = await service.start(
+    run = await service.start(
         session_id="session-1", requesting_user_id="user-1", workflow_run_id="run-1"
     )
-    first_attempt = await service.wait_for_run(first_attempt.id)
-    failed_step = next(step for step in first_attempt.steps if step.status == "failed")
+    run = await service.wait_for_run(run.id)
 
-    assert failed_step.step_id == "run-security-scan"
-
-    retried = await service.start(
-        session_id="session-1",
-        requesting_user_id="user-1",
-        workflow_run_id="run-1",
-        resume_from_step=failed_step.step_id,
-    )
-    retried = await service.wait_for_run(retried.id)
-
-    assert retried.status == "completed"
-    assert retried.status == "completed"
+    assert run.status == "completed"
+    assert run.launch_url == run.frontend_url
+    assert security_scan_service.calls == 0
+    assert [step.step_id for step in run.steps][-2:] == [
+        "execute-test-suite",
+        "launch-mission",
+    ]
 
 
 class _ModelRecordingMissionAgentService(NullMissionAgentProvisioningService):

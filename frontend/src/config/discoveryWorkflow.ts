@@ -67,7 +67,7 @@ export const MISSION_PHASES: MissionPhase[] = [
   },
 ];
 
-// Deploy & Launch's own nine steps (app.deploy_launch.pipeline_service,
+// Deploy & Launch's own eight steps (app.deploy_launch.pipeline_service,
 // DEPLOYMENT_STEP_ORDER/DEPLOYMENT_STEP_NAMES) are a separate real pipeline
 // that runs AFTER this discovery workflow, but it publishes its own live
 // step_started/step_completed/step_failed events onto the SAME session-wide
@@ -85,7 +85,6 @@ const DEPLOYMENT_PIPELINE_PHASES: MissionPhase[] = [
   { stepId: "deploy-frontend-app", label: "Deploy Frontend" },
   { stepId: "generate-test-suite", label: "Generate Functional & Regression Tests" },
   { stepId: "execute-test-suite", label: "Execute Full Fledge Testing" },
-  { stepId: "run-security-scan", label: "Security Scan (Backend & Frontend)" },
   { stepId: "launch-mission", label: "Launch" },
 ].map(({ stepId, label }) => ({
   stepId,
@@ -96,6 +95,6 @@ const DEPLOYMENT_PIPELINE_PHASES: MissionPhase[] = [
 }));
 
 /** Full end-to-end mission trace: discovery's 3 phases followed by Deploy &
- * Launch's 9 real pipeline steps - what the Triage panel's Mission Trace
+ * Launch's 8 real pipeline steps - what the Triage panel's Mission Trace
  * renders, so it never appears to "end" right after Build. */
 export const END_TO_END_MISSION_PHASES: MissionPhase[] = [...MISSION_PHASES, ...DEPLOYMENT_PIPELINE_PHASES];
