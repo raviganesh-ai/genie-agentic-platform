@@ -134,6 +134,24 @@ workflows:
 
     enabled: true
 
+  - id: discovery-build-workflow
+    name: Discovery Build Workflow
+    description: >-
+      Builds a selected, already-analyzed Discovery solution without rerunning
+      Requirements or Architecture.
+    steps:
+      - id: build-solution
+        agent_id: genie-orchestrator
+        description: Generate the runnable UI and agent workflow for the selected solution.
+        depends_on: []
+        prompt_id: orchestrator-build-phase-v1
+        allowed_tool_names:
+          - call_build_agent
+        variable_sources:
+          available_models: model-catalog
+          previous_build_output: step:build-solution
+    enabled: true
+
   - id: debugging-workflow
     name: Debugging Workflow
     description: >-

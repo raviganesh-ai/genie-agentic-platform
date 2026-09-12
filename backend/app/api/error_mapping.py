@@ -23,7 +23,7 @@ from app.deploy_launch.code_materializer import MaterializedCodeError
 from app.deploy_launch.frontend_deployment_service import FrontendDeploymentError
 from app.deploy_launch.mission_agent_provisioning_service import MissionAgentProvisioningError
 from app.deploy_launch.pipeline_service import DeploymentPipelineStepFailedError
-from app.discovery.service import DiscoveryCaseNotFoundError
+from app.discovery.service import DiscoveryCaseNotFoundError, DiscoveryStateConflictError
 from app.governance.approval_service import (
     ApprovalAlreadyDecidedError,
     ApprovalExpiredError,
@@ -70,6 +70,7 @@ _CONFLICT_ERRORS = (
     ApprovalAlreadyDecidedError,
     ApprovalExpiredError,
     MemoryAccessDeniedError,
+    DiscoveryStateConflictError,
 )
 
 _UNPROCESSABLE_ERRORS = (MaterializedCodeError, DeploymentPipelineStepFailedError)

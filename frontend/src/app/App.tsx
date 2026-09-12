@@ -9,6 +9,7 @@ import { ArchitectureStudioPage } from "@/features/architecture-studio/Architect
 import { WorkshopPage } from "@/features/workshop-center/WorkshopPage";
 import { RequirementFidelityGatePage } from "@/features/requirement-fidelity/RequirementFidelityGatePage";
 import { DeployLaunchPage } from "@/features/deploy-launch/DeployLaunchPage";
+import { DiscoveryPage } from "@/features/discovery/DiscoveryPage";
 
 const router = createBrowserRouter([
   {
@@ -17,6 +18,7 @@ const router = createBrowserRouter([
     children: [
       { index: true, element: <LandingPage /> },
       { path: "upload", element: <UploadPage /> },
+      { path: "discovery", element: <DiscoveryPage /> },
       {
         path: "requirements",
         element: <RequirementsHubPage />,

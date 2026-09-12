@@ -149,7 +149,16 @@ Workflows (`config/workflows/registry.yaml`) define ordered, dependency-graphed 
   3. `build-solution` (prompt `orchestrator-build-phase-v1`, tool `call_build_agent`, human-gated) — generate the real UI + agent + orchestrator code for the approved architecture. On a retried attempt, this step's own prior output is fed back in as `previous_build_output` so `call_build_agent` skips regenerating any component that already succeeded, instead of rebuilding the whole mission from scratch.
 
   Test generation and its real execution are deliberately **not** steps in this workflow — they happen later, inside the separate [Deploy & Launch pipeline](#deploy--launch-pipeline), against the mission's actually-deployed build.
+- **`discovery-build-workflow`** — a Build-only path used after a user selects a fully analyzed Discovery solution. The approved Discovery `requirements_text` and `architecture_text` are supplied directly to the existing `genie-orchestrator` → `build-agent` path; Requirements and Architecture are not rerun or represented by synthetic completed steps. Deploy & Launch reads those durable Build inputs when the legacy upstream steps are absent.
 - **`debugging-workflow`** — a single `diagnose-failure` step (agent `debugging-agent`, prompt `failure-diagnosis-v1`) triggered on a detected workflow/agent execution failure, executed through the exact same `AzureAgentGateway` path as every other workflow (never a bespoke/local diagnostic path).
+
+### Persona-led Discovery
+
+The Landing page offers two distinct paths: **Start Prototype** enters the original Requirements-first workflow, while **Start Discovery** opens one durable progressive workspace. Discovery accepts the same transcript, recording, and supporting-document uploads, extracts evidence-grounded personas through the Foundry-hosted Requirements Analyst, and lets the user select one persona for pain-point, information-gap, assumption, and clarification-question analysis.
+
+Questions can be answered in a batch or one at a time. Skipping a question records only a recommendation offer; Genie calls the Architecture Designer for a Microsoft/Azure best-practice recommendation only after the user explicitly accepts that offer. The user can stop after Q&A and resume the same Cosmos-backed case later, add customer material for a new analysis revision, or delete an abandoned pre-Build case together with only its case-prefixed Shared Collaboration Memory records.
+
+Probable solutions include Build-ready requirements and architecture, tradeoffs, AI feasibility, a React Flow architecture diagram backed by a fixed allowlist of local [official Microsoft Azure Architecture Icons](https://learn.microsoft.com/azure/architecture/icons/), and deterministic cost estimates. The agent proposes service/SKU/region/usage assumptions but never supplies prices; Genie resolves unit prices through the Azure Retail Prices API and labels coverage `complete`, `partial`, or `unavailable` instead of inventing missing costs.
 
 ### Agentic-workflow qualification check
 
@@ -354,6 +363,7 @@ All backend configuration is via environment variables prefixed `GENIE_` (pydant
 | `GENIE_USE_SYNTHETIC_DATA` | `true` | Must be `false` in production |
 | `GENIE_AZURE_FOUNDRY_ENDPOINT` | *(none)* | `https://<account>.services.ai.azure.com/api/projects/<project>` |
 | `GENIE_AZURE_FOUNDRY_PROJECT_NAME` | *(none)* | Foundry project name |
+| `GENIE_AZURE_RETAIL_PRICES_ENDPOINT` | `https://prices.azure.com/api/retail/prices` | Public Azure Retail Prices API used for deterministic Discovery estimates |
 | `GENIE_MEMORY_STORE_BACKEND` | `in_memory` | `in_memory` \| `cosmos_db` — production requires `cosmos_db` |
 | `GENIE_MEMORY_STORE_ENDPOINT` | *(none)* | Required in production when backend is `cosmos_db` |
 | `GENIE_MEMORY_STORE_DATABASE_NAME` | `genie` | Cosmos database containing durable sessions, upload text, workflow checkpoints, and prototype inventory |
@@ -653,13 +663,16 @@ If this identity/RBAC/secrets setup is ever missing or revoked, `deploy-backend`
 
 Every deployment to the shared Azure evaluation environment (backend Container App and/or frontend Static Web App) is recorded here: commit, what changed, and why. Update this section as part of the same commit that ships the fix/feature, before pushing to `master` triggers [Continuous deployment](#continuous-deployment-github-actions).
 
-### 2026-09-11 — Discovery Phase 1: durable case lifecycle
+### 2026-09-11 — Discovery: complete persona-to-prototype experience
 
 - **Durable domain**: added strongly typed Discovery case state for source/analyzed uploads, revision tracking, personas, persona-scoped findings, gap analysis, consent-aware Q&A, priced solution options, structured Azure architecture graphs, selected solution, and eventual Build handoff.
 - **Persistence**: production uses the existing managed-identity Cosmos document store with a dedicated logical `discovery-cases` partition and `discovery-case` record type. Local development and tests use an isolated in-memory repository. Discovery cases survive backend restarts without provisioning another physical Cosmos container.
-- **Authenticated lifecycle API**: `POST /sessions/{session_id}/discovery` creates or resumes the session's single case and validates every supplied upload belongs to that session; `GET /discovery` lists the caller's cases; `GET /sessions/{session_id}/discovery` resumes one case; and `DELETE /sessions/{session_id}/discovery` hard-deletes it. Ownership inconsistencies fail closed.
-- **Scope**: this is the persistence/API foundation only. Persona extraction, deep analysis, Q&A, pricing, diagrams, and Build handoff remain later Discovery phases and are not represented as working behavior yet.
-- **Verification**: focused repository/service/API tests cover in-memory isolation, Cosmos restart recovery, owner filtering, idempotent resume, incremental upload merging, invalid upload rejection, ownership failure, and deletion.
+- **Foundry state machine**: authenticated transition APIs now run persona extraction and deep analysis through `requirements-analyst`, and consented recommendations plus probable-solution generation through `architecture-designer`. Strict JSON schemas, ordered durable states, revision-safe reanalysis, and retryable failure states fail closed on malformed agent output or invalid transitions.
+- **Consent and governance**: skipped questions first become `recommendation_offered`; no recommendation is generated until the user explicitly accepts. Persona, gap/Q&A, and solution artifacts are revisioned in Shared Collaboration Memory with normal policy and governance events. Deleting an abandoned case performs a governed, prefix-scoped cascade without touching unrelated session memory.
+- **Real pricing and diagrams**: pricing assumptions are resolved against the public Azure Retail Prices API, with partial/unavailable coverage shown when records cannot be verified and no synthetic fallback. Architecture options render in React Flow using a local allowlist copied from Microsoft's official Azure Architecture Icons V24 pack.
+- **Direct Build handoff**: selecting a solution starts `discovery-build-workflow`, which reuses the production Orchestrator and Build Agent with the selected requirements and architecture. Deploy & Launch falls back to those persisted Build inputs, so it does not rerun or forge Requirements/Architecture stages.
+- **Single-page UI**: the Landing page now separates Prototype and Discovery entry points. `/discovery` combines uploads, persona selection, pain points/gaps, batch or interactive Q&A, recommendation consent, solution comparison, pricing evidence, architecture diagrams, resumability, deletion, and prototype handoff in one responsive Fluent UI workspace.
+- **Verification**: focused tests cover repository/API lifecycle, transition ordering, recommendation consent, durable reload, no-fabrication pricing, Shared Memory behavior, Deploy & Launch compatibility, and the progressive frontend state; the full backend suite passes with 591 tests.
 
 ### 2026-09-11 — Fidelity launches directly; generated UIs use Impeccable
 

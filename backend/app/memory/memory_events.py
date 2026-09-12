@@ -17,7 +17,13 @@ from typing import Literal, Protocol
 
 from app.agents.models import MemoryTier
 
-MemoryEventType = Literal["memory_read", "memory_write", "memory_update", "memory_denied"]
+MemoryEventType = Literal[
+    "memory_read",
+    "memory_write",
+    "memory_update",
+    "memory_delete",
+    "memory_denied",
+]
 
 
 @dataclass(frozen=True)

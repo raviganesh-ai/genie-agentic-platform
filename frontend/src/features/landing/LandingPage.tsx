@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Button, Dropdown, Input, Option, Text } from "@fluentui/react-components";
+import { Badge, Button, Dropdown, Input, Option, Text } from "@fluentui/react-components";
 import { sessionApi } from "@/services/sessionApi";
 import { modelCatalogApi } from "@/services/modelCatalogApi";
+import { discoveryApi } from "@/services/discoveryApi";
 import { ApiError } from "@/services/httpClient";
 import { useSessionContext } from "@/state/SessionContext";
 import { ErrorState } from "@/components/ErrorState";
 import type { SafeError } from "@/types/common";
+import type { DiscoveryCase } from "@/types/discovery";
 
 /**
  * Landing page: create or resume a Genie session. This is the single entry
@@ -22,6 +24,7 @@ export function LandingPage(): JSX.Element {
   const [loadingModels, setLoadingModels] = useState(true);
   const [modelsError, setModelsError] = useState<SafeError | null>(null);
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
+  const [savedDiscoveries, setSavedDiscoveries] = useState<DiscoveryCase[]>([]);
 
   useEffect(() => {
     let mounted = true;
@@ -45,14 +48,27 @@ export function LandingPage(): JSX.Element {
     };
   }, []);
 
-  const handleCreate = useCallback(async () => {
+  useEffect(() => {
+    let mounted = true;
+    discoveryApi
+      .list()
+      .then((cases) => {
+        if (mounted) setSavedDiscoveries(cases);
+      })
+      .catch(() => undefined);
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const handleCreate = useCallback(async (destination: "/upload" | "/discovery") => {
     setCreating(true);
     setError(null);
     try {
       const session = await sessionApi.create(title.trim());
       setSessionId(session.id);
       setSelectedModelDeploymentRef(selectedModel);
-      navigate("/upload");
+      navigate(destination);
     } catch (err) {
       setError(err instanceof ApiError ? err : { message: "Unable to create a session." });
     } finally {
@@ -88,7 +104,7 @@ export function LandingPage(): JSX.Element {
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: "minmax(0, 1fr) auto",
+          gridTemplateColumns: "minmax(0, 1fr)",
           gap: 12,
           justifyContent: "center",
           alignItems: "center",
@@ -105,22 +121,13 @@ export function LandingPage(): JSX.Element {
           value={title}
           onChange={(_, data) => setTitle(data.value)}
           onKeyDown={(event) => {
-            if (event.key === "Enter" && !creating && title.trim()) void handleCreate();
+            if (event.key === "Enter" && !creating && title.trim()) void handleCreate("/upload");
           }}
           style={{ width: "100%" }}
           required
         />
-        <Button
-          appearance="primary"
-          disabled={creating || !title.trim()}
-          onClick={() => void handleCreate()}
-          style={{ whiteSpace: "nowrap" }}
-        >
-          {creating ? "Creating your session..." : "✨ Start New Session"}
-        </Button>
         <div
           style={{
-            gridColumn: "1 / -1",
             display: "flex",
             flexDirection: "column",
             alignItems: "stretch",
@@ -147,10 +154,66 @@ export function LandingPage(): JSX.Element {
             ))}
           </Dropdown>
         </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 10 }}>
+          <Button
+            appearance="primary"
+            disabled={creating || !title.trim()}
+            onClick={() => void handleCreate("/upload")}
+          >
+            {creating ? "Creating session..." : "Start Prototype"}
+          </Button>
+          <Button
+            appearance="secondary"
+            disabled={creating || !title.trim()}
+            onClick={() => void handleCreate("/discovery")}
+          >
+            Start Discovery
+          </Button>
+        </div>
       </div>
 
       {modelsError ? <ErrorState error={modelsError} /> : null}
-      {error ? <ErrorState error={error} onRetry={() => void handleCreate()} /> : null}
+      {error ? <ErrorState error={error} /> : null}
+
+      {savedDiscoveries.length > 0 ? (
+        <section style={{ marginTop: 32, textAlign: "left", borderTop: "1px solid #232a33", paddingTop: 20 }}>
+          <Text weight="semibold" size={400}>Resume Discovery</Text>
+          <div style={{ display: "grid", gap: 8, marginTop: 12 }}>
+            {savedDiscoveries.map((item) => (
+              <div
+                key={item.id}
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "minmax(0, 1fr) auto auto",
+                  alignItems: "center",
+                  gap: 12,
+                  padding: "12px 0",
+                  borderBottom: "1px solid #232a33",
+                }}
+              >
+                <div>
+                  <Text weight="semibold" style={{ display: "block" }}>
+                    Discovery revision {item.analysis_revision}
+                  </Text>
+                  <Text size={200} style={{ opacity: 0.7 }}>
+                    Updated {new Date(item.updated_at).toLocaleString()} · {item.source_upload_ids.length} source file(s)
+                  </Text>
+                </div>
+                <Badge appearance="outline">{item.status.replace(/_/g, " ")}</Badge>
+                <Button
+                  onClick={() => {
+                    setSessionId(item.session_id);
+                    setSelectedModelDeploymentRef(item.model_deployment_ref);
+                    navigate("/discovery");
+                  }}
+                >
+                  Resume
+                </Button>
+              </div>
+            ))}
+          </div>
+        </section>
+      ) : null}
     </div>
   );
 }

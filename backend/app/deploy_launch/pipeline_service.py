@@ -1880,7 +1880,34 @@ class DeploymentPipelineService:
             )
             if approved_requirements:
                 return approved_requirements
+        build_step = next(
+            (result for result in run.step_results if result.step_id == self._build_step_id),
+            None,
+        )
+        if build_step is not None:
+            discovery_requirements = build_step.resolved_variables.get("requirements")
+            if discovery_requirements:
+                return discovery_requirements
         return await self._get_step_output(run, self._requirements_step_id, trace_id=trace_id)
+
+    async def _get_approved_architecture(
+        self, run: WorkflowRunResult, *, trace_id: str
+    ) -> str:
+        architecture_step = next(
+            (result for result in run.step_results if result.step_id == self._architecture_step_id),
+            None,
+        )
+        if architecture_step is not None and architecture_step.status == "completed":
+            return architecture_step.output_text or ""
+        build_step = next(
+            (result for result in run.step_results if result.step_id == self._build_step_id),
+            None,
+        )
+        if build_step is not None:
+            discovery_architecture = build_step.resolved_variables.get("architecture")
+            if discovery_architecture:
+                return discovery_architecture
+        return await self._get_step_output(run, self._architecture_step_id, trace_id=trace_id)
 
     async def _restore_repair_memory_references(
         self, run: WorkflowRunResult, *, trace_id: str
@@ -1914,6 +1941,19 @@ class DeploymentPipelineService:
                 ),
                 None,
             )
+            build_step = next(
+                (result for result in run.step_results if result.step_id == self._build_step_id),
+                None,
+            )
+            resolved_name = (
+                "requirements" if step_id == self._requirements_step_id else "architecture"
+            )
+            if (
+                step is None
+                and build_step is not None
+                and build_step.resolved_variables.get(resolved_name)
+            ):
+                continue
             if step is None or not step.output_text:
                 raise UnknownWorkflowRunError(
                     f"Automatic fidelity repair cannot restore required workflow output '{step_id}'."
@@ -2041,8 +2081,8 @@ class DeploymentPipelineService:
                     detail = f"Generated least-access policy for {len(document.agents)} agent(s) with managed identity {document.mission_identity.identity_name if document.mission_identity else 'unknown'}."
 
                 elif step_id == "provision-foundry-agents":
-                    architecture_document = await self._get_step_output(
-                        run, self._architecture_step_id, trace_id=trace_id
+                    architecture_document = await self._get_approved_architecture(
+                        run, trace_id=trace_id
                     )
                     build_output_text = await self._get_step_output(
                         run, self._build_step_id, trace_id=trace_id

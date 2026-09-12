@@ -1,0 +1,225 @@
+.discovery-page {
+  --discovery-line: #29323d;
+  --discovery-surface: #151b23;
+  --discovery-muted: #9aa6b2;
+  --discovery-cyan: #39b8c8;
+  display: flex;
+  flex-direction: column;
+  gap: 30px;
+  padding-bottom: 48px;
+}
+
+.discovery-toolbar,
+.discovery-actions,
+.discovery-upload-row,
+.discovery-choice-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.discovery-toolbar {
+  justify-content: space-between;
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--discovery-line);
+}
+
+.discovery-progress {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 2px;
+}
+
+.discovery-progress span {
+  min-height: 5px;
+  background: #27313c;
+}
+
+.discovery-progress span:first-child {
+  border-radius: 3px 0 0 3px;
+}
+
+.discovery-progress span:last-child {
+  border-radius: 0 3px 3px 0;
+}
+
+.discovery-progress .active {
+  background: var(--discovery-cyan);
+}
+
+.discovery-section {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding-top: 4px;
+}
+
+.discovery-section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 18px;
+}
+
+.discovery-section-heading {
+  margin: 0;
+  font-family: "Bahnschrift", "Aptos Display", sans-serif;
+  font-size: 22px;
+  font-weight: 600;
+}
+
+.discovery-muted {
+  color: var(--discovery-muted);
+}
+
+.discovery-persona-grid,
+.discovery-solution-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 14px;
+}
+
+.discovery-card {
+  border: 1px solid var(--discovery-line);
+  border-radius: 8px;
+  background: var(--discovery-surface);
+  padding: 18px;
+}
+
+.discovery-card.selected {
+  border-color: var(--discovery-cyan);
+  box-shadow: inset 3px 0 0 var(--discovery-cyan);
+}
+
+.discovery-card h3,
+.discovery-question h3 {
+  margin: 0 0 8px;
+  font-family: "Bahnschrift", "Aptos Display", sans-serif;
+  font-size: 17px;
+}
+
+.discovery-card ul,
+.discovery-gap ul {
+  margin: 7px 0 0;
+  padding-left: 20px;
+}
+
+.discovery-gap-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px 28px;
+  padding: 18px 0;
+  border-top: 1px solid var(--discovery-line);
+  border-bottom: 1px solid var(--discovery-line);
+}
+
+.discovery-gap h3 {
+  margin: 0;
+  color: var(--discovery-muted);
+  font-size: 13px;
+  text-transform: uppercase;
+}
+
+.discovery-question {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px 18px;
+  padding: 18px 0;
+  border-bottom: 1px solid var(--discovery-line);
+}
+
+.discovery-question-answer {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 10px;
+}
+
+.discovery-question-answer > *:first-child {
+  flex: 1;
+}
+
+.discovery-recommendation {
+  grid-column: 1 / -1;
+  padding-left: 14px;
+  border-left: 3px solid #e0ad36;
+}
+
+.discovery-solution-grid {
+  align-items: start;
+}
+
+.discovery-solution-grid .discovery-card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.discovery-two-column {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+}
+
+.discovery-architecture {
+  height: 350px;
+  min-height: 350px;
+  background: #0f141a;
+}
+
+.discovery-node {
+  width: 172px;
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  border: 1px solid #3b5064;
+  border-radius: 6px;
+  background: #17212b;
+  color: #eff5fa;
+  padding: 10px;
+  font-size: 11px;
+}
+
+.discovery-node img {
+  width: 32px;
+  height: 32px;
+  object-fit: contain;
+}
+
+.discovery-node strong {
+  display: block;
+  font-size: 12px;
+}
+
+.discovery-cost {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 6px 16px;
+  border-top: 1px solid var(--discovery-line);
+  padding-top: 14px;
+}
+
+@media (max-width: 720px) {
+  .discovery-progress {
+    grid-template-columns: 1fr;
+  }
+
+  .discovery-progress span {
+    min-height: 3px;
+  }
+
+  .discovery-gap-grid,
+  .discovery-two-column {
+    grid-template-columns: 1fr;
+  }
+
+  .discovery-question {
+    grid-template-columns: 1fr;
+  }
+
+  .discovery-question-answer,
+  .discovery-recommendation {
+    grid-column: 1;
+  }
+}

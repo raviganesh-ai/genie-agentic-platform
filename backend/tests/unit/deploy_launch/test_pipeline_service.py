@@ -398,6 +398,38 @@ def _build_service(
     )
 
 
+async def test_discovery_build_run_supplies_deploy_requirements_and_architecture(
+    tmp_path: Path,
+) -> None:
+    service = _build_service(test_output_text=_PASSING_TEST_OUTPUT, tmp_path=tmp_path)
+    run = WorkflowRunResult(
+        workflow_run_id="discovery-run-1",
+        workflow_id="discovery-build-workflow",
+        session_id="session-1",
+        status="completed",
+        step_results=[
+            WorkflowStepResult(
+                step_id="build-solution",
+                agent_id="genie-orchestrator",
+                status="completed",
+                output_text=_BUILD_OUTPUT,
+                started_at=datetime.now(UTC),
+                completed_at=datetime.now(UTC),
+                resolved_variables={
+                    "requirements": _REQUIREMENTS_OUTPUT,
+                    "architecture": _ARCHITECTURE_DOCUMENT,
+                },
+            )
+        ],
+    )
+
+    requirements = await service._get_approved_requirements(run, trace_id="trace-1")
+    architecture = await service._get_approved_architecture(run, trace_id="trace-1")
+
+    assert requirements == _REQUIREMENTS_OUTPUT
+    assert architecture == _ARCHITECTURE_DOCUMENT
+
+
 async def test_full_pipeline_runs_every_step(tmp_path: Path):
     service = _build_service(test_output_text=_PASSING_TEST_OUTPUT, tmp_path=tmp_path)
 

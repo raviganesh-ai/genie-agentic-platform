@@ -1494,4 +1494,98 @@ prompts:
       - user_message
     version: "1.1.0"
 
+  - id: discovery-persona-extraction-v1
+    name: Discovery Persona Extraction
+    description: Extracts evidence-grounded personas from uploaded customer material.
+    template: >-
+      Analyze all source material below and identify the distinct customer personas
+      who experience or influence the problem. Return only valid JSON with one top-level
+      field named personas. Each persona must contain id, name, description, pain_points,
+      evidence_references, and confidence_score from 0 to 1. Arrays must contain concise
+      strings. Use stable lowercase-hyphenated ids. Evidence references must quote or
+      identify the supplied material; do not invent facts or personas without evidence.
+
+      Source material:
+      {source_material}
+    variables:
+      - source_material
+    version: "1.0.0"
+
+  - id: discovery-persona-deep-dive-v1
+    name: Discovery Persona Deep Dive
+    description: Finds persona pain points, missing information, and clarification questions.
+    template: >-
+      Deeply analyze the selected persona against the complete source material. Return only
+      valid JSON with deep_dive_findings, gap_analysis, and questions. gap_analysis must
+      contain known_facts, information_gaps, assumptions, evidence_references, and a
+      confidence_score from 0 to 1. questions must be an array where every object contains id, text, category,
+      status set to pending, and empty evidence_references; omit answer and recommendation.
+      Questions must close material gaps needed to recommend an implementable Azure solution.
+      Do not invent customer facts.
+
+      Selected persona:
+      {selected_persona}
+
+      Source material:
+      {source_material}
+    variables:
+      - selected_persona
+      - source_material
+    version: "1.0.0"
+
+  - id: discovery-best-practice-recommendation-v1
+    name: Discovery Best Practice Recommendation
+    description: Supplies a consented Microsoft and Azure best-practice answer.
+    template: >-
+      The user explicitly consented to a best-practice recommendation for the skipped
+      question below. Return only valid JSON containing recommendation and
+      evidence_references. Clearly distinguish an industry or Microsoft/Azure best practice
+      from a known customer fact. Be specific enough for architecture decisions and do not
+      claim undocumented Azure capabilities.
+
+      Question:
+      {question}
+
+      Discovery context:
+      {discovery_context}
+    variables:
+      - question
+      - discovery_context
+    version: "1.0.0"
+
+  - id: discovery-probable-solutions-v1
+    name: Discovery Probable Solutions
+    description: Produces comparable, build-ready Azure-native solution options.
+    template: >-
+      Propose one to three implementable Azure-native solutions grounded in the Discovery
+      context and source material. Return only valid JSON with a top-level solutions array.
+      Every solution must contain id, name, summary, requirements_text, architecture_text,
+      architecture_nodes, architecture_edges, pros, cons, ai_feasibility,
+      ai_feasibility_rationale, and pricing_queries. ai_feasibility must be recommended,
+      feasible_with_tradeoffs, or not_feasible. Each architecture node must contain id,
+      service_name, azure_icon_key, purpose, x, and y. Each edge must contain id, source,
+      target, and label. Use only
+      real Azure service names; the UI maps those names to an allowlisted official icon.
+      requirements_text must use [REQ-001] style identifiers and include every approved
+      capability under the normal requirement-category headings plus a Critical path section.
+      architecture_text must follow the existing Architecture Designer contract exactly: a
+      "## Single-Page UI Design" section with one top-level "**Zone name**:" bullet per
+      concrete input zone and a "## Multi-Agent Workflow" section with one top-level
+      "**Agent name**:" bullet per agent, including exactly one Orchestrator Agent. Every
+      bullet must cite the requirement ids it fulfills. This text is sent unchanged to the
+      existing Build Agent, so do not replace it with an Azure infrastructure summary.
+      pricing_queries may contain only service_name, arm_region_name, sku_name,
+      units_per_month, and assumption. Never provide prices: Genie resolves every unit price
+      deterministically from the Azure Retail Prices API and reports missing coverage.
+
+      Discovery context:
+      {discovery_context}
+
+      Source material:
+      {source_material}
+    variables:
+      - discovery_context
+      - source_material
+    version: "1.0.0"
+
 

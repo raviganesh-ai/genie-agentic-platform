@@ -136,6 +136,43 @@ class SharedMemoryStore:
             )
         return records
 
+    async def delete_prefix(
+        self,
+        *,
+        agent: AgentDefinition,
+        session_id: str,
+        trace_id: str,
+        key_prefix: str,
+    ) -> int:
+        """Delete one owner's artifact family after the same write-policy check."""
+        decision = self._policy_service.authorize_shared_write(
+            agent=agent,
+            is_overwrite=True,
+            approval_status="approved",
+        )
+        if not decision.allowed:
+            self._emit(
+                event_type="memory_denied",
+                session_id=session_id,
+                agent_id=agent.id,
+                trace_id=trace_id,
+                detail=decision.reason,
+            )
+            raise MemoryAccessDeniedError(decision.reason)
+        count = await self._repository.delete_prefix(
+            session_id=session_id,
+            key_prefix=key_prefix,
+        )
+        if self._policy_service.document.shared_collaboration_memory.emits_governance_events:
+            self._emit(
+                event_type="memory_delete",
+                session_id=session_id,
+                agent_id=agent.id,
+                trace_id=trace_id,
+                detail=f"key_prefix={key_prefix} count={count}",
+            )
+        return count
+
     def _emit(
         self,
         *,

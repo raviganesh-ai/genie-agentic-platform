@@ -67,6 +67,7 @@ class Settings(BaseSettings):
     # --- Azure AI Foundry ---------------------------------------------------------
     azure_foundry_endpoint: str | None = None
     azure_foundry_project_name: str | None = None
+    azure_retail_prices_endpoint: str = "https://prices.azure.com/api/retail/prices"
 
     # Azure subscription every real Deploy & Launch pipeline Azure mgmt SDK
     # call (ACR, Container Apps, Storage) targets. Never hardcoded to a real

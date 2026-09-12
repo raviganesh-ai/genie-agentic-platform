@@ -27,6 +27,10 @@ class SharedMemoryRepository(Protocol):
         """List every record within ``session_id``."""
         ...
 
+    async def delete_prefix(self, *, session_id: str, key_prefix: str) -> int:
+        """Delete records in one session whose keys begin with ``key_prefix``."""
+        ...
+
 
 class InMemorySharedMemoryRepository:
     """Process-local ``SharedMemoryRepository`` for local development and tests.
@@ -55,3 +59,14 @@ class InMemorySharedMemoryRepository:
                 for (rec_session_id, _), record in self._records.items()
                 if rec_session_id == session_id
             ]
+
+    async def delete_prefix(self, *, session_id: str, key_prefix: str) -> int:
+        async with self._lock:
+            keys = [
+                key
+                for key in self._records
+                if key[0] == session_id and key[1].startswith(key_prefix)
+            ]
+            for key in keys:
+                del self._records[key]
+            return len(keys)

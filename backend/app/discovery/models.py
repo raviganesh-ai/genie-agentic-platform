@@ -43,6 +43,7 @@ __all__ = [
     "DiscoveryStatus",
     "GapAnalysis",
     "PersonaProfile",
+    "PricingQuery",
     "ProposedSolution",
 ]
 
@@ -113,6 +114,18 @@ class CostEstimate(BaseModel):
     retrieved_at: datetime | None = None
 
 
+class PricingQuery(BaseModel):
+    """Agent-proposed usage assumption; unit prices are always resolved externally."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    service_name: str = Field(min_length=1)
+    arm_region_name: str = Field(min_length=1)
+    sku_name: str | None = None
+    units_per_month: float = Field(gt=0)
+    assumption: str = Field(min_length=1)
+
+
 class ProposedSolution(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -127,6 +140,7 @@ class ProposedSolution(BaseModel):
     cons: list[str] = Field(default_factory=list)
     ai_feasibility: AiFeasibility
     ai_feasibility_rationale: str = Field(min_length=1)
+    pricing_queries: list[PricingQuery] = Field(default_factory=list)
     cost_estimate: CostEstimate
 
 
@@ -138,6 +152,7 @@ class DiscoveryCase(BaseModel):
     id: str = Field(min_length=1)
     session_id: str = Field(min_length=1)
     owner_user_id: str = Field(min_length=1)
+    model_deployment_ref: str | None = None
     status: DiscoveryStatus = "created"
     source_upload_ids: list[str] = Field(default_factory=list)
     analyzed_upload_ids: list[str] = Field(default_factory=list)

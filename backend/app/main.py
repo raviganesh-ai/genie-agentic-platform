@@ -54,6 +54,7 @@ from app.deploy_launch.mission_agent_provisioning_service import (
 )
 from app.deploy_launch.mission_identity_service import create_mission_identity_service
 from app.deploy_launch.pipeline_service import create_deployment_pipeline_service
+from app.discovery.pricing_service import AzureRetailPricingService
 from app.discovery.repository import CosmosDiscoveryCaseRepository
 from app.discovery.service import create_discovery_service
 from app.governance.replay_service import ReplayService
@@ -257,6 +258,13 @@ def create_app(
         app.state.discovery_service = create_discovery_service(
             session_service=session_service,
             repository=discovery_case_repository,
+            orchestrator=orchestrator,
+            governance_service=orchestrator.governance_service,
+            memory_service=orchestrator.memory_service,
+            model_catalog_service=app.state.model_catalog_service,
+            pricing_service=AzureRetailPricingService(
+                endpoint=resolved_settings.azure_retail_prices_endpoint
+            ),
         )
         app.state.speech_to_text_service = create_speech_to_text_service(resolved_settings)
         app.state.workshop_service = create_workshop_service(
