@@ -15,7 +15,21 @@ from app.repositories.document_store import DocumentStore
 __all__ = ["CosmosUploadRepository", "InMemoryUploadRepository", "UploadRepository"]
 
 _PARTITION_KEY = "uploads"
-_METADATA_FIELDS = {"partitionKey", "recordType", "_rid", "_self", "_etag", "_attachments", "_ts"}
+# JSON may encode one non-BMP character as a 12-byte surrogate pair. This
+# bound leaves ample room below Cosmos DB's 2 MiB item limit in that worst case.
+_TRANSCRIPT_CHUNK_CHARACTERS = 125_000
+_TRANSCRIPT_CHUNK_COUNT_FIELD = "transcriptChunkCount"
+_TRANSCRIPT_CHUNK_RECORD_TYPE = "uploadTranscriptChunk"
+_METADATA_FIELDS = {
+    "partitionKey",
+    "recordType",
+    _TRANSCRIPT_CHUNK_COUNT_FIELD,
+    "_rid",
+    "_self",
+    "_etag",
+    "_attachments",
+    "_ts",
+}
 
 
 class UploadRepository(Protocol):
@@ -68,12 +82,30 @@ class CosmosUploadRepository:
 
     async def put(self, record: UploadRecord) -> None:
         document = record.model_dump(mode="json")
+        transcript_text = document.pop("transcript_text", None)
+        transcript_chunks = self._split_transcript(transcript_text)
+        chunk_transcript = len(transcript_chunks) > 1
         document.update(
             {
                 "partitionKey": _PARTITION_KEY,
                 "recordType": "upload",
+                "transcript_text": None if chunk_transcript else transcript_text,
+                _TRANSCRIPT_CHUNK_COUNT_FIELD: len(transcript_chunks) if chunk_transcript else 0,
             }
         )
+        if chunk_transcript:
+            for index, text in enumerate(transcript_chunks):
+                await self._store.upsert(
+                    {
+                        "id": self._chunk_id(record.id, index),
+                        "partitionKey": _PARTITION_KEY,
+                        "recordType": _TRANSCRIPT_CHUNK_RECORD_TYPE,
+                        "session_id": record.session_id,
+                        "upload_id": record.id,
+                        "chunk_index": index,
+                        "text": text,
+                    }
+                )
         await self._store.upsert(document)
 
     async def get(self, *, upload_id: str) -> UploadRecord | None:
@@ -83,7 +115,7 @@ class CosmosUploadRepository:
         )
         if document is None:
             return None
-        return self._to_model(document)
+        return await self._to_model(document)
 
     async def list_for_session(self, *, session_id: str) -> list[UploadRecord]:
         documents = await self._store.query(
@@ -97,10 +129,39 @@ class CosmosUploadRepository:
             ],
             partition_key=_PARTITION_KEY,
         )
-        return [self._to_model(document) for document in documents]
+        return list(await asyncio.gather(*(self._to_model(document) for document in documents)))
+
+    async def _to_model(self, document: dict[str, object]) -> UploadRecord:
+        model_data = {
+            key: value for key, value in document.items() if key not in _METADATA_FIELDS
+        }
+        chunk_count = int(document.get(_TRANSCRIPT_CHUNK_COUNT_FIELD, 0))
+        if chunk_count:
+            chunks = await asyncio.gather(
+                *(
+                    self._store.read(
+                        document_id=self._chunk_id(str(document["id"]), index),
+                        partition_key=_PARTITION_KEY,
+                    )
+                    for index in range(chunk_count)
+                )
+            )
+            if any(chunk is None for chunk in chunks):
+                raise RuntimeError(
+                    f"Upload '{document['id']}' has incomplete transcript storage."
+                )
+            model_data["transcript_text"] = "".join(str(chunk["text"]) for chunk in chunks if chunk)
+        return UploadRecord.model_validate(model_data)
 
     @staticmethod
-    def _to_model(document: dict[str, object]) -> UploadRecord:
-        return UploadRecord.model_validate(
-            {key: value for key, value in document.items() if key not in _METADATA_FIELDS}
-        )
+    def _chunk_id(upload_id: str, index: int) -> str:
+        return f"{upload_id}:transcript:{index}"
+
+    @staticmethod
+    def _split_transcript(transcript_text: object) -> list[str]:
+        if not isinstance(transcript_text, str) or not transcript_text:
+            return []
+        return [
+            transcript_text[index : index + _TRANSCRIPT_CHUNK_CHARACTERS]
+            for index in range(0, len(transcript_text), _TRANSCRIPT_CHUNK_CHARACTERS)
+        ]

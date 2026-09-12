@@ -15,7 +15,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, UploadFile
 
 from app.api.dependencies import get_session_service, get_speech_to_text_service
-from app.models.upload_models import UploadRecord, UploadType
+from app.models.upload_models import UploadMetadata, UploadType
 from app.security.auth_models import AuthenticatedUser
 from app.security.dependencies import get_current_user
 from app.services.session_service import SessionService
@@ -33,7 +33,7 @@ async def create_upload(
     user: AuthenticatedUser = Depends(get_current_user),
     session_service: SessionService = Depends(get_session_service),
     speech_service: SpeechToTextService = Depends(get_speech_to_text_service),
-) -> UploadRecord:
+) -> UploadMetadata:
     contents = await file.read()
     file_name = file.filename or "unnamed"
     content_type = file.content_type or "application/octet-stream"
@@ -80,7 +80,7 @@ async def list_uploads(
     session_id: str,
     user: AuthenticatedUser = Depends(get_current_user),
     session_service: SessionService = Depends(get_session_service),
-) -> list[UploadRecord]:
+) -> list[UploadMetadata]:
     return await session_service.list_uploads(session_id=session_id, requesting_user_id=user.user_id)
 
 
@@ -90,7 +90,7 @@ async def get_upload(
     upload_id: str,
     user: AuthenticatedUser = Depends(get_current_user),
     session_service: SessionService = Depends(get_session_service),
-) -> UploadRecord:
+) -> UploadMetadata:
     return await session_service.get_upload(
         session_id=session_id, upload_id=upload_id, requesting_user_id=user.user_id
     )

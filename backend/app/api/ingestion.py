@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.api.dependencies import get_session_service
-from app.models.upload_models import IngestionStatus, UploadRecord
+from app.models.upload_models import IngestionStatus, UploadMetadata
 from app.security.auth_models import AuthenticatedUser
 from app.security.dependencies import get_current_user
 from app.services.session_service import SessionService
@@ -34,7 +34,7 @@ async def get_ingestion_status(
     upload_id: str,
     user: AuthenticatedUser = Depends(get_current_user),
     session_service: SessionService = Depends(get_session_service),
-) -> UploadRecord:
+) -> UploadMetadata:
     return await session_service.get_upload(
         session_id=session_id, upload_id=upload_id, requesting_user_id=user.user_id
     )
@@ -47,7 +47,7 @@ async def update_ingestion_status(
     body: UpdateIngestionStatusRequest,
     user: AuthenticatedUser = Depends(get_current_user),
     session_service: SessionService = Depends(get_session_service),
-) -> UploadRecord:
+) -> UploadMetadata:
     return await session_service.update_ingestion_status(
         session_id=session_id,
         upload_id=upload_id,

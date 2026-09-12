@@ -663,6 +663,13 @@ If this identity/RBAC/secrets setup is ever missing or revoked, `deploy-backend`
 
 Every deployment to the shared Azure evaluation environment (backend Container App and/or frontend Static Web App) is recorded here: commit, what changed, and why. Update this section as part of the same commit that ships the fix/feature, before pushing to `master` triggers [Continuous deployment](#continuous-deployment-github-actions).
 
+### 2026-09-12 — Discovery: large evidence upload resilience
+
+- **Production diagnosis**: correlation ID `63ea0471-92cd-40a0-aea4-68f6b53803d0` corresponded to a transcript upload that failed with Cosmos DB `RequestEntityTooLarge`; extracted transcript text was embedded in one upload document and could exceed Cosmos DB's 2 MiB item limit.
+- **Lossless storage**: the Cosmos upload repository now persists oversized extracted text in bounded companion documents and transparently reconstructs it for downstream Discovery analysis. Normal and existing inline-text records remain readable.
+- **Bounded API responses**: upload, list, and ingestion-status endpoints now return upload metadata without echoing internal transcript text back to the browser.
+- **Verification**: repository coverage round-trips a multi-megabyte, non-ASCII transcript while asserting every stored document stays below 2 MiB; API coverage verifies transcript text is excluded from responses. The full backend suite passes with 593 tests and Ruff reports no issues.
+
 ### 2026-09-11 — Discovery upload usability
 
 - Replaced the detached material button with one visible upload panel that groups material type, a prominent **Choose files** action, empty-state guidance, uploaded filenames/statuses, and the next **Find personas** action.

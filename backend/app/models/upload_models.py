@@ -17,11 +17,11 @@ from pydantic import BaseModel, ConfigDict, Field
 UploadType = Literal["transcript", "audio", "video", "supporting_document"]
 IngestionStatus = Literal["received", "queued", "processing", "completed", "failed"]
 
-__all__ = ["IngestionStatus", "UploadRecord", "UploadType"]
+__all__ = ["IngestionStatus", "UploadMetadata", "UploadRecord", "UploadType"]
 
 
-class UploadRecord(BaseModel):
-    """A single uploaded file and its current ingestion status."""
+class UploadMetadata(BaseModel):
+    """Public metadata for a single uploaded file and its ingestion status."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -34,6 +34,13 @@ class UploadRecord(BaseModel):
     uploaded_by: str = Field(min_length=1)
     status: IngestionStatus = "received"
     detail: str = ""
+    uploaded_at: datetime
+    updated_at: datetime
+
+
+class UploadRecord(UploadMetadata):
+    """Internal upload record including extracted text used by downstream agents."""
+
     transcript_text: str | None = Field(
         default=None,
         description=(
@@ -42,5 +49,3 @@ class UploadRecord(BaseModel):
             "uploads. None until ingestion completes."
         ),
     )
-    uploaded_at: datetime
-    updated_at: datetime

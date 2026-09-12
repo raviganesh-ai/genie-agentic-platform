@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -20,6 +21,7 @@ class _FakeDocumentStore:
         self.documents: dict[tuple[str, str], dict[str, Any]] = {}
 
     async def upsert(self, document: dict[str, Any]) -> None:
+        assert len(json.dumps(document).encode("utf-8")) < 2 * 1024 * 1024
         self.documents[(document["partitionKey"], document["id"])] = dict(document)
 
     async def read(self, *, document_id: str, partition_key: str) -> dict[str, Any] | None:
@@ -148,9 +150,37 @@ async def test_cosmos_upload_repository_preserves_extracted_text_after_restart()
     await CosmosUploadRepository(store=store).put(upload)
     restarted_repository = CosmosUploadRepository(store=store)
 
+    assert store.documents[("uploads", upload.id)]["transcript_text"] == "Original transcript"
+    assert store.documents[("uploads", upload.id)]["transcriptChunkCount"] == 0
     assert await restarted_repository.get(upload_id=upload.id) == upload
     assert await restarted_repository.list_for_session(session_id=upload.session_id) == [upload]
     assert await restarted_repository.list_for_session(session_id="session-2") == []
+
+
+async def test_cosmos_upload_repository_chunks_transcripts_larger_than_one_item() -> None:
+    store = _FakeDocumentStore()
+    now = datetime.now(UTC)
+    transcript_text = "🚀" * 300_000
+    upload = UploadRecord(
+        id="upload-large",
+        session_id="session-1",
+        upload_type="transcript",
+        file_name="large-discovery.txt",
+        content_type="text/plain",
+        size_bytes=len(transcript_text.encode("utf-8")),
+        uploaded_by="genie-internal-user",
+        status="completed",
+        transcript_text=transcript_text,
+        uploaded_at=now,
+        updated_at=now,
+    )
+
+    await CosmosUploadRepository(store=store).put(upload)
+
+    metadata = store.documents[("uploads", upload.id)]
+    assert metadata["transcript_text"] is None
+    assert metadata["transcriptChunkCount"] > 1
+    assert await CosmosUploadRepository(store=store).get(upload_id=upload.id) == upload
 
 
 async def test_cosmos_discovery_repository_survives_restart_and_deletes() -> None:
