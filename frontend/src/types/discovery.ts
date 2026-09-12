@@ -23,6 +23,7 @@ export type DiscoveryQuestionStatus =
 export interface PersonaProfile {
   id: string;
   name: string;
+  role_or_context?: string | null;
   description: string;
   pain_points: string[];
   evidence_references: string[];

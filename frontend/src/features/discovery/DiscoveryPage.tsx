@@ -516,7 +516,7 @@ export function DiscoveryPage(): JSX.Element {
               {readyUploads.length} {readyUploads.length === 1 ? "source file" : "source files"} ready
             </Text>
             <Button appearance="secondary" disabled={Boolean(busy) || !readyUploads.length} onClick={() => void analyze()}>
-              {discoveryCase?.analysis_revision ? "Analyze new revision" : "Find personas"}
+              {discoveryCase?.analysis_revision ? "Analyze new revision" : "Find people"}
             </Button>
           </div>
         </div>
@@ -526,23 +526,24 @@ export function DiscoveryPage(): JSX.Element {
         <section className="discovery-section" aria-labelledby="discovery-personas">
           <div className="discovery-section-header">
             <div>
-              <h2 id="discovery-personas" className="discovery-section-heading">2. Personas</h2>
-              <Text className="discovery-muted">Choose whose problem Genie should investigate deeply.</Text>
+              <h2 id="discovery-personas" className="discovery-section-heading">2. People in the evidence</h2>
+              <Text className="discovery-muted">Choose the named person whose situation and pain points Genie should investigate.</Text>
             </div>
           </div>
           <div className="discovery-persona-grid">
             {discoveryCase.personas.map((persona) => (
               <article key={persona.id} className={`discovery-card${persona.id === discoveryCase.selected_persona_id ? " selected" : ""}`}>
                 <h3>{persona.name}</h3>
+                {persona.role_or_context ? <Text weight="semibold">{persona.role_or_context}</Text> : null}
                 <Text className="discovery-muted">{persona.description}</Text>
                 <Text weight="semibold" style={{ display: "block", marginTop: 14 }}>Pain points</Text>
                 <ul>{persona.pain_points.map((pain) => <li key={pain}>{pain}</li>)}</ul>
                 <Button
                   appearance={persona.id === discoveryCase.selected_persona_id ? "primary" : "secondary"}
                   disabled={Boolean(busy)}
-                  onClick={() => void perform("analyze persona", () => discoveryApi.selectPersona(sessionId, persona.id))}
+                  onClick={() => void perform(`analyze ${persona.name}'s situation`, () => discoveryApi.selectPersona(sessionId, persona.id))}
                 >
-                  {persona.id === discoveryCase.selected_persona_id ? "Selected" : "Investigate persona"}
+                  {persona.id === discoveryCase.selected_persona_id ? "Selected" : `Investigate ${persona.name}`}
                 </Button>
               </article>
             ))}

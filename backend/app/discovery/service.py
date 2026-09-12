@@ -49,9 +49,20 @@ class DiscoveryStateConflictError(RuntimeError):
     """Raised when an action is invalid for the current durable state."""
 
 
+class _NamedPersonDraft(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: str = Field(min_length=1)
+    name: str = Field(min_length=1)
+    role_or_context: str = Field(min_length=1)
+    description: str = Field(min_length=1)
+    pain_points: list[str] = Field(default_factory=list)
+    evidence_references: list[str] = Field(min_length=1)
+    confidence_score: float = Field(ge=0, le=1)
+
+
 class _PersonasEnvelope(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    personas: list[PersonaProfile] = Field(min_length=1)
+    personas: list[_NamedPersonDraft]
 
 
 class _DeepDiveEnvelope(BaseModel):
@@ -250,6 +261,17 @@ class DiscoveryService:
                 discovery_case=discovery_case,
             )
             parsed = parse_agent_response(result, _PersonasEnvelope)
+            personas = self._validated_named_people(
+                parsed.personas,
+                source_material=source_material,
+            )
+        except DiscoveryStateConflictError as exc:
+            await self._save(
+                discovery_case,
+                status=previous_status,
+                last_error=str(exc),
+            )
+            raise
         except Exception:
             await self._save(
                 discovery_case,
@@ -263,7 +285,7 @@ class DiscoveryService:
             status="awaiting_persona_selection",
             analyzed_upload_ids=list(discovery_case.source_upload_ids),
             analysis_revision=revision,
-            personas=parsed.personas,
+            personas=personas,
             selected_persona_id=None,
             deep_dive_findings=[],
             gap_analysis=None,
@@ -279,9 +301,36 @@ class DiscoveryService:
             agent_id="requirements-analyst",
             artifact="personas",
             classification="requirement",
-            content={"personas": [item.model_dump(mode="json") for item in parsed.personas]},
+            content={"personas": [item.model_dump(mode="json") for item in personas]},
         )
         return updated
+
+    @staticmethod
+    def _validated_named_people(
+        drafts: list[_NamedPersonDraft], *, source_material: str
+    ) -> list[PersonaProfile]:
+        if not drafts:
+            raise DiscoveryStateConflictError(
+                "No named people were found in the selected evidence. Add material that "
+                "identifies a person by name before continuing Discovery."
+            )
+        normalized_source = " ".join(source_material.casefold().split())
+        invalid_names = [
+            draft.name
+            for draft in drafts
+            if (
+                " ".join(draft.name.casefold().split()) not in normalized_source
+                or " ".join(draft.name.casefold().split())
+                == " ".join(draft.role_or_context.casefold().split())
+            )
+        ]
+        if invalid_names:
+            raise DiscoveryStateConflictError(
+                "Discovery returned entries that are not explicitly named people in the evidence: "
+                + ", ".join(invalid_names)
+                + ". Re-run analysis with evidence that explicitly identifies each person."
+            )
+        return [PersonaProfile.model_validate(draft.model_dump()) for draft in drafts]
 
     async def select_persona(
         self,

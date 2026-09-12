@@ -1496,25 +1496,32 @@ prompts:
 
   - id: discovery-persona-extraction-v1
     name: Discovery Persona Extraction
-    description: Extracts evidence-grounded personas and customer context across all sources.
+    description: Extracts evidence-grounded named people and customer context across all sources.
     template: >-
       Analyze all source material as one customer evidence set, including OCR text,
       tables, visual descriptions, diagrams, and charts when present. Synthesize the
       customer's current situation, desired outcomes, stakeholders, constraints, and
-      dependencies across documents before identifying the distinct personas who
-      experience, own, or influence the problem. Return only valid JSON with one
-      top-level field named personas. Each persona must contain id, name, description,
-      pain_points, evidence_references, and confidence_score from 0 to 1. Arrays must
-      contain concise strings. Use stable lowercase-hyphenated ids. Every pain point
+      dependencies across documents before identifying the individual people who
+      experience, own, or influence the problem. A persona in this workflow means a
+      real person explicitly named in the evidence, not a role archetype, stakeholder
+      group, team, organization, or hypothetical user. Copy each person's name exactly
+      as it appears in the evidence. Put their job title, role, organization, or other
+      identifying context in role_or_context, never in name. If the evidence names no
+      individual people, return an empty personas array; never invent a name or substitute
+      labels such as "Claims Reviewer", "Customer", "Business User", or "Operations".
+      Return only valid JSON with one top-level field named personas. Each person must
+      contain id, name, role_or_context, description, pain_points, evidence_references,
+      and confidence_score from 0 to 1. Arrays must contain concise strings. Use stable
+      lowercase-hyphenated ids derived from the person's name. Every person and pain point
       must be grounded in a source reference. Treat generated visual descriptions as
       evidence derived from an image, not as a direct customer quotation. Do not invent
-      facts, silently resolve conflicting sources, or create personas without evidence.
+      facts or silently resolve conflicting sources.
 
       Source material:
       {source_material}
     variables:
       - source_material
-    version: "2.0.0"
+    version: "3.0.0"
 
   - id: discovery-persona-deep-dive-v1
     name: Discovery Persona Deep Dive

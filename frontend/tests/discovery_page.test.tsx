@@ -20,15 +20,16 @@ describe("DiscoveryPage", () => {
           analysis_revision: 1,
           personas: [
             {
-              id: "reviewer",
-              name: "Claims Reviewer",
+              id: "jordan-lee",
+              name: "Jordan Lee",
+              role_or_context: "Claims reviewer",
               description: "Reviews incoming claims",
               pain_points: ["Manual evidence checks"],
               evidence_references: ["call.txt"],
               confidence_score: 0.9,
             },
           ],
-          selected_persona_id: "reviewer",
+          selected_persona_id: "jordan-lee",
           deep_dive_findings: ["Evidence review is the bottleneck"],
           gap_analysis: {
             known_facts: ["Claims arrive digitally"],
@@ -84,7 +85,10 @@ describe("DiscoveryPage", () => {
 
     renderWithProviders(<DiscoveryPage />, { sessionId: "session-1" });
 
-    await waitFor(() => expect(screen.getByText("Claims Reviewer")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("Jordan Lee")).toBeInTheDocument());
+    expect(screen.getByText("Claims reviewer")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "2. People in the evidence" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Selected" })).toBeInTheDocument();
     expect(screen.getByText("Manual review may breach the response target")).toBeInTheDocument();
     expect(screen.getByText("The stated SLA conflicts with the manual queue")).toBeInTheDocument();
     expect(screen.getByText("What is the peak monthly volume?")).toBeInTheDocument();
@@ -218,7 +222,7 @@ describe("DiscoveryPage", () => {
 
     expect(await screen.findByText("1 source file ready")).toBeInTheDocument();
     expect(screen.getByText("Unable to parse DOCX 'broken.docx'.")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Find personas" }));
+    await user.click(screen.getByRole("button", { name: "Find people" }));
     await waitFor(() => {
       const createCall = fetchMock.mock.calls.find(([input, init]) =>
         new URL(input.toString()).pathname.endsWith("/sessions/session-1/discovery")

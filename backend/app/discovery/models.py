@@ -53,6 +53,7 @@ class PersonaProfile(BaseModel):
 
     id: str = Field(min_length=1)
     name: str = Field(min_length=1)
+    role_or_context: str | None = None
     description: str = Field(min_length=1)
     pain_points: list[str] = Field(default_factory=list)
     evidence_references: list[str] = Field(default_factory=list)

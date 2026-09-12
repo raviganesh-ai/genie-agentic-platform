@@ -44,13 +44,18 @@ class _PricingService:
         )
 
 
-async def _create_service() -> tuple[DiscoveryService, _FakeOrchestrator, str]:
+async def _create_service(
+    *,
+    extracted_name: str = "Jordan Lee",
+    transcript_text: str = "Jordan Lee is a claims reviewer who manually inspects every document.",
+) -> tuple[DiscoveryService, _FakeOrchestrator, str]:
     outputs: list[dict[str, object]] = [
         {
             "personas": [
                 {
-                    "id": "claims-reviewer",
-                    "name": "Claims Reviewer",
+                    "id": extracted_name.casefold().replace(" ", "-"),
+                    "name": extracted_name,
+                    "role_or_context": "Claims reviewer",
                     "description": "Operations specialist who resolves claims",
                     "pain_points": ["Manual document review"],
                     "evidence_references": ["call.txt: claims review"],
@@ -135,7 +140,7 @@ async def _create_service() -> tuple[DiscoveryService, _FakeOrchestrator, str]:
         file_name="call.txt",
         content_type="text/plain",
         size_bytes=10,
-        transcript_text="Claims reviewers manually inspect every document.",
+        transcript_text=transcript_text,
     )
     service = DiscoveryService(
         session_service=session_service,
@@ -151,6 +156,28 @@ async def _create_service() -> tuple[DiscoveryService, _FakeOrchestrator, str]:
     return service, orchestrator, session.id
 
 
+async def test_persona_extraction_rejects_role_archetype_not_named_in_evidence() -> None:
+    service, _, session_id = await _create_service(extracted_name="Claims Reviewer")
+
+    with pytest.raises(
+        DiscoveryStateConflictError,
+        match="not explicitly named people in the evidence: Claims Reviewer",
+    ):
+        await service.analyze_personas(
+            session_id=session_id,
+            requesting_user_id="user-1",
+        )
+
+    reloaded = await service.get_case(
+        session_id=session_id,
+        requesting_user_id="user-1",
+    )
+    assert reloaded.status == "created"
+    assert reloaded.personas == []
+    assert reloaded.last_error is not None
+    assert "Claims Reviewer" in reloaded.last_error
+
+
 async def test_skip_requires_consent_before_recommendation_and_state_is_durable() -> None:
     service, orchestrator, session_id = await _create_service()
 
@@ -160,7 +187,7 @@ async def test_skip_requires_consent_before_recommendation_and_state_is_durable(
     case = await service.select_persona(
         session_id=session_id,
         requesting_user_id="user-1",
-        persona_id="claims-reviewer",
+        persona_id="jordan-lee",
     )
     case = await service.set_qa_mode(
         session_id=session_id,
