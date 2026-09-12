@@ -380,7 +380,6 @@ export function DiscoveryPage(): JSX.Element {
               </Dropdown>
             </div>
             <div className="discovery-upload-prompt">
-              <DocumentAdd24Regular aria-hidden="true" />
               <div>
                 <Text weight="semibold" style={{ display: "block" }}>Add customer material</Text>
                 <Text className="discovery-muted" size={200}>Select one or more files. You can add more at any time.</Text>

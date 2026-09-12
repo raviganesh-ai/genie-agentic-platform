@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Badge, Button, Dropdown, Input, Option, Text } from "@fluentui/react-components";
+import { Delete24Regular } from "@fluentui/react-icons";
 import { sessionApi } from "@/services/sessionApi";
 import { modelCatalogApi } from "@/services/modelCatalogApi";
 import { discoveryApi } from "@/services/discoveryApi";
@@ -25,6 +26,7 @@ export function LandingPage(): JSX.Element {
   const [modelsError, setModelsError] = useState<SafeError | null>(null);
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
   const [savedDiscoveries, setSavedDiscoveries] = useState<DiscoveryCase[]>([]);
+  const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -75,6 +77,19 @@ export function LandingPage(): JSX.Element {
       setCreating(false);
     }
   }, [title, selectedModel, setSelectedModelDeploymentRef, setSessionId, navigate]);
+
+  const handleDeleteDiscovery = useCallback(async (item: DiscoveryCase) => {
+    setDeletingSessionId(item.session_id);
+    setError(null);
+    try {
+      await discoveryApi.delete(item.session_id);
+      setSavedDiscoveries((cases) => cases.filter((saved) => saved.id !== item.id));
+    } catch (err) {
+      setError(err instanceof ApiError ? err : { message: "Unable to delete Discovery." });
+    } finally {
+      setDeletingSessionId(null);
+    }
+  }, []);
 
   return (
     <div className="genie-fade-in" style={{ maxWidth: 680, margin: "8vh auto", textAlign: "center" }}>
@@ -200,15 +215,27 @@ export function LandingPage(): JSX.Element {
                   </Text>
                 </div>
                 <Badge appearance="outline">{item.status.replace(/_/g, " ")}</Badge>
-                <Button
-                  onClick={() => {
-                    setSessionId(item.session_id);
-                    setSelectedModelDeploymentRef(item.model_deployment_ref);
-                    navigate("/discovery");
-                  }}
-                >
-                  Resume
-                </Button>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <Button
+                    disabled={deletingSessionId === item.session_id}
+                    onClick={() => {
+                      setSessionId(item.session_id);
+                      setSelectedModelDeploymentRef(item.model_deployment_ref);
+                      navigate("/discovery");
+                    }}
+                  >
+                    Resume
+                  </Button>
+                  <Button
+                    appearance="subtle"
+                    shape="circular"
+                    icon={<Delete24Regular />}
+                    aria-label={`Delete Discovery revision ${item.analysis_revision}`}
+                    title={`Delete Discovery revision ${item.analysis_revision}`}
+                    disabled={deletingSessionId !== null}
+                    onClick={() => void handleDeleteDiscovery(item)}
+                  />
+                </div>
               </div>
             ))}
           </div>

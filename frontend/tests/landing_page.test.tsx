@@ -61,4 +61,44 @@ describe("LandingPage generation model selector", () => {
 
     expect(await screen.findByText("Resumed session-42 with gpt-5-mini")).toBeInTheDocument();
   });
+
+  it("deletes a saved Discovery from the resume list", async () => {
+    const fetchMock = mockFetchSequence([
+      {
+        match: "/sessions/session-42/discovery",
+        response: {},
+      },
+      {
+        match: "/models/available",
+        response: { default_model: "gpt-5-mini", available_models: ["gpt-5-mini"] },
+      },
+      {
+        match: "/discovery",
+        response: [
+          {
+            id: "discovery-1",
+            session_id: "session-42",
+            model_deployment_ref: "gpt-5-mini",
+            status: "questioning",
+            analysis_revision: 3,
+            source_upload_ids: ["upload-1"],
+            updated_at: "2026-09-12T03:00:00Z",
+          },
+        ],
+      },
+    ]);
+
+    renderWithProviders(<LandingPage />);
+
+    expect(await screen.findByText("Discovery revision 3")).toBeInTheDocument();
+    await userEvent.setup().click(screen.getByRole("button", { name: "Delete Discovery revision 3" }));
+
+    await waitFor(() => {
+      expect(screen.queryByText("Discovery revision 3")).not.toBeInTheDocument();
+      expect(fetchMock.mock.calls.some(([input, init]) =>
+        new URL(input.toString()).pathname.endsWith("/sessions/session-42/discovery")
+        && init?.method === "DELETE",
+      )).toBe(true);
+    });
+  });
 });
