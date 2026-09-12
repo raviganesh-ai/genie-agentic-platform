@@ -64,6 +64,12 @@ interface AzureNodeData {
   icon?: string;
 }
 
+interface PendingUpload {
+  id: string;
+  fileName: string;
+  status: "queued" | "processing";
+}
+
 function AzureServiceNode({ data }: NodeProps<AzureNodeData>): JSX.Element {
   return (
     <div className="discovery-node">
@@ -190,13 +196,13 @@ export function DiscoveryPage(): JSX.Element {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<SafeError | null>(null);
   const [uploadType, setUploadType] = useState<UploadType>("transcript");
+  const [pendingUploads, setPendingUploads] = useState<PendingUpload[]>([]);
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { data: uploads, loading: loadingUploads, refresh } = useUploads(sessionId);
   const {
     upload,
     remove: removeUpload,
-    uploading,
     removingUploadIds,
     error: uploadError,
   } = useUploadAction(sessionId);
@@ -267,13 +273,30 @@ export function DiscoveryPage(): JSX.Element {
   const handleUpload = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(event.target.files ?? []);
     if (!files.length) return;
+    const selectedUploads = files.map((file, index) => ({
+      id: `${Date.now()}-${index}-${file.name}`,
+      fileName: file.name,
+      status: "queued" as const,
+    }));
+    setPendingUploads(selectedUploads);
+    event.target.value = "";
     try {
-      for (const file of files) await upload(uploadType, file);
+      for (const [index, file] of files.entries()) {
+        const pendingId = selectedUploads[index].id;
+        setPendingUploads((current) => current.map((item) => (
+          item.id === pendingId ? { ...item, status: "processing" } : item
+        )));
+        try {
+          await upload(uploadType, file);
+        } finally {
+          await refresh();
+          setPendingUploads((current) => current.filter((item) => item.id !== pendingId));
+        }
+      }
     } catch {
       return;
     } finally {
-      await refresh();
-      event.target.value = "";
+      setPendingUploads([]);
     }
   }, [refresh, upload, uploadType]);
 
@@ -407,7 +430,7 @@ export function DiscoveryPage(): JSX.Element {
                 id="discovery-upload-type"
                 value={UPLOAD_TYPE_LABELS[uploadType]}
                 selectedOptions={[uploadType]}
-                disabled={uploading}
+                disabled={pendingUploads.length > 0}
                 onOptionSelect={(_, data) => setUploadType(data.optionValue as UploadType)}
               >
                 {UPLOAD_TYPES.map((type) => <Option key={type} value={type}>{UPLOAD_TYPE_LABELS[type]}</Option>)}
@@ -422,10 +445,12 @@ export function DiscoveryPage(): JSX.Element {
             <Button
               appearance="primary"
               icon={<DocumentAdd24Regular />}
-              disabled={uploading}
+              disabled={pendingUploads.length > 0}
               onClick={() => fileInputRef.current?.click()}
             >
-              {uploading ? "Uploading files..." : "Choose files"}
+              {pendingUploads.length > 0
+                ? `Processing ${pendingUploads.length} ${pendingUploads.length === 1 ? "file" : "files"}...`
+                : "Choose files"}
             </Button>
             <input
               ref={fileInputRef}
@@ -438,9 +463,27 @@ export function DiscoveryPage(): JSX.Element {
             />
           </div>
           <div aria-live="polite">
-            {uploads?.length ? (
+            {uploads?.length || pendingUploads.length ? (
               <ul className="discovery-upload-list" aria-label="Uploaded customer material">
-                {uploads.map((item) => (
+                {pendingUploads.map((item) => (
+                  <li key={item.id} aria-busy="true">
+                    <div className="discovery-upload-file">
+                      <Text>{item.fileName}</Text>
+                      <Text className="discovery-upload-progress" size={200}>
+                        {item.status === "processing"
+                          ? "Uploading and analyzing content..."
+                          : "Waiting to upload..."}
+                      </Text>
+                    </div>
+                    <div className="discovery-upload-actions">
+                      {item.status === "processing" ? <Spinner size="tiny" /> : null}
+                      <Badge appearance="outline">
+                        {item.status === "processing" ? "processing" : "queued"}
+                      </Badge>
+                    </div>
+                  </li>
+                ))}
+                {(uploads ?? []).map((item) => (
                   <li key={item.id}>
                     <div className="discovery-upload-file">
                       <Text>{item.file_name}</Text>

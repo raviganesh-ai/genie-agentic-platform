@@ -136,6 +136,10 @@
   color: var(--colorPaletteRedForeground1);
 }
 
+.discovery-upload-progress {
+  color: var(--discovery-cyan);
+}
+
 .discovery-upload-next {
   padding-top: 12px;
   border-top: 1px solid var(--discovery-line);

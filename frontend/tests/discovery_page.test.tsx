@@ -99,10 +99,35 @@ describe("DiscoveryPage", () => {
     expect(fileInput.getAttribute("accept")).toContain(".xlsx");
     expect(fileInput.getAttribute("accept")).toContain(".pptx");
 
+    const fetchImplementation = fetchMock.getMockImplementation();
+    let releaseFirstUpload: (() => void) | undefined;
+    const firstUploadGate = new Promise<void>((resolve) => {
+      releaseFirstUpload = resolve;
+    });
+    let uploadRequestCount = 0;
+    fetchMock.mockImplementation(async (input, init) => {
+      if (
+        new URL(input.toString()).pathname.endsWith("/uploads/transcript")
+        && init?.method === "POST"
+        && uploadRequestCount++ === 0
+      ) {
+        await firstUploadGate;
+      }
+      return fetchImplementation!(input, init);
+    });
+
     await userEvent.setup().upload(fileInput, [
       new File(["first transcript"], "customer-call.txt", { type: "text/plain" }),
       new File(["second transcript"], "workshop.txt", { type: "text/plain" }),
     ]);
+
+    expect(await screen.findByText("customer-call.txt")).toBeInTheDocument();
+    expect(screen.getByText("workshop.txt")).toBeInTheDocument();
+    expect(screen.getByText("Uploading and analyzing content...")).toBeInTheDocument();
+    expect(screen.getByText("Waiting to upload...")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Processing 2 files..." })).toBeDisabled();
+
+    releaseFirstUpload?.();
 
     await waitFor(() => {
       const uploadCalls = fetchMock.mock.calls.filter(([input, init]) =>
