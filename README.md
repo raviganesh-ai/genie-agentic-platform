@@ -668,7 +668,7 @@ Every deployment to the shared Azure evaluation environment (backend Container A
 - Replaced the detached material button with one visible upload panel that groups material type, a prominent **Choose files** action, empty-state guidance, uploaded filenames/statuses, and the next **Find personas** action.
 - The picker accepts multiple files in one selection and uploads them sequentially through the existing authenticated upload API before refreshing the durable evidence list.
 - Component coverage verifies that the upload action is discoverable and that selecting two files produces two real multipart upload requests.
-- Gave the Fluent material-type dropdown a dedicated track at least as wide as the control's intrinsic geometry and removed the adjacent duplicate document icon, preventing overlap at constrained shell widths and browser zoom levels.
+- Gave the Fluent material-type dropdown a dedicated track at least as wide as the control's intrinsic geometry, removed the adjacent duplicate document icon, and stack the upload controls at narrower shell widths so guidance remains readable without overlap.
 - Added an accessible delete action beside **Resume** for each saved Discovery; successful deletion removes the case from the landing list immediately and failures remain visible to the user.
 
 ### 2026-09-11 — Discovery: complete persona-to-prototype experience

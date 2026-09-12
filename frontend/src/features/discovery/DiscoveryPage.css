@@ -130,12 +130,12 @@
 
 @media (max-width: 1100px) {
   .discovery-upload-row {
-    grid-template-columns: minmax(250px, 280px) minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .discovery-upload-row > button {
-    grid-column: 1 / -1;
-    justify-self: end;
+    grid-column: 1;
+    justify-self: stretch;
   }
 }
 
