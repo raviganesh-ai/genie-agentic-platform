@@ -88,6 +88,12 @@
 .discovery-upload-type {
   display: grid;
   gap: 6px;
+  min-width: 0;
+}
+
+.discovery-upload-type > [role="combobox"] {
+  width: 100%;
+  min-width: 0;
 }
 
 .discovery-upload-prompt {
@@ -123,6 +129,17 @@
 .discovery-upload-next {
   padding-top: 12px;
   border-top: 1px solid var(--discovery-line);
+}
+
+@media (max-width: 1100px) {
+  .discovery-upload-row {
+    grid-template-columns: minmax(180px, 220px) minmax(240px, 1fr);
+  }
+
+  .discovery-upload-row > button {
+    grid-column: 1 / -1;
+    justify-self: end;
+  }
 }
 
 .discovery-muted {
