@@ -50,11 +50,21 @@ const UPLOAD_TYPE_LABELS: Record<UploadType, string> = {
   video: "Video recording",
   supporting_document: "Supporting document",
 };
+const DOCUMENT_ACCEPT = [
+  ".txt",
+  ".md",
+  ".pdf",
+  ".docx",
+  "text/plain",
+  "text/markdown",
+  "application/pdf",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+].join(",");
 const UPLOAD_TYPE_ACCEPT: Record<UploadType, string> = {
-  transcript: ".txt,.md,.pdf,text/plain,text/markdown,application/pdf",
+  transcript: DOCUMENT_ACCEPT,
   audio: "audio/*",
   video: "video/*",
-  supporting_document: ".txt,.md,.pdf,text/plain,text/markdown,application/pdf",
+  supporting_document: DOCUMENT_ACCEPT,
 };
 
 interface AzureNodeData {

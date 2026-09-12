@@ -154,7 +154,7 @@ Workflows (`config/workflows/registry.yaml`) define ordered, dependency-graphed 
 
 ### Persona-led Discovery
 
-The Landing page offers two distinct paths: **Start Prototype** enters the original Requirements-first workflow, while **Start Discovery** opens one durable progressive workspace. Discovery accepts the same transcript, recording, and supporting-document uploads, extracts evidence-grounded personas through the Foundry-hosted Requirements Analyst, and lets the user select one persona for pain-point, information-gap, assumption, and clarification-question analysis.
+The Landing page offers two distinct paths: **Start Prototype** enters the original Requirements-first workflow, while **Start Discovery** opens one durable progressive workspace. Discovery accepts plain-text, Markdown, PDF, DOCX, recording, and supporting-document uploads, extracts evidence-grounded personas through the Foundry-hosted Requirements Analyst, and lets the user select one persona for pain-point, information-gap, assumption, and clarification-question analysis.
 
 Questions can be answered in a batch or one at a time. Skipping a question records only a recommendation offer; Genie calls the Architecture Designer for a Microsoft/Azure best-practice recommendation only after the user explicitly accepts that offer. The user can stop after Q&A and resume the same Cosmos-backed case later, add customer material for a new analysis revision, or delete an abandoned pre-Build case together with only its case-prefixed Shared Collaboration Memory records.
 
@@ -662,6 +662,14 @@ If this identity/RBAC/secrets setup is ever missing or revoked, `deploy-backend`
 ## Deploy log
 
 Every deployment to the shared Azure evaluation environment (backend Container App and/or frontend Static Web App) is recorded here: commit, what changed, and why. Update this section as part of the same commit that ships the fix/feature, before pushing to `master` triggers [Continuous deployment](#continuous-deployment-github-actions).
+
+### 2026-09-12 — Discovery: real DOCX extraction
+
+- **Production diagnosis**: correlation ID `bd16a2a4-ca33-4be5-96b1-e8f9e7004136` reached backend revision `gh77` but Foundry rejected persona extraction with HTTP 429. The four inputs were DOCX files; the upload layer only parsed PDF and otherwise UTF-8-decoded bytes, so ZIP-based Word documents were marked completed and several megabytes of binary mojibake were sent to `gpt-5-1`.
+- **Correct extraction**: DOCX uploads are now parsed with `python-docx`; non-empty paragraphs and table rows become clean evidence text. Malformed and text-empty Word documents fail closed as upload failures rather than entering Discovery.
+- **Existing-case safety**: Discovery recognizes legacy DOCX records beginning with the ZIP signature and returns a specific conflict telling the user to start a new Discovery and re-upload. Original DOCX bytes were never persisted, so those lossy legacy records cannot be repaired in place.
+- **Picker contract**: both upload experiences now advertise `.docx` and its standard MIME type alongside text, Markdown, and PDF.
+- **Verification**: focused backend coverage validates DOCX paragraphs, tables, extension/MIME detection, malformed files, empty files, and legacy-record rejection; frontend coverage validates DOCX picker support.
 
 ### 2026-09-12 — Discovery: large evidence upload resilience
 

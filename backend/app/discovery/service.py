@@ -563,6 +563,14 @@ class DiscoveryService:
                 requesting_user_id=requesting_user_id,
             )
             if upload.transcript_text:
+                is_docx = upload.file_name.lower().endswith(".docx") or upload.content_type == (
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                )
+                if is_docx and upload.transcript_text.startswith("PK\x03\x04"):
+                    raise DiscoveryStateConflictError(
+                        f"'{upload.file_name}' was uploaded before Word document extraction "
+                        "was available. Start a new Discovery and re-upload the DOCX files."
+                    )
                 parts.append(f"--- {upload.file_name} ---\n{upload.transcript_text}")
         return "\n\n".join(parts)
 

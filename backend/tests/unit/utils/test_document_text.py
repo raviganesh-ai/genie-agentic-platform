@@ -9,6 +9,7 @@ from __future__ import annotations
 import io
 
 import pytest
+from docx import Document
 from pypdf import PdfWriter
 from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
 
@@ -48,6 +49,27 @@ def _build_blank_pdf_bytes() -> bytes:
     writer.add_blank_page(width=200, height=200)
     buffer = io.BytesIO()
     writer.write(buffer)
+    return buffer.getvalue()
+
+
+def _build_docx_bytes() -> bytes:
+    document = Document()
+    document.add_heading("Apache modernization", level=1)
+    document.add_paragraph("Move the workload to an Azure-native platform.")
+    table = document.add_table(rows=2, cols=2)
+    table.cell(0, 0).text = "Owner"
+    table.cell(0, 1).text = "Requirement"
+    table.cell(1, 0).text = "Operations"
+    table.cell(1, 1).text = "Zero-downtime migration"
+    buffer = io.BytesIO()
+    document.save(buffer)
+    return buffer.getvalue()
+
+
+def _build_blank_docx_bytes() -> bytes:
+    document = Document()
+    buffer = io.BytesIO()
+    document.save(buffer)
     return buffer.getvalue()
 
 
@@ -94,6 +116,29 @@ def test_pdf_detected_by_file_extension_is_parsed_for_text() -> None:
     assert "Extracted via extension" in text
 
 
+def test_docx_detected_by_content_type_extracts_paragraphs_and_tables() -> None:
+    text = extract_text(
+        content=_build_docx_bytes(),
+        content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        file_name="document",
+    )
+
+    assert "Apache modernization" in text
+    assert "Move the workload to an Azure-native platform." in text
+    assert "Owner | Requirement" in text
+    assert "Operations | Zero-downtime migration" in text
+
+
+def test_docx_detected_by_file_extension_is_parsed_for_text() -> None:
+    text = extract_text(
+        content=_build_docx_bytes(),
+        content_type="application/octet-stream",
+        file_name="requirements.docx",
+    )
+
+    assert "Apache modernization" in text
+
+
 def test_blank_pdf_with_no_text_raises_extraction_error() -> None:
     pdf_bytes = _build_blank_pdf_bytes()
     with pytest.raises(DocumentTextExtractionError):
@@ -103,3 +148,21 @@ def test_blank_pdf_with_no_text_raises_extraction_error() -> None:
 def test_malformed_pdf_bytes_raise_extraction_error() -> None:
     with pytest.raises(DocumentTextExtractionError):
         extract_text(content=b"not a real pdf", content_type="application/pdf", file_name="bad.pdf")
+
+
+def test_blank_docx_with_no_text_raises_extraction_error() -> None:
+    with pytest.raises(DocumentTextExtractionError):
+        extract_text(
+            content=_build_blank_docx_bytes(),
+            content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            file_name="blank.docx",
+        )
+
+
+def test_malformed_docx_bytes_raise_extraction_error() -> None:
+    with pytest.raises(DocumentTextExtractionError):
+        extract_text(
+            content=b"not a real docx",
+            content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            file_name="bad.docx",
+        )

@@ -3,7 +3,7 @@
 Thin wrapper over ``SessionService.register_upload`` / ``list_uploads`` /
 ``get_upload``. ``transcript``/``supporting_document`` uploads have their
 text extracted synchronously via ``app.utils.document_text.extract_text``
-(PDF-aware - plain text otherwise); ``audio``/``video`` uploads are
+(PDF/DOCX-aware - plain text otherwise); ``audio``/``video`` uploads are
 transcribed synchronously via the configured ``SpeechToTextService`` (Azure
 AI Speech in production, per ``app.transcription.speech_service``) before
 the upload record is created. File bytes themselves are still never

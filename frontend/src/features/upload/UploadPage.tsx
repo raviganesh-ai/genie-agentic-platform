@@ -13,6 +13,22 @@ import type { SafeError } from "@/types/common";
 import type { UploadType } from "@/types/upload";
 
 const UPLOAD_TYPES: UploadType[] = ["transcript", "audio", "video", "supporting_document"];
+const DOCUMENT_ACCEPT = [
+  ".txt",
+  ".md",
+  ".pdf",
+  ".docx",
+  "text/plain",
+  "text/markdown",
+  "application/pdf",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+].join(",");
+const UPLOAD_TYPE_ACCEPT: Record<UploadType, string> = {
+  transcript: DOCUMENT_ACCEPT,
+  audio: "audio/*",
+  video: "video/*",
+  supporting_document: DOCUMENT_ACCEPT,
+};
 
 export function UploadPage(): JSX.Element {
   const navigate = useNavigate();
@@ -121,6 +137,7 @@ export function UploadPage(): JSX.Element {
         <input
           ref={fileInputRef}
           type="file"
+          accept={UPLOAD_TYPE_ACCEPT[uploadType]}
           hidden
           onChange={(event) => void handleFileChosen(event)}
         />

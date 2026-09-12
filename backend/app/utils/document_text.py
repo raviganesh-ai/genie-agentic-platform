@@ -1,4 +1,4 @@
-"""Best-effort text extraction from uploaded document bytes.
+"""Text extraction from supported customer-document bytes.
 
 Used by ``app.api.uploads`` so every upload type that is supposed to
 contribute text to the session's combined transcript
@@ -6,7 +6,7 @@ contribute text to the session's combined transcript
 correctly:
 
 - Previously, ``transcript`` uploads were always UTF-8-decoded raw bytes -
-  fine for plain-text files, but garbage (mojibake) for a PDF.
+    fine for plain-text files, but garbage (mojibake) for a PDF or DOCX.
 - ``supporting_document`` uploads never had ``transcript_text`` populated
   at all, so a genuinely important PDF (a requirements doc, a statement of
   work, etc.) silently contributed nothing to what the orchestrator/
@@ -29,7 +29,10 @@ content type - only the PDF path is content-type/extension sensitive.
 from __future__ import annotations
 
 import io
+from zipfile import BadZipFile
 
+from docx import Document
+from docx.opc.exceptions import PackageNotFoundError
 from pypdf import PdfReader
 from pypdf.errors import PyPdfError
 
@@ -37,6 +40,10 @@ __all__ = ["DocumentTextExtractionError", "extract_text"]
 
 _PDF_CONTENT_TYPES = {"application/pdf"}
 _PDF_EXTENSIONS = (".pdf",)
+_DOCX_CONTENT_TYPES = {
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+}
+_DOCX_EXTENSIONS = (".docx",)
 
 
 class DocumentTextExtractionError(RuntimeError):
@@ -45,6 +52,10 @@ class DocumentTextExtractionError(RuntimeError):
 
 def _is_pdf(*, content_type: str, file_name: str) -> bool:
     return content_type.lower() in _PDF_CONTENT_TYPES or file_name.lower().endswith(_PDF_EXTENSIONS)
+
+
+def _is_docx(*, content_type: str, file_name: str) -> bool:
+    return content_type.lower() in _DOCX_CONTENT_TYPES or file_name.lower().endswith(_DOCX_EXTENSIONS)
 
 
 def _extract_pdf_text(*, content: bytes, file_name: str) -> str:
@@ -63,6 +74,25 @@ def _extract_pdf_text(*, content: bytes, file_name: str) -> str:
     return text
 
 
+def _extract_docx_text(*, content: bytes, file_name: str) -> str:
+    try:
+        document = Document(io.BytesIO(content))
+    except (BadZipFile, PackageNotFoundError, ValueError) as exc:
+        raise DocumentTextExtractionError(f"Unable to parse DOCX '{file_name}': {exc}") from exc
+
+    parts = [paragraph.text.strip() for paragraph in document.paragraphs if paragraph.text.strip()]
+    for table in document.tables:
+        for row in table.rows:
+            cells = [cell.text.strip() for cell in row.cells]
+            if any(cells):
+                parts.append(" | ".join(cells))
+
+    text = "\n".join(parts)
+    if not text.strip():
+        raise DocumentTextExtractionError(f"DOCX '{file_name}' contained no extractable text.")
+    return text
+
+
 def extract_text(*, content: bytes, content_type: str, file_name: str) -> str:
     """Extracts plain text from uploaded document bytes.
 
@@ -73,4 +103,6 @@ def extract_text(*, content: bytes, content_type: str, file_name: str) -> str:
     """
     if _is_pdf(content_type=content_type, file_name=file_name):
         return _extract_pdf_text(content=content, file_name=file_name)
+    if _is_docx(content_type=content_type, file_name=file_name):
+        return _extract_docx_text(content=content, file_name=file_name)
     return content.decode("utf-8", errors="replace")

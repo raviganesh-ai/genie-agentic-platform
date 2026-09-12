@@ -89,7 +89,10 @@ describe("DiscoveryPage", () => {
     expect(screen.getByRole("button", { name: "Choose files" })).toBeInTheDocument();
     expect(screen.getByText("No files uploaded yet.")).toBeInTheDocument();
 
-    await userEvent.setup().upload(screen.getByLabelText("Choose customer material files"), [
+    const fileInput = screen.getByLabelText("Choose customer material files");
+    expect(fileInput.getAttribute("accept")).toContain(".docx");
+
+    await userEvent.setup().upload(fileInput, [
       new File(["first transcript"], "customer-call.txt", { type: "text/plain" }),
       new File(["second transcript"], "workshop.txt", { type: "text/plain" }),
     ]);
