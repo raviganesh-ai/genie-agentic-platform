@@ -62,6 +62,8 @@ async def _create_service() -> tuple[DiscoveryService, _FakeOrchestrator, str]:
             "deep_dive_findings": ["Review latency is the primary constraint"],
             "gap_analysis": {
                 "known_facts": ["Documents arrive digitally"],
+                "risks": ["Manual review can miss time-sensitive claims"],
+                "contradictions": ["The target response time conflicts with manual review"],
                 "information_gaps": ["Peak monthly volume"],
                 "assumptions": [],
                 "evidence_references": ["call.txt"],
@@ -104,6 +106,7 @@ async def _create_service() -> tuple[DiscoveryService, _FakeOrchestrator, str]:
                     "cons": ["Requires evaluation"],
                     "ai_feasibility": "recommended",
                     "ai_feasibility_rationale": "The source documents are machine readable.",
+                    "evidence_references": ["call.txt: manual document review"],
                     "pricing_queries": [
                         {
                             "service_name": "Azure AI Search",
@@ -194,6 +197,14 @@ async def test_skip_requires_consent_before_recommendation_and_state_is_durable(
     assert reloaded == case
     assert reloaded.proposed_solutions[0].cost_estimate.monthly_amount == 42.5
     assert reloaded.proposed_solutions[0].cost_estimate.coverage == "complete"
+    assert reloaded.gap_analysis is not None
+    assert reloaded.gap_analysis.risks == ["Manual review can miss time-sensitive claims"]
+    assert reloaded.gap_analysis.contradictions == [
+        "The target response time conflicts with manual review"
+    ]
+    assert reloaded.proposed_solutions[0].evidence_references == [
+        "call.txt: manual document review"
+    ]
 
 
 async def test_removing_analyzed_upload_invalidates_derived_discovery_state() -> None:

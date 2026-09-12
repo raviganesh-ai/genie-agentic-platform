@@ -44,6 +44,19 @@ _DOCX_CONTENT_TYPES = {
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 }
 _DOCX_EXTENSIONS = (".docx",)
+_TEXT_CONTENT_TYPES = {
+    "application/csv",
+    "application/json",
+    "application/rtf",
+    "application/xml",
+    "text/csv",
+    "text/html",
+    "text/markdown",
+    "text/plain",
+    "text/tab-separated-values",
+    "text/xml",
+}
+_TEXT_EXTENSIONS = (".csv", ".html", ".json", ".kml", ".md", ".rtf", ".tsv", ".txt", ".xml")
 
 
 class DocumentTextExtractionError(RuntimeError):
@@ -56,6 +69,10 @@ def _is_pdf(*, content_type: str, file_name: str) -> bool:
 
 def _is_docx(*, content_type: str, file_name: str) -> bool:
     return content_type.lower() in _DOCX_CONTENT_TYPES or file_name.lower().endswith(_DOCX_EXTENSIONS)
+
+
+def _is_text(*, content_type: str, file_name: str) -> bool:
+    return content_type.lower() in _TEXT_CONTENT_TYPES or file_name.lower().endswith(_TEXT_EXTENSIONS)
 
 
 def _extract_pdf_text(*, content: bytes, file_name: str) -> str:
@@ -105,4 +122,17 @@ def extract_text(*, content: bytes, content_type: str, file_name: str) -> str:
         return _extract_pdf_text(content=content, file_name=file_name)
     if _is_docx(content_type=content_type, file_name=file_name):
         return _extract_docx_text(content=content, file_name=file_name)
-    return content.decode("utf-8", errors="replace")
+    if not _is_text(content_type=content_type, file_name=file_name):
+        raise DocumentTextExtractionError(
+            f"Unsupported local document type for '{file_name}'; configure Azure Content "
+            "Understanding for rich document and image evidence."
+        )
+    try:
+        text = content.decode("utf-8", errors="strict")
+    except UnicodeDecodeError as exc:
+        raise DocumentTextExtractionError(
+            f"Unable to decode text evidence '{file_name}' as UTF-8."
+        ) from exc
+    if not text.strip():
+        raise DocumentTextExtractionError(f"Text evidence '{file_name}' contained no content.")
+    return text

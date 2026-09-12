@@ -1496,32 +1496,45 @@ prompts:
 
   - id: discovery-persona-extraction-v1
     name: Discovery Persona Extraction
-    description: Extracts evidence-grounded personas from uploaded customer material.
+    description: Extracts evidence-grounded personas and customer context across all sources.
     template: >-
-      Analyze all source material below and identify the distinct customer personas
-      who experience or influence the problem. Return only valid JSON with one top-level
-      field named personas. Each persona must contain id, name, description, pain_points,
-      evidence_references, and confidence_score from 0 to 1. Arrays must contain concise
-      strings. Use stable lowercase-hyphenated ids. Evidence references must quote or
-      identify the supplied material; do not invent facts or personas without evidence.
+      Analyze all source material as one customer evidence set, including OCR text,
+      tables, visual descriptions, diagrams, and charts when present. Synthesize the
+      customer's current situation, desired outcomes, stakeholders, constraints, and
+      dependencies across documents before identifying the distinct personas who
+      experience, own, or influence the problem. Return only valid JSON with one
+      top-level field named personas. Each persona must contain id, name, description,
+      pain_points, evidence_references, and confidence_score from 0 to 1. Arrays must
+      contain concise strings. Use stable lowercase-hyphenated ids. Every pain point
+      must be grounded in a source reference. Treat generated visual descriptions as
+      evidence derived from an image, not as a direct customer quotation. Do not invent
+      facts, silently resolve conflicting sources, or create personas without evidence.
 
       Source material:
       {source_material}
     variables:
       - source_material
-    version: "1.0.0"
+    version: "2.0.0"
 
   - id: discovery-persona-deep-dive-v1
     name: Discovery Persona Deep Dive
-    description: Finds persona pain points, missing information, and clarification questions.
+    description: Finds persona pain points, risks, contradictions, gaps, and questions.
     template: >-
-      Deeply analyze the selected persona against the complete source material. Return only
-      valid JSON with deep_dive_findings, gap_analysis, and questions. gap_analysis must
-      contain known_facts, information_gaps, assumptions, evidence_references, and a
-      confidence_score from 0 to 1. questions must be an array where every object contains id, text, category,
-      status set to pending, and empty evidence_references; omit answer and recommendation.
-      Questions must close material gaps needed to recommend an implementable Azure solution.
-      Do not invent customer facts.
+      Deeply analyze the selected persona against the complete source material, including
+      text, OCR, tables, visual descriptions, diagrams, and charts. Establish the current
+      customer situation, desired outcomes, process and technology dependencies, constraints,
+      and success measures. Evaluate operational, security, privacy, compliance, adoption,
+      delivery, data-quality, and integration risks only where the evidence supports them.
+      Identify contradictions between sources explicitly instead of choosing one version.
+      Return only valid JSON with deep_dive_findings, gap_analysis, and questions.
+      gap_analysis must contain known_facts, risks, contradictions, information_gaps,
+      assumptions, evidence_references, and a confidence_score from 0 to 1. Keep facts,
+      risks, contradictions, assumptions, and unknowns separate. Every factual finding and
+      risk must be traceable to evidence; label inferences as assumptions. questions must be
+      an array where every object contains id, text, category, status set to pending, and
+      empty evidence_references; omit answer and recommendation. Ask the smallest set of
+      high-value questions needed to resolve contradictions, close material gaps, and
+      recommend an implementable solution. Do not invent customer facts.
 
       Selected persona:
       {selected_persona}
@@ -1531,7 +1544,7 @@ prompts:
     variables:
       - selected_persona
       - source_material
-    version: "1.0.0"
+    version: "2.0.0"
 
   - id: discovery-best-practice-recommendation-v1
     name: Discovery Best Practice Recommendation
@@ -1558,10 +1571,16 @@ prompts:
     description: Produces comparable, build-ready Azure-native solution options.
     template: >-
       Propose one to three implementable Azure-native solutions grounded in the Discovery
-      context and source material. Return only valid JSON with a top-level solutions array.
+      context and complete source material. Use known facts and user-approved recommendations;
+      do not convert unresolved gaps, contradictions, or unapproved assumptions into facts.
+      Each option must address the customer's desired outcomes and material risks, expose
+      meaningful tradeoffs, and trace its major decisions to evidence. Return only valid JSON
+      with a top-level solutions array.
       Every solution must contain id, name, summary, requirements_text, architecture_text,
       architecture_nodes, architecture_edges, pros, cons, ai_feasibility,
-      ai_feasibility_rationale, and pricing_queries. ai_feasibility must be recommended,
+      ai_feasibility_rationale, evidence_references, and pricing_queries. evidence_references
+      must identify the customer evidence or approved recommendation supporting the option's
+      requirements and architecture decisions. ai_feasibility must be recommended,
       feasible_with_tradeoffs, or not_feasible. Each architecture node must contain id,
       service_name, azure_icon_key, purpose, x, and y. Each edge must contain id, source,
       target, and label. Use only
@@ -1586,6 +1605,6 @@ prompts:
     variables:
       - discovery_context
       - source_material
-    version: "1.0.0"
+    version: "2.0.0"
 
 

@@ -5,6 +5,7 @@ import { Delete24Regular } from "@fluentui/react-icons";
 import { PageHeader } from "@/layouts/AppShell";
 import { LoadingState } from "@/components/LoadingState";
 import { ErrorState } from "@/components/ErrorState";
+import { DOCUMENT_EVIDENCE_ACCEPT } from "@/config/evidenceFormats";
 import { useSessionContext } from "@/state/SessionContext";
 import { useUploadAction, useUploads } from "@/hooks/useUploads";
 import { useWorkflowRun } from "@/hooks/useWorkflowRun";
@@ -14,21 +15,11 @@ import type { SafeError } from "@/types/common";
 import type { UploadType } from "@/types/upload";
 
 const UPLOAD_TYPES: UploadType[] = ["transcript", "audio", "video", "supporting_document"];
-const DOCUMENT_ACCEPT = [
-  ".txt",
-  ".md",
-  ".pdf",
-  ".docx",
-  "text/plain",
-  "text/markdown",
-  "application/pdf",
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-].join(",");
 const UPLOAD_TYPE_ACCEPT: Record<UploadType, string> = {
-  transcript: DOCUMENT_ACCEPT,
+  transcript: DOCUMENT_EVIDENCE_ACCEPT,
   audio: "audio/*",
   video: "video/*",
-  supporting_document: DOCUMENT_ACCEPT,
+  supporting_document: DOCUMENT_EVIDENCE_ACCEPT,
 };
 
 export function UploadPage(): JSX.Element {

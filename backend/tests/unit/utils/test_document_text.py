@@ -166,3 +166,21 @@ def test_malformed_docx_bytes_raise_extraction_error() -> None:
             content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             file_name="bad.docx",
         )
+
+
+def test_unknown_binary_type_is_not_decoded_as_customer_evidence() -> None:
+    with pytest.raises(DocumentTextExtractionError, match="Unsupported local document type"):
+        extract_text(
+            content=b"PK\x03\x04binary",
+            content_type="application/octet-stream",
+            file_name="evidence.zip",
+        )
+
+
+def test_invalid_utf8_is_not_replaced_with_lossy_characters() -> None:
+    with pytest.raises(DocumentTextExtractionError, match="UTF-8"):
+        extract_text(
+            content=b"customer requirement: \xff",
+            content_type="text/plain",
+            file_name="requirements.txt",
+        )

@@ -63,6 +63,8 @@ class GapAnalysis(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     known_facts: list[str] = Field(default_factory=list)
+    risks: list[str] = Field(default_factory=list)
+    contradictions: list[str] = Field(default_factory=list)
     information_gaps: list[str] = Field(default_factory=list)
     assumptions: list[str] = Field(default_factory=list)
     evidence_references: list[str] = Field(default_factory=list)
@@ -140,6 +142,7 @@ class ProposedSolution(BaseModel):
     cons: list[str] = Field(default_factory=list)
     ai_feasibility: AiFeasibility
     ai_feasibility_rationale: str = Field(min_length=1)
+    evidence_references: list[str] = Field(default_factory=list)
     pricing_queries: list[PricingQuery] = Field(default_factory=list)
     cost_estimate: CostEstimate
 

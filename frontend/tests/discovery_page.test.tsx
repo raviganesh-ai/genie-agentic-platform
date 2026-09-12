@@ -32,6 +32,8 @@ describe("DiscoveryPage", () => {
           deep_dive_findings: ["Evidence review is the bottleneck"],
           gap_analysis: {
             known_facts: ["Claims arrive digitally"],
+            risks: ["Manual review may breach the response target"],
+            contradictions: ["The stated SLA conflicts with the manual queue"],
             information_gaps: ["Peak volume"],
             assumptions: [],
             evidence_references: ["call.txt"],
@@ -83,6 +85,8 @@ describe("DiscoveryPage", () => {
     renderWithProviders(<DiscoveryPage />, { sessionId: "session-1" });
 
     await waitFor(() => expect(screen.getByText("Claims Reviewer")).toBeInTheDocument());
+    expect(screen.getByText("Manual review may breach the response target")).toBeInTheDocument();
+    expect(screen.getByText("The stated SLA conflicts with the manual queue")).toBeInTheDocument();
     expect(screen.getByText("What is the peak monthly volume?")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Yes, recommend" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "No, leave unanswered" })).toBeInTheDocument();
@@ -91,6 +95,9 @@ describe("DiscoveryPage", () => {
 
     const fileInput = screen.getByLabelText("Choose customer material files");
     expect(fileInput.getAttribute("accept")).toContain(".docx");
+    expect(fileInput.getAttribute("accept")).toContain(".png");
+    expect(fileInput.getAttribute("accept")).toContain(".xlsx");
+    expect(fileInput.getAttribute("accept")).toContain(".pptx");
 
     await userEvent.setup().upload(fileInput, [
       new File(["first transcript"], "customer-call.txt", { type: "text/plain" }),

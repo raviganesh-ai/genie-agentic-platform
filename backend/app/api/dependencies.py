@@ -19,6 +19,7 @@ from app.memory.memory_service import MemoryService
 from app.orchestration.agent_orchestrator import AgentOrchestrator
 from app.orchestration.workflow_event_bus import WorkflowEventBus
 from app.services.architecture_service import ArchitectureService
+from app.services.document_understanding_service import DocumentUnderstandingService
 from app.services.foundry_agent_inventory_service import FoundryAgentInventoryService
 from app.services.foundry_agent_lifecycle_service import FoundryAgentLifecycleService
 from app.services.foundry_agent_synchronization_service import FoundryAgentSynchronizationService
@@ -36,6 +37,7 @@ __all__ = [
     "get_architecture_service",
     "get_deployment_pipeline_service",
     "get_discovery_service",
+    "get_document_understanding_service",
     "get_foundry_inventory_service",
     "get_foundry_lifecycle_service",
     "get_foundry_synchronization_service",
@@ -64,6 +66,10 @@ def get_session_service(request: Request) -> SessionService:
 
 def get_discovery_service(request: Request) -> DiscoveryService:
     return request.app.state.discovery_service
+
+
+def get_document_understanding_service(request: Request) -> DocumentUnderstandingService:
+    return request.app.state.document_understanding_service
 
 
 def get_speech_to_text_service(request: Request) -> SpeechToTextService:

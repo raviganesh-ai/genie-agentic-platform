@@ -55,6 +55,7 @@ Genie follows Clean Architecture in application code and uses Azure-native ident
 | **Web experience** | React/TypeScript on Azure Static Web Apps; no sign-in or bearer token is required |
 | **API access boundary** | Public Standard v2 API Management is the only Internet-facing API endpoint; outbound VNet integration, private DNS, and a Container Apps environment private endpoint reach FastAPI on `8000` while environment public access remains disabled |
 | **Agent execution** | `AzureAgentGateway` is the only production execution path to independently provisioned Azure AI Foundry Prompt Agents |
+| **Evidence understanding** | Azure Content Understanding `prebuilt-documentSearch` converts supported documents and images into grounded Markdown through managed identity before Discovery agents run |
 | **Identity and secrets** | User-assigned managed identity and least-privilege Azure RBAC; secrets belong in Key Vault and are never embedded in images or source |
 | **Memory and artifacts** | Cosmos DB for durable session/memory/lineage state, Azure AI Search for enterprise knowledge, and Azure Storage for uploads and generated artifacts |
 | **Images and hosting** | Commit-pinned FastAPI images in Azure Container Registry, deployed to Azure Container Apps |
@@ -154,7 +155,9 @@ Workflows (`config/workflows/registry.yaml`) define ordered, dependency-graphed 
 
 ### Persona-led Discovery
 
-The Landing page offers two distinct paths: **Start Prototype** enters the original Requirements-first workflow, while **Start Discovery** opens one durable progressive workspace. Discovery accepts plain-text, Markdown, PDF, DOCX, recording, and supporting-document uploads, extracts evidence-grounded personas through the Foundry-hosted Requirements Analyst, and lets the user select one persona for pain-point, information-gap, assumption, and clarification-question analysis.
+The Landing page offers two distinct paths: **Start Prototype** enters the original Requirements-first workflow, while **Start Discovery** opens one durable progressive workspace. In production, Discovery sends supported customer documents and images to Azure Content Understanding before agent analysis. Its explicit allowlist covers PDF, TIFF and common image formats, Word, Excel, PowerPoint, OpenDocument, email, EPUB, HTML, Markdown, RTF, XML, JSON, CSV/TSV, KML, and plain text. Content Understanding contributes OCR, document structure, tables, and grounded Markdown; PDF and standalone image inputs can additionally contribute generated descriptions of diagrams and charts. Embedded-image semantic analysis in Office files is not claimed. Local development remains intentionally narrower: deterministic UTF-8 text, text PDFs, and DOCX only, with unsupported or lossy input rejected rather than treated as evidence.
+
+The Foundry-hosted Discovery agents synthesize that evidence across files, identify personas, and keep known facts, risks, contradictions, assumptions, and information gaps distinct. Clarification questions target unresolved evidence needed for implementation. Probable Azure-native solutions include tradeoffs, evidence references, structured reference-architecture nodes and edges, AI feasibility, and independently resolved Azure Retail Prices data. Removing analyzed evidence invalidates every derived result so stale conclusions cannot survive a source change.
 
 Questions can be answered in a batch or one at a time. Skipping a question records only a recommendation offer; Genie calls the Architecture Designer for a Microsoft/Azure best-practice recommendation only after the user explicitly accepts that offer. The user can stop after Q&A and resume the same Cosmos-backed case later, add customer material for a new analysis revision, or delete an abandoned pre-Build case together with only its case-prefixed Shared Collaboration Memory records.
 
@@ -363,6 +366,12 @@ All backend configuration is via environment variables prefixed `GENIE_` (pydant
 | `GENIE_USE_SYNTHETIC_DATA` | `true` | Must be `false` in production |
 | `GENIE_AZURE_FOUNDRY_ENDPOINT` | *(none)* | `https://<account>.services.ai.azure.com/api/projects/<project>` |
 | `GENIE_AZURE_FOUNDRY_PROJECT_NAME` | *(none)* | Foundry project name |
+| `GENIE_AZURE_CONTENT_UNDERSTANDING_ENDPOINT` | *(derived from Foundry endpoint)* | Optional HTTPS AIServices account root URL for document/image evidence analysis |
+| `GENIE_CONTENT_UNDERSTANDING_ANALYZER_ID` | `prebuilt-documentSearch` | Externally selectable Content Understanding analyzer |
+| `GENIE_CONTENT_UNDERSTANDING_API_VERSION` | `2025-11-01` | Pinned GA Content Understanding REST API |
+| `GENIE_CONTENT_UNDERSTANDING_PROCESSING_LOCATION` | `geography` | `geography` \| `dataZone` \| `global` processing boundary |
+| `GENIE_CONTENT_UNDERSTANDING_TIMEOUT_SECONDS` | `300` | End-to-end analysis polling deadline |
+| `GENIE_CONTENT_UNDERSTANDING_POLL_INTERVAL_SECONDS` | `2` | Delay between operation-status requests |
 | `GENIE_AZURE_RETAIL_PRICES_ENDPOINT` | `https://prices.azure.com/api/retail/prices` | Public Azure Retail Prices API used for deterministic Discovery estimates |
 | `GENIE_MEMORY_STORE_BACKEND` | `in_memory` | `in_memory` \| `cosmos_db` — production requires `cosmos_db` |
 | `GENIE_MEMORY_STORE_ENDPOINT` | *(none)* | Required in production when backend is `cosmos_db` |
@@ -634,6 +643,23 @@ All three require `GENIE_AZURE_FOUNDRY_ENDPOINT` / `GENIE_AZURE_FOUNDRY_PROJECT_
 
 If this identity/RBAC/secrets setup is ever missing or revoked, `deploy-backend`/`deploy-frontend` fail fast (within seconds, at an explicit "Check required secrets" step) rather than hanging — the `backend`/`frontend` test jobs are unaffected either way and still gate every PR.
 
+Content Understanding also requires completion and embedding model aliases on the AIServices resource. Configure them once per environment with externally supplied deployment/model names:
+
+```powershell
+./scripts/configure_content_understanding.ps1 `
+  -SubscriptionId <subscription-id> `
+  -ResourceGroup <resource-group> `
+  -AccountName <ai-services-account> `
+  -CompletionDeploymentName <completion-deployment> `
+  -CompletionModelName <supported-completion-model> `
+  -CompletionModelVersion <completion-model-version> `
+  -EmbeddingDeploymentName <embedding-deployment> `
+  -EmbeddingModelName <supported-embedding-model> `
+  -EmbeddingModelVersion <embedding-model-version>
+```
+
+The script uses Microsoft Entra authentication, creates only missing model deployments, checks both model families against the live analyzer's `supportedModels`, PATCHes the analyzer aliases as resource defaults, and reads them back. The runtime managed identity requires **Cognitive Services User** on the AIServices account. Production startup independently reads the analyzer and defaults and refuses readiness when the analyzer is unavailable or any required alias is unmapped.
+
 ---
 
 ## Testing
@@ -662,6 +688,13 @@ If this identity/RBAC/secrets setup is ever missing or revoked, `deploy-backend`
 ## Deploy log
 
 Every deployment to the shared Azure evaluation environment (backend Container App and/or frontend Static Web App) is recorded here: commit, what changed, and why. Update this section as part of the same commit that ships the fix/feature, before pushing to `master` triggers [Continuous deployment](#continuous-deployment-github-actions).
+
+### 2026-09-12 — Multimodal, evidence-grounded Discovery
+
+- **Production document understanding**: transcript and supporting-document uploads now pass through an injected async service. Production uses Azure Content Understanding GA `2025-11-01` and `prebuilt-documentSearch` through managed identity; local/test mode retains deterministic text/PDF/DOCX extraction only. Unknown binaries, malformed UTF-8, empty analysis results, unsafe poll URLs, Azure failures, and timeouts fail closed as visible upload errors.
+- **Broad but explicit format coverage**: both file pickers advertise the documented PDF, image, Office, OpenDocument, email, EPUB, HTML, Markdown, RTF, structured-text, and plain-text allowlist. Scans and standalone images gain OCR and visual descriptions; the product does not claim semantic extraction of embedded Office images.
+- **Intelligent synthesis contract**: Discovery prompts now synthesize the complete evidence set and explicitly separate facts, risks, contradictions, assumptions, and gaps. Clarification questions prioritize unresolved implementation decisions, while solution options must expose tradeoffs and cite the evidence or approved recommendation behind requirements and architecture decisions.
+- **Production readiness**: startup verifies the configured analyzer is ready and every model alias it requires has a resource default before accepting traffic. `scripts/configure_content_understanding.ps1` provisions/verifies those model deployments and defaults without keys. The existing environment was verified with `gpt-5-mini` plus `text-embedding-3-large`, and a live PNG analysis returned nonempty grounded Markdown.
 
 ### 2026-09-12 — Discovery: evidence readiness and file removal
 

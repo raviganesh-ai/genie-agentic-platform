@@ -28,6 +28,7 @@ import ReactFlow, {
 import "reactflow/dist/style.css";
 import "./DiscoveryPage.css";
 import { ErrorState } from "@/components/ErrorState";
+import { DOCUMENT_EVIDENCE_ACCEPT } from "@/config/evidenceFormats";
 import { PageHeader } from "@/layouts/AppShell";
 import { useUploadAction, useUploads } from "@/hooks/useUploads";
 import { ApiError } from "@/services/httpClient";
@@ -50,21 +51,11 @@ const UPLOAD_TYPE_LABELS: Record<UploadType, string> = {
   video: "Video recording",
   supporting_document: "Supporting document",
 };
-const DOCUMENT_ACCEPT = [
-  ".txt",
-  ".md",
-  ".pdf",
-  ".docx",
-  "text/plain",
-  "text/markdown",
-  "application/pdf",
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-].join(",");
 const UPLOAD_TYPE_ACCEPT: Record<UploadType, string> = {
-  transcript: DOCUMENT_ACCEPT,
+  transcript: DOCUMENT_EVIDENCE_ACCEPT,
   audio: "audio/*",
   video: "video/*",
-  supporting_document: DOCUMENT_ACCEPT,
+  supporting_document: DOCUMENT_EVIDENCE_ACCEPT,
 };
 
 interface AzureNodeData {
@@ -156,6 +147,12 @@ function SolutionCard({
         </div>
       </div>
       <Text>{solution.ai_feasibility_rationale}</Text>
+      {(solution.evidence_references ?? []).length > 0 ? (
+        <div>
+          <Text weight="semibold">Evidence</Text>
+          <ul>{(solution.evidence_references ?? []).map((item) => <li key={item}>{item}</li>)}</ul>
+        </div>
+      ) : null}
       <div className="discovery-cost">
         <Text weight="semibold">Estimated Azure run rate</Text>
         <Text weight="bold">
@@ -520,6 +517,8 @@ export function DiscoveryPage(): JSX.Element {
           <div className="discovery-gap-grid">
             {([
               ["known facts", discoveryCase.gap_analysis.known_facts],
+              ["risks", discoveryCase.gap_analysis.risks ?? []],
+              ["contradictions", discoveryCase.gap_analysis.contradictions ?? []],
               ["information gaps", discoveryCase.gap_analysis.information_gaps],
               ["assumptions", discoveryCase.gap_analysis.assumptions],
               ["evidence", discoveryCase.gap_analysis.evidence_references],

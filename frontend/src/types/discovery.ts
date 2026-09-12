@@ -31,6 +31,8 @@ export interface PersonaProfile {
 
 export interface GapAnalysis {
   known_facts: string[];
+  risks: string[];
+  contradictions: string[];
   information_gaps: string[];
   assumptions: string[];
   evidence_references: string[];
@@ -94,6 +96,7 @@ export interface ProposedSolution {
   cons: string[];
   ai_feasibility: "recommended" | "feasible_with_tradeoffs" | "not_feasible";
   ai_feasibility_rationale: string;
+  evidence_references: string[];
   pricing_queries: PricingQuery[];
   cost_estimate: CostEstimate;
 }

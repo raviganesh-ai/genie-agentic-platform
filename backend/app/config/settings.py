@@ -69,6 +69,19 @@ class Settings(BaseSettings):
     azure_foundry_project_name: str | None = None
     azure_retail_prices_endpoint: str = "https://prices.azure.com/api/retail/prices"
 
+    # --- Azure Content Understanding (customer evidence ingestion) --------------
+    # A dedicated account endpoint can be supplied. When omitted, production
+    # derives the account root from azure_foundry_endpoint so the existing
+    # AIServices resource can host both Foundry agents and Content Understanding.
+    azure_content_understanding_endpoint: str | None = None
+    content_understanding_analyzer_id: str = "prebuilt-documentSearch"
+    content_understanding_api_version: Literal["2025-11-01"] = "2025-11-01"
+    content_understanding_processing_location: Literal[
+        "geography", "dataZone", "global"
+    ] = "geography"
+    content_understanding_timeout_seconds: float = Field(default=300, gt=0, le=1800)
+    content_understanding_poll_interval_seconds: float = Field(default=2, ge=0.1, le=30)
+
     # Azure subscription every real Deploy & Launch pipeline Azure mgmt SDK
     # call (ACR, Container Apps, Storage) targets. Never hardcoded to a real
     # subscription id (Configuration Rules).
@@ -206,6 +219,7 @@ class Settings(BaseSettings):
 
     @field_validator(
         "azure_foundry_endpoint",
+        "azure_content_understanding_endpoint",
         "azure_speech_endpoint",
         "key_vault_uri",
         "memory_store_endpoint",

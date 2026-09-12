@@ -67,6 +67,7 @@ from app.repositories.session_repository import CosmosSessionRepository
 from app.repositories.upload_repository import CosmosUploadRepository
 from app.repositories.workflow_run_repository import CosmosWorkflowRunRepository
 from app.services.architecture_service import create_architecture_service
+from app.services.document_understanding_service import create_document_understanding_service
 from app.services.foundry_agent_inventory_service import FoundryAgentInventoryService
 from app.services.foundry_agent_lifecycle_service import FoundryAgentLifecycleService
 from app.services.foundry_agent_synchronization_service import (
@@ -267,6 +268,10 @@ def create_app(
             ),
         )
         app.state.speech_to_text_service = create_speech_to_text_service(resolved_settings)
+        app.state.document_understanding_service = create_document_understanding_service(
+            resolved_settings
+        )
+        await app.state.document_understanding_service.validate_ready()
         app.state.workshop_service = create_workshop_service(
             orchestrator=orchestrator, session_service=session_service
         )
