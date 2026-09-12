@@ -25,6 +25,7 @@ from app.api import (
     architecture,
     debugging,
     deploy_launch,
+    discovery,
     foundry_admin,
     health,
     ingestion,
@@ -53,6 +54,8 @@ from app.deploy_launch.mission_agent_provisioning_service import (
 )
 from app.deploy_launch.mission_identity_service import create_mission_identity_service
 from app.deploy_launch.pipeline_service import create_deployment_pipeline_service
+from app.discovery.repository import CosmosDiscoveryCaseRepository
+from app.discovery.service import create_discovery_service
 from app.governance.replay_service import ReplayService
 from app.governance.traceability_service import TraceabilityService
 from app.orchestration.agent_orchestrator import create_agent_orchestrator
@@ -159,6 +162,7 @@ def create_app(
         document_store: CosmosDocumentStore | None = None
         session_repository = None
         deployment_run_repository = None
+        discovery_case_repository = None
         upload_repository = None
         workflow_run_repository = None
         if resolved_settings.memory_store_backend == "cosmos_db":
@@ -169,6 +173,7 @@ def create_app(
             )
             session_repository = CosmosSessionRepository(store=document_store)
             deployment_run_repository = CosmosDeploymentRunRepository(store=document_store)
+            discovery_case_repository = CosmosDiscoveryCaseRepository(store=document_store)
             upload_repository = CosmosUploadRepository(store=document_store)
             workflow_run_repository = CosmosWorkflowRunRepository(store=document_store)
         app.state.document_store = document_store
@@ -249,6 +254,10 @@ def create_app(
             upload_repository=upload_repository,
         )
         app.state.session_service = session_service
+        app.state.discovery_service = create_discovery_service(
+            session_service=session_service,
+            repository=discovery_case_repository,
+        )
         app.state.speech_to_text_service = create_speech_to_text_service(resolved_settings)
         app.state.workshop_service = create_workshop_service(
             orchestrator=orchestrator, session_service=session_service
@@ -376,6 +385,7 @@ def create_app(
     app.include_router(replay.router)
     app.include_router(foundry_admin.router)
     app.include_router(deploy_launch.router)
+    app.include_router(discovery.router)
 
     return app
 

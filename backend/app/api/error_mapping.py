@@ -23,6 +23,7 @@ from app.deploy_launch.code_materializer import MaterializedCodeError
 from app.deploy_launch.frontend_deployment_service import FrontendDeploymentError
 from app.deploy_launch.mission_agent_provisioning_service import MissionAgentProvisioningError
 from app.deploy_launch.pipeline_service import DeploymentPipelineStepFailedError
+from app.discovery.service import DiscoveryCaseNotFoundError
 from app.governance.approval_service import (
     ApprovalAlreadyDecidedError,
     ApprovalExpiredError,
@@ -54,6 +55,7 @@ _SERVICE_UNAVAILABLE_ERRORS = (
 )
 
 _NOT_FOUND_ERRORS = (
+    DiscoveryCaseNotFoundError,
     SessionNotFoundError,
     UploadNotFoundError,
     UnknownWorkflowRunError,

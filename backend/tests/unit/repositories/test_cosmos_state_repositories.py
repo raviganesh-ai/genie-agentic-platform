@@ -4,6 +4,8 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from app.deploy_launch.models import DeploymentPipelineRun
+from app.discovery.models import DiscoveryCase
+from app.discovery.repository import CosmosDiscoveryCaseRepository
 from app.models.session_models import Session
 from app.models.upload_models import UploadRecord
 from app.models.workflow_models import WorkflowRunResult, WorkflowStepResult
@@ -149,3 +151,30 @@ async def test_cosmos_upload_repository_preserves_extracted_text_after_restart()
     assert await restarted_repository.get(upload_id=upload.id) == upload
     assert await restarted_repository.list_for_session(session_id=upload.session_id) == [upload]
     assert await restarted_repository.list_for_session(session_id="session-2") == []
+
+
+async def test_cosmos_discovery_repository_survives_restart_and_deletes() -> None:
+    store = _FakeDocumentStore()
+    now = datetime.now(UTC)
+    discovery_case = DiscoveryCase(
+        id="discovery-1",
+        session_id="session-1",
+        owner_user_id="tenant-1:object-1",
+        source_upload_ids=["upload-1"],
+        created_at=now,
+        updated_at=now,
+    )
+
+    await CosmosDiscoveryCaseRepository(store=store).put(discovery_case)
+    restarted_repository = CosmosDiscoveryCaseRepository(store=store)
+
+    assert await restarted_repository.get(discovery_case_id=discovery_case.id) == discovery_case
+    assert await restarted_repository.get_for_session(session_id=discovery_case.session_id) == discovery_case
+    assert await restarted_repository.list_for_owner(
+        owner_user_id=discovery_case.owner_user_id
+    ) == [discovery_case]
+    assert await restarted_repository.list_for_owner(owner_user_id="tenant-2:object-1") == []
+
+    await restarted_repository.delete(discovery_case_id=discovery_case.id)
+
+    assert await restarted_repository.get(discovery_case_id=discovery_case.id) is None

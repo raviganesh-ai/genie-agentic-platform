@@ -237,6 +237,7 @@ Each step's real status (`pending` → `running` → `completed`/`failed`/`skipp
 backend/           FastAPI application (Python 3.12+)
   app/
     agents/        AgentRegistry, AzureAgentGateway, orchestration tools, Foundry provider/sync/lifecycle
+    discovery/     Durable Discovery case models, repository, and state service
     api/            19 routers (thin — auth + delegation only)
     architecture/   Architecture Studio services
     config/         Settings (pydantic-settings, env prefix GENIE_)
@@ -651,6 +652,14 @@ If this identity/RBAC/secrets setup is ever missing or revoked, `deploy-backend`
 ## Deploy log
 
 Every deployment to the shared Azure evaluation environment (backend Container App and/or frontend Static Web App) is recorded here: commit, what changed, and why. Update this section as part of the same commit that ships the fix/feature, before pushing to `master` triggers [Continuous deployment](#continuous-deployment-github-actions).
+
+### 2026-09-11 — Discovery Phase 1: durable case lifecycle
+
+- **Durable domain**: added strongly typed Discovery case state for source/analyzed uploads, revision tracking, personas, persona-scoped findings, gap analysis, consent-aware Q&A, priced solution options, structured Azure architecture graphs, selected solution, and eventual Build handoff.
+- **Persistence**: production uses the existing managed-identity Cosmos document store with a dedicated logical `discovery-cases` partition and `discovery-case` record type. Local development and tests use an isolated in-memory repository. Discovery cases survive backend restarts without provisioning another physical Cosmos container.
+- **Authenticated lifecycle API**: `POST /sessions/{session_id}/discovery` creates or resumes the session's single case and validates every supplied upload belongs to that session; `GET /discovery` lists the caller's cases; `GET /sessions/{session_id}/discovery` resumes one case; and `DELETE /sessions/{session_id}/discovery` hard-deletes it. Ownership inconsistencies fail closed.
+- **Scope**: this is the persistence/API foundation only. Persona extraction, deep analysis, Q&A, pricing, diagrams, and Build handoff remain later Discovery phases and are not represented as working behavior yet.
+- **Verification**: focused repository/service/API tests cover in-memory isolation, Cosmos restart recovery, owner filtering, idempotent resume, incremental upload merging, invalid upload rejection, ownership failure, and deletion.
 
 ### 2026-09-11 — Fidelity launches directly; generated UIs use Impeccable
 

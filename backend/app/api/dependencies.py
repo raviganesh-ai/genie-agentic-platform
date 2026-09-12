@@ -10,6 +10,7 @@ from __future__ import annotations
 from fastapi import Request
 
 from app.deploy_launch.pipeline_service import DeploymentPipelineService
+from app.discovery.service import DiscoveryService
 from app.governance.approval_service import ApprovalService
 from app.governance.governance_service import GovernanceService
 from app.governance.replay_service import ReplayService
@@ -34,6 +35,7 @@ __all__ = [
     "get_approval_service",
     "get_architecture_service",
     "get_deployment_pipeline_service",
+    "get_discovery_service",
     "get_foundry_inventory_service",
     "get_foundry_lifecycle_service",
     "get_foundry_synchronization_service",
@@ -58,6 +60,10 @@ def get_agent_orchestrator(request: Request) -> AgentOrchestrator:
 
 def get_session_service(request: Request) -> SessionService:
     return request.app.state.session_service
+
+
+def get_discovery_service(request: Request) -> DiscoveryService:
+    return request.app.state.discovery_service
 
 
 def get_speech_to_text_service(request: Request) -> SpeechToTextService:
