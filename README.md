@@ -691,9 +691,9 @@ Every deployment to the shared Azure evaluation environment (backend Container A
 
 ### 2026-09-12 — Discovery deep-dive response resilience
 
-- **Production diagnosis**: **Run Discovery** reached the Foundry-hosted Requirements Analyst but correlation ID `d30d64d3-623b-466b-b92c-521ae18351c8` failed when additional model-generated metadata did not satisfy the strict `_DeepDiveEnvelope` response boundary.
+- **Production diagnosis**: **Run Discovery** reached the Foundry-hosted Requirements Analyst but correlation ID `d30d64d3-623b-466b-b92c-521ae18351c8` failed at the strict `_DeepDiveEnvelope` response boundary. The original parser discarded the specific JSON or field-validation cause, so the failure could not be diagnosed safely from production logs.
 - **Resilient validation**: the external deep-dive envelope, gap analysis, and question drafts now ignore unrecognized metadata before mapping into Genie's strict internal models. Required findings, gap fields, question fields, types, and confidence bounds remain validated and malformed core content still fails closed.
-- **Prompt contract**: `discovery-persona-deep-dive-v1` now provides the exact escaped JSON shape and explicitly forbids additional fields. Regression coverage injects extra metadata at every response level and verifies multi-person Discovery still reaches clarification mode.
+- **Prompt contract and diagnostics**: `discovery-persona-deep-dive-v1` now provides the exact escaped JSON shape and explicitly forbids additional fields. Schema failures report only field paths and validation messages, never rejected response values or customer evidence. Regression coverage verifies both extra-metadata compatibility and privacy-safe error details.
 
 ### 2026-09-12 — Multimodal, evidence-grounded Discovery
 
