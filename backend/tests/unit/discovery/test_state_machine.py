@@ -21,10 +21,12 @@ class _FakeOrchestrator:
     def __init__(self, outputs: list[dict[str, object]]) -> None:
         self.outputs = deque(json.dumps(output) for output in outputs)
         self.calls: list[str] = []
+        self.execution_requests: list[dict[str, object]] = []
 
     async def execute_agent(self, **kwargs: object) -> AgentExecutionResult:
         prompt_id = str(kwargs["prompt_id"])
         self.calls.append(prompt_id)
+        self.execution_requests.append(kwargs)
         return AgentExecutionResult(
             agent_id=str(kwargs["agent_id"]),
             output_text=self.outputs.popleft(),
@@ -437,6 +439,12 @@ async def test_solution_generation_retries_once_after_truncated_json() -> None:
         "discovery-probable-solutions-v1",
         "discovery-probable-solutions-v1",
     ]
+    retry_variables = orchestrator.execution_requests[-1]["variables"]
+    assert isinstance(retry_variables, dict)
+    assert "not valid JSON" in str(retry_variables["retry_instruction"])
+    assert "between 1,200 and 2,500 characters" in str(
+        retry_variables["retry_instruction"]
+    )
 
 
 async def test_solution_generation_fails_closed_after_two_malformed_responses() -> None:

@@ -684,12 +684,6 @@ class DiscoveryService:
             "retry_instruction": "",
         }
         for attempt in range(2):
-            if attempt:
-                variables["retry_instruction"] = (
-                    "A prior response was malformed, truncated, or schema-invalid. Regenerate "
-                    "it as fresh JSON, honor every field and size limit, and close all arrays, "
-                    "objects, and strings."
-                )
             result = await self._execute(
                 agent_id="architecture-designer",
                 prompt_id="discovery-probable-solutions-v1",
@@ -698,9 +692,16 @@ class DiscoveryService:
             )
             try:
                 return parse_agent_response(result, _SolutionsEnvelope).solutions
-            except DiscoveryAgentResponseError:
+            except DiscoveryAgentResponseError as exc:
                 if attempt == 1:
                     raise
+                variables["retry_instruction"] = (
+                    "A prior response was malformed, truncated, or schema-invalid. Correct "
+                    f"these exact validation issues: {exc} Regenerate the complete response "
+                    "as fresh JSON, keep requirements_text and architecture_text between "
+                    "1,200 and 2,500 characters each, honor every field and size limit, and "
+                    "close all arrays, objects, and strings."
+                )
         raise RuntimeError("Discovery solution retry loop exited unexpectedly.")
 
     async def select_solution(

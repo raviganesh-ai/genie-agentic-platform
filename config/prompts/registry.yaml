@@ -1636,9 +1636,10 @@ prompts:
       units_per_month, and assumption. Never provide prices: Genie resolves every unit price
       deterministically from the Azure Retail Prices API and reports missing coverage. Keep the
       complete JSON response under 20,000 characters. Keep each summary under 800 characters,
-      requirements_text and architecture_text under 4,000 characters each, and return at most
-      10 architecture nodes, 12 edges, 5 pros, 5 cons, 8 evidence references, and 6 pricing
-      queries per solution. Prefer concise, complete content over repetition.
+      target 1,200 to 2,500 characters each for requirements_text and architecture_text and
+      never exceed 4,000 characters for either field. Return at most 10 architecture nodes,
+      12 edges, 5 pros, 5 cons, 8 evidence references, and 6 pricing queries per solution.
+      Prefer concise, complete content over repetition.
 
       {retry_instruction}
 
@@ -1651,6 +1652,6 @@ prompts:
       - discovery_context
       - retry_instruction
       - source_material
-    version: "2.1.0"
+    version: "2.2.0"
 
 

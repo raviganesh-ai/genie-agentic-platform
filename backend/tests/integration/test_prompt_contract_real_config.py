@@ -59,7 +59,8 @@ def test_discovery_solution_prompt_bounds_structured_output_and_supports_retry()
 
     assert "under 20,000 characters" in template
     assert "at most 10 architecture nodes" in template
-    assert "requirements_text and architecture_text under 4,000 characters" in template
+    assert "target 1,200 to 2,500 characters each" in template
+    assert "never exceed 4,000 characters for either field" in template
     assert "{retry_instruction}" in prompt.template
 
 
