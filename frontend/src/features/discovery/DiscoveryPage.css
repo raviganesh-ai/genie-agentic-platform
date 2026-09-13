@@ -265,35 +265,99 @@
   gap: 18px;
 }
 
+.discovery-architecture-shell {
+  overflow: hidden;
+  border: 1px solid #324557;
+  border-radius: 8px;
+  background: #0d141b;
+}
+
+.discovery-architecture-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  padding: 14px 16px;
+  border-bottom: 1px solid #263746;
+  background: #121c25;
+}
+
+.discovery-architecture-header > div {
+  display: grid;
+  gap: 2px;
+}
+
 .discovery-architecture {
-  height: 350px;
-  min-height: 350px;
-  background: #0f141a;
+  height: clamp(460px, 58vh, 620px);
+  min-height: 460px;
+  background: #0d141b;
 }
 
 .discovery-node {
-  width: 172px;
+  box-sizing: border-box;
+  width: 228px;
+  height: 118px;
+  display: grid;
+  align-content: start;
+  gap: 11px;
+  overflow: hidden;
+  border: 1px solid #48677f;
+  border-radius: 6px;
+  background: #17232e;
+  color: #eff5fa;
+  padding: 14px;
+  box-shadow: 0 8px 20px rgb(0 0 0 / 26%);
+}
+
+.discovery-node img {
+  width: 34px;
+  height: 34px;
+  object-fit: contain;
+}
+
+.discovery-node-service {
   display: grid;
   grid-template-columns: 34px minmax(0, 1fr);
   gap: 10px;
   align-items: center;
-  border: 1px solid #3b5064;
-  border-radius: 6px;
-  background: #17212b;
-  color: #eff5fa;
-  padding: 10px;
-  font-size: 11px;
-}
-
-.discovery-node img {
-  width: 32px;
-  height: 32px;
-  object-fit: contain;
 }
 
 .discovery-node strong {
-  display: block;
-  font-size: 12px;
+  display: -webkit-box;
+  overflow: hidden;
+  font-size: 13px;
+  line-height: 1.25;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.discovery-node-purpose {
+  display: -webkit-box;
+  overflow: hidden;
+  color: #b8c8d5;
+  font-size: 11px;
+  line-height: 1.45;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.discovery-node-fallback {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border: 1px solid #4d91ba;
+  border-radius: 4px;
+  color: #8fd8f0;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.discovery-node .react-flow__handle {
+  width: 7px;
+  height: 7px;
+  border: 1px solid #0d141b;
+  background: #62bad8;
 }
 
 .discovery-cost {
@@ -343,6 +407,15 @@
   .discovery-custom-answer {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .discovery-architecture-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .discovery-architecture {
+    height: 500px;
   }
 }
 

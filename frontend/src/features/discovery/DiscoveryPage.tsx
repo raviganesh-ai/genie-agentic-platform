@@ -23,6 +23,7 @@ import ReactFlow, {
   Background,
   Controls,
   Handle,
+  MarkerType,
   Position,
   type Edge,
   type Node,
@@ -45,6 +46,7 @@ import type {
   ProposedSolution,
 } from "@/types/discovery";
 import type { UploadType } from "@/types/upload";
+import { layoutArchitecture } from "./architectureLayout";
 import { getAzureServiceIcon } from "./azureIconManifest";
 
 const UPLOAD_TYPES: UploadType[] = ["transcript", "audio", "video", "supporting_document"];
@@ -75,13 +77,15 @@ interface PendingUpload {
 
 function AzureServiceNode({ data }: NodeProps<AzureNodeData>): JSX.Element {
   return (
-    <div className="discovery-node">
+    <div className="discovery-node" role="group" aria-label={`${data.service}: ${data.label}`}>
       <Handle type="target" position={Position.Left} />
-      {data.icon ? <img src={data.icon} alt="" /> : <span>{data.service.slice(0, 2)}</span>}
-      <div>
-        <strong>{data.label}</strong>
-        <span className="discovery-muted">{data.service}</span>
+      <div className="discovery-node-service">
+        {data.icon
+          ? <img src={data.icon} alt="" />
+          : <span className="discovery-node-fallback">Az</span>}
+        <strong title={data.service}>{data.service}</strong>
       </div>
+      <span className="discovery-node-purpose" title={data.label}>{data.label}</span>
       <Handle type="source" position={Position.Right} />
     </div>
   );
@@ -90,10 +94,14 @@ function AzureServiceNode({ data }: NodeProps<AzureNodeData>): JSX.Element {
 const NODE_TYPES = { azureService: AzureServiceNode };
 
 function ArchitectureDiagram({ solution }: { solution: ProposedSolution }): JSX.Element {
+  const positions = new Map(
+    layoutArchitecture(solution.architecture_nodes, solution.architecture_edges)
+      .map((position) => [position.id, position]),
+  );
   const nodes: Node<AzureNodeData>[] = solution.architecture_nodes.map((node: ArchitectureNode) => ({
     id: node.id,
     type: "azureService",
-    position: { x: node.x, y: node.y },
+    position: positions.get(node.id) ?? { x: 0, y: 0 },
     data: {
       label: node.purpose,
       service: node.service_name,
@@ -105,22 +113,45 @@ function ArchitectureDiagram({ solution }: { solution: ProposedSolution }): JSX.
     source: edge.source,
     target: edge.target,
     label: edge.label,
-    animated: true,
-    style: { stroke: "#5a8fb8" },
-    labelStyle: { fill: "#d7e3ed", fontSize: 10 },
+    type: "smoothstep",
+    markerEnd: { type: MarkerType.ArrowClosed, color: "#58a6c7" },
+    style: { stroke: "#58a6c7", strokeWidth: 1.6 },
+    labelStyle: { fill: "#dce9f2", fontSize: 11, fontWeight: 600 },
+    labelBgStyle: { fill: "#101820", fillOpacity: 0.94 },
+    labelBgPadding: [7, 4],
+    labelBgBorderRadius: 3,
   }));
   return (
-    <div className="discovery-architecture">
-      <ReactFlow
-        nodes={nodes}
-        edges={edges}
-        nodeTypes={NODE_TYPES}
-        fitView
-        proOptions={{ hideAttribution: true }}
+    <div className="discovery-architecture-shell">
+      <div className="discovery-architecture-header">
+        <div>
+          <Text weight="semibold">Azure service architecture</Text>
+          <Text size={200} className="discovery-muted">Service flow and integration boundaries</Text>
+        </div>
+        <Badge appearance="outline">{nodes.length} Azure services</Badge>
+      </div>
+      <div
+        className="discovery-architecture"
+        role="img"
+        aria-label={`${solution.name} Azure service architecture`}
       >
-        <Background color="#293744" gap={18} />
-        <Controls showInteractive={false} />
-      </ReactFlow>
+        <ReactFlow
+          nodes={nodes}
+          edges={edges}
+          nodeTypes={NODE_TYPES}
+          fitView
+          fitViewOptions={{ padding: 0.18, minZoom: 0.45, maxZoom: 1 }}
+          minZoom={0.35}
+          maxZoom={1.4}
+          nodesDraggable={false}
+          nodesConnectable={false}
+          elementsSelectable={false}
+          proOptions={{ hideAttribution: true }}
+        >
+          <Background color="#273746" gap={20} size={1} />
+          <Controls showInteractive={false} />
+        </ReactFlow>
+      </div>
     </div>
   );
 }

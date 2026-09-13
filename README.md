@@ -161,7 +161,7 @@ The Foundry-hosted Discovery agents synthesize that evidence across files, ident
 
 When material clarification is needed, customers can answer all questions in a batch or work through unresolved questions one at a time. Every question includes two to four Foundry-generated, evidence-aware answer choices and an editable free-text field, so a customer can select a likely answer or provide a different one. When the evidence already resolves every material implementation decision, Genie does not show an empty Q&A mode choice and proceeds directly to probable-solution generation. Skipping a question records only a recommendation offer; Genie calls the Architecture Designer for a Microsoft/Azure best-practice recommendation only after the user explicitly accepts that offer. The user can stop after Q&A and resume the same Cosmos-backed case later, add customer material for a new analysis revision, or delete an abandoned pre-Build case together with only its case-prefixed Shared Collaboration Memory records.
 
-Probable solutions include Build-ready requirements and architecture, tradeoffs, AI feasibility, a React Flow architecture diagram backed by a fixed allowlist of local [official Microsoft Azure Architecture Icons](https://learn.microsoft.com/azure/architecture/icons/), and deterministic cost estimates. The agent proposes service/SKU/region/usage assumptions but never supplies prices; Genie resolves unit prices through the Azure Retail Prices API and labels coverage `complete`, `partial`, or `unavailable` instead of inventing missing costs.
+Probable solutions include Build-ready requirements and architecture, tradeoffs, AI feasibility, a deterministic React Flow service topology backed by a fixed allowlist of local [official Microsoft Azure Architecture Icons](https://learn.microsoft.com/azure/architecture/icons/), and deterministic cost estimates. Foundry supplies the Azure services and their relationships, while Dagre computes stable left-to-right presentation coordinates so model-generated positions cannot overlap the service nodes. The agent proposes service/SKU/region/usage assumptions but never supplies prices; Genie resolves unit prices through the Azure Retail Prices API and labels coverage `complete`, `partial`, or `unavailable` instead of inventing missing costs.
 
 ### Agentic-workflow qualification check
 
@@ -688,6 +688,12 @@ The script uses Microsoft Entra authentication, creates only missing model deplo
 ## Deploy log
 
 Every deployment to the shared Azure evaluation environment (backend Container App and/or frontend Static Web App) is recorded here: commit, what changed, and why. Update this section as part of the same commit that ships the fix/feature, before pushing to `master` triggers [Continuous deployment](#continuous-deployment-github-actions).
+
+### 2026-09-13 — Professional Azure service architecture
+
+- **Deterministic topology**: probable solutions remain structured Foundry output, but the frontend no longer trusts model-supplied canvas coordinates. Dagre computes a stable left-to-right service graph from the returned nodes and edges, preventing the overlaps that made dense solution architectures unreadable.
+- **Azure-first presentation**: every bounded node leads with the real Azure service name and its allowlisted official icon, with concise purpose text secondary. Restrained orthogonal connectors, directional markers, edge labels, a service count, and a larger responsive workspace replace the previous animated generic graph treatment.
+- **Regression and visual coverage**: focused tests prove that model coordinates cannot affect layout, connected nodes progress left to right, node rectangles do not intersect, and the Discovery page exposes the service architecture accessibly. Browser checks cover a dense nine-service graph, official icon loading, node intersections, and desktop/mobile canvas behavior.
 
 ### 2026-09-13 — Separate gaps and assumptions with bounded solution recovery
 
