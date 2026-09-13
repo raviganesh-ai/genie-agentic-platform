@@ -55,6 +55,7 @@ async def _create_service(
         },
         {
             "deep_dive_findings": ["Review latency is the primary constraint"],
+            "analysis_summary": "Additional model metadata must not invalidate the response.",
             "gap_analysis": {
                 "known_facts": ["Documents arrive digitally"],
                 "risks": ["Manual review can miss time-sensitive claims"],
@@ -63,6 +64,7 @@ async def _create_service(
                 "assumptions": [],
                 "evidence_references": ["call.txt"],
                 "confidence_score": 0.8,
+                "priority": "high",
             },
             "questions": [
                 {
@@ -71,6 +73,7 @@ async def _create_service(
                     "category": "capacity",
                     "status": "pending",
                     "evidence_references": [],
+                    "rationale": "Capacity affects the recommended Azure sizing.",
                 }
             ],
         },
@@ -214,7 +217,7 @@ async def test_find_people_accepts_prior_personas_shape_but_discards_analysis() 
     assert case.personas[0].pain_points == []
 
 
-async def test_discovery_can_analyze_multiple_selected_people() -> None:
+async def test_deep_dive_accepts_multiple_people_and_extra_agent_metadata() -> None:
     service, orchestrator, session_id = await _create_service(
         transcript_text=(
             "Jordan Lee manually inspects every document. "

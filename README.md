@@ -689,6 +689,12 @@ The script uses Microsoft Entra authentication, creates only missing model deplo
 
 Every deployment to the shared Azure evaluation environment (backend Container App and/or frontend Static Web App) is recorded here: commit, what changed, and why. Update this section as part of the same commit that ships the fix/feature, before pushing to `master` triggers [Continuous deployment](#continuous-deployment-github-actions).
 
+### 2026-09-12 — Discovery deep-dive response resilience
+
+- **Production diagnosis**: **Run Discovery** reached the Foundry-hosted Requirements Analyst but correlation ID `d30d64d3-623b-466b-b92c-521ae18351c8` failed when additional model-generated metadata did not satisfy the strict `_DeepDiveEnvelope` response boundary.
+- **Resilient validation**: the external deep-dive envelope, gap analysis, and question drafts now ignore unrecognized metadata before mapping into Genie's strict internal models. Required findings, gap fields, question fields, types, and confidence bounds remain validated and malformed core content still fails closed.
+- **Prompt contract**: `discovery-persona-deep-dive-v1` now provides the exact escaped JSON shape and explicitly forbids additional fields. Regression coverage injects extra metadata at every response level and verifies multi-person Discovery still reaches clarification mode.
+
 ### 2026-09-12 — Multimodal, evidence-grounded Discovery
 
 - **Production document understanding**: transcript and supporting-document uploads now pass through an injected async service. Production uses Azure Content Understanding GA `2025-11-01` and `prebuilt-documentSearch` through managed identity; local/test mode retains deterministic text/PDF/DOCX extraction only. Unknown binaries, malformed UTF-8, empty analysis results, unsafe poll URLs, Azure failures, and timeouts fail closed as visible upload errors.

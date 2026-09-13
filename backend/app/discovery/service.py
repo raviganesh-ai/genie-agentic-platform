@@ -62,11 +62,19 @@ class _PeopleEnvelope(BaseModel):
     )
 
 
+class _GapAnalysisDraft(GapAnalysis):
+    model_config = ConfigDict(extra="ignore")
+
+
+class _DiscoveryQuestionDraft(DiscoveryQuestion):
+    model_config = ConfigDict(extra="ignore")
+
+
 class _DeepDiveEnvelope(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
     deep_dive_findings: list[str] = Field(min_length=1)
-    gap_analysis: GapAnalysis
-    questions: list[DiscoveryQuestion] = Field(min_length=1)
+    gap_analysis: _GapAnalysisDraft
+    questions: list[_DiscoveryQuestionDraft] = Field(min_length=1)
 
 
 class _RecommendationEnvelope(BaseModel):
