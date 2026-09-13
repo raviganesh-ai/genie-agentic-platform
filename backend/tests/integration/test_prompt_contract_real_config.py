@@ -40,6 +40,9 @@ def test_discovery_deep_dive_prompt_bounds_structured_output() -> None:
     assert "under 12,000 characters" in template
     assert "at most 10 deep_dive_findings" in template
     assert "at most 8 questions" in template
+    assert "one to five thematic sections chosen intelligently" in template
+    assert "rather than one section per raw finding or gap category" in template
+    assert "preserve attribution by person" in template
     assert "{retry_instruction}" in prompt.template
 
 

@@ -14,6 +14,7 @@ from app.discovery.models import (
     ArchitectureEdge,
     ArchitectureNode,
     DiscoveryCase,
+    DiscoveryInsightSection,
     DiscoveryQaMode,
     DiscoveryQuestion,
     GapAnalysis,
@@ -70,9 +71,14 @@ class _DiscoveryQuestionDraft(DiscoveryQuestion):
     model_config = ConfigDict(extra="ignore")
 
 
+class _DiscoveryInsightSectionDraft(DiscoveryInsightSection):
+    model_config = ConfigDict(extra="ignore")
+
+
 class _DeepDiveEnvelope(BaseModel):
     model_config = ConfigDict(extra="ignore")
     deep_dive_findings: list[str] = Field(min_length=1)
+    insight_sections: list[_DiscoveryInsightSectionDraft] = Field(min_length=1, max_length=5)
     gap_analysis: _GapAnalysisDraft
     questions: list[_DiscoveryQuestionDraft] = Field(min_length=1)
 
@@ -270,6 +276,7 @@ class DiscoveryService:
                 selected_persona_id=None,
                 selected_persona_ids=[],
                 deep_dive_findings=[],
+                insight_sections=[],
                 gap_analysis=None,
                 qa_mode=None,
                 questions=[],
@@ -342,6 +349,7 @@ class DiscoveryService:
             selected_persona_id=None,
             selected_persona_ids=[],
             deep_dive_findings=[],
+            insight_sections=[],
             gap_analysis=None,
             qa_mode=None,
             questions=[],
@@ -455,6 +463,7 @@ class DiscoveryService:
             selected_persona_id=unique_ids[0],
             selected_persona_ids=unique_ids,
             deep_dive_findings=parsed.deep_dive_findings,
+            insight_sections=parsed.insight_sections,
             gap_analysis=parsed.gap_analysis,
             qa_mode=None,
             questions=parsed.questions,
@@ -468,6 +477,9 @@ class DiscoveryService:
             classification="requirement",
             content={
                 "personas": [persona.model_dump(mode="json") for persona in selected_personas],
+                "insight_sections": [
+                    section.model_dump(mode="json") for section in parsed.insight_sections
+                ],
                 "findings": parsed.deep_dive_findings,
                 "gap_analysis": parsed.gap_analysis.model_dump(mode="json"),
                 "questions": [item.model_dump(mode="json") for item in parsed.questions],
@@ -888,6 +900,10 @@ class DiscoveryService:
                 "selected_persona_ids": discovery_case.selected_persona_ids,
                 "personas": [item.model_dump(mode="json") for item in discovery_case.personas],
                 "deep_dive_findings": discovery_case.deep_dive_findings,
+                "insight_sections": [
+                    section.model_dump(mode="json")
+                    for section in discovery_case.insight_sections
+                ],
                 "gap_analysis": (
                     discovery_case.gap_analysis.model_dump(mode="json")
                     if discovery_case.gap_analysis

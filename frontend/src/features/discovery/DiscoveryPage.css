@@ -149,11 +149,6 @@
   .discovery-upload-row {
     grid-template-columns: minmax(0, 1fr);
   }
-
-    grid-column: 1;
-}
-    justify-self: stretch;
-  }
 }
 
 .discovery-muted {
@@ -186,26 +181,43 @@
   font-size: 17px;
 }
 
-.discovery-card ul,
-.discovery-gap ul {
+.discovery-card ul {
   margin: 7px 0 0;
   padding-left: 20px;
 }
 
-.discovery-gap-grid {
+.discovery-insight-list {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 18px 28px;
-  padding: 18px 0;
   border-top: 1px solid var(--discovery-line);
   border-bottom: 1px solid var(--discovery-line);
 }
 
-.discovery-gap h3 {
+.discovery-insight {
+  display: grid;
+  grid-template-columns: minmax(170px, 0.35fr) minmax(0, 1fr);
+  gap: 24px;
+  padding: 18px 0;
+  border-bottom: 1px solid var(--discovery-line);
+}
+
+.discovery-insight:last-child {
+  border-bottom: 0;
+}
+
+.discovery-insight h3 {
   margin: 0;
+  font-family: "Bahnschrift", "Aptos Display", sans-serif;
+  font-size: 16px;
+}
+
+.discovery-insight > div {
+  display: grid;
+  gap: 8px;
+}
+
+.discovery-insight-evidence {
   color: var(--discovery-muted);
-  font-size: 13px;
-  text-transform: uppercase;
+  font-size: 12px;
 }
 
 .discovery-question {
@@ -296,9 +308,13 @@
     min-height: 3px;
   }
 
-  .discovery-gap-grid,
   .discovery-two-column {
     grid-template-columns: 1fr;
+  }
+
+  .discovery-insight {
+    grid-template-columns: 1fr;
+    gap: 8px;
   }
 
   .discovery-upload-row {

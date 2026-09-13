@@ -56,6 +56,16 @@ async def _create_service(
         },
         {
             "deep_dive_findings": ["Review latency is the primary constraint"],
+            "insight_sections": [
+                {
+                    "title": "Manual review constrains response time",
+                    "summary": (
+                        "Jordan Lee's manual evidence review is the main source of delay, "
+                        "putting the stated response target at risk as volume grows."
+                    ),
+                    "evidence_references": ["call.txt"],
+                }
+            ],
             "analysis_summary": "Additional model metadata must not invalidate the response.",
             "gap_analysis": {
                 "known_facts": ["Documents arrive digitally"],
@@ -241,6 +251,7 @@ async def test_deep_dive_accepts_multiple_people_and_extra_agent_metadata() -> N
 
     assert case.selected_persona_id == "jordan-lee"
     assert case.selected_persona_ids == ["jordan-lee", "morgan-chen"]
+    assert case.insight_sections[0].title == "Manual review constrains response time"
     assert case.status == "awaiting_qa_mode"
 
 
@@ -372,6 +383,7 @@ async def test_removing_analyzed_upload_invalidates_derived_discovery_state() ->
     assert reloaded.personas == []
     assert reloaded.selected_persona_id is None
     assert reloaded.deep_dive_findings == []
+    assert reloaded.insight_sections == []
     assert reloaded.gap_analysis is None
     assert reloaded.qa_mode is None
     assert reloaded.questions == []

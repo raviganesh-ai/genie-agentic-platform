@@ -37,6 +37,7 @@ __all__ = [
     "ArchitectureNode",
     "CostEstimate",
     "DiscoveryCase",
+    "DiscoveryInsightSection",
     "DiscoveryQaMode",
     "DiscoveryQuestion",
     "DiscoveryQuestionStatus",
@@ -70,6 +71,14 @@ class GapAnalysis(BaseModel):
     assumptions: list[str] = Field(default_factory=list)
     evidence_references: list[str] = Field(default_factory=list)
     confidence_score: float = Field(ge=0, le=1)
+
+
+class DiscoveryInsightSection(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = Field(min_length=1)
+    summary: str = Field(min_length=1)
+    evidence_references: list[str] = Field(default_factory=list)
 
 
 class DiscoveryQuestion(BaseModel):
@@ -166,6 +175,7 @@ class DiscoveryCase(BaseModel):
     selected_persona_id: str | None = None
     selected_persona_ids: list[str] = Field(default_factory=list)
     deep_dive_findings: list[str] = Field(default_factory=list)
+    insight_sections: list[DiscoveryInsightSection] = Field(default_factory=list)
     gap_analysis: GapAnalysis | None = None
     qa_mode: DiscoveryQaMode | None = None
     questions: list[DiscoveryQuestion] = Field(default_factory=list)

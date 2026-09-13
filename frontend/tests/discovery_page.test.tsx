@@ -33,6 +33,11 @@ describe("DiscoveryPage", () => {
           selected_persona_id: "jordan-lee",
           selected_persona_ids: ["jordan-lee"],
           deep_dive_findings: ["Evidence review is the bottleneck"],
+          insight_sections: [{
+            title: "Manual review threatens response targets",
+            summary: "Jordan Lee's manual evidence checks create the primary bottleneck and make the stated SLA difficult to sustain.",
+            evidence_references: ["call.txt"],
+          }],
           gap_analysis: {
             known_facts: ["Claims arrive digitally"],
             risks: ["Manual review may breach the response target"],
@@ -94,8 +99,11 @@ describe("DiscoveryPage", () => {
     expect(screen.getByRole("combobox", { name: "Select personas" })).toHaveValue("Jordan Lee");
     expect(screen.getByRole("switch", { name: "Save discovery" })).toBeChecked();
     expect(screen.getByText("Based only on evidence attributable to Jordan Lee.")).toBeInTheDocument();
-    expect(screen.getByText("Manual review may breach the response target")).toBeInTheDocument();
-    expect(screen.getByText("The stated SLA conflicts with the manual queue")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Manual review threatens response targets" })).toBeInTheDocument();
+    expect(screen.getByText(/manual evidence checks create the primary bottleneck/)).toBeInTheDocument();
+    expect(screen.getByText("Evidence: call.txt")).toBeInTheDocument();
+    expect(screen.queryByText("Manual review may breach the response target")).not.toBeInTheDocument();
+    expect(screen.queryByText("The stated SLA conflicts with the manual queue")).not.toBeInTheDocument();
     expect(screen.getByText("What is the peak monthly volume?")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Yes, recommend" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "No, leave unanswered" })).toBeInTheDocument();
@@ -162,6 +170,7 @@ describe("DiscoveryPage", () => {
       selected_persona_id: null,
       selected_persona_ids: [],
       deep_dive_findings: [],
+      insight_sections: [],
       gap_analysis: null,
       qa_mode: null,
       questions: [],
@@ -274,6 +283,7 @@ describe("DiscoveryPage", () => {
       selected_persona_id: null,
       selected_persona_ids: [],
       deep_dive_findings: [],
+      insight_sections: [],
       gap_analysis: null,
       qa_mode: null,
       questions: [],
@@ -302,6 +312,11 @@ describe("DiscoveryPage", () => {
           selected_persona_id: "john-greeson",
           selected_persona_ids: ["john-greeson", "charles-sayre"],
           deep_dive_findings: ["Named evidence analyzed"],
+          insight_sections: [{
+            title: "Modernization priorities",
+            summary: "The selected perspectives emphasize a staged modernization plan with explicit operational safeguards.",
+            evidence_references: [],
+          }],
           gap_analysis: {
             known_facts: [], risks: [], contradictions: [], information_gaps: ["More detail"],
             assumptions: [], evidence_references: [], confidence_score: 0.7,

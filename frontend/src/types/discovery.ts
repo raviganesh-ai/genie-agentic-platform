@@ -40,6 +40,12 @@ export interface GapAnalysis {
   confidence_score: number;
 }
 
+export interface DiscoveryInsightSection {
+  title: string;
+  summary: string;
+  evidence_references: string[];
+}
+
 export interface DiscoveryQuestion {
   id: string;
   text: string;
@@ -116,6 +122,7 @@ export interface DiscoveryCase {
   selected_persona_id: string | null;
   selected_persona_ids: string[];
   deep_dive_findings: string[];
+  insight_sections: DiscoveryInsightSection[];
   gap_analysis: GapAnalysis | null;
   qa_mode: DiscoveryQaMode | null;
   questions: DiscoveryQuestion[];

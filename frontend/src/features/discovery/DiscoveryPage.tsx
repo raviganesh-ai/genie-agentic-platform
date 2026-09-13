@@ -621,20 +621,41 @@ export function DiscoveryPage(): JSX.Element {
             <h2 id="discovery-gaps" className="discovery-section-heading">3. Pain points and gaps</h2>
             <Text className="discovery-muted">Based only on evidence attributable to {selectedPersonaNames}.</Text>
           </div>
-          <ul>{discoveryCase.deep_dive_findings.map((finding) => <li key={finding}>{finding}</li>)}</ul>
-          <div className="discovery-gap-grid">
-            {([
-              ["known facts", discoveryCase.gap_analysis.known_facts],
-              ["risks", discoveryCase.gap_analysis.risks ?? []],
-              ["contradictions", discoveryCase.gap_analysis.contradictions ?? []],
-              ["information gaps", discoveryCase.gap_analysis.information_gaps],
-              ["assumptions", discoveryCase.gap_analysis.assumptions],
-              ["evidence", discoveryCase.gap_analysis.evidence_references],
-            ] as Array<[string, string[]]>).map(([label, items]) => (
-              <div key={label} className="discovery-gap">
-                <h3>{label}</h3>
-                <ul>{items.map((item) => <li key={item}>{item}</li>)}</ul>
-              </div>
+          <div className="discovery-insight-list">
+            {(discoveryCase.insight_sections?.length
+              ? discoveryCase.insight_sections
+              : [
+                  {
+                    title: "Key findings",
+                    summary: discoveryCase.deep_dive_findings.join(" "),
+                    evidence_references: discoveryCase.gap_analysis.evidence_references,
+                  },
+                  {
+                    title: "Risks and contradictions",
+                    summary: [
+                      ...(discoveryCase.gap_analysis.risks ?? []),
+                      ...(discoveryCase.gap_analysis.contradictions ?? []),
+                    ].join(" "),
+                    evidence_references: [],
+                  },
+                  {
+                    title: "What remains unknown",
+                    summary: discoveryCase.gap_analysis.information_gaps.join(" "),
+                    evidence_references: [],
+                  },
+                ].filter((section) => section.summary)
+            ).map((section) => (
+              <article key={section.title} className="discovery-insight">
+                <h3>{section.title}</h3>
+                <div>
+                  <Text>{section.summary}</Text>
+                  {section.evidence_references.length ? (
+                    <Text className="discovery-insight-evidence">
+                      Evidence: {section.evidence_references.join(" · ")}
+                    </Text>
+                  ) : null}
+                </div>
+              </article>
             ))}
           </div>
           <Text className="discovery-muted">
