@@ -21,7 +21,7 @@ from app.discovery.models import (
     PricingQuery,
     ProposedSolution,
 )
-from app.discovery.parsing import parse_agent_response
+from app.discovery.parsing import DiscoveryAgentResponseError, parse_agent_response
 from app.discovery.pricing_service import PricingService
 from app.discovery.repository import DiscoveryCaseRepository, InMemoryDiscoveryCaseRepository
 from app.governance.governance_service import GovernanceService
@@ -435,20 +435,13 @@ class DiscoveryService:
             discovery_case, status="analyzing_persona", last_error=None
         )
         try:
-            result = await self._execute(
-                agent_id="requirements-analyst",
-                prompt_id="discovery-persona-deep-dive-v1",
-                variables={
-                    "source_material": await self._source_material(
-                        discovery_case, requesting_user_id
-                    ),
-                    "selected_persona": json.dumps(
-                        [persona.model_dump(mode="json") for persona in selected_personas]
-                    ),
-                },
+            parsed = await self._execute_deep_dive(
                 discovery_case=discovery_case,
+                source_material=await self._source_material(
+                    discovery_case, requesting_user_id
+                ),
+                selected_personas=selected_personas,
             )
-            parsed = parse_agent_response(result, _DeepDiveEnvelope)
         except Exception:
             await self._save(
                 discovery_case,
@@ -481,6 +474,40 @@ class DiscoveryService:
             },
         )
         return updated
+
+    async def _execute_deep_dive(
+        self,
+        *,
+        discovery_case: DiscoveryCase,
+        source_material: str,
+        selected_personas: list[PersonaProfile],
+    ) -> _DeepDiveEnvelope:
+        variables = {
+            "source_material": source_material,
+            "selected_persona": json.dumps(
+                [persona.model_dump(mode="json") for persona in selected_personas]
+            ),
+            "retry_instruction": "",
+        }
+        for attempt in range(2):
+            if attempt:
+                variables["retry_instruction"] = (
+                    "A prior response was malformed or truncated. Regenerate it from the "
+                    "source as fresh JSON, honor every size limit, and close all arrays, "
+                    "objects, and strings."
+                )
+            result = await self._execute(
+                agent_id="requirements-analyst",
+                prompt_id="discovery-persona-deep-dive-v1",
+                variables=variables,
+                discovery_case=discovery_case,
+            )
+            try:
+                return parse_agent_response(result, _DeepDiveEnvelope)
+            except DiscoveryAgentResponseError:
+                if attempt == 1:
+                    raise
+        raise RuntimeError("Discovery deep-dive retry loop exited unexpectedly.")
 
     async def set_qa_mode(
         self,

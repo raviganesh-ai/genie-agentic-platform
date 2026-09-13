@@ -691,9 +691,10 @@ Every deployment to the shared Azure evaluation environment (backend Container A
 
 ### 2026-09-12 — Discovery deep-dive response resilience
 
-- **Production diagnosis**: **Run Discovery** reached the Foundry-hosted Requirements Analyst but correlation ID `d30d64d3-623b-466b-b92c-521ae18351c8` failed at the strict `_DeepDiveEnvelope` response boundary. The original parser discarded the specific JSON or field-validation cause, so the failure could not be diagnosed safely from production logs.
+- **Production diagnosis**: **Run Discovery** reached the Foundry-hosted Requirements Analyst but correlation ID `d30d64d3-623b-466b-b92c-521ae18351c8` failed at the strict `_DeepDiveEnvelope` response boundary. Privacy-safe diagnostics and a live retry on revision `gh88` identified the real cause: Foundry returned truncated JSON at column 26,692 while analyzing three large documents.
 - **Resilient validation**: the external deep-dive envelope, gap analysis, and question drafts now ignore unrecognized metadata before mapping into Genie's strict internal models. Required findings, gap fields, question fields, types, and confidence bounds remain validated and malformed core content still fails closed.
-- **Prompt contract and diagnostics**: `discovery-persona-deep-dive-v1` now provides the exact escaped JSON shape and explicitly forbids additional fields. Schema failures report only field paths and validation messages, never rejected response values or customer evidence. Regression coverage verifies both extra-metadata compatibility and privacy-safe error details.
+- **Bounded recovery**: `discovery-persona-deep-dive-v1` now provides the exact escaped JSON shape, caps the complete response below 12,000 characters, limits findings/gaps/questions, and requires concise entries. If Foundry still returns malformed or schema-invalid JSON, Genie makes exactly one corrective Foundry retry with explicit closure and size instructions, then fails closed. It never invokes a local or static fallback.
+- **Privacy-safe diagnostics**: schema failures report only field paths and validation messages, never rejected response values or customer evidence. Regression coverage verifies extra-metadata compatibility, truncated-response recovery, the two-attempt ceiling, selector-state restoration, prompt limits, and privacy-safe error details.
 
 ### 2026-09-12 — Multimodal, evidence-grounded Discovery
 

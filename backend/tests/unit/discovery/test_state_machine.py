@@ -8,6 +8,7 @@ import pytest
 
 from app.agents.models import AgentExecutionResult
 from app.discovery.models import CostEstimate, PricingQuery
+from app.discovery.parsing import DiscoveryAgentResponseError
 from app.discovery.pricing_service import AzureRetailPricingService
 from app.discovery.repository import InMemoryDiscoveryCaseRepository
 from app.discovery.service import DiscoveryService, DiscoveryStateConflictError
@@ -241,6 +242,57 @@ async def test_deep_dive_accepts_multiple_people_and_extra_agent_metadata() -> N
     assert case.selected_persona_id == "jordan-lee"
     assert case.selected_persona_ids == ["jordan-lee", "morgan-chen"]
     assert case.status == "awaiting_qa_mode"
+
+
+async def test_deep_dive_retries_once_after_truncated_json() -> None:
+    service, orchestrator, session_id = await _create_service()
+    orchestrator.outputs.insert(1, '{"deep_dive_findings":["truncated response')
+
+    await service.analyze_personas(
+        session_id=session_id,
+        requesting_user_id="user-1",
+    )
+    case = await service.select_personas(
+        session_id=session_id,
+        requesting_user_id="user-1",
+        persona_ids=["jordan-lee"],
+    )
+
+    assert case.status == "awaiting_qa_mode"
+    assert case.deep_dive_findings == ["Review latency is the primary constraint"]
+    assert orchestrator.calls == [
+        "discovery-persona-extraction-v1",
+        "discovery-persona-deep-dive-v1",
+        "discovery-persona-deep-dive-v1",
+    ]
+
+
+async def test_deep_dive_fails_closed_after_two_malformed_responses() -> None:
+    service, orchestrator, session_id = await _create_service()
+    orchestrator.outputs[1] = '{"deep_dive_findings":["first truncated response'
+    orchestrator.outputs.insert(2, '{"deep_dive_findings":["second truncated response')
+
+    await service.analyze_personas(
+        session_id=session_id,
+        requesting_user_id="user-1",
+    )
+    with pytest.raises(DiscoveryAgentResponseError, match="not valid JSON"):
+        await service.select_personas(
+            session_id=session_id,
+            requesting_user_id="user-1",
+            persona_ids=["jordan-lee"],
+        )
+
+    case = await service.get_case(
+        session_id=session_id,
+        requesting_user_id="user-1",
+    )
+    assert case.status == "awaiting_persona_selection"
+    assert orchestrator.calls == [
+        "discovery-persona-extraction-v1",
+        "discovery-persona-deep-dive-v1",
+        "discovery-persona-deep-dive-v1",
+    ]
 
 
 async def test_skip_requires_consent_before_recommendation_and_state_is_durable() -> None:

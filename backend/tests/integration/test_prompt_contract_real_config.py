@@ -31,6 +31,18 @@ from app.prompts.registry import PromptRegistry
 _REPO_CONFIG_ROOT = Path(__file__).resolve().parents[3] / "config"
 
 
+def test_discovery_deep_dive_prompt_bounds_structured_output() -> None:
+    registry = PromptRegistry.load(_REPO_CONFIG_ROOT / "prompts")
+
+    prompt = registry.get("discovery-persona-deep-dive-v1")
+    template = " ".join(prompt.template.split())
+
+    assert "under 12,000 characters" in template
+    assert "at most 10 deep_dive_findings" in template
+    assert "at most 8 questions" in template
+    assert "{retry_instruction}" in prompt.template
+
+
 def test_architecture_recommendation_prompt_forbids_per_agent_sub_bullets():
     registry = PromptRegistry.load(_REPO_CONFIG_ROOT / "prompts")
 

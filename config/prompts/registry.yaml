@@ -1545,7 +1545,13 @@ prompts:
       object contains id, text, category, status set to pending, and empty evidence_references;
       omit answer and recommendation. Ask the smallest set of high-value questions needed to
       resolve contradictions, close material gaps, and recommend an implementable solution.
-      Do not invent customer facts.
+      Do not invent customer facts. Keep the complete JSON response under 12,000 characters.
+      Return at most 10 deep_dive_findings, at most 6 entries in each gap_analysis array,
+      and at most 8 questions. Keep every finding, gap entry, evidence reference, and
+      question under 240 characters. Prioritize material implementation decisions and
+      consolidate duplicates instead of trying to restate the source material.
+
+      {retry_instruction}
 
       Selected people:
       {selected_persona}
@@ -1553,9 +1559,10 @@ prompts:
       Source material:
       {source_material}
     variables:
+      - retry_instruction
       - selected_persona
       - source_material
-    version: "4.1.0"
+    version: "4.2.0"
 
   - id: discovery-best-practice-recommendation-v1
     name: Discovery Best Practice Recommendation
