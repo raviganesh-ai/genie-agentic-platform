@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 
 from app.discovery.models import (
     AiFeasibility,
@@ -109,7 +109,26 @@ class _SolutionDraft(BaseModel):
         default_factory=list,
         validation_alias=AliasChoices("evidence_references", "Evidence_references"),
     )
-    pricing_queries: list[PricingQuery] = Field(default_factory=list, max_length=6)
+    pricing_queries: list[PricingQuery] = Field(default_factory=list, max_length=10)
+
+    @model_validator(mode="after")
+    def pricing_queries_match_architecture(self) -> _SolutionDraft:
+        architecture_services = {
+            node.service_name.strip().casefold() for node in self.architecture_nodes
+        }
+        unmatched_services = sorted(
+            {
+                query.service_name
+                for query in self.pricing_queries
+                if query.service_name.strip().casefold() not in architecture_services
+            }
+        )
+        if unmatched_services:
+            raise ValueError(
+                "pricing query services must match architecture node service names: "
+                + ", ".join(unmatched_services)
+            )
+        return self
 
 
 class _SolutionsEnvelope(BaseModel):

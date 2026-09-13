@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { DiscoveryPage } from "@/features/discovery/DiscoveryPage";
 import { mockFetchSequence, renderWithProviders } from "./testUtils";
@@ -535,15 +535,30 @@ describe("DiscoveryPage", () => {
         ai_feasibility: "recommended",
         ai_feasibility_rationale: "The workflow maps to managed Azure AI capabilities.",
         evidence_references: ["customer-call.txt"],
-        pricing_queries: [],
+        pricing_queries: [
+          {
+            service_name: "Azure API Management",
+            arm_region_name: "eastus",
+            sku_name: "Consumption",
+            units_per_month: 100000,
+            assumption: "100,000 API calls per month",
+          },
+          {
+            service_name: "Azure AI Foundry",
+            arm_region_name: "eastus",
+            sku_name: null,
+            units_per_month: 1,
+            assumption: "One billable model deployment",
+          },
+        ],
         cost_estimate: {
           currency_code: "USD",
           region: "eastus",
           monthly_amount: 125,
           annual_amount: 1500,
           coverage: "complete",
-          assumptions: [],
-          source_urls: [],
+          assumptions: ["100,000 API calls per month", "One billable model deployment"],
+          source_urls: ["https://prices.azure.com/api/retail/prices"],
           retrieved_at: "2026-09-12T10:00:00Z",
         },
       }],
@@ -567,7 +582,15 @@ describe("DiscoveryPage", () => {
     })).toBeInTheDocument();
     expect(screen.getByText("3 Azure services")).toBeInTheDocument();
     expect(screen.getByText("Azure Static Web Apps")).toBeInTheDocument();
-    expect(screen.getByText("Azure API Management")).toBeInTheDocument();
-    expect(screen.getByText("Azure AI Foundry")).toBeInTheDocument();
+    expect(screen.getAllByText("Azure API Management")).toHaveLength(2);
+    expect(screen.getAllByText("Azure AI Foundry")).toHaveLength(2);
+    const cost = screen.getByRole("region", { name: "Estimated Azure solution cost" });
+    expect(within(cost).getByText("$125.00")).toBeInTheDocument();
+    expect(within(cost).getByText("$1,500.00")).toBeInTheDocument();
+    expect(within(cost).getByText("Based on 2 pricing inputs from this architecture in eastus.")).toBeInTheDocument();
+    expect(within(cost).getByText("Consumption · 100,000 billable units/month")).toBeInTheDocument();
+    expect(within(cost).getByText("100,000 API calls per month")).toBeInTheDocument();
+    expect(within(cost).getByText(/implementation, support, taxes, and negotiated discounts are excluded/)).toBeInTheDocument();
+    expect(screen.queryByText("Estimated Azure run rate")).not.toBeInTheDocument();
   });
 });

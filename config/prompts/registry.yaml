@@ -1634,11 +1634,16 @@ prompts:
       existing Build Agent, so do not replace it with an Azure infrastructure summary.
       pricing_queries may contain only service_name, arm_region_name, sku_name,
       units_per_month, and assumption. Never provide prices: Genie resolves every unit price
-      deterministically from the Azure Retail Prices API and reports missing coverage. Keep the
+      deterministically from the Azure Retail Prices API and reports missing coverage. Derive
+      pricing_queries from architecture_nodes: include one query for every independently billed
+      Azure service in the architecture, use the architecture node's exact service_name, and do
+      not include services that are absent from the architecture. If a logical platform label is
+      not independently billed, represent its underlying billable Azure resource as its own
+      architecture node and price that node instead. Keep the
       complete JSON response under 20,000 characters. Keep each summary under 800 characters,
       target 1,200 to 2,500 characters each for requirements_text and architecture_text and
       never exceed 12,000 characters for either field. Return at most 10 architecture nodes,
-      12 edges, 5 pros, 5 cons, 8 evidence references, and 6 pricing queries per solution.
+      12 edges, 5 pros, 5 cons, 8 evidence references, and 10 pricing queries per solution.
       Prefer concise, complete content over repetition.
 
       {retry_instruction}
@@ -1652,6 +1657,6 @@ prompts:
       - discovery_context
       - retry_instruction
       - source_material
-    version: "2.3.0"
+    version: "2.4.0"
 
 

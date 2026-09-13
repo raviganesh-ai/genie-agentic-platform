@@ -117,9 +117,9 @@ async def _create_service(
                     "architecture_nodes": [
                         {
                             "id": "foundry",
-                            "service_name": "Azure AI Foundry",
-                            "azure_icon_key": "azure ai foundry",
-                            "purpose": "Claims agent",
+                            "service_name": "Azure AI Search",
+                            "azure_icon_key": "azure ai search",
+                            "purpose": "Grounds the claims agent in approved evidence",
                             "x": 0,
                             "y": 0,
                         }
@@ -445,6 +445,54 @@ async def test_solution_generation_retries_once_after_truncated_json() -> None:
     assert isinstance(retry_variables, dict)
     assert "not valid JSON" in str(retry_variables["retry_instruction"])
     assert "between 1,200 and 2,500 characters" in str(
+        retry_variables["retry_instruction"]
+    )
+
+
+async def test_solution_generation_retries_when_pricing_is_outside_architecture() -> None:
+    service, orchestrator, session_id = await _create_service()
+    await service.analyze_personas(
+        session_id=session_id, requesting_user_id="user-1"
+    )
+    await service.select_persona(
+        session_id=session_id,
+        requesting_user_id="user-1",
+        persona_id="jordan-lee",
+    )
+    await service.set_qa_mode(
+        session_id=session_id,
+        requesting_user_id="user-1",
+        mode="batch",
+    )
+    await service.answer_question(
+        session_id=session_id,
+        requesting_user_id="user-1",
+        question_id="monthly-volume",
+        answer="10,000 to 100,000 documents",
+    )
+    orchestrator.outputs.popleft()
+    valid_output = json.loads(orchestrator.outputs.popleft())
+    invalid_output = json.loads(json.dumps(valid_output))
+    invalid_output["solutions"][0]["pricing_queries"][0]["service_name"] = (
+        "Azure SQL Database"
+    )
+    orchestrator.outputs.extend(
+        [json.dumps(invalid_output), json.dumps(valid_output)]
+    )
+
+    case = await service.generate_solutions(
+        session_id=session_id, requesting_user_id="user-1"
+    )
+
+    assert case.status == "awaiting_solution_selection"
+    assert case.proposed_solutions[0].pricing_queries[0].service_name == "Azure AI Search"
+    assert orchestrator.calls[-2:] == [
+        "discovery-probable-solutions-v1",
+        "discovery-probable-solutions-v1",
+    ]
+    retry_variables = orchestrator.execution_requests[-1]["variables"]
+    assert isinstance(retry_variables, dict)
+    assert "pricing query services must match architecture node service names" in str(
         retry_variables["retry_instruction"]
     )
 

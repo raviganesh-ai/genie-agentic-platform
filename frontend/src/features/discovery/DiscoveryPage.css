@@ -362,10 +362,59 @@
 
 .discovery-cost {
   display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 6px 16px;
+  gap: 16px;
   border-top: 1px solid var(--discovery-line);
   padding-top: 14px;
+}
+
+.discovery-cost-header,
+.discovery-cost-totals {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.discovery-cost-header > div,
+.discovery-cost-totals > div {
+  display: grid;
+  gap: 3px;
+}
+
+.discovery-cost-totals {
+  justify-content: start;
+}
+
+.discovery-cost-totals > div {
+  min-width: 180px;
+  padding-left: 12px;
+  border-left: 2px solid #4d91ba;
+}
+
+.discovery-cost-services {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  border-top: 1px solid var(--discovery-line);
+  border-bottom: 1px solid var(--discovery-line);
+}
+
+.discovery-cost-services > div {
+  display: grid;
+  align-content: start;
+  gap: 7px;
+  padding: 12px;
+  border-right: 1px solid var(--discovery-line);
+  border-bottom: 1px solid var(--discovery-line);
+}
+
+.discovery-cost-services > div > div {
+  display: grid;
+  gap: 2px;
+}
+
+.discovery-cost-sources {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
 }
 
 @media (max-width: 720px) {
@@ -416,6 +465,12 @@
 
   .discovery-architecture {
     height: 500px;
+  }
+
+  .discovery-cost-header,
+  .discovery-cost-totals {
+    align-items: flex-start;
+    flex-direction: column;
   }
 }
 
