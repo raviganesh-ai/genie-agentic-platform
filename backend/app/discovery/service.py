@@ -80,6 +80,8 @@ class _DeepDiveEnvelope(BaseModel):
     model_config = ConfigDict(extra="ignore")
     deep_dive_findings: list[str] = Field(min_length=1)
     insight_sections: list[_DiscoveryInsightSectionDraft] = Field(min_length=1, max_length=5)
+    gap_summary: str = Field(min_length=1, max_length=1200)
+    assumption_summary: str = Field(min_length=1, max_length=1200)
     gap_analysis: _GapAnalysisDraft
     questions: list[_DiscoveryQuestionDraft] = Field(max_length=8)
 
@@ -94,20 +96,20 @@ class _SolutionDraft(BaseModel):
     model_config = ConfigDict(extra="forbid")
     id: str = Field(min_length=1)
     name: str = Field(min_length=1)
-    summary: str = Field(min_length=1)
-    requirements_text: str = Field(min_length=1)
-    architecture_text: str = Field(min_length=1)
-    architecture_nodes: list[ArchitectureNode] = Field(min_length=1)
-    architecture_edges: list[ArchitectureEdge] = Field(default_factory=list)
-    pros: list[str] = Field(min_length=1)
-    cons: list[str] = Field(min_length=1)
+    summary: str = Field(min_length=1, max_length=800)
+    requirements_text: str = Field(min_length=1, max_length=4000)
+    architecture_text: str = Field(min_length=1, max_length=4000)
+    architecture_nodes: list[ArchitectureNode] = Field(min_length=1, max_length=10)
+    architecture_edges: list[ArchitectureEdge] = Field(default_factory=list, max_length=12)
+    pros: list[str] = Field(min_length=1, max_length=5)
+    cons: list[str] = Field(min_length=1, max_length=5)
     ai_feasibility: AiFeasibility
     ai_feasibility_rationale: str = Field(min_length=1)
     evidence_references: list[str] = Field(
         default_factory=list,
         validation_alias=AliasChoices("evidence_references", "Evidence_references"),
     )
-    pricing_queries: list[PricingQuery] = Field(default_factory=list)
+    pricing_queries: list[PricingQuery] = Field(default_factory=list, max_length=6)
 
 
 class _SolutionsEnvelope(BaseModel):
@@ -281,6 +283,8 @@ class DiscoveryService:
                 selected_persona_ids=[],
                 deep_dive_findings=[],
                 insight_sections=[],
+                gap_summary="",
+                assumption_summary="",
                 gap_analysis=None,
                 qa_mode=None,
                 questions=[],
@@ -354,6 +358,8 @@ class DiscoveryService:
             selected_persona_ids=[],
             deep_dive_findings=[],
             insight_sections=[],
+            gap_summary="",
+            assumption_summary="",
             gap_analysis=None,
             qa_mode=None,
             questions=[],
@@ -468,6 +474,8 @@ class DiscoveryService:
             selected_persona_ids=unique_ids,
             deep_dive_findings=parsed.deep_dive_findings,
             insight_sections=parsed.insight_sections,
+            gap_summary=parsed.gap_summary,
+            assumption_summary=parsed.assumption_summary,
             gap_analysis=parsed.gap_analysis,
             qa_mode=None,
             questions=parsed.questions,
@@ -484,6 +492,8 @@ class DiscoveryService:
                 "insight_sections": [
                     section.model_dump(mode="json") for section in parsed.insight_sections
                 ],
+                "gap_summary": parsed.gap_summary,
+                "assumption_summary": parsed.assumption_summary,
                 "findings": parsed.deep_dive_findings,
                 "gap_analysis": parsed.gap_analysis.model_dump(mode="json"),
                 "questions": [item.model_dump(mode="json") for item in parsed.questions],
@@ -628,18 +638,12 @@ class DiscoveryService:
             discovery_case, status="generating_solutions", last_error=None
         )
         try:
-            result = await self._execute(
-                agent_id="architecture-designer",
-                prompt_id="discovery-probable-solutions-v1",
-                variables={
-                    "discovery_context": self._context_json(discovery_case),
-                    "source_material": await self._source_material(
-                        discovery_case, requesting_user_id
-                    ),
-                },
+            drafts = await self._execute_solution_drafts(
                 discovery_case=discovery_case,
+                source_material=await self._source_material(
+                    discovery_case, requesting_user_id
+                ),
             )
-            drafts = parse_agent_response(result, _SolutionsEnvelope).solutions
             solutions: list[ProposedSolution] = []
             for draft in drafts:
                 estimate = await self._pricing_service.estimate(draft.pricing_queries)
@@ -667,6 +671,37 @@ class DiscoveryService:
             content={"solutions": [item.model_dump(mode="json") for item in solutions]},
         )
         return updated
+
+    async def _execute_solution_drafts(
+        self,
+        *,
+        discovery_case: DiscoveryCase,
+        source_material: str,
+    ) -> list[_SolutionDraft]:
+        variables = {
+            "discovery_context": self._context_json(discovery_case),
+            "source_material": source_material,
+            "retry_instruction": "",
+        }
+        for attempt in range(2):
+            if attempt:
+                variables["retry_instruction"] = (
+                    "A prior response was malformed, truncated, or schema-invalid. Regenerate "
+                    "it as fresh JSON, honor every field and size limit, and close all arrays, "
+                    "objects, and strings."
+                )
+            result = await self._execute(
+                agent_id="architecture-designer",
+                prompt_id="discovery-probable-solutions-v1",
+                variables=variables,
+                discovery_case=discovery_case,
+            )
+            try:
+                return parse_agent_response(result, _SolutionsEnvelope).solutions
+            except DiscoveryAgentResponseError:
+                if attempt == 1:
+                    raise
+        raise RuntimeError("Discovery solution retry loop exited unexpectedly.")
 
     async def select_solution(
         self,
@@ -908,6 +943,8 @@ class DiscoveryService:
                     section.model_dump(mode="json")
                     for section in discovery_case.insight_sections
                 ],
+                "gap_summary": discovery_case.gap_summary,
+                "assumption_summary": discovery_case.assumption_summary,
                 "gap_analysis": (
                     discovery_case.gap_analysis.model_dump(mode="json")
                     if discovery_case.gap_analysis

@@ -66,6 +66,13 @@ async def _create_service(
                     "evidence_references": ["call.txt"],
                 }
             ],
+            "gap_summary": (
+                "Peak monthly volume remains unknown, preventing confident capacity sizing."
+            ),
+            "assumption_summary": (
+                "The analysis assumes documents continue to arrive digitally; the customer "
+                "must validate that all intake channels follow this pattern."
+            ),
             "analysis_summary": "Additional model metadata must not invalidate the response.",
             "gap_analysis": {
                 "known_facts": ["Documents arrive digitally"],
@@ -257,6 +264,8 @@ async def test_deep_dive_accepts_multiple_people_and_extra_agent_metadata() -> N
     assert case.selected_persona_id == "jordan-lee"
     assert case.selected_persona_ids == ["jordan-lee", "morgan-chen"]
     assert case.insight_sections[0].title == "Manual review constrains response time"
+    assert "Peak monthly volume" in case.gap_summary
+    assert "assumes documents continue" in case.assumption_summary
     assert case.questions[0].suggested_answers == [
         "Fewer than 10,000 documents",
         "10,000 to 100,000 documents",
@@ -393,6 +402,89 @@ async def test_skip_requires_consent_before_recommendation_and_state_is_durable(
     ]
 
 
+async def test_solution_generation_retries_once_after_truncated_json() -> None:
+    service, orchestrator, session_id = await _create_service()
+    case = await service.analyze_personas(
+        session_id=session_id, requesting_user_id="user-1"
+    )
+    case = await service.select_persona(
+        session_id=session_id,
+        requesting_user_id="user-1",
+        persona_id="jordan-lee",
+    )
+    case = await service.set_qa_mode(
+        session_id=session_id,
+        requesting_user_id="user-1",
+        mode="batch",
+    )
+    case = await service.answer_question(
+        session_id=session_id,
+        requesting_user_id="user-1",
+        question_id="monthly-volume",
+        answer="10,000 to 100,000 documents",
+    )
+    assert case.status == "ready_for_solutions"
+    orchestrator.outputs.popleft()
+    orchestrator.outputs.appendleft('{"solutions":[{"id":"truncated"')
+
+    case = await service.generate_solutions(
+        session_id=session_id, requesting_user_id="user-1"
+    )
+
+    assert case.status == "awaiting_solution_selection"
+    assert len(case.proposed_solutions) == 1
+    assert orchestrator.calls[-2:] == [
+        "discovery-probable-solutions-v1",
+        "discovery-probable-solutions-v1",
+    ]
+
+
+async def test_solution_generation_fails_closed_after_two_malformed_responses() -> None:
+    service, orchestrator, session_id = await _create_service()
+    await service.analyze_personas(
+        session_id=session_id, requesting_user_id="user-1"
+    )
+    await service.select_persona(
+        session_id=session_id,
+        requesting_user_id="user-1",
+        persona_id="jordan-lee",
+    )
+    await service.set_qa_mode(
+        session_id=session_id,
+        requesting_user_id="user-1",
+        mode="batch",
+    )
+    case = await service.answer_question(
+        session_id=session_id,
+        requesting_user_id="user-1",
+        question_id="monthly-volume",
+        answer="10,000 to 100,000 documents",
+    )
+    assert case.status == "ready_for_solutions"
+    orchestrator.outputs.clear()
+    orchestrator.outputs.extend(
+        [
+            '{"solutions":[{"id":"first-truncated"',
+            '{"solutions":[{"id":"second-truncated"',
+        ]
+    )
+
+    with pytest.raises(DiscoveryAgentResponseError, match="not valid JSON"):
+        await service.generate_solutions(
+            session_id=session_id, requesting_user_id="user-1"
+        )
+
+    reloaded = await service.get_case(
+        session_id=session_id, requesting_user_id="user-1"
+    )
+    assert reloaded.status == "ready_for_solutions"
+    assert reloaded.last_error == "Solution generation failed. Retry when Foundry is available."
+    assert orchestrator.calls[-2:] == [
+        "discovery-probable-solutions-v1",
+        "discovery-probable-solutions-v1",
+    ]
+
+
 async def test_removing_analyzed_upload_invalidates_derived_discovery_state() -> None:
     service, _, session_id = await _create_service()
     analyzed = await service.analyze_personas(
@@ -415,6 +507,8 @@ async def test_removing_analyzed_upload_invalidates_derived_discovery_state() ->
     assert reloaded.selected_persona_id is None
     assert reloaded.deep_dive_findings == []
     assert reloaded.insight_sections == []
+    assert reloaded.gap_summary == ""
+    assert reloaded.assumption_summary == ""
     assert reloaded.gap_analysis is None
     assert reloaded.qa_mode is None
     assert reloaded.questions == []

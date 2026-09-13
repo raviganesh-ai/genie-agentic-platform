@@ -43,9 +43,23 @@ def test_discovery_deep_dive_prompt_bounds_structured_output() -> None:
     assert "one to five thematic sections chosen intelligently" in template
     assert "rather than one section per raw finding or gap category" in template
     assert "preserve attribution by person" in template
+    assert "gap_summary must synthesize the material information_gaps" in template
+    assert "assumption_summary must synthesize the assumptions" in template
     assert "questions may be empty" in template
     assert "two to four concise suggested_answers" in template
     assert "must not present assumptions as customer facts" in template
+    assert "{retry_instruction}" in prompt.template
+
+
+def test_discovery_solution_prompt_bounds_structured_output_and_supports_retry() -> None:
+    registry = PromptRegistry.load(_REPO_CONFIG_ROOT / "prompts")
+
+    prompt = registry.get("discovery-probable-solutions-v1")
+    template = " ".join(prompt.template.split())
+
+    assert "under 20,000 characters" in template
+    assert "at most 10 architecture nodes" in template
+    assert "requirements_text and architecture_text under 4,000 characters" in template
     assert "{retry_instruction}" in prompt.template
 
 

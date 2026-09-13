@@ -38,6 +38,8 @@ describe("DiscoveryPage", () => {
             summary: "Jordan Lee's manual evidence checks create the primary bottleneck and make the stated SLA difficult to sustain.",
             evidence_references: ["call.txt"],
           }],
+          gap_summary: "Peak processing volume and exception rates remain unknown, preventing confident capacity sizing.",
+          assumption_summary: "The analysis assumes all claims arrive digitally; Jordan Lee must validate remaining intake channels.",
           gap_analysis: {
             known_facts: ["Claims arrive digitally"],
             risks: ["Manual review may breach the response target"],
@@ -113,9 +115,16 @@ describe("DiscoveryPage", () => {
     expect(screen.getByRole("heading", { name: "Manual review threatens response targets" })).toBeInTheDocument();
     expect(screen.getByText(/manual evidence checks create the primary bottleneck/)).toBeInTheDocument();
     expect(screen.getByText("Evidence: call.txt")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "3. Pain points" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "4. Gaps and assumptions" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Gaps" })).toBeInTheDocument();
+    expect(screen.getByText(/Peak processing volume and exception rates remain unknown/)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Assumptions" })).toBeInTheDocument();
+    expect(screen.getByText(/assumes all claims arrive digitally/)).toBeInTheDocument();
     expect(screen.queryByText("Manual review may breach the response target")).not.toBeInTheDocument();
     expect(screen.queryByText("The stated SLA conflicts with the manual queue")).not.toBeInTheDocument();
     expect(screen.getByText("2 questions · 1 answered")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "5. Clarify what matters" })).toBeInTheDocument();
     expect(screen.getByText("What is the peak monthly volume?")).toBeInTheDocument();
     expect(screen.queryByText("How long must claim evidence be retained?")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Yes, recommend" })).toBeInTheDocument();

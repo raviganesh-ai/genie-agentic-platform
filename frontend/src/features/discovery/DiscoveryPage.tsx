@@ -419,9 +419,11 @@ export function DiscoveryPage(): JSX.Element {
     ["answered", "recommended"].includes(question.status),
   ).length ?? 0;
   const progress = discoveryCase?.proposed_solutions.length
-    ? 5
-    : discoveryCase?.questions.length
-      ? 4
+    ? 6
+    : discoveryCase?.qa_mode || discoveryCase?.questions.length
+      ? 5
+      : discoveryCase?.gap_analysis
+        ? 4
       : selectedPersonas.length
         ? 3
         : discoveryCase?.personas.length
@@ -434,8 +436,8 @@ export function DiscoveryPage(): JSX.Element {
         title="Discovery"
         subtitle="Turn customer evidence into a persona-led, costed Azure solution and runnable prototype."
       />
-      <div className="discovery-progress" aria-label={`Discovery progress, step ${progress} of 5`}>
-        {[1, 2, 3, 4, 5].map((step) => <span key={step} className={step <= progress ? "active" : ""} />)}
+      <div className="discovery-progress" aria-label={`Discovery progress, step ${progress} of 6`}>
+        {[1, 2, 3, 4, 5, 6].map((step) => <span key={step} className={step <= progress ? "active" : ""} />)}
       </div>
       <div className="discovery-toolbar">
         <Text className="discovery-muted">
@@ -622,9 +624,10 @@ export function DiscoveryPage(): JSX.Element {
       ) : null}
 
       {discoveryCase && selectedPersonas.length > 0 && discoveryCase.gap_analysis ? (
-        <section className="discovery-section" aria-labelledby="discovery-gaps">
+        <>
+        <section className="discovery-section" aria-labelledby="discovery-pain-points">
           <div>
-            <h2 id="discovery-gaps" className="discovery-section-heading">3. Pain points and gaps</h2>
+            <h2 id="discovery-pain-points" className="discovery-section-heading">3. Pain points</h2>
             <Text className="discovery-muted">Based only on evidence attributable to {selectedPersonaNames}.</Text>
           </div>
           <div className="discovery-insight-list">
@@ -667,6 +670,30 @@ export function DiscoveryPage(): JSX.Element {
           <Text className="discovery-muted">
             Analysis confidence: {Math.round(discoveryCase.gap_analysis.confidence_score * 100)}%
           </Text>
+        </section>
+        <section className="discovery-section" aria-labelledby="discovery-gaps-assumptions">
+          <div>
+            <h2 id="discovery-gaps-assumptions" className="discovery-section-heading">4. Gaps and assumptions</h2>
+            <Text className="discovery-muted">What remains unresolved and what still requires customer validation.</Text>
+          </div>
+          <div className="discovery-insight-list">
+            <article className="discovery-insight">
+              <h3>Gaps</h3>
+              <Text>
+                {discoveryCase.gap_summary
+                  || discoveryCase.gap_analysis.information_gaps.join(" ")
+                  || "No material information gaps were identified."}
+              </Text>
+            </article>
+            <article className="discovery-insight">
+              <h3>Assumptions</h3>
+              <Text>
+                {discoveryCase.assumption_summary
+                  || discoveryCase.gap_analysis.assumptions.join(" ")
+                  || "No material assumptions were identified."}
+              </Text>
+            </article>
+          </div>
           {!discoveryCase.qa_mode && discoveryCase.questions.length ? (
             <div className="discovery-choice-row">
               <Text weight="semibold">How should Genie ask?</Text>
@@ -692,12 +719,13 @@ export function DiscoveryPage(): JSX.Element {
               </div>
           ) : null}
         </section>
+        </>
       ) : null}
 
       {discoveryCase?.qa_mode ? (
         <section className="discovery-section" aria-labelledby="discovery-questions">
           <div>
-            <h2 id="discovery-questions" className="discovery-section-heading">4. Clarify what matters</h2>
+            <h2 id="discovery-questions" className="discovery-section-heading">5. Clarify what matters</h2>
             <Text className="discovery-muted" style={{ display: "block" }}>
               {totalQuestionCount} {totalQuestionCount === 1 ? "question" : "questions"} · {answeredQuestionCount} answered
             </Text>
@@ -773,7 +801,7 @@ export function DiscoveryPage(): JSX.Element {
       {discoveryCase?.proposed_solutions.length ? (
         <section className="discovery-section" aria-labelledby="discovery-solutions">
           <div>
-            <h2 id="discovery-solutions" className="discovery-section-heading">5. Probable solutions</h2>
+            <h2 id="discovery-solutions" className="discovery-section-heading">6. Probable solutions</h2>
             <Text className="discovery-muted">Compare architecture, tradeoffs, AI feasibility, and verified Azure price coverage.</Text>
           </div>
           <div className="discovery-solution-grid">

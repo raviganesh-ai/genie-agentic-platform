@@ -124,6 +124,8 @@ export interface DiscoveryCase {
   selected_persona_ids: string[];
   deep_dive_findings: string[];
   insight_sections: DiscoveryInsightSection[];
+  gap_summary: string;
+  assumption_summary: string;
   gap_analysis: GapAnalysis | null;
   qa_mode: DiscoveryQaMode | null;
   questions: DiscoveryQuestion[];

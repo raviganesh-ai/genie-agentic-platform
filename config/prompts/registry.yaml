@@ -1532,7 +1532,9 @@ prompts:
       Return only valid JSON in exactly this shape, with no additional fields:
       {{"deep_dive_findings":["Finding attributable to Person Name"],"insight_sections":
       [{{"title":"Decision-relevant theme","summary":"A concise evidence-grounded synthesis",
-      "evidence_references":["source reference"]}}],"gap_analysis":
+      "evidence_references":["source reference"]}}],"gap_summary":"A concise synthesis of
+      unresolved information and its decision impact","assumption_summary":"A concise synthesis
+      of assumptions and how they must be validated","gap_analysis":
       {{"known_facts":[],"risks":[],"contradictions":[],"information_gaps":[],
       "assumptions":[],"evidence_references":[],"confidence_score":0.0}},"questions":
       [{{"id":"stable-question-id","text":"Question text","category":"category",
@@ -1559,7 +1561,11 @@ prompts:
       into a concise two-to-four-sentence narrative useful for solution decisions. Use specific,
       meaningful titles, preserve attribution by person, cite supporting evidence_references,
       and do not repeat the same point in multiple sections. Do not force a theme unsupported
-      by the evidence. Do not invent customer facts. Keep the complete JSON response under
+      by the evidence. gap_summary must synthesize the material information_gaps and explain
+      why they matter; assumption_summary must synthesize the assumptions and distinguish them
+      clearly from customer facts. If either list is empty, state concisely that no material
+      gaps or assumptions were identified instead of inventing content. Keep each summary under
+      1,200 characters. Do not invent customer facts. Keep the complete JSON response under
       12,000 characters.
       Return at most 10 deep_dive_findings, at most 6 entries in each gap_analysis array,
       and at most 8 questions. Keep every finding, gap entry, evidence reference, and
@@ -1577,7 +1583,7 @@ prompts:
       - retry_instruction
       - selected_persona
       - source_material
-    version: "4.4.0"
+    version: "4.5.0"
 
   - id: discovery-best-practice-recommendation-v1
     name: Discovery Best Practice Recommendation
@@ -1628,7 +1634,13 @@ prompts:
       existing Build Agent, so do not replace it with an Azure infrastructure summary.
       pricing_queries may contain only service_name, arm_region_name, sku_name,
       units_per_month, and assumption. Never provide prices: Genie resolves every unit price
-      deterministically from the Azure Retail Prices API and reports missing coverage.
+      deterministically from the Azure Retail Prices API and reports missing coverage. Keep the
+      complete JSON response under 20,000 characters. Keep each summary under 800 characters,
+      requirements_text and architecture_text under 4,000 characters each, and return at most
+      10 architecture nodes, 12 edges, 5 pros, 5 cons, 8 evidence references, and 6 pricing
+      queries per solution. Prefer concise, complete content over repetition.
+
+      {retry_instruction}
 
       Discovery context:
       {discovery_context}
@@ -1637,7 +1649,8 @@ prompts:
       {source_material}
     variables:
       - discovery_context
+      - retry_instruction
       - source_material
-    version: "2.0.0"
+    version: "2.1.0"
 
 

@@ -689,6 +689,14 @@ The script uses Microsoft Entra authentication, creates only missing model deplo
 
 Every deployment to the shared Azure evaluation environment (backend Container App and/or frontend Static Web App) is recorded here: commit, what changed, and why. Update this section as part of the same commit that ships the fix/feature, before pushing to `master` triggers [Continuous deployment](#continuous-deployment-github-actions).
 
+### 2026-09-13 — Separate gaps and assumptions with bounded solution recovery
+
+- **Separate intelligence sections**: Section 3 remains the successful thematic **Pain points** view. A new Section 4, **Gaps and assumptions**, presents distinct Foundry-authored narratives for unresolved information and assumptions requiring customer validation rather than mixing either into the pain-point themes or exposing raw arrays.
+- **Workflow clarity**: **Clarify what matters** and **Probable solutions** move to Sections 5 and 6, and the progress indicator reflects the six-part Discovery flow. Existing cases without the new summaries receive concise fallbacks from their structured gap analysis until reanalyzed.
+- **Second production diagnosis**: after normalizing `Evidence_references`, the live solution retry reached a different failure: Foundry emitted malformed or truncated JSON at line 735, column 36. The large build-ready solution payload had no bounded recovery path.
+- **Bounded recovery**: solution output is now capped below 20,000 characters with limits on architecture text, requirements, nodes, edges, tradeoffs, references, and pricing queries. Malformed or schema-invalid output receives exactly one fresh Foundry retry with explicit closure and size instructions; a second invalid response restores `ready_for_solutions` and fails closed without local or static fallback.
+- **Verification**: focused tests cover summary persistence and invalidation, separate UI sections, prompt bounds, successful retry after truncation, and fail-closed behavior after two malformed responses.
+
 ### 2026-09-13 — Discovery question progress and solution response compatibility
 
 - **Question progress**: **Clarify what matters** now displays the total question count and how many have been answered. Interactive mode counts the complete question set even though it renders only the next unresolved question; direct customer answers and accepted Genie recommendations count as answered.
