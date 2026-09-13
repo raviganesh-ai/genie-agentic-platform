@@ -186,6 +186,17 @@ async def generate_discovery_solutions(
     )
 
 
+@router.post("/sessions/{session_id}/discovery/solutions/pricing")
+async def refresh_discovery_solution_pricing(
+    session_id: str,
+    user: AuthenticatedUser = Depends(get_current_user),
+    discovery_service: DiscoveryService = Depends(get_discovery_service),
+) -> DiscoveryCase:
+    return await discovery_service.refresh_solution_pricing(
+        session_id=session_id, requesting_user_id=user.user_id
+    )
+
+
 @router.post("/sessions/{session_id}/discovery/solution")
 async def select_discovery_solution(
     session_id: str,

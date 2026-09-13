@@ -75,8 +75,12 @@ export interface ArchitectureEdge {
 
 export interface PricingQuery {
   service_name: string;
+  retail_service_name?: string | null;
+  product_name?: string | null;
   arm_region_name: string;
   sku_name: string | null;
+  meter_name?: string | null;
+  unit_of_measure?: string | null;
   units_per_month: number;
   assumption: string;
 }

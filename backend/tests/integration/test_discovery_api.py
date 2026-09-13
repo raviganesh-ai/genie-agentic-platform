@@ -90,3 +90,25 @@ def test_discovery_case_rejects_unknown_source_upload(app_local_settings) -> Non
 
         assert response.status_code == 404
         assert "missing-upload" in response.json()["detail"]
+
+
+def test_discovery_pricing_refresh_requires_generated_solutions(app_local_settings) -> None:
+    app = create_app(settings=app_local_settings)
+
+    with TestClient(app) as client:
+        session_id = client.post(
+            "/sessions", json={"title": "Pricing refresh"}
+        ).json()["id"]
+        client.post(
+            f"/sessions/{session_id}/discovery",
+            json={"source_upload_ids": []},
+        )
+
+        response = client.post(
+            f"/sessions/{session_id}/discovery/solutions/pricing"
+        )
+
+        assert response.status_code == 409
+        assert response.json()["detail"] == (
+            "Generate probable solutions before pricing them."
+        )

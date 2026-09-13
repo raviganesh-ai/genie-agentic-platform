@@ -73,6 +73,9 @@ export const discoveryApi = {
   generateSolutions(sessionId: string): Promise<DiscoveryCase> {
     return apiFetch<DiscoveryCase>(path(sessionId, "/solutions"), { method: "POST" });
   },
+  refreshSolutionPricing(sessionId: string): Promise<DiscoveryCase> {
+    return apiFetch<DiscoveryCase>(path(sessionId, "/solutions/pricing"), { method: "POST" });
+  },
   selectSolution(sessionId: string, solutionId: string): Promise<DiscoveryCase> {
     return apiFetch<DiscoveryCase>(path(sessionId, "/solution"), {
       method: "POST",

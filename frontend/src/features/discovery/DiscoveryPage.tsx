@@ -17,6 +17,7 @@ import {
   ArrowRight24Regular,
   Delete24Regular,
   DocumentAdd24Regular,
+  DocumentPdf24Regular,
   Lightbulb24Regular,
 } from "@fluentui/react-icons";
 import ReactFlow, {
@@ -228,7 +229,9 @@ function SolutionCard({
                 <div>
                   <Text weight="semibold">{query.service_name}</Text>
                   <Text size={200} className="discovery-muted">
-                    {query.sku_name ?? "Consumption pricing"} · {query.units_per_month.toLocaleString()} billable {query.units_per_month === 1 ? "unit" : "units"}/month
+                    {[query.sku_name ?? "Consumption pricing", query.meter_name, query.unit_of_measure]
+                      .filter(Boolean)
+                      .join(" · ")} · {query.units_per_month.toLocaleString()} billable {query.units_per_month === 1 ? "unit" : "units"}/month
                   </Text>
                 </div>
                 <Text size={200} className="discovery-muted">{query.assumption}</Text>
@@ -461,6 +464,14 @@ export function DiscoveryPage(): JSX.Element {
     }
   }, [navigate, sessionId]);
 
+  const exportDiscovery = useCallback(() => {
+    const originalTitle = document.title;
+    const exportedAt = new Date().toISOString().slice(0, 10);
+    document.title = `Genie-Discovery-${sessionId}-${exportedAt}`;
+    window.print();
+    document.title = originalTitle;
+  }, [sessionId]);
+
   if (!sessionId) {
     return (
       <div>
@@ -515,6 +526,16 @@ export function DiscoveryPage(): JSX.Element {
             : "Not saved · kept only for this active session"}
         </Text>
         <div className="discovery-toolbar-actions">
+          {discoveryCase ? (
+            <Button
+              appearance="secondary"
+              icon={<DocumentPdf24Regular />}
+              disabled={Boolean(busy)}
+              onClick={exportDiscovery}
+            >
+              Export PDF
+            </Button>
+          ) : null}
           {discoveryCase ? (
             <Switch
               label="Save discovery"
@@ -869,9 +890,25 @@ export function DiscoveryPage(): JSX.Element {
 
       {discoveryCase?.proposed_solutions.length ? (
         <section className="discovery-section" aria-labelledby="discovery-solutions">
-          <div>
-            <h2 id="discovery-solutions" className="discovery-section-heading">6. Probable solutions</h2>
-            <Text className="discovery-muted">Compare architecture, tradeoffs, AI feasibility, and verified Azure price coverage.</Text>
+          <div className="discovery-section-header">
+            <div>
+              <h2 id="discovery-solutions" className="discovery-section-heading">6. Probable solutions</h2>
+              <Text className="discovery-muted">Compare architecture, tradeoffs, AI feasibility, and verified Azure price coverage.</Text>
+            </div>
+            {discoveryCase.proposed_solutions.some(
+              (solution) => solution.cost_estimate.coverage !== "complete",
+            ) ? (
+              <Button
+                appearance="secondary"
+                disabled={Boolean(busy)}
+                onClick={() => void perform(
+                  "refresh Azure pricing",
+                  () => discoveryApi.refreshSolutionPricing(sessionId),
+                )}
+              >
+                Refresh Azure pricing
+              </Button>
+            ) : null}
           </div>
           <div className="discovery-solution-grid">
             {discoveryCase.proposed_solutions.map((solution) => (

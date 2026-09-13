@@ -493,3 +493,145 @@
     width: 100%;
   }
 }
+
+@media print {
+  @page {
+    size: A4 landscape;
+    margin: 12mm;
+  }
+
+  :root {
+    color-scheme: light;
+  }
+
+  html,
+  body,
+  #root {
+    height: auto;
+    overflow: visible;
+  }
+
+  body {
+    background: #fff;
+    color: #17202a;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+
+  body nav,
+  [role="complementary"],
+  .discovery-toolbar-actions,
+  .discovery-progress,
+  .discovery-upload-row,
+  .discovery-upload-actions,
+  .discovery-upload-next,
+  .discovery-persona-picker,
+  .discovery-choice-row,
+  .discovery-question-answer,
+  .discovery-section-header > button,
+  .discovery-actions,
+  .react-flow__controls,
+  .discovery-card > button {
+    display: none !important;
+  }
+
+  #root,
+  #root > div,
+  main {
+    display: block !important;
+    min-height: 0 !important;
+    background: #fff !important;
+  }
+
+  main {
+    padding: 0 !important;
+    overflow: visible !important;
+  }
+
+  .discovery-page {
+    --discovery-line: #cbd3dc;
+    --discovery-surface: #fff;
+    --discovery-muted: #4f5b67;
+    --discovery-cyan: #167d93;
+    display: block;
+    color: #17202a;
+    padding: 0;
+  }
+
+  .discovery-page,
+  .discovery-page * {
+    color: #17202a !important;
+  }
+
+  .discovery-page > * {
+    margin-bottom: 8mm;
+  }
+
+  .discovery-toolbar {
+    padding-bottom: 4mm;
+    border-color: var(--discovery-line);
+  }
+
+  .discovery-section,
+  .discovery-card,
+  .discovery-insight,
+  .discovery-question,
+  .discovery-cost-services > div {
+    break-inside: avoid;
+  }
+
+  .discovery-card {
+    border-color: var(--discovery-line);
+    background: #fff;
+    box-shadow: none;
+  }
+
+  .discovery-upload-panel {
+    border-color: var(--discovery-line);
+    background: #fff;
+  }
+
+  .discovery-architecture-shell {
+    border-color: #aebbc7;
+    background: #f5f8fa;
+    break-inside: avoid;
+  }
+
+  .discovery-architecture-header {
+    border-color: #cbd3dc;
+    background: #edf3f7;
+  }
+
+  .discovery-architecture {
+    height: 145mm;
+    min-height: 145mm;
+    background: #f5f8fa;
+  }
+
+  .discovery-node {
+    border-color: #53758c;
+    background: #fff;
+    color: #17202a;
+    box-shadow: none;
+  }
+
+  .discovery-node-purpose,
+  .discovery-muted,
+  .discovery-insight-evidence {
+    color: #4f5b67 !important;
+  }
+
+  .discovery-node-fallback,
+  .discovery-cost-sources a {
+    color: #075985 !important;
+  }
+
+  .discovery-cost-services {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  a {
+    color: #075985;
+    overflow-wrap: anywhere;
+  }
+}

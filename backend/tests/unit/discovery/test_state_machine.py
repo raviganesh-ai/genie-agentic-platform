@@ -35,8 +35,12 @@ class _FakeOrchestrator:
 
 
 class _PricingService:
+    def __init__(self) -> None:
+        self.calls = 0
+
     async def estimate(self, queries: list[object]) -> CostEstimate:
         assert len(queries) == 1
+        self.calls += 1
         return CostEstimate(
             region="eastus",
             monthly_amount=42.5,
@@ -449,6 +453,41 @@ async def test_solution_generation_retries_once_after_truncated_json() -> None:
     )
 
 
+async def test_refresh_solution_pricing_preserves_generated_solution() -> None:
+    service, _, session_id = await _create_service()
+    await service.analyze_personas(session_id=session_id, requesting_user_id="user-1")
+    await service.select_persona(
+        session_id=session_id,
+        requesting_user_id="user-1",
+        persona_id="jordan-lee",
+    )
+    await service.set_qa_mode(
+        session_id=session_id,
+        requesting_user_id="user-1",
+        mode="batch",
+    )
+    await service.answer_question(
+        session_id=session_id,
+        requesting_user_id="user-1",
+        question_id="monthly-volume",
+        answer="10,000 to 100,000 documents",
+    )
+    generated = await service.generate_solutions(
+        session_id=session_id, requesting_user_id="user-1"
+    )
+
+    refreshed = await service.refresh_solution_pricing(
+        session_id=session_id, requesting_user_id="user-1"
+    )
+
+    assert refreshed.status == generated.status
+    assert refreshed.version == generated.version + 1
+    assert refreshed.proposed_solutions[0].architecture_nodes == (
+        generated.proposed_solutions[0].architecture_nodes
+    )
+    assert refreshed.proposed_solutions[0].cost_estimate.monthly_amount == 42.5
+
+
 async def test_solution_generation_retries_when_pricing_is_outside_architecture() -> None:
     service, orchestrator, session_id = await _create_service()
     await service.analyze_personas(
@@ -611,6 +650,89 @@ async def test_pricing_uses_verified_retail_unit_price() -> None:
     assert estimate.monthly_amount == 25
     assert estimate.annual_amount == 300
     assert estimate.source_urls[0].startswith("https://prices.azure.com/")
+
+
+async def test_pricing_recovers_from_architecture_label_and_global_region() -> None:
+    requests: list[httpx.Request] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if len(requests) == 1:
+            return httpx.Response(200, json={"Items": []})
+        assert "contains(serviceName, 'Front Door')" in request.url.params["$filter"]
+        assert "armRegionName" not in request.url.params["$filter"]
+        return httpx.Response(
+            200,
+            json={
+                "Items": [
+                    {
+                        "serviceName": "Azure Front Door Service",
+                        "productName": "Azure Front Door",
+                        "skuName": "Standard",
+                        "meterName": "Standard Data Transfer Out",
+                        "armRegionName": "Zone 1",
+                        "unitOfMeasure": "1 GB",
+                        "retailPrice": 0.083,
+                    },
+                    {
+                        "serviceName": "Azure Front Door Service",
+                        "productName": "Azure Front Door",
+                        "skuName": "Standard",
+                        "meterName": "Standard Requests",
+                        "armRegionName": "US Gov Zone 1",
+                        "unitOfMeasure": "10K",
+                        "retailPrice": 0.01125,
+                        "tierMinimumUnits": 0,
+                        "meterId": "front-door-gov-requests",
+                    },
+                    {
+                        "serviceName": "Azure Front Door Service",
+                        "productName": "Azure Front Door",
+                        "skuName": "Standard",
+                        "meterName": "Standard Requests",
+                        "armRegionName": "Zone 1",
+                        "unitOfMeasure": "10K",
+                        "retailPrice": 0.009,
+                        "tierMinimumUnits": 0,
+                        "meterId": "front-door-requests",
+                    },
+                    {
+                        "serviceName": "Azure Front Door Service",
+                        "productName": "Azure Front Door",
+                        "skuName": "Standard",
+                        "meterName": "Standard Requests",
+                        "armRegionName": "",
+                        "unitOfMeasure": "10K",
+                        "retailPrice": 0.0065,
+                        "tierMinimumUnits": 25000,
+                        "meterId": "front-door-requests",
+                    },
+                ]
+            },
+        )
+
+    service = AzureRetailPricingService(
+        endpoint="https://prices.azure.com/api/retail/prices",
+        transport=httpx.MockTransport(handler),
+    )
+    estimate = await service.estimate(
+        [
+            PricingQuery(
+                service_name="Azure Front Door",
+                arm_region_name="eastus",
+                sku_name="Standard_AzureFrontDoor",
+                meter_name="Standard Requests",
+                unit_of_measure="10K",
+                units_per_month=30000,
+                assumption="300 million requests represented as 30,000 10K billing units",
+            )
+        ]
+    )
+
+    assert len(requests) == 2
+    assert estimate.coverage == "complete"
+    assert estimate.monthly_amount == 257.5
+    assert estimate.annual_amount == 3090
 
 
 async def test_state_cannot_advance_out_of_order() -> None:

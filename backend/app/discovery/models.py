@@ -133,8 +133,12 @@ class PricingQuery(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     service_name: str = Field(min_length=1)
+    retail_service_name: str | None = None
+    product_name: str | None = None
     arm_region_name: str = Field(min_length=1)
     sku_name: str | None = None
+    meter_name: str | None = None
+    unit_of_measure: str | None = None
     units_per_month: float = Field(gt=0)
     assumption: str = Field(min_length=1)
 

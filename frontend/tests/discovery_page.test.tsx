@@ -6,6 +6,8 @@ import { mockFetchSequence, renderWithProviders } from "./testUtils";
 
 describe("DiscoveryPage", () => {
   it("renders resumable persona analysis and asks consent before a recommendation", async () => {
+    const print = vi.spyOn(window, "print").mockImplementation(() => undefined);
+    const originalTitle = document.title;
     const fetchMock = mockFetchSequence([
       {
         match: "/sessions/session-1/discovery",
@@ -111,6 +113,11 @@ describe("DiscoveryPage", () => {
     expect(screen.getByRole("heading", { name: "2. Select the persona of your choice" })).toBeInTheDocument();
     expect(screen.getByRole("combobox", { name: "Select personas" })).toHaveValue("Jordan Lee");
     expect(screen.getByRole("switch", { name: "Save discovery" })).toBeChecked();
+    expect(screen.getByRole("button", { name: "Export PDF" })).toBeInTheDocument();
+    await userEvent.setup().click(screen.getByRole("button", { name: "Export PDF" }));
+    expect(print).toHaveBeenCalledOnce();
+    expect(document.title).toBe(originalTitle);
+    print.mockRestore();
     expect(screen.getByText("Based only on evidence attributable to Jordan Lee.")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Manual review threatens response targets" })).toBeInTheDocument();
     expect(screen.getByText(/manual evidence checks create the primary bottleneck/)).toBeInTheDocument();
@@ -556,7 +563,7 @@ describe("DiscoveryPage", () => {
           region: "eastus",
           monthly_amount: 125,
           annual_amount: 1500,
-          coverage: "complete",
+          coverage: "partial",
           assumptions: ["100,000 API calls per month", "One billable model deployment"],
           source_urls: ["https://prices.azure.com/api/retail/prices"],
           retrieved_at: "2026-09-12T10:00:00Z",
@@ -569,7 +576,7 @@ describe("DiscoveryPage", () => {
       created_at: "2026-09-12T10:00:00Z",
       updated_at: "2026-09-12T10:02:00Z",
     };
-    mockFetchSequence([
+    const fetchMock = mockFetchSequence([
       { match: "/sessions/session-1/discovery", response: caseState },
       { match: "/sessions/session-1/uploads", response: [] },
     ]);
@@ -592,5 +599,11 @@ describe("DiscoveryPage", () => {
     expect(within(cost).getByText("100,000 API calls per month")).toBeInTheDocument();
     expect(within(cost).getByText(/implementation, support, taxes, and negotiated discounts are excluded/)).toBeInTheDocument();
     expect(screen.queryByText("Estimated Azure run rate")).not.toBeInTheDocument();
+
+    await userEvent.setup().click(screen.getByRole("button", { name: "Refresh Azure pricing" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining("/sessions/session-1/discovery/solutions/pricing"),
+      expect.objectContaining({ method: "POST" }),
+    ));
   });
 });

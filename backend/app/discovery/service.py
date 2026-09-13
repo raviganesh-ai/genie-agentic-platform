@@ -691,6 +691,23 @@ class DiscoveryService:
         )
         return updated
 
+    async def refresh_solution_pricing(
+        self, *, session_id: str, requesting_user_id: str
+    ) -> DiscoveryCase:
+        discovery_case = await self.get_case(
+            session_id=session_id, requesting_user_id=requesting_user_id
+        )
+        if self._pricing_service is None:
+            raise DiscoveryStateConflictError("Azure retail pricing is unavailable.")
+        if not discovery_case.proposed_solutions:
+            raise DiscoveryStateConflictError("Generate probable solutions before pricing them.")
+
+        repriced_solutions: list[ProposedSolution] = []
+        for solution in discovery_case.proposed_solutions:
+            estimate = await self._pricing_service.estimate(solution.pricing_queries)
+            repriced_solutions.append(solution.model_copy(update={"cost_estimate": estimate}))
+        return await self._save(discovery_case, proposed_solutions=repriced_solutions)
+
     async def _execute_solution_drafts(
         self,
         *,

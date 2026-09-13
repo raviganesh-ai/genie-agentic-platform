@@ -61,6 +61,8 @@ def test_discovery_solution_prompt_bounds_structured_output_and_supports_retry()
     assert "at most 10 architecture nodes" in template
     assert "one query for every independently billed Azure service" in template
     assert "use the architecture node's exact service_name" in template
+    assert "Azure Retail Prices API taxonomy" in template
+    assert "number of billing units represented by unit_of_measure" in template
     assert "10 pricing queries per solution" in template
     assert "target 1,200 to 2,500 characters each" in template
     assert "never exceed 12,000 characters for either field" in template

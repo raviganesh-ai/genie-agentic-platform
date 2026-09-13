@@ -1632,9 +1632,15 @@ prompts:
       "**Agent name**:" bullet per agent, including exactly one Orchestrator Agent. Every
       bullet must cite the requirement ids it fulfills. This text is sent unchanged to the
       existing Build Agent, so do not replace it with an Azure infrastructure summary.
-      pricing_queries may contain only service_name, arm_region_name, sku_name,
-      units_per_month, and assumption. Never provide prices: Genie resolves every unit price
-      deterministically from the Azure Retail Prices API and reports missing coverage. Derive
+      pricing_queries may contain only service_name, retail_service_name, product_name,
+      arm_region_name, sku_name, meter_name, unit_of_measure, units_per_month, and assumption.
+      Never provide prices: Genie resolves every unit price deterministically from the Azure
+      Retail Prices API and reports missing coverage. service_name must remain the exact
+      architecture-node service name. Use Azure Retail Prices API taxonomy for the optional
+      retail_service_name, product_name, sku_name, meter_name, and unit_of_measure fields;
+      include those fields whenever known so the intended billable meter is unambiguous.
+      units_per_month must be the number of billing units represented by unit_of_measure, not
+      the raw request, token, byte, or operation count. Derive
       pricing_queries from architecture_nodes: include one query for every independently billed
       Azure service in the architecture, use the architecture node's exact service_name, and do
       not include services that are absent from the architecture. If a logical platform label is
@@ -1657,6 +1663,6 @@ prompts:
       - discovery_context
       - retry_instruction
       - source_material
-    version: "2.4.0"
+    version: "2.5.0"
 
 
