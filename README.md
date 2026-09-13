@@ -689,6 +689,13 @@ The script uses Microsoft Entra authentication, creates only missing model deplo
 
 Every deployment to the shared Azure evaluation environment (backend Container App and/or frontend Static Web App) is recorded here: commit, what changed, and why. Update this section as part of the same commit that ships the fix/feature, before pushing to `master` triggers [Continuous deployment](#continuous-deployment-github-actions).
 
+### 2026-09-13 — Discovery question progress and solution response compatibility
+
+- **Question progress**: **Clarify what matters** now displays the total question count and how many have been answered. Interactive mode counts the complete question set even though it renders only the next unresolved question; direct customer answers and accepted Genie recommendations count as answered.
+- **Production failure**: solution generation correlation ID `256e60fa-2500-4743-b4d1-d8578f59bc53` failed because Foundry returned `Evidence_references` while the external `_SolutionsEnvelope` accepted only canonical `evidence_references` and rejected the alternate casing as an extra field.
+- **Boundary normalization**: `_SolutionDraft` now explicitly accepts either known spelling at the Foundry boundary and maps both to canonical `evidence_references` before constructing the strict internal `ProposedSolution`. All other unexpected solution fields remain forbidden.
+- **Regression coverage**: the solution state-machine fixture uses the exact production casing and verifies that its evidence references survive parsing, pricing, persistence, and strict domain-model construction. Discovery UI coverage verifies the answered and total counts in one-at-a-time mode.
+
 ### 2026-09-13 — Adaptive Discovery clarification
 
 - **No empty Q&A choice**: Foundry may return zero questions when the selected evidence already resolves every material implementation decision. Those cases move directly to probable-solution generation instead of asking the customer to choose between one-at-a-time and batch modes for an empty list.

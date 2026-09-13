@@ -120,7 +120,7 @@ async def _create_service(
                     "cons": ["Requires evaluation"],
                     "ai_feasibility": "recommended",
                     "ai_feasibility_rationale": "The source documents are machine readable.",
-                    "evidence_references": ["call.txt: manual document review"],
+                    "Evidence_references": ["call.txt: manual document review"],
                     "pricing_queries": [
                         {
                             "service_name": "Azure AI Search",

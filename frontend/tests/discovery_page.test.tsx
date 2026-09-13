@@ -59,6 +59,16 @@ describe("DiscoveryPage", () => {
               recommendation: null,
               evidence_references: [],
             },
+            {
+              id: "retention",
+              text: "How long must claim evidence be retained?",
+              category: "compliance",
+              suggested_answers: ["Seven years", "Ten years"],
+              status: "answered",
+              answer: "Seven years",
+              recommendation: null,
+              evidence_references: ["policy.txt"],
+            },
           ],
           proposed_solutions: [],
           selected_solution_id: null,
@@ -105,7 +115,9 @@ describe("DiscoveryPage", () => {
     expect(screen.getByText("Evidence: call.txt")).toBeInTheDocument();
     expect(screen.queryByText("Manual review may breach the response target")).not.toBeInTheDocument();
     expect(screen.queryByText("The stated SLA conflicts with the manual queue")).not.toBeInTheDocument();
+    expect(screen.getByText("2 questions · 1 answered")).toBeInTheDocument();
     expect(screen.getByText("What is the peak monthly volume?")).toBeInTheDocument();
+    expect(screen.queryByText("How long must claim evidence be retained?")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Yes, recommend" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "No, leave unanswered" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Choose files" })).toBeInTheDocument();

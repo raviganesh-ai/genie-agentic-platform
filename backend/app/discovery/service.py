@@ -103,7 +103,10 @@ class _SolutionDraft(BaseModel):
     cons: list[str] = Field(min_length=1)
     ai_feasibility: AiFeasibility
     ai_feasibility_rationale: str = Field(min_length=1)
-    evidence_references: list[str] = Field(default_factory=list)
+    evidence_references: list[str] = Field(
+        default_factory=list,
+        validation_alias=AliasChoices("evidence_references", "Evidence_references"),
+    )
     pricing_queries: list[PricingQuery] = Field(default_factory=list)
 
 

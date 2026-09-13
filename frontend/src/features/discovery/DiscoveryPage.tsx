@@ -414,6 +414,10 @@ export function DiscoveryPage(): JSX.Element {
         ["pending", "recommendation_offered"].includes(question.status),
       ).slice(0, 1)
     : discoveryCase?.questions ?? [];
+  const totalQuestionCount = discoveryCase?.questions.length ?? 0;
+  const answeredQuestionCount = discoveryCase?.questions.filter((question) =>
+    ["answered", "recommended"].includes(question.status),
+  ).length ?? 0;
   const progress = discoveryCase?.proposed_solutions.length
     ? 5
     : discoveryCase?.questions.length
@@ -694,6 +698,9 @@ export function DiscoveryPage(): JSX.Element {
         <section className="discovery-section" aria-labelledby="discovery-questions">
           <div>
             <h2 id="discovery-questions" className="discovery-section-heading">4. Clarify what matters</h2>
+            <Text className="discovery-muted" style={{ display: "block" }}>
+              {totalQuestionCount} {totalQuestionCount === 1 ? "question" : "questions"} · {answeredQuestionCount} answered
+            </Text>
             <Text className="discovery-muted">Every answer is saved. Leave and return without losing the conversation.</Text>
           </div>
           {visibleQuestions.map((question) => (
