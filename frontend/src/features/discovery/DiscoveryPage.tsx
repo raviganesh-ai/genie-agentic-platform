@@ -8,6 +8,7 @@ import {
   MessageBar,
   Option,
   Spinner,
+  Switch,
   Text,
 } from "@fluentui/react-components";
 import {
@@ -197,6 +198,7 @@ export function DiscoveryPage(): JSX.Element {
   const [error, setError] = useState<SafeError | null>(null);
   const [uploadType, setUploadType] = useState<UploadType>("transcript");
   const [pendingUploads, setPendingUploads] = useState<PendingUpload[]>([]);
+  const [selectedPersonaIds, setSelectedPersonaIds] = useState<string[]>([]);
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { data: uploads, loading: loadingUploads, refresh } = useUploads(sessionId);
@@ -230,6 +232,7 @@ export function DiscoveryPage(): JSX.Element {
               sessionId,
               [],
               selectedModelDeploymentRef ?? undefined,
+              false,
             )
             .then((value) => {
               if (mounted) setDiscoveryCase(value);
@@ -254,6 +257,17 @@ export function DiscoveryPage(): JSX.Element {
       mounted = false;
     };
   }, [selectedModelDeploymentRef, sessionId]);
+
+  useEffect(() => {
+    if (!discoveryCase) return;
+    setSelectedPersonaIds(
+      discoveryCase.selected_persona_ids?.length
+        ? discoveryCase.selected_persona_ids
+        : discoveryCase.selected_persona_id
+          ? [discoveryCase.selected_persona_id]
+          : [],
+    );
+  }, [discoveryCase]);
 
   const perform = useCallback(
     async (label: string, operation: () => Promise<DiscoveryCase>) => {
@@ -307,10 +321,30 @@ export function DiscoveryPage(): JSX.Element {
         sessionId,
         readyUploads.map((item) => item.id),
         selectedModelDeploymentRef ?? undefined,
+        discoveryCase?.save_enabled ?? false,
       );
       return discoveryApi.analyze(sessionId);
     });
-  }, [perform, readyUploads, selectedModelDeploymentRef, sessionId]);
+  }, [discoveryCase?.save_enabled, perform, readyUploads, selectedModelDeploymentRef, sessionId]);
+
+  const updateSavePreference = useCallback(
+    async (enabled: boolean) => {
+      if (!sessionId) return;
+      await perform(
+        enabled ? "save Discovery" : "stop saving Discovery",
+        () => discoveryApi.setSavePreference(sessionId, enabled),
+      );
+    },
+    [perform, sessionId],
+  );
+
+  const runDiscovery = useCallback(async () => {
+    if (!sessionId || !selectedPersonaIds.length) return;
+    await perform(
+      "run Discovery",
+      () => discoveryApi.selectPersonas(sessionId, selectedPersonaIds),
+    );
+  }, [perform, selectedPersonaIds, sessionId]);
 
   const handleRemoveUpload = useCallback(
     async (uploadId: string) => {
@@ -365,9 +399,14 @@ export function DiscoveryPage(): JSX.Element {
     );
   }
 
-  const selectedPersona = discoveryCase?.personas.find(
-    (persona) => persona.id === discoveryCase.selected_persona_id,
-  );
+  const selectedPersonas = discoveryCase?.personas.filter((persona) =>
+    (discoveryCase.selected_persona_ids?.length
+      ? discoveryCase.selected_persona_ids
+      : discoveryCase.selected_persona_id
+        ? [discoveryCase.selected_persona_id]
+        : []).includes(persona.id),
+  ) ?? [];
+  const selectedPersonaNames = selectedPersonas.map((persona) => persona.name).join(", ");
   const visibleQuestions = discoveryCase?.qa_mode === "interactive"
     ? discoveryCase.questions.filter((question) =>
         ["pending", "recommendation_offered"].includes(question.status),
@@ -377,7 +416,7 @@ export function DiscoveryPage(): JSX.Element {
     ? 5
     : discoveryCase?.questions.length
       ? 4
-      : discoveryCase?.selected_persona_id
+      : selectedPersonas.length
         ? 3
         : discoveryCase?.personas.length
           ? 2
@@ -394,18 +433,30 @@ export function DiscoveryPage(): JSX.Element {
       </div>
       <div className="discovery-toolbar">
         <Text className="discovery-muted">
-          {discoveryCase ? `Revision ${discoveryCase.analysis_revision} · Saved ${new Date(discoveryCase.updated_at).toLocaleString()}` : "Not analyzed yet"}
+          {discoveryCase?.save_enabled
+            ? `Revision ${discoveryCase.analysis_revision} · Saved ${new Date(discoveryCase.updated_at).toLocaleString()}`
+            : "Not saved · kept only for this active session"}
         </Text>
-        {discoveryCase ? (
-          <Button
-            appearance="subtle"
-            icon={<Delete24Regular />}
-            disabled={Boolean(busy) || discoveryCase.status === "build_started"}
-            onClick={() => void deleteDiscovery()}
-          >
-            Delete Discovery
-          </Button>
-        ) : null}
+        <div className="discovery-toolbar-actions">
+          {discoveryCase ? (
+            <Switch
+              label="Save discovery"
+              checked={discoveryCase.save_enabled}
+              disabled={Boolean(busy) || discoveryCase.status === "build_started"}
+              onChange={(_, data) => void updateSavePreference(Boolean(data.checked))}
+            />
+          ) : null}
+          {discoveryCase ? (
+            <Button
+              appearance="subtle"
+              icon={<Delete24Regular />}
+              disabled={Boolean(busy) || discoveryCase.status === "build_started"}
+              onClick={() => void deleteDiscovery()}
+            >
+              {discoveryCase.save_enabled ? "Delete Discovery" : "Discard Discovery"}
+            </Button>
+          ) : null}
+        </div>
       </div>
 
       {error ? <ErrorState error={error} /> : null}
@@ -526,32 +577,49 @@ export function DiscoveryPage(): JSX.Element {
         <section className="discovery-section" aria-labelledby="discovery-personas">
           <div className="discovery-section-header">
             <div>
-              <h2 id="discovery-personas" className="discovery-section-heading">2. People named in the files</h2>
-              <Text className="discovery-muted">Select a person to investigate only the situation and pain points they stated.</Text>
+              <h2 id="discovery-personas" className="discovery-section-heading">2. Select the persona of your choice</h2>
+              <Text className="discovery-muted">Choose one or more people whose perspective should shape Discovery.</Text>
             </div>
           </div>
-          <div className="discovery-persona-grid">
-            {discoveryCase.personas.map((persona) => (
-              <article key={persona.id} className={`discovery-card${persona.id === discoveryCase.selected_persona_id ? " selected" : ""}`}>
-                <h3>{persona.name}</h3>
-                <Button
-                  appearance={persona.id === discoveryCase.selected_persona_id ? "primary" : "secondary"}
-                  disabled={Boolean(busy)}
-                  onClick={() => void perform(`analyze ${persona.name}'s situation`, () => discoveryApi.selectPersona(sessionId, persona.id))}
-                >
-                  {persona.id === discoveryCase.selected_persona_id ? "Selected" : `Investigate ${persona.name}`}
-                </Button>
-              </article>
-            ))}
+          <div className="discovery-persona-picker">
+            <Dropdown
+              aria-label="Select personas"
+              placeholder="Select people"
+              multiselect
+              selectedOptions={selectedPersonaIds}
+              value={selectedPersonaIds.length
+                ? discoveryCase.personas
+                    .filter((persona) => selectedPersonaIds.includes(persona.id))
+                    .map((persona) => persona.name)
+                    .join(", ")
+                : ""}
+              disabled={Boolean(busy) || discoveryCase.status !== "awaiting_persona_selection"}
+              onOptionSelect={(_, data) => setSelectedPersonaIds(data.selectedOptions)}
+            >
+              {discoveryCase.personas.map((persona) => (
+                <Option key={persona.id} value={persona.id}>{persona.name}</Option>
+              ))}
+            </Dropdown>
+            <Button
+              appearance="primary"
+              disabled={
+                Boolean(busy)
+                || !selectedPersonaIds.length
+                || discoveryCase.status !== "awaiting_persona_selection"
+              }
+              onClick={() => void runDiscovery()}
+            >
+              Run Discovery
+            </Button>
           </div>
         </section>
       ) : null}
 
-      {discoveryCase && selectedPersona && discoveryCase.gap_analysis ? (
+      {discoveryCase && selectedPersonas.length > 0 && discoveryCase.gap_analysis ? (
         <section className="discovery-section" aria-labelledby="discovery-gaps">
           <div>
             <h2 id="discovery-gaps" className="discovery-section-heading">3. Pain points and gaps</h2>
-            <Text className="discovery-muted">Based only on evidence attributable to {selectedPersona.name}.</Text>
+            <Text className="discovery-muted">Based only on evidence attributable to {selectedPersonaNames}.</Text>
           </div>
           <ul>{discoveryCase.deep_dive_findings.map((finding) => <li key={finding}>{finding}</li>)}</ul>
           <div className="discovery-gap-grid">

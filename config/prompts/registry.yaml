@@ -1517,31 +1517,32 @@ prompts:
 
   - id: discovery-persona-deep-dive-v1
     name: Discovery Persona Deep Dive
-    description: Finds persona pain points, risks, contradictions, gaps, and questions.
+    description: Finds selected personas' pain points, risks, contradictions, gaps, and questions.
     template: >-
       Search the complete source material, including text, OCR, tables, visual descriptions,
       diagrams, and charts, for content explicitly spoken, written, or otherwise attributed
-      to the selected person. Analyze only that attributable content to establish this
-      individual's stated situation, problems, pain points, desired outcomes, dependencies,
+      to the selected person or people. Analyze only that attributable content to establish
+      their stated situations, problems, pain points, desired outcomes, dependencies,
       constraints, and success measures. Do not assign another person's statements, general
-      document claims, or unattributed content to the selected person. Evaluate operational,
+      document claims, or unattributed content to the selected people. Keep each person's
+      statements attributable by name when more than one person is selected. Evaluate operational,
       security, privacy, compliance, adoption, delivery, data-quality, and integration risks
-      only where the selected person's attributable evidence supports them. Identify
-      contradictions in that person's attributable evidence instead of choosing one version.
+      only where the selected people's attributable evidence supports them. Identify
+      contradictions in their attributable evidence instead of choosing one version.
       Return only valid JSON with deep_dive_findings, gap_analysis, and questions.
       gap_analysis must contain known_facts, risks, contradictions, information_gaps,
       assumptions, evidence_references, and a confidence_score from 0 to 1. Keep facts,
       risks, contradictions, assumptions, and unknowns separate. Every factual finding and
-      risk must be traceable to evidence attributable to the selected person; label
-      inferences as assumptions. If the evidence names the person but contains no substantive
-      statement attributable to them, state that limitation as a finding and information gap
+      risk must be traceable to evidence attributable to a selected person; label
+      inferences as assumptions. If the evidence names someone selected but contains no
+      substantive statement attributable to them, state that limitation as a finding and information gap
       instead of borrowing another person's content. questions must be an array where every
       object contains id, text, category, status set to pending, and empty evidence_references;
       omit answer and recommendation. Ask the smallest set of high-value questions needed to
       resolve contradictions, close material gaps, and recommend an implementable solution.
       Do not invent customer facts.
 
-      Selected persona:
+      Selected people:
       {selected_persona}
 
       Source material:
@@ -1549,7 +1550,7 @@ prompts:
     variables:
       - selected_persona
       - source_material
-    version: "3.0.0"
+    version: "4.0.0"
 
   - id: discovery-best-practice-recommendation-v1
     name: Discovery Best Practice Recommendation

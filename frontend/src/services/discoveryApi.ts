@@ -15,22 +15,33 @@ export const discoveryApi = {
     sessionId: string,
     sourceUploadIds: string[],
     modelDeploymentRef?: string,
+    saveEnabled = false,
   ): Promise<DiscoveryCase> {
     return apiFetch<DiscoveryCase>(path(sessionId), {
       method: "POST",
       body: {
         source_upload_ids: sourceUploadIds,
         model_deployment_ref: modelDeploymentRef,
+        save_enabled: saveEnabled,
       },
+    });
+  },
+  setSavePreference(sessionId: string, enabled: boolean): Promise<DiscoveryCase> {
+    return apiFetch<DiscoveryCase>(path(sessionId, "/save-preference"), {
+      method: "PUT",
+      body: { enabled },
     });
   },
   analyze(sessionId: string): Promise<DiscoveryCase> {
     return apiFetch<DiscoveryCase>(path(sessionId, "/analyze"), { method: "POST" });
   },
   selectPersona(sessionId: string, personaId: string): Promise<DiscoveryCase> {
+    return this.selectPersonas(sessionId, [personaId]);
+  },
+  selectPersonas(sessionId: string, personaIds: string[]): Promise<DiscoveryCase> {
     return apiFetch<DiscoveryCase>(path(sessionId, "/persona"), {
       method: "POST",
-      body: { persona_id: personaId },
+      body: { persona_ids: personaIds },
     });
   },
   setQaMode(sessionId: string, mode: DiscoveryQaMode): Promise<DiscoveryCase> {

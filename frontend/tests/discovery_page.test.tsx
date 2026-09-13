@@ -13,6 +13,7 @@ describe("DiscoveryPage", () => {
           id: "discovery-1",
           session_id: "session-1",
           owner_user_id: "user-1",
+          save_enabled: true,
           model_deployment_ref: "gpt-5-mini",
           status: "questioning",
           source_upload_ids: ["upload-1"],
@@ -30,6 +31,7 @@ describe("DiscoveryPage", () => {
             },
           ],
           selected_persona_id: "jordan-lee",
+          selected_persona_ids: ["jordan-lee"],
           deep_dive_findings: ["Evidence review is the bottleneck"],
           gap_analysis: {
             known_facts: ["Claims arrive digitally"],
@@ -88,8 +90,9 @@ describe("DiscoveryPage", () => {
     await waitFor(() => expect(screen.getByText("Jordan Lee")).toBeInTheDocument());
     expect(screen.queryByText("Claims reviewer")).not.toBeInTheDocument();
     expect(screen.queryByText("Manual evidence checks")).not.toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "2. People named in the files" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Selected" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "2. Select the persona of your choice" })).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Select personas" })).toHaveValue("Jordan Lee");
+    expect(screen.getByRole("switch", { name: "Save discovery" })).toBeChecked();
     expect(screen.getByText("Based only on evidence attributable to Jordan Lee.")).toBeInTheDocument();
     expect(screen.getByText("Manual review may breach the response target")).toBeInTheDocument();
     expect(screen.getByText("The stated SLA conflicts with the manual queue")).toBeInTheDocument();
@@ -149,6 +152,7 @@ describe("DiscoveryPage", () => {
       id: "discovery-1",
       session_id: "session-1",
       owner_user_id: "user-1",
+      save_enabled: false,
       model_deployment_ref: "gpt-5-mini",
       status: "created",
       source_upload_ids: [],
@@ -156,6 +160,7 @@ describe("DiscoveryPage", () => {
       analysis_revision: 0,
       personas: [],
       selected_persona_id: null,
+      selected_persona_ids: [],
       deep_dive_findings: [],
       gap_analysis: null,
       qa_mode: null,
@@ -232,6 +237,7 @@ describe("DiscoveryPage", () => {
       );
       expect(JSON.parse(String(createCall?.[1]?.body))).toMatchObject({
         source_upload_ids: ["upload-completed"],
+        save_enabled: false,
       });
     });
 
@@ -248,5 +254,97 @@ describe("DiscoveryPage", () => {
         && (init?.method ?? "GET") === "GET",
       ),
     ).toHaveLength(2);
+  });
+
+  it("selects multiple personas and runs one Discovery analysis", async () => {
+    const caseState = {
+      id: "discovery-1",
+      session_id: "session-1",
+      owner_user_id: "user-1",
+      save_enabled: false,
+      model_deployment_ref: "gpt-5-mini",
+      status: "awaiting_persona_selection",
+      source_upload_ids: ["upload-1"],
+      analyzed_upload_ids: ["upload-1"],
+      analysis_revision: 1,
+      personas: [
+        { id: "john-greeson", name: "John Greeson", pain_points: [], evidence_references: [] },
+        { id: "charles-sayre", name: "Charles Sayre", pain_points: [], evidence_references: [] },
+      ],
+      selected_persona_id: null,
+      selected_persona_ids: [],
+      deep_dive_findings: [],
+      gap_analysis: null,
+      qa_mode: null,
+      questions: [],
+      proposed_solutions: [],
+      selected_solution_id: null,
+      build_workflow_run_id: null,
+      last_error: null,
+      version: 2,
+      created_at: "2026-09-12T10:00:00Z",
+      updated_at: "2026-09-12T10:01:00Z",
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const pathname = new URL(input.toString()).pathname;
+      const method = init?.method ?? "GET";
+      if (pathname.endsWith("/workflow-events/stream")) {
+        return new Response(new ReadableStream({ start: (controller) => controller.close() }));
+      }
+      if (pathname.endsWith("/sessions/session-1/uploads")) return Response.json([]);
+      if (pathname.endsWith("/sessions/session-1/discovery/save-preference") && method === "PUT") {
+        return Response.json({ ...caseState, save_enabled: true, version: 3 });
+      }
+      if (pathname.endsWith("/sessions/session-1/discovery/persona") && method === "POST") {
+        return Response.json({
+          ...caseState,
+          status: "awaiting_qa_mode",
+          selected_persona_id: "john-greeson",
+          selected_persona_ids: ["john-greeson", "charles-sayre"],
+          deep_dive_findings: ["Named evidence analyzed"],
+          gap_analysis: {
+            known_facts: [], risks: [], contradictions: [], information_gaps: ["More detail"],
+            assumptions: [], evidence_references: [], confidence_score: 0.7,
+          },
+          questions: [{
+            id: "detail", text: "What detail is missing?", category: "context",
+            status: "pending", answer: null, recommendation: null, evidence_references: [],
+          }],
+        });
+      }
+      if (pathname.endsWith("/sessions/session-1/discovery")) return Response.json(caseState);
+      throw new Error(`Unexpected request: ${method} ${pathname}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+
+    renderWithProviders(<DiscoveryPage />, { sessionId: "session-1" });
+
+    const picker = await screen.findByRole("combobox", { name: "Select personas" });
+    picker.focus();
+    await user.keyboard("{ArrowDown}{Enter}{ArrowDown}{Enter}{Escape}");
+    await user.click(screen.getByRole("button", { name: "Run Discovery" }));
+
+    await waitFor(() => {
+      const call = fetchMock.mock.calls.find(([input, init]) =>
+        new URL(input.toString()).pathname.endsWith("/sessions/session-1/discovery/persona")
+        && init?.method === "POST",
+      );
+      expect(JSON.parse(String(call?.[1]?.body))).toEqual({
+        persona_ids: ["john-greeson", "charles-sayre"],
+      });
+    });
+    expect(await screen.findByText(
+      "Based only on evidence attributable to John Greeson, Charles Sayre.",
+    )).toBeInTheDocument();
+
+    await user.click(screen.getByRole("switch", { name: "Save discovery" }));
+    await waitFor(() => {
+      const saveCall = fetchMock.mock.calls.find(([input, init]) =>
+        new URL(input.toString()).pathname.endsWith("/save-preference")
+        && init?.method === "PUT",
+      );
+      expect(JSON.parse(String(saveCall?.[1]?.body))).toEqual({ enabled: true });
+    });
   });
 });

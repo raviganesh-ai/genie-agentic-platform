@@ -18,11 +18,19 @@ class CreateDiscoveryCaseRequest(BaseModel):
 
     source_upload_ids: list[str] = Field(default_factory=list)
     model_deployment_ref: str | None = None
+    save_enabled: bool = False
+
+
+class SaveDiscoveryRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool
 
 
 class SelectPersonaRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    persona_id: str = Field(min_length=1)
+    persona_id: str | None = Field(default=None, min_length=1)
+    persona_ids: list[str] = Field(default_factory=list)
 
 
 class SetQaModeRequest(BaseModel):
@@ -65,6 +73,21 @@ async def create_or_resume_discovery_case(
         requesting_user_id=user.user_id,
         source_upload_ids=body.source_upload_ids,
         model_deployment_ref=body.model_deployment_ref,
+        save_enabled=body.save_enabled,
+    )
+
+
+@router.put("/sessions/{session_id}/discovery/save-preference")
+async def set_discovery_save_preference(
+    session_id: str,
+    body: SaveDiscoveryRequest,
+    user: AuthenticatedUser = Depends(get_current_user),
+    discovery_service: DiscoveryService = Depends(get_discovery_service),
+) -> DiscoveryCase:
+    return await discovery_service.set_save_preference(
+        session_id=session_id,
+        requesting_user_id=user.user_id,
+        enabled=body.enabled,
     )
 
 
@@ -98,10 +121,11 @@ async def select_discovery_persona(
     user: AuthenticatedUser = Depends(get_current_user),
     discovery_service: DiscoveryService = Depends(get_discovery_service),
 ) -> DiscoveryCase:
-    return await discovery_service.select_persona(
+    selected_ids = body.persona_ids or ([body.persona_id] if body.persona_id else [])
+    return await discovery_service.select_personas(
         session_id=session_id,
         requesting_user_id=user.user_id,
-        persona_id=body.persona_id,
+        persona_ids=selected_ids,
     )
 
 

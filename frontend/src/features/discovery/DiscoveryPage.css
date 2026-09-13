@@ -150,8 +150,8 @@
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .discovery-upload-row > button {
     grid-column: 1;
+}
     justify-self: stretch;
   }
 }
@@ -317,5 +317,25 @@
   .discovery-question-answer,
   .discovery-recommendation {
     grid-column: 1;
+  }
+}
+
+.discovery-toolbar-actions,
+.discovery-persona-picker {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.discovery-persona-picker > [role="combobox"] {
+  flex: 1 1 320px;
+  width: min(100%, 520px);
+}
+
+@media (max-width: 600px) {
+  .discovery-persona-picker > *,
+  .discovery-toolbar-actions {
+    width: 100%;
   }
 }

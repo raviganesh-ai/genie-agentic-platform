@@ -156,6 +156,7 @@ class DiscoveryCase(BaseModel):
     id: str = Field(min_length=1)
     session_id: str = Field(min_length=1)
     owner_user_id: str = Field(min_length=1)
+    save_enabled: bool = True
     model_deployment_ref: str | None = None
     status: DiscoveryStatus = "created"
     source_upload_ids: list[str] = Field(default_factory=list)
@@ -163,6 +164,7 @@ class DiscoveryCase(BaseModel):
     analysis_revision: int = Field(default=0, ge=0)
     personas: list[PersonaProfile] = Field(default_factory=list)
     selected_persona_id: str | None = None
+    selected_persona_ids: list[str] = Field(default_factory=list)
     deep_dive_findings: list[str] = Field(default_factory=list)
     gap_analysis: GapAnalysis | None = None
     qa_mode: DiscoveryQaMode | None = None

@@ -106,6 +106,7 @@ export interface DiscoveryCase {
   id: string;
   session_id: string;
   owner_user_id: string;
+  save_enabled: boolean;
   model_deployment_ref: string | null;
   status: DiscoveryStatus;
   source_upload_ids: string[];
@@ -113,6 +114,7 @@ export interface DiscoveryCase {
   analysis_revision: number;
   personas: PersonaProfile[];
   selected_persona_id: string | null;
+  selected_persona_ids: string[];
   deep_dive_findings: string[];
   gap_analysis: GapAnalysis | null;
   qa_mode: DiscoveryQaMode | null;

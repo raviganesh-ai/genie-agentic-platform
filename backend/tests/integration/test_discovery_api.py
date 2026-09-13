@@ -15,7 +15,7 @@ def test_discovery_case_is_resumable_listed_and_deletable(app_local_settings) ->
 
         create_response = client.post(
             f"/sessions/{session_id}/discovery",
-            json={"source_upload_ids": []},
+            json={"source_upload_ids": [], "save_enabled": True},
         )
         assert create_response.status_code == 201
         created = create_response.json()
@@ -41,6 +41,39 @@ def test_discovery_case_is_resumable_listed_and_deletable(app_local_settings) ->
         delete_response = client.delete(f"/sessions/{session_id}/discovery")
         assert delete_response.status_code == 204
         assert client.get(f"/sessions/{session_id}/discovery").status_code == 404
+
+
+def test_unsaved_discovery_is_transient_until_save_is_enabled(app_local_settings) -> None:
+    app = create_app(settings=app_local_settings)
+
+    with TestClient(app) as client:
+        session_id = client.post(
+            "/sessions", json={"title": "Transient discovery"}
+        ).json()["id"]
+
+        created = client.post(
+            f"/sessions/{session_id}/discovery",
+            json={"source_upload_ids": []},
+        ).json()
+
+        assert created["save_enabled"] is False
+        assert client.get("/discovery").json() == []
+        assert client.get(f"/sessions/{session_id}/discovery").json() == created
+
+        saved = client.put(
+            f"/sessions/{session_id}/discovery/save-preference",
+            json={"enabled": True},
+        ).json()
+        assert saved["save_enabled"] is True
+        assert client.get("/discovery").json() == [saved]
+
+        unsaved = client.put(
+            f"/sessions/{session_id}/discovery/save-preference",
+            json={"enabled": False},
+        ).json()
+        assert unsaved["save_enabled"] is False
+        assert client.get("/discovery").json() == []
+        assert client.get(f"/sessions/{session_id}/discovery").json() == unsaved
 
 
 def test_discovery_case_rejects_unknown_source_upload(app_local_settings) -> None:

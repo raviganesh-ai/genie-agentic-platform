@@ -103,6 +103,7 @@ class DiscoveryService:
         *,
         session_service: SessionService,
         repository: DiscoveryCaseRepository,
+        transient_repository: DiscoveryCaseRepository | None = None,
         orchestrator: AgentOrchestrator | None = None,
         pricing_service: PricingService | None = None,
         governance_service: GovernanceService | None = None,
@@ -111,6 +112,7 @@ class DiscoveryService:
     ) -> None:
         self._session_service = session_service
         self._repository = repository
+        self._transient_repository = transient_repository or InMemoryDiscoveryCaseRepository()
         self._orchestrator = orchestrator
         self._pricing_service = pricing_service
         self._governance_service = governance_service
@@ -124,6 +126,7 @@ class DiscoveryService:
         requesting_user_id: str,
         source_upload_ids: list[str],
         model_deployment_ref: str | None = None,
+        save_enabled: bool = True,
     ) -> DiscoveryCase:
         await self._session_service.get_session(
             session_id=session_id,
@@ -139,7 +142,7 @@ class DiscoveryService:
                 requesting_user_id=requesting_user_id,
             )
 
-        existing = await self._repository.get_for_session(session_id=session_id)
+        existing = await self._get_stored_case(session_id=session_id)
         if existing is not None:
             self._assert_owner(existing, requesting_user_id)
             merged_upload_ids = list(
@@ -162,12 +165,13 @@ class DiscoveryService:
             id=str(uuid4()),
             session_id=session_id,
             owner_user_id=requesting_user_id,
+            save_enabled=save_enabled,
             model_deployment_ref=model_deployment_ref,
             source_upload_ids=unique_upload_ids,
             created_at=now,
             updated_at=now,
         )
-        await self._repository.put(discovery_case)
+        await self._case_repository(discovery_case).put(discovery_case)
         await self._record_state(discovery_case, "created")
         return discovery_case
 
@@ -176,7 +180,7 @@ class DiscoveryService:
             session_id=session_id,
             requesting_user_id=requesting_user_id,
         )
-        discovery_case = await self._repository.get_for_session(session_id=session_id)
+        discovery_case = await self._get_stored_case(session_id=session_id)
         if discovery_case is None:
             raise DiscoveryCaseNotFoundError(
                 f"No Discovery case exists for session '{session_id}'."
@@ -187,10 +191,53 @@ class DiscoveryService:
     async def list_cases(self, *, owner_user_id: str) -> list[DiscoveryCase]:
         return await self._repository.list_for_owner(owner_user_id=owner_user_id)
 
+    async def set_save_preference(
+        self,
+        *,
+        session_id: str,
+        requesting_user_id: str,
+        enabled: bool,
+    ) -> DiscoveryCase:
+        discovery_case = await self.get_case(
+            session_id=session_id,
+            requesting_user_id=requesting_user_id,
+        )
+        if discovery_case.save_enabled == enabled:
+            return discovery_case
+        if discovery_case.status == "build_started":
+            raise DiscoveryStateConflictError(
+                "Discovery save preference cannot change after its prototype build has started."
+            )
+
+        updated = discovery_case.model_copy(
+            update={
+                "save_enabled": enabled,
+                "version": discovery_case.version + 1,
+                "updated_at": datetime.now(UTC),
+            }
+        )
+        if enabled:
+            await self._repository.put(updated)
+            await self._transient_repository.delete(discovery_case_id=updated.id)
+            if updated.analysis_revision > 0:
+                await self._write_memory(
+                    updated,
+                    agent_id="requirements-analyst",
+                    artifact=f"saved-snapshot-v{updated.version}",
+                    classification="requirement",
+                    content={"discovery_case": updated.model_dump(mode="json")},
+                )
+        else:
+            await self._transient_repository.put(updated)
+            await self._delete_discovery_memory(discovery_case)
+            await self._repository.delete(discovery_case_id=updated.id)
+        await self._record_state(updated, "save-enabled" if enabled else "save-disabled")
+        return updated
+
     async def remove_source_upload(
         self, *, session_id: str, upload_id: str, requesting_user_id: str
     ) -> None:
-        discovery_case = await self._repository.get_for_session(session_id=session_id)
+        discovery_case = await self._get_stored_case(session_id=session_id)
         if discovery_case is None:
             return
         self._assert_owner(discovery_case, requesting_user_id)
@@ -213,6 +260,7 @@ class DiscoveryService:
                 status="created",
                 personas=[],
                 selected_persona_id=None,
+                selected_persona_ids=[],
                 deep_dive_findings=[],
                 gap_analysis=None,
                 qa_mode=None,
@@ -284,6 +332,7 @@ class DiscoveryService:
             analysis_revision=revision,
             personas=personas,
             selected_persona_id=None,
+            selected_persona_ids=[],
             deep_dive_findings=[],
             gap_analysis=None,
             qa_mode=None,
@@ -347,13 +396,33 @@ class DiscoveryService:
         requesting_user_id: str,
         persona_id: str,
     ) -> DiscoveryCase:
+        return await self.select_personas(
+            session_id=session_id,
+            requesting_user_id=requesting_user_id,
+            persona_ids=[persona_id],
+        )
+
+    async def select_personas(
+        self,
+        *,
+        session_id: str,
+        requesting_user_id: str,
+        persona_ids: list[str],
+    ) -> DiscoveryCase:
         discovery_case = await self.get_case(
             session_id=session_id, requesting_user_id=requesting_user_id
         )
         self._require_status(discovery_case, "awaiting_persona_selection")
-        persona = next((item for item in discovery_case.personas if item.id == persona_id), None)
-        if persona is None:
-            raise DiscoveryStateConflictError(f"Unknown Discovery persona '{persona_id}'.")
+        unique_ids = list(dict.fromkeys(persona_ids))
+        if not unique_ids:
+            raise DiscoveryStateConflictError("Select at least one person before running Discovery.")
+        personas_by_id = {item.id: item for item in discovery_case.personas}
+        unknown_ids = [persona_id for persona_id in unique_ids if persona_id not in personas_by_id]
+        if unknown_ids:
+            raise DiscoveryStateConflictError(
+                "Unknown Discovery persona(s): " + ", ".join(unknown_ids) + "."
+            )
+        selected_personas = [personas_by_id[persona_id] for persona_id in unique_ids]
         discovery_case = await self._save(
             discovery_case, status="analyzing_persona", last_error=None
         )
@@ -365,7 +434,9 @@ class DiscoveryService:
                     "source_material": await self._source_material(
                         discovery_case, requesting_user_id
                     ),
-                    "selected_persona": persona.model_dump_json(),
+                    "selected_persona": json.dumps(
+                        [persona.model_dump(mode="json") for persona in selected_personas]
+                    ),
                 },
                 discovery_case=discovery_case,
             )
@@ -380,7 +451,8 @@ class DiscoveryService:
         updated = await self._save(
             discovery_case,
             status="awaiting_qa_mode",
-            selected_persona_id=persona_id,
+            selected_persona_id=unique_ids[0],
+            selected_persona_ids=unique_ids,
             deep_dive_findings=parsed.deep_dive_findings,
             gap_analysis=parsed.gap_analysis,
             qa_mode=None,
@@ -394,7 +466,7 @@ class DiscoveryService:
             artifact="persona-deep-dive",
             classification="requirement",
             content={
-                "persona": persona.model_dump(mode="json"),
+                "personas": [persona.model_dump(mode="json") for persona in selected_personas],
                 "findings": parsed.deep_dive_findings,
                 "gap_analysis": parsed.gap_analysis.model_dump(mode="json"),
                 "questions": [item.model_dump(mode="json") for item in parsed.questions],
@@ -633,19 +705,25 @@ class DiscoveryService:
             raise DiscoveryStateConflictError(
                 "Discovery cannot be deleted after its prototype build has started."
             )
-        if (
-            self._memory_service is not None
-            and self._orchestrator is not None
-            and "genie-orchestrator" in self._orchestrator.agent_registry
-        ):
-            await self._memory_service.shared.delete_prefix(
-                agent=self._orchestrator.agent_registry.get("genie-orchestrator"),
-                session_id=session_id,
-                trace_id=f"discovery:{discovery_case.id}:delete",
-                key_prefix=f"discovery:{discovery_case.id}:",
-            )
-        await self._repository.delete(discovery_case_id=discovery_case.id)
+        await self._delete_discovery_memory(discovery_case)
+        await self._case_repository(discovery_case).delete(
+            discovery_case_id=discovery_case.id
+        )
         await self._record_state(discovery_case, "deleted")
+
+    async def _delete_discovery_memory(self, discovery_case: DiscoveryCase) -> None:
+        if (
+            self._memory_service is None
+            or self._orchestrator is None
+            or "genie-orchestrator" not in self._orchestrator.agent_registry
+        ):
+            return
+        await self._memory_service.shared.delete_prefix(
+            agent=self._orchestrator.agent_registry.get("genie-orchestrator"),
+            session_id=discovery_case.session_id,
+            trace_id=f"discovery:{discovery_case.id}:delete",
+            key_prefix=f"discovery:{discovery_case.id}:",
+        )
 
     async def _source_material(
         self, discovery_case: DiscoveryCase, requesting_user_id: str
@@ -692,9 +770,18 @@ class DiscoveryService:
             updated_at=datetime.now(UTC),
         )
         updated = discovery_case.model_copy(update=updates)
-        await self._repository.put(updated)
+        await self._case_repository(updated).put(updated)
         await self._record_state(updated, updated.status)
         return updated
+
+    async def _get_stored_case(self, *, session_id: str) -> DiscoveryCase | None:
+        durable = await self._repository.get_for_session(session_id=session_id)
+        if durable is not None:
+            return durable
+        return await self._transient_repository.get_for_session(session_id=session_id)
+
+    def _case_repository(self, discovery_case: DiscoveryCase) -> DiscoveryCaseRepository:
+        return self._repository if discovery_case.save_enabled else self._transient_repository
 
     async def _record_state(self, discovery_case: DiscoveryCase, state: str) -> None:
         if self._governance_service is None:
@@ -715,7 +802,11 @@ class DiscoveryService:
         classification: str,
         content: dict[str, Any],
     ) -> None:
-        if self._memory_service is None or self._orchestrator is None:
+        if (
+            not discovery_case.save_enabled
+            or self._memory_service is None
+            or self._orchestrator is None
+        ):
             return
         agent = self._orchestrator.agent_registry.get(agent_id)
         await self._memory_service.shared.write(
@@ -759,6 +850,7 @@ class DiscoveryService:
         return json.dumps(
             {
                 "selected_persona_id": discovery_case.selected_persona_id,
+                "selected_persona_ids": discovery_case.selected_persona_ids,
                 "personas": [item.model_dump(mode="json") for item in discovery_case.personas],
                 "deep_dive_findings": discovery_case.deep_dive_findings,
                 "gap_analysis": (
@@ -787,6 +879,7 @@ def create_discovery_service(
     *,
     session_service: SessionService,
     repository: DiscoveryCaseRepository | None = None,
+    transient_repository: DiscoveryCaseRepository | None = None,
     orchestrator: AgentOrchestrator | None = None,
     pricing_service: PricingService | None = None,
     governance_service: GovernanceService | None = None,
@@ -796,6 +889,7 @@ def create_discovery_service(
     return DiscoveryService(
         session_service=session_service,
         repository=repository or InMemoryDiscoveryCaseRepository(),
+        transient_repository=transient_repository,
         orchestrator=orchestrator,
         pricing_service=pricing_service,
         governance_service=governance_service,

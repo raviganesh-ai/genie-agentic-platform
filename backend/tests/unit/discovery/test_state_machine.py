@@ -214,6 +214,32 @@ async def test_find_people_accepts_prior_personas_shape_but_discards_analysis() 
     assert case.personas[0].pain_points == []
 
 
+async def test_discovery_can_analyze_multiple_selected_people() -> None:
+    service, orchestrator, session_id = await _create_service(
+        transcript_text=(
+            "Jordan Lee manually inspects every document. "
+            "Morgan Chen reports that claim handoffs are frequently delayed."
+        )
+    )
+    orchestrator.outputs[0] = json.dumps(
+        {"people": [{"name": "Jordan Lee"}, {"name": "Morgan Chen"}]}
+    )
+
+    await service.analyze_personas(
+        session_id=session_id,
+        requesting_user_id="user-1",
+    )
+    case = await service.select_personas(
+        session_id=session_id,
+        requesting_user_id="user-1",
+        persona_ids=["jordan-lee", "morgan-chen"],
+    )
+
+    assert case.selected_persona_id == "jordan-lee"
+    assert case.selected_persona_ids == ["jordan-lee", "morgan-chen"]
+    assert case.status == "awaiting_qa_mode"
+
+
 async def test_skip_requires_consent_before_recommendation_and_state_is_durable() -> None:
     service, orchestrator, session_id = await _create_service()
 
