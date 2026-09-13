@@ -97,8 +97,8 @@ class _SolutionDraft(BaseModel):
     id: str = Field(min_length=1)
     name: str = Field(min_length=1)
     summary: str = Field(min_length=1, max_length=800)
-    requirements_text: str = Field(min_length=1, max_length=4000)
-    architecture_text: str = Field(min_length=1, max_length=4000)
+    requirements_text: str = Field(min_length=1, max_length=12000)
+    architecture_text: str = Field(min_length=1, max_length=12000)
     architecture_nodes: list[ArchitectureNode] = Field(min_length=1, max_length=10)
     architecture_edges: list[ArchitectureEdge] = Field(default_factory=list, max_length=12)
     pros: list[str] = Field(min_length=1, max_length=5)
@@ -699,7 +699,7 @@ class DiscoveryService:
                     "A prior response was malformed, truncated, or schema-invalid. Correct "
                     f"these exact validation issues: {exc} Regenerate the complete response "
                     "as fresh JSON, keep requirements_text and architecture_text between "
-                    "1,200 and 2,500 characters each, honor every field and size limit, and "
+                    "1,200 and 2,500 characters each, never exceed 12,000 characters, and "
                     "close all arrays, objects, and strings."
                 )
         raise RuntimeError("Discovery solution retry loop exited unexpectedly.")

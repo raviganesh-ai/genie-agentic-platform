@@ -112,8 +112,8 @@ async def _create_service(
                     "id": "document-intelligence",
                     "name": "Document intelligence workflow",
                     "summary": "Extract and review claim evidence.",
-                    "requirements_text": "REQ-001: Review uploaded claims.",
-                    "architecture_text": "Azure AI Foundry coordinates Azure AI Search.",
+                    "requirements_text": "[REQ-001] " + ("Review uploaded claims. " * 200),
+                    "architecture_text": "## Single-Page UI Design\n" + ("Evidence zone. " * 320),
                     "architecture_nodes": [
                         {
                             "id": "foundry",
@@ -394,6 +394,8 @@ async def test_skip_requires_consent_before_recommendation_and_state_is_durable(
     assert reloaded == case
     assert reloaded.proposed_solutions[0].cost_estimate.monthly_amount == 42.5
     assert reloaded.proposed_solutions[0].cost_estimate.coverage == "complete"
+    assert len(reloaded.proposed_solutions[0].requirements_text) > 4000
+    assert len(reloaded.proposed_solutions[0].architecture_text) > 4000
     assert reloaded.gap_analysis is not None
     assert reloaded.gap_analysis.risks == ["Manual review can miss time-sensitive claims"]
     assert reloaded.gap_analysis.contradictions == [
