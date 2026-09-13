@@ -69,6 +69,7 @@ class _GapAnalysisDraft(GapAnalysis):
 
 class _DiscoveryQuestionDraft(DiscoveryQuestion):
     model_config = ConfigDict(extra="ignore")
+    suggested_answers: list[str] = Field(min_length=2, max_length=4)
 
 
 class _DiscoveryInsightSectionDraft(DiscoveryInsightSection):
@@ -80,7 +81,7 @@ class _DeepDiveEnvelope(BaseModel):
     deep_dive_findings: list[str] = Field(min_length=1)
     insight_sections: list[_DiscoveryInsightSectionDraft] = Field(min_length=1, max_length=5)
     gap_analysis: _GapAnalysisDraft
-    questions: list[_DiscoveryQuestionDraft] = Field(min_length=1)
+    questions: list[_DiscoveryQuestionDraft] = Field(max_length=8)
 
 
 class _RecommendationEnvelope(BaseModel):
@@ -459,7 +460,7 @@ class DiscoveryService:
             raise
         updated = await self._save(
             discovery_case,
-            status="awaiting_qa_mode",
+            status="awaiting_qa_mode" if parsed.questions else "ready_for_solutions",
             selected_persona_id=unique_ids[0],
             selected_persona_ids=unique_ids,
             deep_dive_findings=parsed.deep_dive_findings,

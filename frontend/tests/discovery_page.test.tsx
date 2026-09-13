@@ -53,6 +53,7 @@ describe("DiscoveryPage", () => {
               id: "volume",
               text: "What is the peak monthly volume?",
               category: "capacity",
+              suggested_answers: ["Under 10,000", "10,000 to 100,000"],
               status: "recommendation_offered",
               answer: null,
               recommendation: null,
@@ -295,6 +296,32 @@ describe("DiscoveryPage", () => {
       created_at: "2026-09-12T10:00:00Z",
       updated_at: "2026-09-12T10:01:00Z",
     };
+    const analyzedCase = {
+      ...caseState,
+      status: "awaiting_qa_mode",
+      selected_persona_id: "john-greeson",
+      selected_persona_ids: ["john-greeson", "charles-sayre"],
+      deep_dive_findings: ["Named evidence analyzed"],
+      insight_sections: [{
+        title: "Modernization priorities",
+        summary: "The selected perspectives emphasize a staged modernization plan with explicit operational safeguards.",
+        evidence_references: [],
+      }],
+      gap_analysis: {
+        known_facts: [], risks: [], contradictions: [], information_gaps: ["More detail"],
+        assumptions: [], evidence_references: [], confidence_score: 0.7,
+      },
+      questions: [{
+        id: "detail",
+        text: "What detail is missing?",
+        category: "context",
+        suggested_answers: ["Confirm the target operating model", "Confirm the migration deadline"],
+        status: "pending",
+        answer: null,
+        recommendation: null,
+        evidence_references: [],
+      }],
+    };
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const pathname = new URL(input.toString()).pathname;
       const method = init?.method ?? "GET";
@@ -306,26 +333,13 @@ describe("DiscoveryPage", () => {
         return Response.json({ ...caseState, save_enabled: true, version: 3 });
       }
       if (pathname.endsWith("/sessions/session-1/discovery/persona") && method === "POST") {
-        return Response.json({
-          ...caseState,
-          status: "awaiting_qa_mode",
-          selected_persona_id: "john-greeson",
-          selected_persona_ids: ["john-greeson", "charles-sayre"],
-          deep_dive_findings: ["Named evidence analyzed"],
-          insight_sections: [{
-            title: "Modernization priorities",
-            summary: "The selected perspectives emphasize a staged modernization plan with explicit operational safeguards.",
-            evidence_references: [],
-          }],
-          gap_analysis: {
-            known_facts: [], risks: [], contradictions: [], information_gaps: ["More detail"],
-            assumptions: [], evidence_references: [], confidence_score: 0.7,
-          },
-          questions: [{
-            id: "detail", text: "What detail is missing?", category: "context",
-            status: "pending", answer: null, recommendation: null, evidence_references: [],
-          }],
-        });
+        return Response.json(analyzedCase);
+      }
+      if (pathname.endsWith("/sessions/session-1/discovery/qa-mode") && method === "POST") {
+        return Response.json({ ...analyzedCase, status: "questioning", qa_mode: "interactive" });
+      }
+      if (pathname.endsWith("/questions/detail/answer") && method === "POST") {
+        return Response.json({ ...analyzedCase, status: "questioning", qa_mode: "interactive" });
       }
       if (pathname.endsWith("/sessions/session-1/discovery")) return Response.json(caseState);
       throw new Error(`Unexpected request: ${method} ${pathname}`);
@@ -353,6 +367,28 @@ describe("DiscoveryPage", () => {
       "Based only on evidence attributable to John Greeson, Charles Sayre.",
     )).toBeInTheDocument();
 
+    await user.click(screen.getByRole("button", { name: "One at a time" }));
+    const suggestedAnswer = await screen.findByRole("radio", {
+      name: "Confirm the target operating model",
+    });
+    await user.click(suggestedAnswer);
+    const answerInput = screen.getByRole("textbox", { name: "Your answer: What detail is missing?" });
+    expect(answerInput).toHaveValue("Confirm the target operating model");
+
+    await user.clear(answerInput);
+    await user.type(answerInput, "The operating model needs customer confirmation");
+    expect(suggestedAnswer).not.toBeChecked();
+    await user.click(screen.getByRole("button", { name: "Save answer" }));
+    await waitFor(() => {
+      const answerCall = fetchMock.mock.calls.find(([input, init]) =>
+        new URL(input.toString()).pathname.endsWith("/questions/detail/answer")
+        && init?.method === "POST",
+      );
+      expect(JSON.parse(String(answerCall?.[1]?.body))).toEqual({
+        answer: "The operating model needs customer confirmation",
+      });
+    });
+
     await user.click(screen.getByRole("switch", { name: "Save discovery" }));
     await waitFor(() => {
       const saveCall = fetchMock.mock.calls.find(([input, init]) =>
@@ -361,5 +397,58 @@ describe("DiscoveryPage", () => {
       );
       expect(JSON.parse(String(saveCall?.[1]?.body))).toEqual({ enabled: true });
     });
+  });
+
+  it("skips the Q&A mode choice when no clarification is needed", async () => {
+    const caseState = {
+      id: "discovery-1",
+      session_id: "session-1",
+      owner_user_id: "user-1",
+      save_enabled: false,
+      model_deployment_ref: "gpt-5-mini",
+      status: "ready_for_solutions",
+      source_upload_ids: ["upload-1"],
+      analyzed_upload_ids: ["upload-1"],
+      analysis_revision: 1,
+      personas: [{ id: "jordan-lee", name: "Jordan Lee", pain_points: [], evidence_references: [] }],
+      selected_persona_id: "jordan-lee",
+      selected_persona_ids: ["jordan-lee"],
+      deep_dive_findings: ["The evidence resolves the material decisions"],
+      insight_sections: [{
+        title: "Decision context is complete",
+        summary: "The available evidence resolves the material implementation decisions.",
+        evidence_references: ["call.txt"],
+      }],
+      gap_analysis: {
+        known_facts: ["Scope is approved"], risks: [], contradictions: [], information_gaps: [],
+        assumptions: [], evidence_references: ["call.txt"], confidence_score: 0.95,
+      },
+      qa_mode: null,
+      questions: [],
+      proposed_solutions: [],
+      selected_solution_id: null,
+      build_workflow_run_id: null,
+      last_error: null,
+      version: 3,
+      created_at: "2026-09-12T10:00:00Z",
+      updated_at: "2026-09-12T10:01:00Z",
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const pathname = new URL(input.toString()).pathname;
+      if (pathname.endsWith("/workflow-events/stream")) {
+        return new Response(new ReadableStream({ start: (controller) => controller.close() }));
+      }
+      if (pathname.endsWith("/sessions/session-1/uploads")) return Response.json([]);
+      if (pathname.endsWith("/sessions/session-1/discovery")) return Response.json(caseState);
+      throw new Error(`Unexpected request: ${pathname}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderWithProviders(<DiscoveryPage />, { sessionId: "session-1" });
+
+    expect(await screen.findByText("No additional clarification is needed for this evidence.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "One at a time" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Show all questions" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Generate probable solutions" })).toBeInTheDocument();
   });
 });

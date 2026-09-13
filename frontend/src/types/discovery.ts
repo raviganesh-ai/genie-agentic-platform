@@ -50,6 +50,7 @@ export interface DiscoveryQuestion {
   id: string;
   text: string;
   category: string;
+  suggested_answers: string[];
   status: DiscoveryQuestionStatus;
   answer: string | null;
   recommendation: string | null;

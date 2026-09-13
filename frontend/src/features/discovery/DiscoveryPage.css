@@ -230,11 +230,16 @@
 
 .discovery-question-answer {
   grid-column: 1 / -1;
+  display: grid;
+  gap: 14px;
+}
+
+.discovery-custom-answer {
   display: flex;
   gap: 10px;
 }
 
-.discovery-question-answer > *:first-child {
+.discovery-custom-answer > *:first-child {
   flex: 1;
 }
 
@@ -333,6 +338,11 @@
   .discovery-question-answer,
   .discovery-recommendation {
     grid-column: 1;
+  }
+
+  .discovery-custom-answer {
+    align-items: stretch;
+    flex-direction: column;
   }
 }
 

@@ -159,7 +159,7 @@ The Landing page offers two distinct paths: **Start Prototype** enters the origi
 
 The Foundry-hosted Discovery agents synthesize that evidence across files, identify personas, and keep known facts, risks, contradictions, assumptions, and information gaps distinct. Clarification questions target unresolved evidence needed for implementation. Probable Azure-native solutions include tradeoffs, evidence references, structured reference-architecture nodes and edges, AI feasibility, and independently resolved Azure Retail Prices data. Removing analyzed evidence invalidates every derived result so stale conclusions cannot survive a source change.
 
-Questions can be answered in a batch or one at a time. Skipping a question records only a recommendation offer; Genie calls the Architecture Designer for a Microsoft/Azure best-practice recommendation only after the user explicitly accepts that offer. The user can stop after Q&A and resume the same Cosmos-backed case later, add customer material for a new analysis revision, or delete an abandoned pre-Build case together with only its case-prefixed Shared Collaboration Memory records.
+When material clarification is needed, customers can answer all questions in a batch or work through unresolved questions one at a time. Every question includes two to four Foundry-generated, evidence-aware answer choices and an editable free-text field, so a customer can select a likely answer or provide a different one. When the evidence already resolves every material implementation decision, Genie does not show an empty Q&A mode choice and proceeds directly to probable-solution generation. Skipping a question records only a recommendation offer; Genie calls the Architecture Designer for a Microsoft/Azure best-practice recommendation only after the user explicitly accepts that offer. The user can stop after Q&A and resume the same Cosmos-backed case later, add customer material for a new analysis revision, or delete an abandoned pre-Build case together with only its case-prefixed Shared Collaboration Memory records.
 
 Probable solutions include Build-ready requirements and architecture, tradeoffs, AI feasibility, a React Flow architecture diagram backed by a fixed allowlist of local [official Microsoft Azure Architecture Icons](https://learn.microsoft.com/azure/architecture/icons/), and deterministic cost estimates. The agent proposes service/SKU/region/usage assumptions but never supplies prices; Genie resolves unit prices through the Azure Retail Prices API and labels coverage `complete`, `partial`, or `unavailable` instead of inventing missing costs.
 
@@ -688,6 +688,13 @@ The script uses Microsoft Entra authentication, creates only missing model deplo
 ## Deploy log
 
 Every deployment to the shared Azure evaluation environment (backend Container App and/or frontend Static Web App) is recorded here: commit, what changed, and why. Update this section as part of the same commit that ships the fix/feature, before pushing to `master` triggers [Continuous deployment](#continuous-deployment-github-actions).
+
+### 2026-09-13 — Adaptive Discovery clarification
+
+- **No empty Q&A choice**: Foundry may return zero questions when the selected evidence already resolves every material implementation decision. Those cases move directly to probable-solution generation instead of asking the customer to choose between one-at-a-time and batch modes for an empty list.
+- **Intelligent answer options**: every generated clarification question carries two to four concise, evidence-aware alternatives grounded in the decision context and relevant Microsoft/Azure practices. The prompt forbids presenting assumptions as customer facts or producing superficial wording variants.
+- **Customer control**: both Q&A modes render the suggested answers as selectable options and retain an editable free-text field. Selecting an option fills the submitted answer; typing a different response supersedes the selection. Skipping remains an explicit path to the existing consent-gated best-practice recommendation.
+- **Verification**: state-machine coverage protects zero-question progression and answer-choice parsing; frontend interaction coverage verifies option selection, custom-answer override, and suppression of the Q&A mode chooser when no questions exist.
 
 ### 2026-09-12 — Discovery deep-dive response resilience
 

@@ -87,6 +87,7 @@ class DiscoveryQuestion(BaseModel):
     id: str = Field(min_length=1)
     text: str = Field(min_length=1)
     category: str = Field(min_length=1)
+    suggested_answers: list[str] = Field(default_factory=list)
     status: DiscoveryQuestionStatus = "pending"
     answer: str | None = None
     recommendation: str | None = None

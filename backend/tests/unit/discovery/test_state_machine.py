@@ -82,6 +82,11 @@ async def _create_service(
                     "id": "monthly-volume",
                     "text": "What is the peak monthly volume?",
                     "category": "capacity",
+                    "suggested_answers": [
+                        "Fewer than 10,000 documents",
+                        "10,000 to 100,000 documents",
+                        "More than 100,000 documents",
+                    ],
                     "status": "pending",
                     "evidence_references": [],
                     "rationale": "Capacity affects the recommended Azure sizing.",
@@ -252,7 +257,33 @@ async def test_deep_dive_accepts_multiple_people_and_extra_agent_metadata() -> N
     assert case.selected_persona_id == "jordan-lee"
     assert case.selected_persona_ids == ["jordan-lee", "morgan-chen"]
     assert case.insight_sections[0].title == "Manual review constrains response time"
+    assert case.questions[0].suggested_answers == [
+        "Fewer than 10,000 documents",
+        "10,000 to 100,000 documents",
+        "More than 100,000 documents",
+    ]
     assert case.status == "awaiting_qa_mode"
+
+
+async def test_deep_dive_without_material_questions_is_ready_for_solutions() -> None:
+    service, orchestrator, session_id = await _create_service()
+    await service.analyze_personas(
+        session_id=session_id,
+        requesting_user_id="user-1",
+    )
+    deep_dive = json.loads(orchestrator.outputs[0])
+    deep_dive["questions"] = []
+    orchestrator.outputs[0] = json.dumps(deep_dive)
+
+    case = await service.select_personas(
+        session_id=session_id,
+        requesting_user_id="user-1",
+        persona_ids=["jordan-lee"],
+    )
+
+    assert case.questions == []
+    assert case.qa_mode is None
+    assert case.status == "ready_for_solutions"
 
 
 async def test_deep_dive_retries_once_after_truncated_json() -> None:

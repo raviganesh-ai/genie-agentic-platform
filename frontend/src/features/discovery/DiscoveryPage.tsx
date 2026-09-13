@@ -7,6 +7,8 @@ import {
   Input,
   MessageBar,
   Option,
+  Radio,
+  RadioGroup,
   Spinner,
   Switch,
   Text,
@@ -661,7 +663,7 @@ export function DiscoveryPage(): JSX.Element {
           <Text className="discovery-muted">
             Analysis confidence: {Math.round(discoveryCase.gap_analysis.confidence_score * 100)}%
           </Text>
-          {!discoveryCase.qa_mode ? (
+          {!discoveryCase.qa_mode && discoveryCase.questions.length ? (
             <div className="discovery-choice-row">
               <Text weight="semibold">How should Genie ask?</Text>
               {(["interactive", "batch"] as DiscoveryQaMode[]).map((mode) => (
@@ -670,6 +672,20 @@ export function DiscoveryPage(): JSX.Element {
                 </Button>
               ))}
             </div>
+          ) : !discoveryCase.questions.length
+            && discoveryCase.status === "ready_for_solutions"
+            && !discoveryCase.proposed_solutions.length ? (
+              <div className="discovery-actions">
+                <MessageBar>No additional clarification is needed for this evidence.</MessageBar>
+                <Button
+                  appearance="primary"
+                  icon={<ArrowRight24Regular />}
+                  disabled={Boolean(busy)}
+                  onClick={() => void perform("generate solutions", () => discoveryApi.generateSolutions(sessionId))}
+                >
+                  Generate probable solutions
+                </Button>
+              </div>
           ) : null}
         </section>
       ) : null}
@@ -689,21 +705,40 @@ export function DiscoveryPage(): JSX.Element {
               <Badge appearance="outline">{question.status.replace(/_/g, " ")}</Badge>
               {question.status === "pending" ? (
                 <div className="discovery-question-answer">
-                  <Input
-                    aria-label={`Answer: ${question.text}`}
-                    value={answers[question.id] ?? ""}
-                    onChange={(_, data) => setAnswers((current) => ({ ...current, [question.id]: data.value }))}
-                  />
-                  <Button
-                    appearance="primary"
-                    disabled={Boolean(busy) || !(answers[question.id] ?? "").trim()}
-                    onClick={() => void perform("save answer", () => discoveryApi.answerQuestion(sessionId, question.id, answers[question.id]))}
-                  >
-                    Save answer
-                  </Button>
-                  <Button disabled={Boolean(busy)} onClick={() => void perform("skip question", () => discoveryApi.answerQuestion(sessionId, question.id, null))}>
-                    Skip
-                  </Button>
+                  {question.suggested_answers?.length ? (
+                    <RadioGroup
+                      aria-label={`Suggested answers: ${question.text}`}
+                      value={question.suggested_answers.includes(answers[question.id] ?? "")
+                        ? answers[question.id]
+                        : ""}
+                      onChange={(_, data) => setAnswers((current) => ({
+                        ...current,
+                        [question.id]: data.value,
+                      }))}
+                    >
+                      {question.suggested_answers.map((answer) => (
+                        <Radio key={answer} value={answer} label={answer} />
+                      ))}
+                    </RadioGroup>
+                  ) : null}
+                  <div className="discovery-custom-answer">
+                    <Input
+                      aria-label={`Your answer: ${question.text}`}
+                      placeholder="Type a different answer"
+                      value={answers[question.id] ?? ""}
+                      onChange={(_, data) => setAnswers((current) => ({ ...current, [question.id]: data.value }))}
+                    />
+                    <Button
+                      appearance="primary"
+                      disabled={Boolean(busy) || !(answers[question.id] ?? "").trim()}
+                      onClick={() => void perform("save answer", () => discoveryApi.answerQuestion(sessionId, question.id, answers[question.id]))}
+                    >
+                      Save answer
+                    </Button>
+                    <Button disabled={Boolean(busy)} onClick={() => void perform("skip question", () => discoveryApi.answerQuestion(sessionId, question.id, null))}>
+                      Skip
+                    </Button>
+                  </div>
                 </div>
               ) : null}
               {question.status === "recommendation_offered" ? (
