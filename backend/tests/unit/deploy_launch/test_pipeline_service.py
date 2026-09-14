@@ -10,6 +10,7 @@ no separate approval-checkpoint request/decide dance to exercise here.
 """
 from __future__ import annotations
 
+import shutil
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -24,7 +25,11 @@ from app.deploy_launch.backend_deployment_service import (
     BackendDeploymentResult,
     NullBackendDeploymentService,
 )
-from app.deploy_launch.frontend_deployment_service import NullFrontendDeploymentService
+from app.deploy_launch.frontend_deployment_service import (
+    FrontendDeploymentError,
+    FrontendDeploymentResult,
+    NullFrontendDeploymentService,
+)
 from app.deploy_launch.mission_agent_provisioning_service import (
     NullMissionAgentProvisioningService,
 )
@@ -1660,6 +1665,84 @@ async def test_backend_retry_after_restart_restores_durable_run_artifacts(tmp_pa
         agent for agent in retried.provisioned_agents if agent.agent_name == "orchestrator"
     )
     assert orchestrator.foundry_agent_name in agent_config_source
+
+
+class _FailOnceThenValidatingFrontendDeploymentService:
+    """Fails the very first ``deploy()`` call, then validates ``ui_root`` is a
+    real, populated directory on every subsequent call - exactly like the real
+    ``ContainerAppFrontendDeploymentService`` - so a test can assert a retry
+    that resumes after a process restart (which wipes the local build
+    workspace, but never the durable run/workflow records) still produces a
+    genuinely materialized frontend directory rather than reusing stale
+    in-memory state that no longer exists on disk."""
+
+    def __init__(self) -> None:
+        self.call_count = 0
+
+    async def deploy(
+        self, *, mission_slug: str, ui_root: Path, mission_identity_resource_id=None, on_progress=None
+    ) -> FrontendDeploymentResult:
+        self.call_count += 1
+        if self.call_count == 1:
+            raise FrontendDeploymentError("Simulated ACR build failure.")
+        if not ui_root.exists() or not any(ui_root.iterdir()):
+            raise FrontendDeploymentError(f"No materialized UI build found at '{ui_root}'.")
+        return FrontendDeploymentResult(
+            frontend_url=f"http://localhost/missions/{mission_slug}/frontend"
+        )
+
+
+async def test_frontend_retry_after_restart_rematerializes_the_wiped_local_build(tmp_path: Path):
+    """Regression test: retrying a run that failed at deploy-frontend-app,
+    after the process (and its local ephemeral build workspace) restarted,
+    must rebuild the frontend directory from durable data instead of failing
+    closed with "No materialized UI build found" - sync-frontend-integration
+    (the step that normally writes it) is skipped on this retry since it
+    already completed before the restart."""
+    repository = InMemoryDeploymentRunRepository()
+    frontend_deployment_service = _FailOnceThenValidatingFrontendDeploymentService()
+    mission_agent_service = _CountingMissionAgentProvisioningService()
+    service = _build_service(
+        test_output_text=_PASSING_TEST_OUTPUT,
+        tmp_path=tmp_path,
+        mission_agent_provisioning_service=mission_agent_service,
+        run_repository=repository,
+    )
+    service._frontend_deployment_service = frontend_deployment_service
+    first_attempt = await service.start(
+        session_id="session-1", requesting_user_id="user-1", workflow_run_id="run-1"
+    )
+    first_attempt = await service.wait_for_run(first_attempt.id)
+    assert first_attempt.status == "failed"
+    failed_step = next(step for step in first_attempt.steps if step.status == "failed")
+    assert failed_step.step_id == "deploy-frontend-app"
+
+    # Simulate a real Container App restart: the local ephemeral build
+    # workspace (including the already-written frontend directory) is gone,
+    # but durable records (the pipeline run, provisioned agents, workflow
+    # step outputs) survive.
+    shutil.rmtree(tmp_path / first_attempt.id, ignore_errors=True)
+
+    restarted = _build_service(
+        test_output_text=_PASSING_TEST_OUTPUT,
+        tmp_path=tmp_path,
+        mission_agent_provisioning_service=mission_agent_service,
+        run_repository=repository,
+    )
+    restarted._frontend_deployment_service = frontend_deployment_service
+    await restarted.initialize()
+    retried = await restarted.start(
+        session_id="session-1",
+        requesting_user_id="user-1",
+        workflow_run_id="run-1",
+        resume_from_step="deploy-frontend-app",
+    )
+
+    assert retried.id == first_attempt.id
+    retried = await restarted.wait_for_run(retried.id)
+
+    assert retried.status == "completed"
+    assert frontend_deployment_service.call_count == 2
 
 
 async def test_retry_with_no_matching_failed_run_restarts_from_the_first_step(tmp_path: Path):

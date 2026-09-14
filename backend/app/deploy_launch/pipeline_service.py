@@ -1719,12 +1719,57 @@ class DeploymentPipelineService:
 
         return pipeline_run
 
+    def _write_frontend_workspace(
+        self,
+        *,
+        frontend_root: Path,
+        materialized: MaterializedBuild,
+        mission_title: str,
+        backend_url: str | None,
+        agent_foundry_names: dict[str, str],
+    ) -> None:
+        """Materializes the mission frontend to the local build workspace - the
+        restart-volatile local-disk writes also needed by ``_restore_retry_artifacts``
+        when a retry resumes at/after ``deploy-frontend-app`` (that step reads this
+        directory but never writes it itself; ``sync-frontend-integration``, the step
+        that normally writes it, is skipped on such a retry)."""
+        frontend_root.mkdir(parents=True, exist_ok=True)
+        (frontend_root / "MissionApp.tsx").write_text(
+            materialized.ui_component or "", encoding="utf-8"
+        )
+        (frontend_root / "index.html").write_text(
+            _FRONTEND_INDEX_HTML_TEMPLATE.format(mission_title=html.escape(mission_title)),
+            encoding="utf-8",
+        )
+        (frontend_root / "package.json").write_text(_FRONTEND_PACKAGE_JSON, encoding="utf-8")
+        (frontend_root / "tsconfig.json").write_text(_FRONTEND_TSCONFIG_JSON, encoding="utf-8")
+        (frontend_root / "vite.config.ts").write_text(_FRONTEND_VITE_CONFIG, encoding="utf-8")
+        src_root = frontend_root / "src"
+        src_root.mkdir(parents=True, exist_ok=True)
+        (src_root / "main.tsx").write_text(_FRONTEND_MAIN_TSX, encoding="utf-8")
+        (src_root / "env.d.ts").write_text(_FRONTEND_ENV_D_TS, encoding="utf-8")
+        (src_root / "styles.css").write_text(_FRONTEND_STYLES_CSS, encoding="utf-8")
+        public_root = frontend_root / "public"
+        public_root.mkdir(parents=True, exist_ok=True)
+        # Specialist agent display names (never "orchestrator" - that's the
+        # internal coordinator, not shown as its own collaborator).
+        mission_agent_names = [name for name in agent_foundry_names if name != "orchestrator"]
+        (public_root / "runtime-config.js").write_text(
+            f'window.__MISSION_BACKEND_URL__ = "{backend_url}";\n'
+            f"window.__MISSION_TITLE__ = {json.dumps(mission_title)};\n"
+            f"window.__MISSION_AGENTS__ = {json.dumps(mission_agent_names)};\n",
+            encoding="utf-8",
+        )
+
     async def _restore_retry_artifacts(
         self,
         *,
         pipeline_run: DeploymentPipelineRun,
         run: WorkflowRunResult,
         trace_id: str,
+        frontend_root: Path,
+        mission_title: str,
+        resume_index: int,
     ) -> None:
         """Rebuilds restart-volatile artifacts from durable workflow and run data."""
 
@@ -1754,6 +1799,19 @@ class DeploymentPipelineService:
         self._agent_foundry_names[pipeline_run.id] = {
             agent_name: foundry_names[agent_name] for agent_name in required_agent_names
         }
+
+        # sync-frontend-integration (the step that normally writes frontend_root) is
+        # skipped when resuming at/after deploy-frontend-app - reconstruct its local
+        # disk output here too, or that step fails closed with "No materialized UI
+        # build found" even though every durable record needed to rebuild it exists.
+        if resume_index >= DEPLOYMENT_STEP_ORDER.index("deploy-frontend-app"):
+            self._write_frontend_workspace(
+                frontend_root=frontend_root,
+                materialized=materialized,
+                mission_title=mission_title,
+                backend_url=pipeline_run.backend_url,
+                agent_foundry_names=self._agent_foundry_names[pipeline_run.id],
+            )
 
     def _fail_run(self, pipeline_run: DeploymentPipelineRun, *, error: str) -> None:
         """Resolves a run to ``failed`` for a failure that happened before any
@@ -1829,6 +1887,9 @@ class DeploymentPipelineService:
                     pipeline_run=pipeline_run,
                     run=run,
                     trace_id=trace_id,
+                    frontend_root=frontend_root,
+                    mission_title=session.title,
+                    resume_index=resume_index,
                 )
             except Exception as exc:  # noqa: BLE001 - fail-closed retry reconstruction boundary.
                 self._fail_run(pipeline_run, error=str(exc))
@@ -2565,48 +2626,12 @@ class DeploymentPipelineService:
 
                 elif step_id == "sync-frontend-integration":
                     materialized = self._materialized_builds[pipeline_run.id]
-                    frontend_root.mkdir(parents=True, exist_ok=True)
-                    (frontend_root / "MissionApp.tsx").write_text(
-                        materialized.ui_component or "", encoding="utf-8"
-                    )
-                    (frontend_root / "index.html").write_text(
-                        _FRONTEND_INDEX_HTML_TEMPLATE.format(
-                            mission_title=html.escape(mission_title)
-                        ),
-                        encoding="utf-8",
-                    )
-                    (frontend_root / "package.json").write_text(
-                        _FRONTEND_PACKAGE_JSON, encoding="utf-8"
-                    )
-                    (frontend_root / "tsconfig.json").write_text(
-                        _FRONTEND_TSCONFIG_JSON, encoding="utf-8"
-                    )
-                    (frontend_root / "vite.config.ts").write_text(
-                        _FRONTEND_VITE_CONFIG, encoding="utf-8"
-                    )
-                    src_root = frontend_root / "src"
-                    src_root.mkdir(parents=True, exist_ok=True)
-                    (src_root / "main.tsx").write_text(_FRONTEND_MAIN_TSX, encoding="utf-8")
-                    (src_root / "env.d.ts").write_text(_FRONTEND_ENV_D_TS, encoding="utf-8")
-                    (src_root / "styles.css").write_text(_FRONTEND_STYLES_CSS, encoding="utf-8")
-                    public_root = frontend_root / "public"
-                    public_root.mkdir(parents=True, exist_ok=True)
-                    # Specialist agent display names (never "orchestrator" -
-                    # that's the internal coordinator, not shown as its own
-                    # collaborator) - lets the deterministic shell render a
-                    # real, accurate live Agent Collaboration panel without
-                    # depending on the LLM-generated UI to invent/describe
-                    # its own agent roster correctly.
-                    mission_agent_names = [
-                        name
-                        for name in self._agent_foundry_names.get(pipeline_run.id, {})
-                        if name != "orchestrator"
-                    ]
-                    (public_root / "runtime-config.js").write_text(
-                        f'window.__MISSION_BACKEND_URL__ = "{pipeline_run.backend_url}";\n'
-                        f"window.__MISSION_TITLE__ = {json.dumps(mission_title)};\n"
-                        f"window.__MISSION_AGENTS__ = {json.dumps(mission_agent_names)};\n",
-                        encoding="utf-8",
+                    self._write_frontend_workspace(
+                        frontend_root=frontend_root,
+                        materialized=materialized,
+                        mission_title=mission_title,
+                        backend_url=pipeline_run.backend_url,
+                        agent_foundry_names=self._agent_foundry_names.get(pipeline_run.id, {}),
                     )
                     detail = f"Frontend wired to real backend URL {pipeline_run.backend_url}."
 
