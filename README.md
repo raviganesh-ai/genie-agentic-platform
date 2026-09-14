@@ -694,6 +694,12 @@ The script uses Microsoft Entra authentication, creates only missing model deplo
 
 Every deployment to the shared Azure evaluation environment (backend Container App and/or frontend Static Web App) is recorded here: commit, what changed, and why. Update this section as part of the same commit that ships the fix/feature, before pushing to `master` triggers [Continuous deployment](#continuous-deployment-github-actions).
 
+### 2026-09-14 — Frontend-step retry also survives a platform restart
+
+- **Root cause**: the prior platform-restart retry fix only reconstructed in-memory materialized-build and Foundry agent-name state; it never rewrote the on-disk generated frontend workspace. That directory is populated exclusively by the `sync-frontend-integration` step, which runs immediately before `deploy-frontend-app` in the pipeline. Retrying directly at `deploy-frontend-app` correctly skipped the already-completed `sync-frontend-integration` step, but a platform restart in between had wiped the container's local ephemeral filesystem, so `deploy-frontend-app` failed instantly with "No materialized UI build found".
+- **Fix**: the frontend-workspace-writing logic used by `sync-frontend-integration` is now a shared helper that a restart-survival retry also calls whenever it resumes at or after `deploy-frontend-app`, rebuilding the generated `MissionApp.tsx`, runtime config, and supporting frontend files from the same durable build record before the deployment step re-reads them.
+- **Verification**: a new regression test simulates a first attempt failing at `deploy-frontend-app`, deletes the local build directory to simulate the restart, then retries against a second service instance sharing the same durable run repository and asserts the retry completes successfully. Full backend suite (653 tests) and `ruff check` pass.
+
 ### 2026-09-14 — Deploy & Launch generated-build repair recovery
 
 - **Root cause**: a DerekPoC Mission Input used `style={{ display: "none" }}` only on two native file controls behind its dropzones. The deterministic materializer treated those functional hidden inputs as visible inline presentation, rejected the otherwise valid 369 KB build, and sent it through expensive full-build regeneration. Repeated starts also created three concurrent pipeline runs for the same workflow.
