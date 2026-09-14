@@ -2418,7 +2418,15 @@ class DeploymentPipelineService:
                             + ", ".join(missing_test_ids)
                         )
                     if pipeline_run.backend_url and pipeline_run.backend_url.startswith("https://"):
-                        real_action_errors = validate_real_action_tests(modules)
+                        materialized = self._materialized_builds[pipeline_run.id]
+                        ui_component = materialized.ui_component or ""
+                        require_attachment_handoff = bool(
+                            re.search(r"\btype\s*=\s*['\"]file['\"]", ui_component)
+                        )
+                        real_action_errors = validate_real_action_tests(
+                            modules,
+                            require_attachment_handoff=require_attachment_handoff,
+                        )
                         real_action_retry = 0
                         while (
                             real_action_errors
@@ -2448,7 +2456,10 @@ class DeploymentPipelineService:
                             test_output_text = correction_result.output_text
                             modules = extract_test_modules(test_output_text)
                             if not has_pytest_discoverable_tests(modules):
-                                real_action_errors = validate_real_action_tests(modules)
+                                real_action_errors = validate_real_action_tests(
+                                    modules,
+                                    require_attachment_handoff=require_attachment_handoff,
+                                )
                                 continue
                             report = record_test_coverage(
                                 report,
@@ -2457,7 +2468,10 @@ class DeploymentPipelineService:
                             )
                             self._generated_test_outputs[pipeline_run.id] = test_output_text
                             pipeline_run.fidelity_report = report
-                            real_action_errors = validate_real_action_tests(modules)
+                            real_action_errors = validate_real_action_tests(
+                                modules,
+                                require_attachment_handoff=require_attachment_handoff,
+                            )
                         if real_action_errors:
                             raise DeploymentPipelineStepFailedError(
                                 "Generated acceptance tests are not real-action tests: "

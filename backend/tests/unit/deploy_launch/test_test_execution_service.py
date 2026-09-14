@@ -289,20 +289,41 @@ def test_real_action_policy_rejects_mocks_and_tests_without_deployed_urls() -> N
         [("from unittest.mock import patch\ndef test_req_001():\n    assert patch('app.run')")]
     ) == (
         "Acceptance tests contain a mock, patch, or interception library.",
-        "Acceptance tests do not reference MISSION_BACKEND_URL or MISSION_FRONTEND_URL.",
+        "Acceptance tests do not reference MISSION_BACKEND_URL.",
+        "Acceptance tests do not invoke the deployed mission backend.",
     )
 
 
-def test_real_action_policy_accepts_black_box_test_using_deployed_url() -> None:
+def test_real_action_policy_accepts_black_box_test_invoking_deployed_backend() -> None:
     reasons = validate_real_action_tests(
         [
             (
                 "import os\nimport httpx\n"
-                "def test_req_001_live_health():\n"
-                "    response = httpx.get(os.environ['MISSION_BACKEND_URL'] + '/health')\n"
+                "def test_req_001_live_mission():\n"
+                "    response = httpx.post(os.environ['MISSION_BACKEND_URL'] + '/invoke', "
+                "json={'message': '{}', 'attachments': []})\n"
                 "    assert response.status_code == 200"
             )
         ]
     )
 
     assert reasons == ()
+
+
+def test_real_action_policy_requires_attachment_handoff_for_upload_missions() -> None:
+    without_attachments = [
+        (
+            "import httpx\nimport os\n"
+            "def test_req_001_live_mission():\n"
+            "    url = os.environ['MISSION_BACKEND_URL'] + '/invoke'\n"
+            "    def invoke():\n"
+            "        return httpx.post(url, json={'message': '{}'})\n"
+            "    assert url"
+        )
+    ]
+
+    assert validate_real_action_tests(
+        without_attachments, require_attachment_handoff=True
+    ) == (
+        "Acceptance tests do not send uploaded attachments to the deployed mission backend.",
+    )

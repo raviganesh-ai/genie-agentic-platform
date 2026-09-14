@@ -101,6 +101,101 @@ def test_materialize_build_allows_non_file_name_comparison():
     assert 'agent.name === "orchestrator"' in build.ui_component
 
 
+def test_materialize_build_rejects_browser_side_uploaded_json_schema_gate():
+    output = _SAMPLE_OUTPUT.replace(
+        "export function MissionApp() {\n    return null;",
+        """export function MissionApp() {
+    const validatePacket = async (file: File) => {
+        const packet = JSON.parse(await file.text());
+        return Array.isArray(packet.documents) && packet.documents.length === 30;
+    };
+    return <input type=\"file\" />;""",
+    )
+
+    with pytest.raises(MaterializedCodeError, match="backend/orchestrator"):
+        materialize_build(output)
+
+
+def test_materialize_build_rejects_browser_side_wildcard_key_scan():
+    output = _SAMPLE_OUTPUT.replace(
+        "export function MissionApp() {\n    return null;",
+        """export function MissionApp() {
+    const containsKeyMaterial = (content: string) =>
+        content.toLowerCase().includes("key");
+    return <input type=\"file\" />;""",
+    )
+
+    with pytest.raises(MaterializedCodeError, match=r"broad '\*key\*' substring scan"):
+        materialize_build(output)
+
+
+def test_materialize_build_allows_non_upload_json_parsing():
+    output = _SAMPLE_OUTPUT.replace(
+        "export function MissionApp() {",
+        """export function MissionApp() {
+    const parseStructuredText = (value: string) => JSON.parse(value);""",
+    )
+
+    build = materialize_build(output)
+
+    assert build.ui_component is not None
+    assert "parseStructuredText" in build.ui_component
+
+
+def test_materialize_build_rejects_interactive_ui_without_backend_handoff():
+    output = _SAMPLE_OUTPUT.replace(
+        "return null;",
+        'return <input aria-label="Mission request" />;',
+    )
+
+    with pytest.raises(MaterializedCodeError, match="never calls its onSubmit prop"):
+        materialize_build(output)
+
+
+def test_materialize_build_rejects_file_input_without_attachment_handoff():
+    output = _SAMPLE_OUTPUT.replace(
+        "export function MissionApp() {\n    return null;",
+        """export function MissionApp({ onSubmit }) {
+    const handleFile = async (file: File) => {
+        const content = await file.text();
+        onSubmit(JSON.stringify({ filename: file.name }));
+    };
+    return <input type=\"file\" onChange={(event) => handleFile(event.target.files[0])} />;""",
+    )
+
+    with pytest.raises(MaterializedCodeError, match="does not pass an attachments array"):
+        materialize_build(output)
+
+
+def test_materialize_build_allows_file_input_handed_to_provisioned_backend():
+    output = _SAMPLE_OUTPUT.replace(
+        "export function MissionApp() {\n    return null;",
+        """export function MissionApp({ onSubmit }) {
+    const handleFile = async (file: File) => {
+        const content = await file.text();
+        const attachments = [{ name: file.name, content }];
+        onSubmit(JSON.stringify({ filename: file.name }), attachments);
+    };
+    return <input type=\"file\" onChange={(event) => handleFile(event.target.files[0])} />;""",
+    )
+
+    build = materialize_build(output)
+
+    assert build.ui_component is not None
+    assert "attachments" in build.ui_component
+
+
+def test_materialize_build_rejects_generated_ui_direct_backend_invoke():
+    output = _SAMPLE_OUTPUT.replace(
+        "export function MissionApp() {",
+        """export function MissionApp() {
+    const run = () => fetch(`/invoke/stream`, { method: \"POST\" });""",
+    )
+
+    with pytest.raises(MaterializedCodeError, match="invoke endpoint directly"):
+        materialize_build(output)
+
+
 def test_materialize_build_rejects_nested_submit_payload():
     # Observed live: the UI grouped fields under "evaluation_config" while the
     # orchestrator's flat `config.get("primary_model_id")` read silently found
@@ -371,6 +466,49 @@ def test_backend_service_scaffold_main_py_runs_the_real_orchestrator_pipeline():
     assert "_conversational_reply" in main_source
     assert "OrchestratorAgent()" in main_source
     assert 'status_code=503' in main_source
+
+
+def test_backend_scaffold_persists_upload_then_runs_orchestrator(
+    monkeypatch, tmp_path: Path
+):
+    scaffold = generate_backend_service_scaffold(
+        mission_title="Acme Mission",
+        orchestrator_agent_name="acme-orchestrator",
+        agent_foundry_names={"Requirements Specialist": "acme-requirements-specialist"},
+    )
+    fake_orchestrator_module = types.ModuleType("orchestrator")
+    observed: dict[str, object] = {}
+
+    class _FileReadingOrchestratorAgent:
+        async def run(self, ui_message, on_progress=None):
+            packet_path = tmp_path / "evaluation.json"
+            observed["message"] = json.loads(ui_message)
+            observed["content"] = packet_path.read_text(encoding="utf-8")
+            return {"status": "processed", "bytes": len(observed["content"])}
+
+    fake_orchestrator_module.OrchestratorAgent = _FileReadingOrchestratorAgent
+    monkeypatch.setitem(sys.modules, "orchestrator", fake_orchestrator_module)
+    monkeypatch.setenv("FACTORY_WORKING_DIR", str(tmp_path))
+
+    generated_module = types.ModuleType("acme_main_attachment_handoff")
+    monkeypatch.setitem(sys.modules, "acme_main_attachment_handoff", generated_module)
+    exec(compile(scaffold["main.py"], "main.py", "exec"), generated_module.__dict__)  # noqa: S102
+    request = generated_module.InvokeRequest(
+        message=json.dumps({"run_id": "mqm-001"}),
+        attachments=[
+            generated_module.Attachment(
+                name="../evaluation.json",
+                content='{"items":[{"candidate_a":"A","candidate_b":"B"}]}',
+            )
+        ],
+    )
+
+    response = asyncio.run(generated_module.invoke(request))
+
+    assert observed["message"] == {"run_id": "mqm-001"}
+    assert observed["content"] == '{"items":[{"candidate_a":"A","candidate_b":"B"}]}'
+    assert not (tmp_path.parent / "evaluation.json").exists()
+    assert json.loads(response.output_text) == {"status": "processed", "bytes": 49}
 
 
 def test_backend_scaffold_rejects_structured_request_when_constructor_fails(monkeypatch):

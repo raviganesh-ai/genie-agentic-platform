@@ -165,6 +165,18 @@ def test_ui_prompts_forbid_binding_file_uploads_to_one_exact_literal_name():
         assert "accept` attribute to that type's extension/MIME list" in template
 
 
+def test_ui_prompts_send_uploaded_content_to_the_provisioned_backend_for_validation():
+    registry = PromptRegistry.load(_REPO_CONFIG_ROOT / "prompts")
+
+    for prompt_id in ("build-generation-v1", "build-generation-component-v1"):
+        template = " ".join(registry.get(prompt_id).template.split())
+        assert "browser UI is a transport surface" in template
+        assert "never call `JSON.parse` on uploaded content" in template
+        assert "Pass the complete read content unchanged" in template
+        assert "generated backend/Orchestrator owns every" in template
+        assert "reaches the real provisioned backend process" in template
+
+
 def test_orchestrator_prompts_require_live_on_progress_hand_off_narration():
     """Regression guard: a live "blind MQM" mission's Agent Pipeline panel
     never visibly animated - the generated Orchestrator's `run()` awaited
@@ -255,6 +267,8 @@ def test_generation_prompts_fail_closed_on_ui_orchestrator_schema_drift():
         registry.get("test-generation-v1").template.split()
     )
     assert "exact JSON object assembled by the generated UI" in test_generation
+    assert "execute a real `httpx.post` to `/invoke`" in test_generation
+    assert "at least one non-empty `attachments` item" in test_generation
     assert "mission-specific result fields" in test_generation
     assert "HTTP 200 alone" in test_generation
 

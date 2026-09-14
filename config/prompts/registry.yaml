@@ -423,10 +423,16 @@ prompts:
       - at least one deployed backend test must reproduce the exact JSON
         object assembled by the generated UI's `JSON.stringify` call,
         including the same field names, casing, nesting, and uploaded
-        attachments, POST it to `/invoke`, and assert mission-specific
-        result fields produced by the specialist pipeline. HTTP 200 alone,
-        non-empty text alone, and a generic conversational response never
-        prove the generated UI-to-orchestrator contract works.
+        attachments, execute a real `httpx.post` to `/invoke`, and assert
+        mission-specific result fields produced by the specialist
+        pipeline. Referencing the backend URL or testing only a health or
+        frontend endpoint does not count as an invocation. If the generated
+        UI renders any `<input type="file">`, this test must send at least
+        one non-empty `attachments` item containing the same full text the
+        UI reads with `File.text()` and prove the mission-specific result
+        was derived from that attachment. HTTP 200 alone, non-empty text
+        alone, and a generic conversational response never prove the
+        generated UI-to-orchestrator contract works.
       - backend requests through `MISSION_BACKEND_URL` are authenticated by
         Genie's trusted acceptance-test proxy. Never read, request, print,
         log, persist, or synthesize credentials or an Authorization header;
@@ -481,7 +487,7 @@ prompts:
       - artifact
       - requirements
       - user_message
-    version: "1.9.0"
+    version: "1.10.0"
 
   - id: failure-diagnosis-v1
     name: Failure Diagnosis
@@ -819,6 +825,18 @@ prompts:
       read its actual content via `File.text()`. Disable the submit
       button only when the upload is genuinely missing/empty, never
       because the chosen file's name differs from an example name.
+      The browser UI is a transport surface, not the authoritative
+      validator for uploaded business content: never call `JSON.parse` on
+      uploaded content, assume one package schema or collection property,
+      count business records, scan content/file names with broad substring
+      checks such as `includes("key")` or `/key/i`, or block submission on
+      any domain rule. Pass the complete read content unchanged in the
+      `attachments` array. The generated backend/Orchestrator owns every
+      schema, quantity, provenance, blindness, and business-policy check
+      against the persisted attachment and must return any actionable
+      validation failure through the normal streamed mission result. This
+      ensures every valid user upload reaches the real provisioned backend
+      process instead of being stranded in guessed browser logic.
 
       REQUIRED VS OPTIONAL - never leave the user guessing which fields
       they must fill in: append a literal " *" to the `<label>`/`<legend>`
@@ -959,7 +977,7 @@ prompts:
       - excluded_agents
       - available_models
       - user_message
-    version: "5.19.0"
+    version: "5.20.0"
 
   - id: build-generation-component-v1
     name: Build Generation - Single Component
@@ -1164,6 +1182,18 @@ prompts:
       read its actual content via `File.text()`. Disable the submit
       button only when the upload is genuinely missing/empty, never
       because the chosen file's name differs from an example name.
+      The browser UI is a transport surface, not the authoritative
+      validator for uploaded business content: never call `JSON.parse` on
+      uploaded content, assume one package schema or collection property,
+      count business records, scan content/file names with broad substring
+      checks such as `includes("key")` or `/key/i`, or block submission on
+      any domain rule. Pass the complete read content unchanged in the
+      `attachments` array. The generated backend/Orchestrator owns every
+      schema, quantity, provenance, blindness, and business-policy check
+      against the persisted attachment and must return any actionable
+      validation failure through the normal streamed mission result. This
+      ensures every valid user upload reaches the real provisioned backend
+      process instead of being stranded in guessed browser logic.
 
       REQUIRED VS OPTIONAL - never leave the user guessing which fields
       they must fill in: append a literal " *" to the `<label>`/`<legend>`
@@ -1287,7 +1317,7 @@ prompts:
       - component_name
       - user_message
       - assigned_requirements
-    version: "1.22.0"
+    version: "1.23.0"
 
   - id: build-component-regeneration-v1
     name: Build Generation - Regenerate Single Component

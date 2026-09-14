@@ -79,16 +79,26 @@ def has_pytest_discoverable_tests(modules: list[str]) -> bool:
     )
 
 
-def validate_real_action_tests(modules: list[str]) -> tuple[str, ...]:
-    """Returns fail-closed reasons when live acceptance tests use doubles or no live URL."""
+def validate_real_action_tests(
+    modules: list[str], *, require_attachment_handoff: bool = False
+) -> tuple[str, ...]:
+    """Returns fail-closed reasons when tests do not exercise the mission backend."""
 
     combined = "\n".join(modules)
     reasons: list[str] = []
     if _TEST_DOUBLE_PATTERN.search(combined):
         reasons.append("Acceptance tests contain a mock, patch, or interception library.")
-    if not any(name in combined for name in _RUNTIME_URL_NAMES):
+    if "MISSION_BACKEND_URL" not in combined:
         reasons.append(
-            "Acceptance tests do not reference MISSION_BACKEND_URL or MISSION_FRONTEND_URL."
+            "Acceptance tests do not reference MISSION_BACKEND_URL."
+        )
+    has_invoke_path = bool(re.search(r"['\"]/invoke(?:/stream)?['\"]", combined))
+    has_http_post = "httpx" in combined and bool(re.search(r"\.post\s*\(", combined))
+    if not has_invoke_path or not has_http_post:
+        reasons.append("Acceptance tests do not invoke the deployed mission backend.")
+    if require_attachment_handoff and "attachments" not in combined:
+        reasons.append(
+            "Acceptance tests do not send uploaded attachments to the deployed mission backend."
         )
     return tuple(reasons)
 

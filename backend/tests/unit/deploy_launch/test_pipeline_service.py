@@ -528,10 +528,15 @@ async def test_prototype_pipeline_uses_anonymous_apim_without_entra(tmp_path: Pa
     test_output = """
 ```python
 # REQ-001
+import httpx
 import os
 
 def test_req_001_uses_public_gateway():
-    assert os.environ["MISSION_BACKEND_URL"].startswith("https://")
+    invoke_url = os.environ["MISSION_BACKEND_URL"] + "/invoke"
+    def invoke():
+        return httpx.post(invoke_url, json={"message": "{}", "attachments": []})
+    assert invoke_url.startswith("https://")
+    assert callable(invoke)
     assert "MISSION_ACCESS_TOKEN" not in os.environ
     assert "MISSION_ACCEPTANCE_TEST_KEY" not in os.environ
 ```
@@ -595,10 +600,15 @@ async def test_passing_fidelity_launches_without_running_security_scan(tmp_path:
     test_output = '''
 ```python
 # REQ-001
+import httpx
 import os
 
 def test_req_001_uses_live_prototype():
-    assert os.environ["MISSION_BACKEND_URL"].startswith("https://")
+    invoke_url = os.environ["MISSION_BACKEND_URL"] + "/invoke"
+    def invoke():
+        return httpx.post(invoke_url, json={"message": "{}", "attachments": []})
+    assert invoke_url.startswith("https://")
+    assert callable(invoke)
 ```
 '''
     security_scan_service = _BlockingSecurityScanService()
@@ -1295,11 +1305,16 @@ def test_req_001_processes_every_document():
     real_action_suite = """
 ```python
 # REQ-001
+import httpx
 import os
 
 def test_req_001_processes_every_document():
     backend_url = os.environ.get("MISSION_BACKEND_URL", "")
-    assert backend_url != ""
+    invoke_url = backend_url + "/invoke"
+    def invoke():
+        return httpx.post(invoke_url, json={"message": "{}", "attachments": []})
+    assert invoke_url.endswith("/invoke")
+    assert callable(invoke)
 ```
 """
     orchestrator = _RepairingFakeOrchestrator(
@@ -1692,6 +1707,7 @@ def test_frontend_main_tsx_renders_a_gamified_multi_input_mission_queue():
     assert "type QueueItem = {" in _FRONTEND_MAIN_TSX
     assert 'type QueueItemStatus = "queued" | "running" | "complete" | "error"' in _FRONTEND_MAIN_TSX
     assert "async function runItem(item: QueueItem)" in _FRONTEND_MAIN_TSX
+    assert "body: JSON.stringify({ message: item.message, attachments: item.attachments })" in _FRONTEND_MAIN_TSX
     assert "function addMessageToQueue()" in _FRONTEND_MAIN_TSX
     assert "async function addFilesToQueue(files: FileList | File[])" in _FRONTEND_MAIN_TSX
     assert "onDrop={handleDrop}" in _FRONTEND_MAIN_TSX
