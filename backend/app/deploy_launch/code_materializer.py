@@ -78,6 +78,11 @@ _DIRECT_INVOKE_PATTERN: Final = re.compile(
     r"\bfetch\s*\([^)]*['\"`]/invoke(?:/stream)?['\"`]", re.DOTALL
 )
 _INLINE_STYLE_PATTERN: Final = re.compile(r"\bstyle\s*=", re.IGNORECASE)
+_INPUT_TAG_PATTERN: Final = re.compile(r"<input\b[^>]*>", re.IGNORECASE | re.DOTALL)
+_HIDDEN_FILE_INPUT_STYLE_PATTERN: Final = re.compile(
+    r"\bstyle\s*=\s*\{\{\s*display\s*:\s*(?P<quote>['\"])none(?P=quote)\s*\}\}",
+    re.IGNORECASE,
+)
 _ON_SUBMIT_INLINE_STRINGIFY_PATTERN: Final = re.compile(
     r"\bonSubmit\s*\(\s*JSON\.stringify\(\s*(\{)"
 )
@@ -233,6 +238,19 @@ def _has_nested_object_value(object_literal: str) -> bool:
     return False
 
 
+def _has_disallowed_inline_style(ui_component: str) -> bool:
+    """Allows only the non-visual hidden native control behind a file dropzone."""
+
+    def remove_allowed_hidden_style(match: re.Match[str]) -> str:
+        input_tag = match.group(0)
+        if not _FILE_INPUT_PATTERN.search(input_tag):
+            return input_tag
+        return _HIDDEN_FILE_INPUT_STYLE_PATTERN.sub("", input_tag)
+
+    normalized = _INPUT_TAG_PATTERN.sub(remove_allowed_hidden_style, ui_component)
+    return _INLINE_STYLE_PATTERN.search(normalized) is not None
+
+
 @dataclass(frozen=True)
 class MaterializedBuild:
     """The Build Agent's generated code, parsed into real, named files."""
@@ -364,7 +382,7 @@ def materialize_build(output_text: str) -> MaterializedBuild:
             "the deterministic Mission Queue owns backend transport and streaming."
         )
 
-    if ui_component is not None and _INLINE_STYLE_PATTERN.search(ui_component):
+    if ui_component is not None and _has_disallowed_inline_style(ui_component):
         raise MaterializedCodeError(
             "The generated mission UI contains an inline style prop. Mission Input must "
             "use semantic HTML and the deterministic shell's genie-form, genie-form-section, "

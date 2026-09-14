@@ -178,7 +178,7 @@ def test_materialize_build_allows_file_input_handed_to_provisioned_backend():
     };
     return <form className=\"genie-form\">
         <div className=\"genie-field genie-dropzone\">
-            <input type=\"file\" onChange={(event) => handleFile(event.target.files[0])} />
+            <input type=\"file\" style={{ display: \"none\" }} onChange={(event) => handleFile(event.target.files[0])} />
         </div>
     </form>;""",
     )
@@ -187,6 +187,16 @@ def test_materialize_build_allows_file_input_handed_to_provisioned_backend():
 
     assert build.ui_component is not None
     assert "attachments" in build.ui_component
+
+
+def test_materialize_build_rejects_hidden_style_on_non_file_input():
+    output = _SAMPLE_OUTPUT.replace(
+        "return null;",
+        'return <input type="text" style={{ display: "none" }} />;',
+    )
+
+    with pytest.raises(MaterializedCodeError, match="semantic HTML"):
+        materialize_build(output)
 
 
 def test_materialize_build_rejects_interactive_ui_without_shell_semantics():

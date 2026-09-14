@@ -144,6 +144,20 @@ def test_control_selection_rules_are_explicit_and_consistent_across_ui_prompts()
     assert 'type="checkbox">` (multi-select' in build_component_v1
 
 
+def test_ui_generation_prompts_require_a_literal_inline_style_preflight():
+    registry = PromptRegistry.load(_REPO_CONFIG_ROOT / "prompts")
+
+    for prompt_id in (
+        "build-generation-v1",
+        "build-generation-component-v1",
+        "build-component-regeneration-v1",
+    ):
+        template = " ".join(registry.get(prompt_id).template.split())
+        assert "search" in template.lower()
+        assert "literal token `style=`" in template
+        assert "any remaining `style=` token makes the build invalid" in template
+
+
 def test_ui_prompts_forbid_binding_file_uploads_to_one_exact_literal_name():
     """Regression guard for a live "blind MQM n30" mission whose generated
     Mission Input form required a file uploaded exactly named

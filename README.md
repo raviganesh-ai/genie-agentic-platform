@@ -694,6 +694,13 @@ The script uses Microsoft Entra authentication, creates only missing model deplo
 
 Every deployment to the shared Azure evaluation environment (backend Container App and/or frontend Static Web App) is recorded here: commit, what changed, and why. Update this section as part of the same commit that ships the fix/feature, before pushing to `master` triggers [Continuous deployment](#continuous-deployment-github-actions).
 
+### 2026-09-14 — Deploy & Launch generated-build repair recovery
+
+- **Root cause**: a DerekPoC Mission Input used `style={{ display: "none" }}` only on two native file controls behind its dropzones. The deterministic materializer treated those functional hidden inputs as visible inline presentation, rejected the otherwise valid 369 KB build, and sent it through expensive full-build regeneration. Repeated starts also created three concurrent pipeline runs for the same workflow.
+- **Validation correction**: generated UI validation now permits only the exact `display: "none"` style on an `<input type="file">`. Inline styles on every other element, and file-input styles containing any additional presentation property, remain fail-closed. The affected live build now materializes all nine specialist modules, its orchestrator, and its UI.
+- **Run safety and diagnostics**: starting Deploy & Launch for a workflow that already has an active run returns that run instead of creating a duplicate. Automatic build repair now appears as active regeneration with an attempt counter, and an exhausted repair budget reports the actual deterministic validator evidence instead of a generic retry message.
+- **Verification**: materializer tests cover the narrow hidden-file-input exception and continued rejection elsewhere; deployment-pipeline tests cover active-run idempotency, successful generated-build repair, and final validation evidence.
+
 ### 2026-09-14 — Retired Entra identities cleaned up
 
 - **External cleanup**: deleted the interactive-authentication Entra application registration retired when Genie and generated prototypes became anonymous. Deleted 18 retired JeyDemo and DerekPoC agents from the active Genie Foundry project; Foundry automatically removed their 18 generated `AgentIdentityBlueprint` application registrations and 36 service principals.

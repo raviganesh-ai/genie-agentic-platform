@@ -1613,6 +1613,20 @@ class DeploymentPipelineService:
 
         resolved_trace_id = trace_id or str(uuid4())
 
+        active_run = next(
+            (
+                run
+                for run in self._runs.values()
+                if run.session_id == session_id
+                and run.workflow_run_id == workflow_run_id
+                and run.owner_user_id == requesting_user_id
+                and run.status == "running"
+            ),
+            None,
+        )
+        if active_run is not None:
+            return active_run
+
         if not resume_from_step:
             active_count = sum(
                 1
@@ -1794,11 +1808,34 @@ class DeploymentPipelineService:
                 break
             except _GeneratedBuildRepairNeeded as exc:
                 if generated_build_repair_attempts >= self._fidelity_max_repair_attempts:
+                    step = self._step_result(pipeline_run, "provision-foundry-agents")
+                    step.error = (
+                        "Generated build validation failed after "
+                        f"{generated_build_repair_attempts} automatic repair attempt(s): "
+                        f"{exc.evidence}"
+                    )
                     pipeline_run.status = "failed"
                     pipeline_run.updated_at = datetime.now(UTC)
                     await self._persist_run(pipeline_run)
                     return
                 generated_build_repair_attempts += 1
+                step = self._step_result(pipeline_run, "provision-foundry-agents")
+                step.status = "running"
+                step.detail = (
+                    "Regenerating the generated build to satisfy deterministic validation "
+                    f"(attempt {generated_build_repair_attempts} of "
+                    f"{self._fidelity_max_repair_attempts})..."
+                )
+                step.error = None
+                step.completed_at = None
+                pipeline_run.updated_at = datetime.now(UTC)
+                await self._persist_run(pipeline_run)
+                await self._publish(
+                    pipeline_run,
+                    step_id="provision-foundry-agents",
+                    event_type="step_started",
+                    output_preview=step.detail,
+                )
                 try:
                     run = await self._repair_prototype(
                         run=run,
@@ -1808,7 +1845,9 @@ class DeploymentPipelineService:
                     )
                 except Exception as repair_exc:  # noqa: BLE001 - fail-closed repair boundary.
                     step = self._step_result(pipeline_run, "provision-foundry-agents")
+                    step.status = "failed"
                     step.error = f"Automatic generated-build repair failed: {repair_exc}"
+                    step.completed_at = datetime.now(UTC)
                     pipeline_run.status = "failed"
                     pipeline_run.updated_at = datetime.now(UTC)
                     await self._persist_run(pipeline_run)

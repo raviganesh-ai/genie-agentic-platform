@@ -1233,6 +1233,48 @@ async def test_pipeline_repairs_invalid_generated_ui_before_provisioning(
     assert run.steps[1].status == "completed"
 
 
+async def test_pipeline_exposes_validation_evidence_after_build_repair_is_exhausted(
+    tmp_path: Path,
+) -> None:
+    orchestrator = _RepairingFakeOrchestrator(
+        test_outputs=[_PASSING_TEST_OUTPUT],
+        requirements_output=_REQUIREMENTS_OUTPUT,
+    )
+    invalid_build = _BUILD_OUTPUT.replace(
+        "export function MissionApp() {",
+        'export function MissionApp() {\n    const invalid = file.name !== "fixed.json";',
+    )
+    orchestrator._run.step_results[-1] = _completed_step(
+        "build-solution", "genie-orchestrator", invalid_build
+    )
+    service = DeploymentPipelineService(
+        orchestrator=orchestrator,  # type: ignore[arg-type]
+        session_service=_FakeSessionService(),  # type: ignore[arg-type]
+        event_bus=WorkflowEventBus(),
+        access_policy_service=_access_policy_service(),
+        mission_identity_service=NullMissionIdentityService(),
+        mission_agent_provisioning_service=NullMissionAgentProvisioningService(),
+        backend_deployment_service=NullBackendDeploymentService(),
+        frontend_deployment_service=NullFrontendDeploymentService(),
+        test_execution_service=TestExecutionService(timeout_seconds=60),
+        security_scan_service=SecurityScanService(timeout_seconds=60),
+        build_workspace_root=tmp_path,
+        fidelity_max_repair_attempts=1,
+    )
+
+    run = await service.start(
+        session_id="session-1", requesting_user_id="user-1", workflow_run_id="run-1"
+    )
+    run = await service.wait_for_run(run.id)
+
+    assert run.status == "failed"
+    failed_step = next(step for step in run.steps if step.step_id == "provision-foundry-agents")
+    assert failed_step.status == "failed"
+    assert failed_step.error is not None
+    assert "after 1 automatic repair attempt(s)" in failed_step.error
+    assert "end-user-controlled filename" in failed_step.error
+
+
 async def test_pipeline_fails_closed_after_fidelity_repair_budget_is_exhausted(
     tmp_path: Path,
 ) -> None:
@@ -1432,6 +1474,22 @@ async def test_start_returns_a_visible_running_run_before_any_slow_lookup_happen
     assert service.list_runs_for_session("session-1") == [run]
 
     await service.wait_for_run(run.id)
+
+
+async def test_start_reuses_an_active_run_for_the_same_workflow(tmp_path: Path):
+    service = _build_service(test_output_text=_PASSING_TEST_OUTPUT, tmp_path=tmp_path)
+
+    first = await service.start(
+        session_id="session-1", requesting_user_id="user-1", workflow_run_id="run-1"
+    )
+    duplicate = await service.start(
+        session_id="session-1", requesting_user_id="user-1", workflow_run_id="run-1"
+    )
+
+    assert duplicate.id == first.id
+    assert service.list_runs_for_session("session-1") == [first]
+
+    await service.wait_for_run(first.id)
 
 
 async def test_start_fails_the_run_visibly_when_the_workflow_run_is_unknown(tmp_path: Path):

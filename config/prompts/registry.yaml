@@ -915,7 +915,9 @@ prompts:
       failure with both `role="alert"` and the `genie-error` class so it is
       announced and receives the shell's readable error panel. Keep helper
       text adjacent to its field and concise; must not encode meaning by color
-      alone.
+      alone. Before returning, search the complete TSX source for the literal
+      token `style=` and replace every occurrence with the appropriate shell
+      class; any remaining `style=` token makes the build invalid.
 
       COMPONENT CONTRACT - your default-exported component receives
       exactly one prop object: `{{ onSubmit: (message: string,
@@ -989,7 +991,7 @@ prompts:
       - excluded_agents
       - available_models
       - user_message
-    version: "5.22.0"
+    version: "5.23.0"
 
   - id: build-generation-component-v1
     name: Build Generation - Single Component
@@ -1278,7 +1280,9 @@ prompts:
       failure with both `role="alert"` and the `genie-error` class so it is
       announced and receives the shell's readable error panel. Keep helper
       text adjacent to its field and concise; must not encode meaning by color
-      alone.
+      alone. Before returning, search the complete TSX source for the literal
+      token `style=` and replace every occurrence with the appropriate shell
+      class; any remaining `style=` token makes the build invalid.
       Return one fenced ```tsx code block, first line `// agent: ui`, then
       a "## Multi-Agent Workflow" section listing ONLY the agents actually
       generated - same count and names as above.
@@ -1341,7 +1345,7 @@ prompts:
       - component_name
       - user_message
       - assigned_requirements
-    version: "1.25.0"
+    version: "1.26.0"
 
   - id: build-component-regeneration-v1
     name: Build Generation - Regenerate Single Component
@@ -1387,7 +1391,10 @@ prompts:
       `genie-btn-primary` as appropriate. Every field-level or form-level validation failure must use both
       `role="alert"` and the `genie-error` class; helper text must remain
       concise, adjacent to its field, and must not encode meaning by color
-      alone.
+      alone. Before returning a revised UI component, search its complete TSX
+      source for the literal token `style=` and replace every occurrence with
+      the appropriate shell class; any remaining `style=` token makes the
+      build invalid.
 
       Security rules you MUST follow: never hardcode any URL, hostname,
       port, API key, token, secret, or credential anywhere - read every
@@ -1406,7 +1413,7 @@ prompts:
       - component_name
       - existing_code
       - instructions
-    version: "1.3.0"
+    version: "1.4.0"
 
   - id: orchestrator-mission-v1
     name: Orchestrator Mission
