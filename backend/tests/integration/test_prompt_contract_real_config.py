@@ -177,6 +177,25 @@ def test_ui_prompts_send_uploaded_content_to_the_provisioned_backend_for_validat
         assert "reaches the real provisioned backend process" in template
 
 
+def test_ui_prompts_inherit_shell_contrast_and_render_semantic_errors():
+    registry = PromptRegistry.load(_REPO_CONFIG_ROOT / "prompts")
+
+    for prompt_id in (
+        "build-generation-v1",
+        "build-generation-component-v1",
+        "build-component-regeneration-v1",
+    ):
+        template = " ".join(registry.get(prompt_id).template.split())
+        assert "light, high-contrast shell surface" in template
+        assert (
+            "Never set inline `color` or `backgroundColor`" in template
+            or "Never add inline `color` or `backgroundColor`" in template
+        )
+        assert '`role="alert"`' in template
+        assert "`genie-error` class" in template
+        assert "must not encode meaning by color alone" in template
+
+
 def test_orchestrator_prompts_require_live_on_progress_hand_off_narration():
     """Regression guard: a live "blind MQM" mission's Agent Pipeline panel
     never visibly animated - the generated Orchestrator's `run()` awaited

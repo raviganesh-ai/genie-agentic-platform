@@ -196,6 +196,16 @@ def test_materialize_build_rejects_generated_ui_direct_backend_invoke():
         materialize_build(output)
 
 
+def test_materialize_build_rejects_inline_colors_that_override_shell_contrast():
+    output = _SAMPLE_OUTPUT.replace(
+        "return null;",
+        'return <p style={{ color: "#555" }}>Unreadable helper text</p>;',
+    )
+
+    with pytest.raises(MaterializedCodeError, match="contrast-safe palette"):
+        materialize_build(output)
+
+
 def test_materialize_build_rejects_nested_submit_payload():
     # Observed live: the UI grouped fields under "evaluation_config" while the
     # orchestrator's flat `config.get("primary_model_id")` read silently found

@@ -75,6 +75,10 @@ _ON_SUBMIT_ATTACHMENTS_PATTERN: Final = re.compile(
 _DIRECT_INVOKE_PATTERN: Final = re.compile(
     r"\bfetch\s*\([^)]*['\"`]/invoke(?:/stream)?['\"`]", re.DOTALL
 )
+_INLINE_COLOR_STYLE_PATTERN: Final = re.compile(
+    r"\bstyle\s*=\s*\{\s*\{[^}]*\b(?:color|backgroundColor)\s*:",
+    re.DOTALL,
+)
 _ON_SUBMIT_INLINE_STRINGIFY_PATTERN: Final = re.compile(
     r"\bonSubmit\s*\(\s*JSON\.stringify\(\s*(\{)"
 )
@@ -359,6 +363,13 @@ def materialize_build(output_text: str) -> MaterializedBuild:
             "The generated mission UI calls the backend invoke endpoint directly. "
             "Every generated component must hand off through its onSubmit prop so "
             "the deterministic Mission Queue owns backend transport and streaming."
+        )
+
+    if ui_component is not None and _INLINE_COLOR_STYLE_PATTERN.search(ui_component):
+        raise MaterializedCodeError(
+            "The generated mission UI hardcodes an inline foreground or background "
+            "color. Mission Input must inherit the deterministic shell's contrast-safe "
+            "palette; validation errors must use role=\"alert\" and genie-error."
         )
 
     if (

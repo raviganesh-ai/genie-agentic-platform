@@ -1049,6 +1049,17 @@ def test_generated_mission_input_does_not_nest_custom_zones_inside_a_shell_card(
     assert '<section className="genie-input-surface genie-fade-in">' in _FRONTEND_MAIN_TSX
     assert '<section className="genie-card genie-fade-in">' not in _FRONTEND_MAIN_TSX
     assert ".genie-input-surface {" in _FRONTEND_STYLES_CSS
+    assert "background-color: #f8fafc;" in _FRONTEND_STYLES_CSS
+    assert "border-top: 4px solid #185abd;" in _FRONTEND_STYLES_CSS
+    assert "color: #172033;" in _FRONTEND_STYLES_CSS
+    assert ".genie-input-surface form > section {" in _FRONTEND_STYLES_CSS
+    assert "background: transparent !important;" in _FRONTEND_STYLES_CSS
+    assert ".genie-input-surface fieldset label {" in _FRONTEND_STYLES_CSS
+    assert '.genie-input-surface [role="alert"] {' in _FRONTEND_STYLES_CSS
+    assert "background-color: #fff0f0;" in _FRONTEND_STYLES_CSS
+    assert '.genie-input-surface :where(input, textarea, select) {' in _FRONTEND_STYLES_CSS
+    assert "grid-template-columns: minmax(0, 1fr);" in _FRONTEND_STYLES_CSS
+    assert "overflow-wrap: anywhere;" in _FRONTEND_STYLES_CSS
 
 
 async def test_pipeline_accumulates_test_coverage_across_repair_retries(

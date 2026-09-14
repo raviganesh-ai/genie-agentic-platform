@@ -303,6 +303,214 @@ input:focus, textarea:focus, select:focus {
 
 .genie-input-surface {
     margin: 28px 0;
+    padding: clamp(20px, 3vw, 32px);
+    color: #172033;
+    background-color: #f8fafc;
+    border: 1px solid #b8c4d4;
+    border-top: 4px solid #185abd;
+    border-radius: 8px;
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.24);
+}
+
+.genie-input-surface :where(h1, h2, h3, label, legend) {
+    color: #172033 !important;
+}
+
+.genie-input-surface :where(p, small) {
+    color: #4a5870 !important;
+}
+
+.genie-input-surface > .genie-zone-title {
+    margin: 0;
+    padding: 0 0 14px;
+    border-bottom: 1px solid #d7dee8;
+    font-size: 14px;
+    letter-spacing: 0;
+}
+
+.genie-input-surface form {
+    display: grid;
+    gap: 0;
+    width: 100%;
+    max-width: none !important;
+    margin: 0;
+    padding: 20px 0 0 !important;
+    color: #172033;
+    background: transparent !important;
+    border: 0 !important;
+    border-radius: 0;
+    box-shadow: none !important;
+}
+
+.genie-input-surface form > section {
+    margin: 0 !important;
+    padding: 22px 0;
+    border-top: 1px solid #d7dee8;
+}
+
+.genie-input-surface form > div:first-child {
+    padding-bottom: 22px;
+}
+
+.genie-input-surface form > div:first-child h2 {
+    margin-bottom: 6px !important;
+    font-size: clamp(20px, 2.4vw, 26px) !important;
+    line-height: 1.2;
+}
+
+.genie-input-surface form > section > h3 {
+    margin-bottom: 6px !important;
+    font-size: 16px !important;
+    line-height: 1.3;
+}
+
+.genie-input-surface :where(label, legend) {
+    font-weight: 650;
+    line-height: 1.35;
+}
+
+.genie-input-surface :where(input, textarea, select) {
+    color: #172033;
+    background-color: #ffffff;
+    border-color: #94a3b8;
+}
+
+.genie-input-surface :where(input[type="text"], input[type="number"], input[type="date"], input[type="datetime-local"], textarea, select) {
+    min-height: 42px;
+}
+
+.genie-input-surface :where(input[type="range"]) {
+    width: 100%;
+    padding-inline: 0;
+}
+
+.genie-input-surface :where(input, textarea, select)::placeholder {
+    color: #64748b;
+    opacity: 1;
+}
+
+.genie-input-surface :where(input, textarea, select):focus {
+    border-color: #185abd;
+    outline: 3px solid rgba(24, 90, 189, 0.22);
+    outline-offset: 1px;
+}
+
+.genie-input-surface input[type="checkbox"],
+.genie-input-surface input[type="radio"] {
+    width: 17px;
+    height: 17px;
+    flex: 0 0 17px;
+    accent-color: #185abd;
+}
+
+.genie-input-surface .genie-card {
+    color: #172033;
+    background-color: transparent;
+    border-color: transparent;
+    box-shadow: none !important;
+}
+
+.genie-input-surface fieldset {
+    min-width: 0;
+}
+
+.genie-input-surface fieldset label {
+    min-height: 36px;
+    padding: 7px 9px;
+    background-color: #ffffff;
+    border: 1px solid #d7dee8;
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+.genie-input-surface fieldset label:hover {
+    background-color: #f0f6ff;
+    border-color: #91add2;
+}
+
+.genie-input-surface .genie-dropzone {
+    color: #263449;
+    background-color: #ffffff !important;
+    border: 1px dashed #64748b !important;
+    border-radius: 6px !important;
+    padding: 22px !important;
+}
+
+.genie-input-surface .genie-dropzone:hover,
+.genie-input-surface .genie-dropzone-active {
+    background-color: #edf5ff !important;
+    border-color: #185abd !important;
+}
+
+.genie-input-surface .genie-btn {
+    min-height: 42px;
+    padding: 10px 18px;
+    color: #ffffff;
+    background: #185abd;
+    border-color: #185abd;
+    border-radius: 4px;
+    box-shadow: 0 1px 2px rgba(18, 35, 58, 0.18);
+}
+
+.genie-input-surface .genie-btn:disabled {
+    color: #526176;
+    background: #d8e0ea;
+    border-color: #d8e0ea;
+    opacity: 1;
+    box-shadow: none;
+}
+
+.genie-input-surface .genie-error,
+.genie-input-surface [role="alert"] {
+    display: block;
+    padding: 10px 12px;
+    color: #8a1c1c;
+    background-color: #fff0f0;
+    border: 1px solid #e7a9a9;
+    border-left: 4px solid #b42318;
+    border-radius: 6px;
+    font-weight: 650;
+    line-height: 1.45;
+}
+
+@media (max-width: 640px) {
+    .genie-input-surface {
+        margin: 20px -8px;
+        padding: 20px 16px 24px;
+    }
+
+    .genie-input-surface form > section {
+        padding: 18px 0;
+    }
+
+    .genie-input-surface fieldset label {
+        min-height: 40px;
+    }
+
+    .genie-pipeline {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+        gap: 8px;
+        align-items: stretch;
+    }
+
+    .genie-pipeline-node {
+        width: 100%;
+        min-width: 0;
+        border-radius: 6px;
+        white-space: normal;
+        overflow-wrap: anywhere;
+    }
+
+    .genie-pipeline-node-active {
+        transform: none;
+    }
+
+    .genie-pipeline-connector {
+        width: 3px;
+        height: 12px;
+        margin: 0 0 0 18px;
+    }
 }
 
 .genie-btn {
@@ -318,7 +526,6 @@ input:focus, textarea:focus, select:focus {
 .genie-btn:hover:not(:disabled) {
   transform: translateY(-1px);
 }
-
 .genie-btn:disabled {
   cursor: not-allowed;
   opacity: 0.55;
