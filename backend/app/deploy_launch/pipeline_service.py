@@ -231,11 +231,6 @@ body,
 body {
     font-family: "Segoe UI Variable Text", "Segoe UI", sans-serif;
     background-color: var(--genie-canvas);
-  background-image:
-        linear-gradient(rgba(24, 90, 189, 0.035) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(24, 90, 189, 0.035) 1px, transparent 1px);
-    background-size: 24px 24px;
-  background-attachment: fixed;
     color: var(--genie-text);
 }
 
@@ -477,8 +472,7 @@ input:focus, textarea:focus, select:focus {
     padding: 10px 12px;
     color: var(--genie-danger);
     background-color: var(--genie-danger-soft);
-    border: 1px solid #e7a9a9;
-    border-left: 4px solid #b42318;
+    border: 1px solid #d77a7f;
     border-radius: 6px;
     font-weight: 650;
     line-height: 1.45;
@@ -600,7 +594,7 @@ input:focus, textarea:focus, select:focus {
 
 .genie-agent-activity {
     border-color: #91add2;
-    box-shadow: inset 4px 0 0 var(--genie-accent), var(--genie-shadow);
+    box-shadow: 0 0 0 2px rgba(24, 90, 189, 0.14), var(--genie-shadow);
 }
 
 @keyframes genie-indeterminate-rail {
@@ -633,8 +627,7 @@ input:focus, textarea:focus, select:focus {
     border-radius: 8px;
   margin-bottom: 24px;
     background: var(--genie-surface);
-    border: 1px solid var(--genie-border);
-    border-left: 4px solid var(--genie-accent);
+    border: 1px solid #91add2;
     box-shadow: var(--genie-shadow);
 }
 

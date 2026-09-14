@@ -1066,6 +1066,9 @@ def test_generated_mission_shell_uses_one_visual_system_without_nested_cards() -
     assert '.genie-input-surface :where(input, textarea, select) {' in _FRONTEND_STYLES_CSS
     assert "grid-template-columns: minmax(0, 1fr);" in _FRONTEND_STYLES_CSS
     assert "overflow-wrap: anywhere;" in _FRONTEND_STYLES_CSS
+    assert "background-image:" not in _FRONTEND_STYLES_CSS
+    assert "border-left: 4px" not in _FRONTEND_STYLES_CSS
+    assert "inset 4px" not in _FRONTEND_STYLES_CSS
     assert _FRONTEND_STYLES_CSS.index("@media (max-width: 640px)") > (
         _FRONTEND_STYLES_CSS.index(".genie-pipeline {")
     )
