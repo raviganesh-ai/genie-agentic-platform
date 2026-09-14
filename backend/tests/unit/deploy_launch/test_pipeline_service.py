@@ -374,6 +374,7 @@ def _build_service(
     test_output_text: str,
     tmp_path: Path,
     backend_deployment_service=None,
+    mission_agent_provisioning_service=None,
     requirements_output: str = _REQUIREMENTS_OUTPUT,
     run_repository=None,
     prototype_max_active_per_owner: int = 3,
@@ -387,7 +388,9 @@ def _build_service(
         event_bus=WorkflowEventBus(),
         access_policy_service=_access_policy_service(),
         mission_identity_service=NullMissionIdentityService(),
-        mission_agent_provisioning_service=NullMissionAgentProvisioningService(),
+        mission_agent_provisioning_service=(
+            mission_agent_provisioning_service or NullMissionAgentProvisioningService()
+        ),
         backend_deployment_service=backend_deployment_service or NullBackendDeploymentService(),
         frontend_deployment_service=NullFrontendDeploymentService(),
         test_execution_service=TestExecutionService(timeout_seconds=60),
@@ -1542,6 +1545,15 @@ class _FailOnceThenSucceedBackendDeploymentService:
         del mission_slug, frontend_origin
 
 
+class _CountingMissionAgentProvisioningService(NullMissionAgentProvisioningService):
+    def __init__(self) -> None:
+        self.provision_count = 0
+
+    async def provision(self, **kwargs):
+        self.provision_count += 1
+        return await super().provision(**kwargs)
+
+
 async def test_retry_from_a_failed_step_reuses_the_same_run_and_its_prior_artifacts(tmp_path: Path):
     """Regression test: retrying (resume_from_step set) a run that already
     failed partway through must continue the SAME pipeline_run - not mint a
@@ -1595,11 +1607,62 @@ async def test_retry_from_a_failed_step_reuses_the_same_run_and_its_prior_artifa
     assert [run.id for run in service.list_runs_for_session("session-1")] == [first_attempt.id]
 
 
+async def test_backend_retry_after_restart_restores_durable_run_artifacts(tmp_path: Path):
+    repository = InMemoryDeploymentRunRepository()
+    backend_deployment_service = _FailOnceThenSucceedBackendDeploymentService()
+    mission_agent_service = _CountingMissionAgentProvisioningService()
+    service = _build_service(
+        test_output_text=_PASSING_TEST_OUTPUT,
+        tmp_path=tmp_path,
+        backend_deployment_service=backend_deployment_service,
+        mission_agent_provisioning_service=mission_agent_service,
+        run_repository=repository,
+    )
+    first_attempt = await service.start(
+        session_id="session-1", requesting_user_id="user-1", workflow_run_id="run-1"
+    )
+    first_attempt = await service.wait_for_run(first_attempt.id)
+    provision_step = next(
+        step for step in first_attempt.steps if step.step_id == "provision-foundry-agents"
+    )
+    provision_completed_at = provision_step.completed_at
+
+    restarted = _build_service(
+        test_output_text=_PASSING_TEST_OUTPUT,
+        tmp_path=tmp_path,
+        backend_deployment_service=backend_deployment_service,
+        mission_agent_provisioning_service=mission_agent_service,
+        run_repository=repository,
+    )
+    await restarted.initialize()
+    retried = await restarted.start(
+        session_id="session-1",
+        requesting_user_id="user-1",
+        workflow_run_id="run-1",
+        resume_from_step="deploy-backend-service",
+    )
+
+    assert retried.id == first_attempt.id
+    retried = await restarted.wait_for_run(retried.id)
+
+    assert retried.status == "completed"
+    assert backend_deployment_service.call_count == 2
+    assert mission_agent_service.provision_count == 1
+    assert provision_step.completed_at == provision_completed_at
+    assert [run.id for run in restarted.list_runs_for_session("session-1")] == [first_attempt.id]
+    build_root = restarted.get_build_root(retried.id)
+    assert build_root is not None
+    agent_config_source = (build_root / "agent_config.py").read_text(encoding="utf-8")
+    orchestrator = next(
+        agent for agent in retried.provisioned_agents if agent.agent_name == "orchestrator"
+    )
+    assert orchestrator.foundry_agent_name in agent_config_source
+
+
 async def test_retry_with_no_matching_failed_run_restarts_from_the_first_step(tmp_path: Path):
     """Regression test: if a caller asks to resume a specific step (e.g. a
-    "Retry" click) but no matching in-memory failed run exists for that
-    session/workflow - most realistically because this process restarted
-    and lost every in-memory run/workspace/generated-test-output - honoring
+    "Retry" click) but no matching durable failed run exists for that
+    session/workflow, honoring
     that resume point against a brand-new pipeline_run would silently skip
     every earlier step without them ever having actually run on this new
     object (e.g. jumping straight to "execute-test-suite" with no generated

@@ -1642,17 +1642,9 @@ class DeploymentPipelineService:
                 )
 
         # A retry (resume_from_step set) MUST continue the SAME run - i.e. the
-        # same pipeline_run.id - not mint a fresh one. Every later step reads
-        # its prerequisite artifacts (materialized build, provisioned Foundry
-        # agent names) out of self._materialized_builds/self._agent_foundry_names,
-        # both keyed by pipeline_run.id, and the run's own already-completed
-        # step results (provisioned_agents, access_policy, backend_url) live on
-        # the DeploymentPipelineRun object itself. Previously this always built
-        # a brand-new DeploymentPipelineRun with a fresh uuid4 id here
-        # regardless of resume_from_step, which orphaned all of that prior
-        # work - so "retry from failed step" always failed again (a KeyError
-        # the moment execution reached any step depending on earlier output),
-        # even though the UI presented it as a normal retry action.
+        # same pipeline_run.id - not mint a fresh one. Durable step results retain
+        # the access policy and real provisioned-agent names; restart-volatile build
+        # artifacts are reconstructed in _restore_retry_artifacts before execution.
         existing_run: DeploymentPipelineRun | None = None
         if resume_from_step:
             candidates = [
@@ -1660,8 +1652,9 @@ class DeploymentPipelineService:
                 for run in self._runs.values()
                 if run.session_id == session_id
                 and run.workflow_run_id == workflow_run_id
+                and run.owner_user_id == requesting_user_id
                 and run.status == "failed"
-                and run.id in self._workspaces
+                and run.cleanup_status == "active"
             ]
             if candidates:
                 existing_run = max(candidates, key=lambda run: run.updated_at)
@@ -1670,16 +1663,19 @@ class DeploymentPipelineService:
             pipeline_run = existing_run
             pipeline_run.status = "running"
             pipeline_run.updated_at = datetime.now(UTC)
-            workspace = self._workspaces[pipeline_run.id]
+            workspace = self._workspaces.get(pipeline_run.id)
+            if workspace is None:
+                workspace = _RunWorkspace(
+                    backend_root=self._build_workspace_root / pipeline_run.id / "backend",
+                    frontend_root=self._build_workspace_root / pipeline_run.id / "frontend",
+                )
+                self._workspaces[pipeline_run.id] = workspace
             backend_root = workspace.backend_root
             frontend_root = workspace.frontend_root
         else:
             # A caller asked to resume a specific step (e.g. a "Retry" click
-            # against a previously failed run) but no matching in-memory
-            # failed run was found - most likely this process restarted and
-            # lost every in-memory run/workspace/generated-test-output since
-            # the original failure (see parked-stage-persistence memory:
-            # these are plain dicts, not durably persisted). Honoring
+            # against a previously failed run) but no matching durable failed
+            # run was found. Honoring
             # resume_from_step against a brand-new pipeline_run would skip
             # every earlier step without them ever having actually run on
             # this object - e.g. jumping straight to "execute-test-suite"
@@ -1729,6 +1725,42 @@ class DeploymentPipelineService:
         )
 
         return pipeline_run
+
+    async def _restore_retry_artifacts(
+        self,
+        *,
+        pipeline_run: DeploymentPipelineRun,
+        run: WorkflowRunResult,
+        trace_id: str,
+    ) -> None:
+        """Rebuilds restart-volatile artifacts from durable workflow and run data."""
+
+        build_output_text = await self._get_step_output(
+            run, self._build_step_id, trace_id=trace_id
+        )
+        materialized = materialize_build(build_output_text)
+        required_agent_names = list(materialized.agent_modules)
+        if materialized.orchestrator_module is not None:
+            required_agent_names.append("orchestrator")
+
+        foundry_names = {
+            agent.agent_name: agent.foundry_agent_name
+            for agent in pipeline_run.provisioned_agents
+            if agent.status == "completed" and agent.foundry_agent_name
+        }
+        missing_agent_names = [
+            agent_name for agent_name in required_agent_names if agent_name not in foundry_names
+        ]
+        if missing_agent_names:
+            raise DeploymentPipelineStepFailedError(
+                "Cannot resume after service restart because completed Foundry agent records "
+                f"are missing for: {', '.join(missing_agent_names)}."
+            )
+
+        self._materialized_builds[pipeline_run.id] = materialized
+        self._agent_foundry_names[pipeline_run.id] = {
+            agent_name: foundry_names[agent_name] for agent_name in required_agent_names
+        }
 
     def _fail_run(self, pipeline_run: DeploymentPipelineRun, *, error: str) -> None:
         """Resolves a run to ``failed`` for a failure that happened before any
@@ -1790,6 +1822,25 @@ class DeploymentPipelineService:
         pipeline_run.mission_slug = mission_slug
         pipeline_run.resource_group_name = prototype_resource_group_name(mission_slug)
         await self._persist_run(pipeline_run)
+
+        resume_index = (
+            DEPLOYMENT_STEP_ORDER.index(resume_from_step)
+            if resume_from_step in DEPLOYMENT_STEP_ORDER
+            else None
+        )
+        if resume_index is not None and resume_index >= DEPLOYMENT_STEP_ORDER.index(
+            "deploy-backend-service"
+        ):
+            try:
+                await self._restore_retry_artifacts(
+                    pipeline_run=pipeline_run,
+                    run=run,
+                    trace_id=trace_id,
+                )
+            except Exception as exc:  # noqa: BLE001 - fail-closed retry reconstruction boundary.
+                self._fail_run(pipeline_run, error=str(exc))
+                await self._persist_run(pipeline_run)
+                return
 
         next_step = resume_from_step
         generated_build_repair_attempts = 0
@@ -2353,7 +2404,9 @@ class DeploymentPipelineService:
         skipping already-completed prior steps. All steps after the resume point
         are reset to "not-started" status.
         """
-        orchestrator_foundry_name = "orchestrator"
+        orchestrator_foundry_name = self._agent_foundry_names.get(pipeline_run.id, {}).get(
+            "orchestrator", "orchestrator"
+        )
         test_output_text = self._generated_test_outputs.get(pipeline_run.id, "")
 
         # Determine the starting index based on resume_from_step
