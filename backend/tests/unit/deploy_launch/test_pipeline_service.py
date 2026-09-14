@@ -1043,23 +1043,29 @@ def test_generated_frontend_runs_pinned_impeccable_detector_before_build() -> No
     assert '"build": "npm run design:check && vite build"' in _FRONTEND_PACKAGE_JSON
 
 
-def test_generated_mission_input_does_not_nest_custom_zones_inside_a_shell_card() -> None:
+def test_generated_mission_shell_uses_one_visual_system_without_nested_cards() -> None:
     from app.deploy_launch.pipeline_service import _FRONTEND_MAIN_TSX, _FRONTEND_STYLES_CSS
 
     assert '<section className="genie-input-surface genie-fade-in">' in _FRONTEND_MAIN_TSX
     assert '<section className="genie-card genie-fade-in">' not in _FRONTEND_MAIN_TSX
+    assert "--genie-surface: #ffffff;" in _FRONTEND_STYLES_CSS
+    assert "--genie-text: #172033;" in _FRONTEND_STYLES_CSS
+    assert "--genie-accent: #185abd;" in _FRONTEND_STYLES_CSS
+    assert "color-scheme: light;" in _FRONTEND_STYLES_CSS
     assert ".genie-input-surface {" in _FRONTEND_STYLES_CSS
-    assert "background-color: #f8fafc;" in _FRONTEND_STYLES_CSS
-    assert "border-top: 4px solid #185abd;" in _FRONTEND_STYLES_CSS
-    assert "color: #172033;" in _FRONTEND_STYLES_CSS
+    assert "background-color: var(--genie-surface);" in _FRONTEND_STYLES_CSS
+    assert "box-shadow: var(--genie-shadow);" in _FRONTEND_STYLES_CSS
     assert ".genie-input-surface form > section {" in _FRONTEND_STYLES_CSS
     assert "background: transparent !important;" in _FRONTEND_STYLES_CSS
     assert ".genie-input-surface fieldset label {" in _FRONTEND_STYLES_CSS
     assert '.genie-input-surface [role="alert"] {' in _FRONTEND_STYLES_CSS
-    assert "background-color: #fff0f0;" in _FRONTEND_STYLES_CSS
+    assert "background-color: var(--genie-danger-soft);" in _FRONTEND_STYLES_CSS
     assert '.genie-input-surface :where(input, textarea, select) {' in _FRONTEND_STYLES_CSS
     assert "grid-template-columns: minmax(0, 1fr);" in _FRONTEND_STYLES_CSS
     assert "overflow-wrap: anywhere;" in _FRONTEND_STYLES_CSS
+    assert _FRONTEND_STYLES_CSS.index("@media (max-width: 640px)") > (
+        _FRONTEND_STYLES_CSS.index(".genie-pipeline {")
+    )
 
 
 async def test_pipeline_accumulates_test_coverage_across_repair_retries(

@@ -176,13 +176,29 @@ def test_materialize_build_allows_file_input_handed_to_provisioned_backend():
         const attachments = [{ name: file.name, content }];
         onSubmit(JSON.stringify({ filename: file.name }), attachments);
     };
-    return <input type=\"file\" onChange={(event) => handleFile(event.target.files[0])} />;""",
+    return <form className=\"genie-form\">
+        <div className=\"genie-field genie-dropzone\">
+            <input type=\"file\" onChange={(event) => handleFile(event.target.files[0])} />
+        </div>
+    </form>;""",
     )
 
     build = materialize_build(output)
 
     assert build.ui_component is not None
     assert "attachments" in build.ui_component
+
+
+def test_materialize_build_rejects_interactive_ui_without_shell_semantics():
+    output = _SAMPLE_OUTPUT.replace(
+        "export function MissionApp() {\n    return null;",
+        """export function MissionApp({ onSubmit }) {
+    const submit = () => onSubmit(JSON.stringify({ request: "review" }));
+    return <form><input aria-label="Request" /><button onClick={submit}>Run</button></form>;""",
+    )
+
+    with pytest.raises(MaterializedCodeError, match="genie-form, genie-field, genie-btn"):
+        materialize_build(output)
 
 
 def test_materialize_build_rejects_generated_ui_direct_backend_invoke():
@@ -196,13 +212,24 @@ def test_materialize_build_rejects_generated_ui_direct_backend_invoke():
         materialize_build(output)
 
 
-def test_materialize_build_rejects_inline_colors_that_override_shell_contrast():
+@pytest.mark.parametrize(
+    "inline_style",
+    [
+        'style={{ color: "#555" }}',
+        'style={{ padding: "1.5rem", maxWidth: 960 }}',
+        'style={customPresentation}',
+        'style="padding: 1.5rem"',
+    ],
+)
+def test_materialize_build_rejects_inline_styles_that_override_shell_system(
+    inline_style: str,
+):
     output = _SAMPLE_OUTPUT.replace(
         "return null;",
-        'return <p style={{ color: "#555" }}>Unreadable helper text</p>;',
+        f"return <form {inline_style}>Mission input</form>;",
     )
 
-    with pytest.raises(MaterializedCodeError, match="contrast-safe palette"):
+    with pytest.raises(MaterializedCodeError, match="semantic HTML"):
         materialize_build(output)
 
 

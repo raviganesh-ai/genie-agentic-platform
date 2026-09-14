@@ -64,6 +64,8 @@ _OVERBROAD_KEY_MATERIAL_PATTERN: Final = re.compile(
     re.IGNORECASE,
 )
 _INTERACTIVE_INPUT_PATTERN: Final = re.compile(r"<(?:input|select|textarea)\b", re.IGNORECASE)
+_FORM_PATTERN: Final = re.compile(r"<form\b", re.IGNORECASE)
+_BUTTON_PATTERN: Final = re.compile(r"<button\b", re.IGNORECASE)
 _FILE_INPUT_PATTERN: Final = re.compile(
     r"<input\b[^>]*\btype\s*=\s*['\"]file['\"]", re.IGNORECASE
 )
@@ -75,10 +77,7 @@ _ON_SUBMIT_ATTACHMENTS_PATTERN: Final = re.compile(
 _DIRECT_INVOKE_PATTERN: Final = re.compile(
     r"\bfetch\s*\([^)]*['\"`]/invoke(?:/stream)?['\"`]", re.DOTALL
 )
-_INLINE_COLOR_STYLE_PATTERN: Final = re.compile(
-    r"\bstyle\s*=\s*\{\s*\{[^}]*\b(?:color|backgroundColor)\s*:",
-    re.DOTALL,
-)
+_INLINE_STYLE_PATTERN: Final = re.compile(r"\bstyle\s*=", re.IGNORECASE)
 _ON_SUBMIT_INLINE_STRINGIFY_PATTERN: Final = re.compile(
     r"\bonSubmit\s*\(\s*JSON\.stringify\(\s*(\{)"
 )
@@ -365,11 +364,12 @@ def materialize_build(output_text: str) -> MaterializedBuild:
             "the deterministic Mission Queue owns backend transport and streaming."
         )
 
-    if ui_component is not None and _INLINE_COLOR_STYLE_PATTERN.search(ui_component):
+    if ui_component is not None and _INLINE_STYLE_PATTERN.search(ui_component):
         raise MaterializedCodeError(
-            "The generated mission UI hardcodes an inline foreground or background "
-            "color. Mission Input must inherit the deterministic shell's contrast-safe "
-            "palette; validation errors must use role=\"alert\" and genie-error."
+            "The generated mission UI contains an inline style prop. Mission Input must "
+            "use semantic HTML and the deterministic shell's genie-form, genie-form-section, "
+            "genie-form-grid, genie-field, genie-field-help, genie-actions, genie-dropzone, "
+            "and genie-btn classes so every prototype remains visually coherent."
         )
 
     if (
@@ -394,6 +394,27 @@ def materialize_build(output_text: str) -> MaterializedBuild:
                 "The generated mission UI renders a file input but does not pass an "
                 "attachments array to onSubmit. Uploaded content must reach the "
                 "provisioned backend unchanged."
+            )
+
+    if ui_component is not None:
+        missing_semantic_classes: list[str] = []
+        if _FORM_PATTERN.search(ui_component) and "genie-form" not in ui_component:
+            missing_semantic_classes.append("genie-form")
+        if (
+            _INTERACTIVE_INPUT_PATTERN.search(ui_component)
+            and "genie-field" not in ui_component
+        ):
+            missing_semantic_classes.append("genie-field")
+        if has_file_input and "genie-dropzone" not in ui_component:
+            missing_semantic_classes.append("genie-dropzone")
+        if _BUTTON_PATTERN.search(ui_component) and "genie-btn" not in ui_component:
+            missing_semantic_classes.append("genie-btn")
+        if missing_semantic_classes:
+            raise MaterializedCodeError(
+                "The generated mission UI does not use the deterministic shell's "
+                "semantic visual system. Add these required classes: "
+                + ", ".join(missing_semantic_classes)
+                + "."
             )
 
     if ui_component is not None and any(

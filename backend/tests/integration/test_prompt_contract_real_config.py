@@ -177,7 +177,7 @@ def test_ui_prompts_send_uploaded_content_to_the_provisioned_backend_for_validat
         assert "reaches the real provisioned backend process" in template
 
 
-def test_ui_prompts_inherit_shell_contrast_and_render_semantic_errors():
+def test_ui_prompts_use_one_shell_visual_system_and_semantic_errors():
     registry = PromptRegistry.load(_REPO_CONFIG_ROOT / "prompts")
 
     for prompt_id in (
@@ -186,11 +186,14 @@ def test_ui_prompts_inherit_shell_contrast_and_render_semantic_errors():
         "build-component-regeneration-v1",
     ):
         template = " ".join(registry.get(prompt_id).template.split())
-        assert "light, high-contrast shell surface" in template
-        assert (
-            "Never set inline `color` or `backgroundColor`" in template
-            or "Never add inline `color` or `backgroundColor`" in template
-        )
+        assert "deterministic shell owns the complete" in template
+        assert "Never use a React `style` prop" in template
+        assert "arbitrary presentation classes" in template
+        assert "nested cards" in template
+        assert "`genie-form-section`" in template
+        assert "`genie-form-grid`" in template
+        assert "`genie-field-help`" in template
+        assert "`genie-actions`" in template
         assert '`role="alert"`' in template
         assert "`genie-error` class" in template
         assert "must not encode meaning by color alone" in template
