@@ -482,8 +482,8 @@ export function DeployLaunchPage(): JSX.Element {
   const awaitingUpstreamStep = isPipelineActive && noOwnStepHasStartedYet && runAgeMs > 20_000;
 
   // What the user actually sees rendered (flow map + step-row list): while
-  // the mission is genuinely in motion, the single next not-yet-started step
-  // is optimistically shown as "In Progress" rather than "Not Started" -
+  // the mission is genuinely in motion but no server-owned step is running,
+  // the single next not-yet-started step is optimistically shown as "In Progress" rather than "Not Started" -
   // Genie really is working on it server-side the moment the prior step
   // completes (or from the very start for step 1), the backend's own status
   // field for it just hasn't flipped to "running" yet (that requires its
@@ -500,6 +500,7 @@ export function DeployLaunchPage(): JSX.Element {
   // working on something upstream" rather than "frozen on step 1".
   const displaySteps = useMemo(() => {
     if (!isPipelineActive) return steps;
+    if (steps.some((step) => step.status === "running")) return steps;
     const nextIndex = steps.findIndex(
       (step) => step.status !== "completed" && step.status !== "failed" && step.status !== "running",
     );

@@ -234,6 +234,48 @@ describe("DeployLaunchPage", () => {
     expect(screen.getByText(/Deploying…/i)).toBeInTheDocument();
   });
 
+  it("does not show backend deployment running while Foundry provisioning is running", async () => {
+    mockFetchSequence([
+      {
+        match: "/deploy-launch/",
+        response: [
+          buildPipelineRun({
+            status: "running",
+            steps: [
+              {
+                step_id: "generate-access-policy",
+                name: "Generate Access Policy & Least Access",
+                status: "completed",
+                detail: "Generated.",
+                error: null,
+                started_at: "2026-07-23T12:00:00Z",
+                completed_at: "2026-07-23T12:00:01Z",
+              },
+              {
+                step_id: "provision-foundry-agents",
+                name: "Deploy Agents to Foundry",
+                status: "running",
+                detail: "Regenerating the generated build to satisfy deterministic validation (attempt 1 of 3)...",
+                error: null,
+                started_at: "2026-07-23T12:00:01Z",
+                completed_at: null,
+              },
+            ],
+          }),
+        ],
+      },
+    ]);
+
+    renderWithProviders(<DeployLaunchPage />, {
+      sessionId: FIXTURE_SESSION_ID,
+      workflowRunId: FIXTURE_WORKFLOW_RUN_ID,
+    });
+
+    await waitFor(() => expect(screen.getByText(/attempt 1 of 3/i)).toBeInTheDocument());
+    expect(screen.getAllByText("In Progress…")).toHaveLength(1);
+    expect(screen.getAllByText("Not Started")).toHaveLength(6);
+  });
+
   it("shows the launch link and download action once the pipeline completes", async () => {
     mockFetchSequence([
       {
