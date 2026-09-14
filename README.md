@@ -319,7 +319,7 @@ e2e/                       Playwright end-to-end tests (scaffolding)
 ### Prerequisites
 
 - Python 3.12+
-- Node.js 20+ (LTS)
+- Node.js 24+ (LTS)
 - An Azure subscription with an Azure AI Foundry project (for anything beyond `LocalAgentGateway` dev mode)
 
 ### Backend
@@ -627,13 +627,15 @@ All three require `GENIE_AZURE_FOUNDRY_ENDPOINT` / `GENIE_AZURE_FOUNDRY_PROJECT_
 
 `.github/workflows/ci.yml` runs on every push/PR to `master` (the repo's actual default branch — double-check this before ever pointing it at `main`). On a real push to `master`, once the `backend` and `frontend` CI jobs pass, two deploy jobs run the exact same steps documented above, automatically:
 
+The workflow runs application builds on Node.js 24 and consumes actions only from the official GitHub `actions/*` and Microsoft `azure/*` repositories. Its Node 24-capable majors are `actions/checkout@v7`, `actions/setup-node@v7`, `actions/setup-python@v7`, and `azure/login@v3`; no third-party GitHub Action is part of the deployment trust boundary.
+
 - **`prepare-gateway`** — logs into Azure via OIDC federated credential (no client secret), idempotently provisions Standard v2 APIM and its delegated subnet/NSG, proves the gateway reaches the current backend, and emits the verified URL without changing Container Apps public access.
 - **`deploy-frontend`** — builds the frontend against that exact gateway job output and deploys it with `@azure/static-web-apps-cli` using a stored deployment token. It no longer trusts a separately maintained production API URL variable.
 - **`deploy-backend`** — waits for the frontend cutover, builds the commit-pinned FastAPI image, prepares private DNS, disables Container Apps public access, creates/verifies the private endpoint, proves APIM still works and direct ingress is denied, then runs `deploy_backend.ps1` so the image, retired-sidecar removal, CORS, probes, and ingress are updated atomically and verified through APIM.
 
 **One-time setup** (already performed for this environment — documented here so it can be reproduced on a new subscription/repo):
 
-1. A dedicated app registration (`genie-github-actions-deploy`, no client secret) holds a **federated identity credential** trusting this repo's GitHub Actions OIDC issuer, scoped to the `production` GitHub Environment — narrower than a branch-based subject, since it also requires the workflow job to declare `environment: production`. **Important**: the subject must match GitHub's *actual* token claim exactly, which is `repo:<org>/<repo>:environment:<env>` only if the org/repo have never been renamed — if either has been renamed, GitHub appends numeric IDs instead (`repo:<org>@<orgId>/<repo>@<repoId>:environment:<env>`). Get the exact value from a failed `azure/login@v2` run's log line `Federated token details: ... subject claim - ...` if login fails with `AADSTS700213`.
+1. A dedicated app registration (`genie-github-actions-deploy`, no client secret) holds a **federated identity credential** trusting this repo's GitHub Actions OIDC issuer, scoped to the `production` GitHub Environment — narrower than a branch-based subject, since it also requires the workflow job to declare `environment: production`. **Important**: the subject must match GitHub's *actual* token claim exactly, which is `repo:<org>/<repo>:environment:<env>` only if the org/repo have never been renamed — if either has been renamed, GitHub appends numeric IDs instead (`repo:<org>@<orgId>/<repo>@<repoId>:environment:<env>`). Get the exact value from a failed `azure/login@v3` run's log line `Federated token details: ... subject claim - ...` if login fails with `AADSTS700213`.
 2. That identity's service principal holds three least-privilege assignments (never a subscription- or resource-group-wide Owner/Contributor grant):
    - **Container Registry Tasks Contributor**, scoped to just the ACR resource — covers `az acr build`'s scheduleRun/upload actions without granting registry data-plane push/pull.
   - **Container Apps Contributor**, scoped to just the `genie-backend-corporate` Container App resource — covers the atomic ARM patch.
@@ -690,6 +692,12 @@ The script uses Microsoft Entra authentication, creates only missing model deplo
 ## Deploy log
 
 Every deployment to the shared Azure evaluation environment (backend Container App and/or frontend Static Web App) is recorded here: commit, what changed, and why. Update this section as part of the same commit that ships the fix/feature, before pushing to `master` triggers [Continuous deployment](#continuous-deployment-github-actions).
+
+### 2026-09-14 — Node.js 24 CI and official action provenance
+
+- **Supported runtime**: frontend validation and production builds now run on Node.js 24 LTS, matching the documented local-development prerequisite and removing the explicit Node.js 20 dependency.
+- **Action runtime upgrade**: checkout, Node setup, Python setup, and Azure OIDC login use their official Node 24-capable majors: `actions/checkout@v7`, `actions/setup-node@v7`, `actions/setup-python@v7`, and `azure/login@v3`.
+- **Approved sources only**: every reusable action in the workflow is maintained in the official GitHub `actions` organization or Microsoft `azure` organization. The deployment workflow introduces no third-party action repository.
 
 ### 2026-09-14 — Generated prototypes execute through their provisioned backend
 
