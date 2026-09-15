@@ -44,6 +44,9 @@ __all__ = [
     "DiscoveryStatus",
     "GapAnalysis",
     "PersonaProfile",
+    "PricingAlternate",
+    "PricingCommitment",
+    "PricingLineItem",
     "PricingQuery",
     "ProposedSolution",
 ]
@@ -114,6 +117,40 @@ class ArchitectureEdge(BaseModel):
     label: str | None = None
 
 
+PricingCommitment = Literal[
+    "reserved_1yr",
+    "reserved_3yr",
+    "savings_plan_1yr",
+    "savings_plan_3yr",
+]
+
+
+class PricingAlternate(BaseModel):
+    """A commitment-based rate for the same resolved meter, shown for comparison only.
+
+    The primary CostEstimate/PricingLineItem totals always remain pay-as-you-go;
+    alternates are informational and are only populated when the Azure Retail
+    Prices API actually returns matching Reservation or Savings Plan data for
+    that meter (never estimated or inferred).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    commitment: PricingCommitment
+    monthly_amount: float = Field(ge=0)
+
+
+class PricingLineItem(BaseModel):
+    """Per-service resolved cost breakdown for one pricing query."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    service_name: str = Field(min_length=1)
+    monthly_amount: float | None = Field(default=None, ge=0)
+    alternates: list[PricingAlternate] = Field(default_factory=list)
+    source_url: str | None = None
+
+
 class CostEstimate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -124,6 +161,7 @@ class CostEstimate(BaseModel):
     coverage: PricingCoverage
     assumptions: list[str] = Field(default_factory=list)
     source_urls: list[str] = Field(default_factory=list)
+    line_items: list[PricingLineItem] = Field(default_factory=list)
     retrieved_at: datetime | None = None
 
 

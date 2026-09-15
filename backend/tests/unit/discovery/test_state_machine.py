@@ -735,6 +735,93 @@ async def test_pricing_recovers_from_architecture_label_and_global_region() -> N
     assert estimate.annual_amount == 3090
 
 
+async def test_pricing_line_items_expose_commitment_alternates() -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        filter_clause = request.url.params["$filter"]
+        assert request.url.params["api-version"] == "2023-01-01-preview"
+        if "priceType eq 'Reservation'" in filter_clause:
+            assert "armSkuName eq 'Standard_D2s_v5'" in filter_clause
+            return httpx.Response(
+                200,
+                json={
+                    "Items": [
+                        {"reservationTerm": "1 Year", "retailPrice": 876.0},
+                        {"reservationTerm": "3 Years", "retailPrice": 2190.0},
+                    ]
+                },
+            )
+        return httpx.Response(
+            200,
+            json={
+                "Items": [
+                    {
+                        "serviceName": "Virtual Machines",
+                        "armRegionName": "eastus",
+                        "armSkuName": "Standard_D2s_v5",
+                        "unitOfMeasure": "1 Hour",
+                        "retailPrice": 0.096,
+                        "savingsPlan": [
+                            {"term": "1 Year", "unitPrice": 0.0672, "retailPrice": 0.0672},
+                            {"term": "3 Years", "unitPrice": 0.0528, "retailPrice": 0.0528},
+                        ],
+                    }
+                ]
+            },
+        )
+
+    service = AzureRetailPricingService(
+        endpoint="https://prices.azure.com/api/retail/prices",
+        transport=httpx.MockTransport(handler),
+    )
+    estimate = await service.estimate(
+        [
+            PricingQuery(
+                service_name="Virtual Machines",
+                arm_region_name="eastus",
+                sku_name="Standard_D2s_v5",
+                units_per_month=730,
+                assumption="One D2s_v5 VM running continuously",
+            )
+        ]
+    )
+
+    assert estimate.coverage == "complete"
+    assert estimate.monthly_amount == pytest.approx(70.08)
+    assert len(estimate.line_items) == 1
+    line_item = estimate.line_items[0]
+    assert line_item.service_name == "Virtual Machines"
+    assert line_item.monthly_amount == pytest.approx(70.08)
+    alternates = {alt.commitment: alt.monthly_amount for alt in line_item.alternates}
+    assert alternates["savings_plan_1yr"] == pytest.approx(49.06)
+    assert alternates["savings_plan_3yr"] == pytest.approx(38.54)
+    assert alternates["reserved_1yr"] == pytest.approx(73.0)
+    assert alternates["reserved_3yr"] == pytest.approx(60.83)
+
+
+async def test_pricing_line_items_have_no_alternates_when_ineligible() -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"Items": [{"retailPrice": 2.5}]})
+
+    service = AzureRetailPricingService(
+        endpoint="https://prices.azure.com/api/retail/prices",
+        transport=httpx.MockTransport(handler),
+    )
+    estimate = await service.estimate(
+        [
+            PricingQuery(
+                service_name="Azure AI Search",
+                arm_region_name="eastus",
+                sku_name="Basic",
+                units_per_month=10,
+                assumption="Ten billable units per month",
+            )
+        ]
+    )
+
+    assert len(estimate.line_items) == 1
+    assert estimate.line_items[0].alternates == []
+
+
 async def test_state_cannot_advance_out_of_order() -> None:
     service, _, session_id = await _create_service()
 

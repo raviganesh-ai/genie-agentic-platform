@@ -85,6 +85,24 @@ export interface PricingQuery {
   assumption: string;
 }
 
+export type PricingCommitment =
+  | "reserved_1yr"
+  | "reserved_3yr"
+  | "savings_plan_1yr"
+  | "savings_plan_3yr";
+
+export interface PricingAlternate {
+  commitment: PricingCommitment;
+  monthly_amount: number;
+}
+
+export interface PricingLineItem {
+  service_name: string;
+  monthly_amount: number | null;
+  alternates: PricingAlternate[];
+  source_url: string | null;
+}
+
 export interface CostEstimate {
   currency_code: string;
   region: string;
@@ -93,6 +111,7 @@ export interface CostEstimate {
   coverage: "complete" | "partial" | "unavailable";
   assumptions: string[];
   source_urls: string[];
+  line_items: PricingLineItem[];
   retrieved_at: string | null;
 }
 

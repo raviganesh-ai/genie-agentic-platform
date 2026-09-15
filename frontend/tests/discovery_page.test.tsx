@@ -566,6 +566,23 @@ describe("DiscoveryPage", () => {
           coverage: "partial",
           assumptions: ["100,000 API calls per month", "One billable model deployment"],
           source_urls: ["https://prices.azure.com/api/retail/prices"],
+          line_items: [
+            {
+              service_name: "Azure API Management",
+              monthly_amount: 100,
+              alternates: [
+                { commitment: "reserved_1yr", monthly_amount: 84 },
+                { commitment: "reserved_3yr", monthly_amount: 63 },
+              ],
+              source_url: "https://prices.azure.com/api/retail/prices",
+            },
+            {
+              service_name: "Azure AI Foundry",
+              monthly_amount: 25,
+              alternates: [],
+              source_url: "https://prices.azure.com/api/retail/prices",
+            },
+          ],
           retrieved_at: "2026-09-12T10:00:00Z",
         },
       }],
@@ -589,15 +606,14 @@ describe("DiscoveryPage", () => {
     })).toBeInTheDocument();
     expect(screen.getByText("3 Azure services")).toBeInTheDocument();
     expect(screen.getByText("Azure Static Web Apps")).toBeInTheDocument();
-    expect(screen.getAllByText("Azure API Management")).toHaveLength(2);
-    expect(screen.getAllByText("Azure AI Foundry")).toHaveLength(2);
-    const cost = screen.getByRole("region", { name: "Estimated Azure solution cost" });
-    expect(within(cost).getByText("$125.00")).toBeInTheDocument();
-    expect(within(cost).getByText("$1,500.00")).toBeInTheDocument();
-    expect(within(cost).getByText("Based on 2 pricing inputs from this architecture in eastus.")).toBeInTheDocument();
-    expect(within(cost).getByText("Consumption · 100,000 billable units/month")).toBeInTheDocument();
-    expect(within(cost).getByText("100,000 API calls per month")).toBeInTheDocument();
-    expect(within(cost).getByText(/implementation, support, taxes, and negotiated discounts are excluded/)).toBeInTheDocument();
+    expect(screen.getAllByText("Azure API Management")).toHaveLength(1);
+    expect(screen.getAllByText("Azure AI Foundry")).toHaveLength(1);
+    expect(screen.queryByText("Estimated Azure solution cost")).not.toBeInTheDocument();
+    expect(screen.getByText(/Discovery provides the solution direction, but the final Azure estimate/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open Azure Pricing Calculator" })).toHaveAttribute(
+      "href",
+      "https://azure.microsoft.com/en-us/pricing/calculator/",
+    );
     expect(screen.queryByText("Estimated Azure run rate")).not.toBeInTheDocument();
 
     await userEvent.setup().click(screen.getByRole("button", { name: "Refresh Azure pricing" }));

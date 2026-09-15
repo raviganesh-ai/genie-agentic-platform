@@ -411,6 +411,13 @@
   gap: 2px;
 }
 
+.discovery-cost-services > div > .discovery-cost-service-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
 .discovery-cost-sources {
   display: flex;
   flex-wrap: wrap;

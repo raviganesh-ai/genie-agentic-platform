@@ -7,9 +7,28 @@ from typing import Any, Protocol
 
 import httpx
 
-from app.discovery.models import CostEstimate, PricingQuery
+from app.discovery.models import (
+    CostEstimate,
+    PricingAlternate,
+    PricingCommitment,
+    PricingLineItem,
+    PricingQuery,
+)
 
 __all__ = ["AzureRetailPricingService", "PricingService"]
+
+# 2023-01-01-preview is required to receive the embedded ``savingsPlan`` array
+# on eligible Consumption items. It is additive/backwards compatible with the
+# GA response shape for every other field this service reads.
+_API_VERSION = "2023-01-01-preview"
+_RESERVATION_TERMS: dict[str, PricingCommitment] = {
+    "1 Year": "reserved_1yr",
+    "3 Years": "reserved_3yr",
+}
+_SAVINGS_PLAN_TERMS: dict[str, PricingCommitment] = {
+    "1 Year": "savings_plan_1yr",
+    "3 Years": "savings_plan_3yr",
+}
 
 
 class PricingService(Protocol):
@@ -42,6 +61,7 @@ class AzureRetailPricingService:
         resolved_count = 0
         assumptions: list[str] = []
         source_urls: list[str] = []
+        line_items: list[PricingLineItem] = []
         async with httpx.AsyncClient(
             timeout=self._timeout_seconds,
             transport=self._transport,
@@ -49,9 +69,20 @@ class AzureRetailPricingService:
             for query in queries:
                 assumptions.append(query.assumption)
                 try:
-                    query_amount, source_url = await self._lookup(client, query)
+                    query_amount, source_url, alternates = await self._lookup(client, query)
                 except httpx.HTTPError:
+                    line_items.append(PricingLineItem(service_name=query.service_name))
                     continue
+                line_items.append(
+                    PricingLineItem(
+                        service_name=query.service_name,
+                        monthly_amount=(
+                            round(query_amount, 2) if query_amount is not None else None
+                        ),
+                        alternates=alternates,
+                        source_url=source_url,
+                    )
+                )
                 if query_amount is None:
                     continue
                 resolved_count += 1
@@ -73,6 +104,7 @@ class AzureRetailPricingService:
             coverage=coverage,
             assumptions=assumptions,
             source_urls=list(dict.fromkeys(source_urls)),
+            line_items=line_items,
             retrieved_at=datetime.now(UTC),
         )
 
@@ -80,7 +112,7 @@ class AzureRetailPricingService:
         self,
         client: httpx.AsyncClient,
         query: PricingQuery,
-    ) -> tuple[float | None, str]:
+    ) -> tuple[float | None, str, list[PricingAlternate]]:
         retail_service_name = query.retail_service_name or query.service_name
         clauses = [
             f"serviceName eq '{_escape_filter(retail_service_name)}'",
@@ -106,10 +138,42 @@ class AzureRetailPricingService:
             response, items = await self._request_items(client, broad_clauses)
         item = _best_price_item(items, query)
         if item is None:
-            return None, str(response.url)
-        return _calculate_tiered_amount(items, item, query.units_per_month), str(
-            response.url
-        )
+            return None, str(response.url), []
+        amount = _calculate_tiered_amount(items, item, query.units_per_month)
+        alternates = _savings_plan_alternates(item, query.units_per_month)
+        alternates.extend(await self._lookup_reservation_alternates(client, item, query))
+        return amount, str(response.url), alternates
+
+    async def _lookup_reservation_alternates(
+        self,
+        client: httpx.AsyncClient,
+        item: dict[str, Any],
+        query: PricingQuery,
+    ) -> list[PricingAlternate]:
+        arm_sku_name = item.get("armSkuName")
+        if not isinstance(arm_sku_name, str) or not arm_sku_name:
+            return []
+        clauses = [
+            f"armRegionName eq '{_escape_filter(query.arm_region_name)}'",
+            f"armSkuName eq '{_escape_filter(arm_sku_name)}'",
+            "priceType eq 'Reservation'",
+        ]
+        try:
+            _, reservation_items = await self._request_items(client, clauses)
+        except httpx.HTTPError:
+            return []
+        alternates: list[PricingAlternate] = []
+        for reservation_item in reservation_items:
+            commitment = _RESERVATION_TERMS.get(reservation_item.get("reservationTerm", ""))
+            price = reservation_item.get("retailPrice")
+            if commitment is None or not isinstance(price, (int, float)):
+                continue
+            term_years = 3 if commitment == "reserved_3yr" else 1
+            monthly_amount = round(float(price) / (term_years * 12), 2)
+            alternates.append(
+                PricingAlternate(commitment=commitment, monthly_amount=monthly_amount)
+            )
+        return alternates
 
     async def _request_items(
         self,
@@ -118,7 +182,7 @@ class AzureRetailPricingService:
     ) -> tuple[httpx.Response, list[dict[str, Any]]]:
         response = await client.get(
             self._endpoint,
-            params={"$filter": " and ".join(clauses)},
+            params={"$filter": " and ".join(clauses), "api-version": _API_VERSION},
         )
         response.raise_for_status()
         payload: dict[str, Any] = response.json()
@@ -259,3 +323,35 @@ def _calculate_tiered_amount(
         )
         amount += (min(units, upper_bound) - lower_bound) * float(tier["retailPrice"])
     return amount
+
+
+def _savings_plan_alternates(
+    item: dict[str, Any],
+    units: float,
+) -> list[PricingAlternate]:
+    """Reads the ``savingsPlan`` array embedded in a Consumption item, if present.
+
+    Only returned by the Azure Retail Prices API for eligible meters (mostly
+    compute SKUs) when queried with ``api-version=2023-01-01-preview``. Savings
+    Plan rates are flat (not tiered), so the monthly amount is a direct
+    unit-price multiplication using the same units_per_month as the on-demand
+    estimate for that meter.
+    """
+    savings_plan = item.get("savingsPlan")
+    if not isinstance(savings_plan, list):
+        return []
+    alternates: list[PricingAlternate] = []
+    for entry in savings_plan:
+        if not isinstance(entry, dict):
+            continue
+        commitment = _SAVINGS_PLAN_TERMS.get(entry.get("term", ""))
+        unit_price = entry.get("unitPrice")
+        if commitment is None or not isinstance(unit_price, (int, float)):
+            continue
+        alternates.append(
+            PricingAlternate(
+                commitment=commitment,
+                monthly_amount=round(float(unit_price) * units, 2),
+            )
+        )
+    return alternates

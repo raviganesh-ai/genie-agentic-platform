@@ -44,6 +44,7 @@ import type {
   ArchitectureNode,
   DiscoveryCase,
   DiscoveryQaMode,
+  PricingCommitment,
   ProposedSolution,
 } from "@/types/discovery";
 import type { UploadType } from "@/types/upload";
@@ -157,6 +158,13 @@ function ArchitectureDiagram({ solution }: { solution: ProposedSolution }): JSX.
   );
 }
 
+const commitmentLabels: Record<PricingCommitment, string> = {
+  reserved_1yr: "Reserved (1yr)",
+  reserved_3yr: "Reserved (3yr)",
+  savings_plan_1yr: "Savings Plan (1yr)",
+  savings_plan_3yr: "Savings Plan (3yr)",
+};
+
 function SolutionCard({
   solution,
   selected,
@@ -202,53 +210,25 @@ function SolutionCard({
           <ul>{(solution.evidence_references ?? []).map((item) => <li key={item}>{item}</li>)}</ul>
         </div>
       ) : null}
-      <section className="discovery-cost" aria-label="Estimated Azure solution cost">
+      <section className="discovery-cost" aria-label="Azure Pricing Calculator">
         <div className="discovery-cost-header">
           <div>
-            <Text weight="semibold">Estimated Azure solution cost</Text>
+            <Text weight="semibold">Price this architecture in Azure</Text>
             <Text size={200} className="discovery-muted">
-              Based on {solution.pricing_queries.length} pricing input{solution.pricing_queries.length === 1 ? "" : "s"} from this architecture in {cost.region}.
+              Discovery provides the solution direction, but the final Azure estimate should be modeled
+              in the official Azure Pricing Calculator for your exact services, region, and discounts.
             </Text>
           </div>
-          <Badge appearance="outline">{cost.coverage} retail pricing coverage</Badge>
         </div>
-        <div className="discovery-cost-totals">
-          <div>
-            <Text size={200} className="discovery-muted">Estimated monthly</Text>
-            <Text size={500} weight="bold">{formatCost(cost.monthly_amount)}</Text>
-          </div>
-          <div>
-            <Text size={200} className="discovery-muted">Estimated annual</Text>
-            <Text size={500} weight="bold">{formatCost(cost.annual_amount)}</Text>
-          </div>
-        </div>
-        {solution.pricing_queries.length > 0 ? (
-          <div className="discovery-cost-services">
-            {solution.pricing_queries.map((query, index) => (
-              <div key={`${query.service_name}-${query.sku_name ?? "consumption"}-${index}`}>
-                <div>
-                  <Text weight="semibold">{query.service_name}</Text>
-                  <Text size={200} className="discovery-muted">
-                    {[query.sku_name ?? "Consumption pricing", query.meter_name, query.unit_of_measure]
-                      .filter(Boolean)
-                      .join(" · ")} · {query.units_per_month.toLocaleString()} billable {query.units_per_month === 1 ? "unit" : "units"}/month
-                  </Text>
-                </div>
-                <Text size={200} className="discovery-muted">{query.assumption}</Text>
-              </div>
-            ))}
-          </div>
-        ) : null}
-        <Text size={200} className="discovery-muted">
-          Azure consumption estimate only; implementation, support, taxes, and negotiated discounts are excluded.
-        </Text>
-        <div className="discovery-cost-sources">
-          {cost.source_urls.map((url, index) => (
-            <a key={url} href={url} target="_blank" rel="noreferrer">
-              Azure Retail Prices source {cost.source_urls.length > 1 ? index + 1 : ""}
-            </a>
-          ))}
-        </div>
+        <Button
+          as="a"
+          href="https://azure.microsoft.com/en-us/pricing/calculator/"
+          target="_blank"
+          rel="noreferrer"
+          appearance="secondary"
+        >
+          Open Azure Pricing Calculator
+        </Button>
       </section>
       <Button appearance={selected ? "primary" : "secondary"} disabled={disabled} onClick={onSelect}>
         {selected ? "Selected" : "Select solution"}
