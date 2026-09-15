@@ -36,9 +36,8 @@ const PHASE_ICONS: Record<string, string> = {
   "deploy-backend-service": "⚙️",
   "sync-frontend-integration": "🔗",
   "deploy-frontend-app": "🌐",
-  "generate-test-suite": "🧪",
-  "execute-test-suite": "✅",
-  "run-security-scan": "🛡️",
+  "security-copilot-scan": "🛡️",
+  "finops-cost-report": "💰",
   "launch-mission": "🚀",
 };
 

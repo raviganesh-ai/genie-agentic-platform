@@ -8,16 +8,15 @@ equivalents when the required settings are not configured, mirroring
 result. This is explicitly NOT an LLM-driven workflow step: it is invoked
 only after the ``solution-discovery-workflow`` has already produced an
 approved architecture (``design-architecture``) and generated build
-(``build-solution``). Test generation happens here too, as this
-pipeline's own ``generate-test-suite`` step: it calls the Test Generation
-Agent directly (``AgentOrchestrator.execute_agent`` - the same
-outside-any-workflow-step execution path Workshop's per-component
-"Regenerate" action already uses) against the approved requirements and
-real deployed mission URLs. ``execute-test-suite`` exercises that deployed
-prototype before Launch; failures trigger a bounded fresh build regeneration,
-redeployment, and retest, and the pipeline fails closed if 100% requirement
-coverage and passing evidence are not achieved before the repair budget is
-exhausted.
+(``build-solution``). Two of its steps are informational-only and can
+never block Launch: ``security-copilot-scan`` (a Microsoft Security
+Copilot Automated Action run against the mission's own deployed
+prototype - see ``app.deploy_launch.security_copilot_gateway``) and
+``finops-cost-report`` (a real Azure Cost Management query scoped to the
+mission's own resource group - see
+``app.deploy_launch.finops_cost_service``); both honestly report
+``available=False`` when not configured or when the underlying request
+fails, rather than failing the pipeline.
 
 Genie's Deploy & Launch stage has exactly one gate: the human clicking
 Start. There is no separate approval-checkpoint request/decide dance -
@@ -26,10 +25,10 @@ Start. There is no separate approval-checkpoint request/decide dance -
 pipeline.
 
 ``start()`` returns as soon as the run is created (status
-``running``) - the nine steps themselves execute in a background asyncio
-task, since real Azure agent/backend/frontend deployments plus a real test
-run and security scan can legitimately take far longer than any single HTTP
-request should block for. Callers (the API layer, the frontend) always
+``running``) - the eight steps themselves execute in a background asyncio
+task, since real Azure agent/backend/frontend deployments can legitimately
+take far longer than any single HTTP request should block for. Callers
+(the API layer, the frontend) always
 observe progress by polling ``get_run``/``list_runs_for_session`` (or the
 live ``WorkflowEventBus`` stream) - never by relying on ``start()`` itself
 to have finished the work.
@@ -66,6 +65,11 @@ from app.deploy_launch.container_app_frontend_deployment_service import (
     ContainerAppFrontendDeploymentService,
     NullContainerAppFrontendDeploymentService,
 )
+from app.deploy_launch.finops_cost_service import (
+    FinOpsCostService,
+    NullFinOpsCostService,
+    create_finops_cost_service,
+)
 from app.deploy_launch.mission_agent_provisioning_service import (
     MissionAgentProvisioningService,
     NullMissionAgentProvisioningService,
@@ -84,12 +88,10 @@ from app.deploy_launch.models import (
     ProvisionedAgentStatus,
 )
 from app.deploy_launch.resource_naming import prototype_resource_group_name
-from app.deploy_launch.security_scan_service import SecurityScanService
-from app.deploy_launch.test_execution_service import (
-    TestExecutionService,
-    extract_test_modules,
-    has_pytest_discoverable_tests,
-    validate_real_action_tests,
+from app.deploy_launch.security_copilot_gateway import (
+    NullSecurityCopilotGateway,
+    SecurityCopilotGateway,
+    create_security_copilot_gateway,
 )
 from app.models.workflow_models import WorkflowRunResult, WorkflowStepInput
 from app.models.workflow_stream_models import WorkflowStreamEvent, WorkflowStreamEventType
@@ -98,11 +100,6 @@ from app.orchestration.workflow_event_bus import WorkflowEventBus
 from app.repositories.deployment_run_repository import (
     DeploymentRunRepository,
     InMemoryDeploymentRunRepository,
-)
-from app.services.requirement_fidelity_service import (
-    create_fidelity_report,
-    record_fidelity_execution,
-    record_test_coverage,
 )
 from app.services.session_service import SessionService
 from app.services.workshop_service import UnknownWorkflowRunError
@@ -1454,15 +1451,7 @@ _FRONTEND_ENV_D_TS = """interface Window {
 
 
 class DeploymentPipelineStepFailedError(RuntimeError):
-    """Raised when a pipeline step's own real result (test run, security scan) fails."""
-
-
-class _RequirementFidelityRepairNeeded(DeploymentPipelineStepFailedError):
-    """Carries observed acceptance-test evidence into one automatic rebuild."""
-
-    def __init__(self, *, summary: str, evidence: str) -> None:
-        super().__init__(summary)
-        self.evidence = evidence
+    """Raised when a pipeline step's own real result (deployment, provisioning) fails."""
 
 
 class _GeneratedBuildRepairNeeded(DeploymentPipelineStepFailedError):
@@ -1482,7 +1471,7 @@ class _RunWorkspace:
 
 
 class DeploymentPipelineService:
-    """Executes the fixed, nine-step Deploy & Launch pipeline for one mission."""
+    """Executes the fixed, eight-step Deploy & Launch pipeline for one mission."""
 
     def __init__(
         self,
@@ -1498,8 +1487,8 @@ class DeploymentPipelineService:
         frontend_deployment_service: (
             ContainerAppFrontendDeploymentService | NullContainerAppFrontendDeploymentService
         ),
-        test_execution_service: TestExecutionService,
-        security_scan_service: SecurityScanService,
+        security_copilot_gateway: SecurityCopilotGateway | NullSecurityCopilotGateway,
+        finops_cost_service: FinOpsCostService | NullFinOpsCostService,
         build_workspace_root: Path,
         run_repository: DeploymentRunRepository | None = None,
         prototype_default_ttl_days: int = 7,
@@ -1507,8 +1496,7 @@ class DeploymentPipelineService:
         architecture_step_id: str = "design-architecture",
         build_step_id: str = "build-solution",
         requirements_step_id: str = "analyze-requirements",
-        fidelity_max_repair_attempts: int = 3,
-        fidelity_min_coverage_percent: float = 90.0,
+        max_repair_attempts: int = 3,
         upstream_grace_check_attempts: int = 5,
         upstream_grace_check_interval_seconds: float = 2.0,
     ) -> None:
@@ -1520,8 +1508,8 @@ class DeploymentPipelineService:
         self._mission_agent_provisioning_service = mission_agent_provisioning_service
         self._backend_deployment_service = backend_deployment_service
         self._frontend_deployment_service = frontend_deployment_service
-        self._test_execution_service = test_execution_service
-        self._security_scan_service = security_scan_service
+        self._security_copilot_gateway = security_copilot_gateway
+        self._finops_cost_service = finops_cost_service
         self._run_repository = run_repository or InMemoryDeploymentRunRepository()
         self._prototype_default_ttl_days = prototype_default_ttl_days
         self._prototype_max_active_per_owner = prototype_max_active_per_owner
@@ -1529,15 +1517,13 @@ class DeploymentPipelineService:
         self._architecture_step_id = architecture_step_id
         self._build_step_id = build_step_id
         self._requirements_step_id = requirements_step_id
-        self._fidelity_max_repair_attempts = fidelity_max_repair_attempts
-        self._fidelity_min_coverage_percent = fidelity_min_coverage_percent
+        self._max_repair_attempts = max_repair_attempts
         self._upstream_grace_check_attempts = upstream_grace_check_attempts
         self._upstream_grace_check_interval_seconds = upstream_grace_check_interval_seconds
         self._runs: dict[str, DeploymentPipelineRun] = {}
         self._workspaces: dict[str, _RunWorkspace] = {}
         self._materialized_builds: dict[str, MaterializedBuild] = {}
         self._agent_foundry_names: dict[str, dict[str, str]] = {}
-        self._generated_test_outputs: dict[str, str] = {}
         self._background_tasks: dict[str, asyncio.Task[None]] = {}
 
     async def initialize(self) -> None:
@@ -1671,9 +1657,8 @@ class DeploymentPipelineService:
             # run was found. Honoring
             # resume_from_step against a brand-new pipeline_run would skip
             # every earlier step without them ever having actually run on
-            # this object - e.g. jumping straight to "execute-test-suite"
-            # with no generated tests produces a false "Running 0 generated
-            # test module(s)" / "fidelity report unavailable" failure
+            # this object - e.g. jumping straight to "launch-mission" with no
+            # deployed frontend URL produces a false "Launch blocked" failure
             # instead of an honest restart. Fail safe: always start this
             # fresh run from the very first step instead.
             resume_from_step = None
@@ -1912,7 +1897,7 @@ class DeploymentPipelineService:
                 )
                 break
             except _GeneratedBuildRepairNeeded as exc:
-                if generated_build_repair_attempts >= self._fidelity_max_repair_attempts:
+                if generated_build_repair_attempts >= self._max_repair_attempts:
                     step = self._step_result(pipeline_run, "provision-foundry-agents")
                     step.error = (
                         "Generated build validation failed after "
@@ -1929,7 +1914,7 @@ class DeploymentPipelineService:
                 step.detail = (
                     "Regenerating the generated build to satisfy deterministic validation "
                     f"(attempt {generated_build_repair_attempts} of "
-                    f"{self._fidelity_max_repair_attempts})..."
+                    f"{self._max_repair_attempts})..."
                 )
                 step.error = None
                 step.completed_at = None
@@ -1957,39 +1942,6 @@ class DeploymentPipelineService:
                     pipeline_run.updated_at = datetime.now(UTC)
                     await self._persist_run(pipeline_run)
                     return
-                next_step = "provision-foundry-agents"
-            except _RequirementFidelityRepairNeeded as exc:
-                report = pipeline_run.fidelity_report
-                if report is None:
-                    self._fail_run(
-                        pipeline_run, error="Requirement fidelity report is unavailable."
-                    )
-                    return
-                pipeline_run.fidelity_report = report.model_copy(
-                    update={
-                        "status": "repairing",
-                        "repair_attempts": report.repair_attempts + 1,
-                    }
-                )
-                try:
-                    run = await self._repair_prototype(
-                        run=run,
-                        pipeline_run=pipeline_run,
-                        trace_id=trace_id,
-                        evidence=exc.evidence,
-                    )
-                except Exception as repair_exc:  # noqa: BLE001 - fail-closed repair boundary.
-                    pipeline_run.fidelity_report = pipeline_run.fidelity_report.model_copy(
-                        update={
-                            "status": "failed",
-                            "gaps": [f"Automatic prototype repair failed: {repair_exc}"],
-                        }
-                    )
-                    pipeline_run.status = "failed"
-                    pipeline_run.updated_at = datetime.now(UTC)
-                    await self._persist_run(pipeline_run)
-                    return
-                pipeline_run.launch_url = None
                 next_step = "provision-foundry-agents"
             except Exception:  # noqa: BLE001 - top-level background-task boundary; every
                 # failure must resolve the run's status here since there is no
@@ -2068,7 +2020,6 @@ class DeploymentPipelineService:
             )
         self._materialized_builds.pop(pipeline_run.id, None)
         self._agent_foundry_names.pop(pipeline_run.id, None)
-        self._generated_test_outputs.pop(pipeline_run.id, None)
         self._workspaces.pop(pipeline_run.id, None)
         self._runs.pop(pipeline_run.id, None)
         await self._run_repository.delete(pipeline_run_id=pipeline_run.id)
@@ -2381,7 +2332,7 @@ class DeploymentPipelineService:
                 continue
             if step is None or not step.output_text:
                 raise UnknownWorkflowRunError(
-                    f"Automatic fidelity repair cannot restore required workflow output '{step_id}'."
+                    f"Automatic build repair cannot restore required workflow output '{step_id}'."
                 )
             await memory_service.shared.write(
                 agent=orchestrator_agent,
@@ -2436,7 +2387,7 @@ class DeploymentPipelineService:
         )
         if build_step is None:
             raise UnknownWorkflowRunError(
-                "Automatic fidelity repair did not produce a completed build-solution step."
+                "Automatic build repair did not produce a completed build-solution step."
             )
         return repaired
 
@@ -2461,7 +2412,6 @@ class DeploymentPipelineService:
         orchestrator_foundry_name = self._agent_foundry_names.get(pipeline_run.id, {}).get(
             "orchestrator", "orchestrator"
         )
-        test_output_text = self._generated_test_outputs.get(pipeline_run.id, "")
 
         # Determine the starting index based on resume_from_step
         start_index = 0
@@ -2663,322 +2613,34 @@ class DeploymentPipelineService:
                     )
                     detail = f"Frontend deployed at {frontend_result.frontend_url}."
 
-                elif step_id == "generate-test-suite":
-                    # Generated for real, right here, against the approved
-                    # requirements and materialized pre-deployment build.
-                    # Deploy & Launch is deliberately NOT
-                    # a workflow step (see module docstring), so this calls
-                    # the Test Generation Agent directly via
-                    # AgentOrchestrator.execute_agent, the same
-                    # outside-any-workflow-step execution path already used
-                    # by Workshop's per-component "Regenerate" action.
-                    build_output_text = await self._get_step_output(
-                        run, self._build_step_id, trace_id=trace_id
-                    )
-                    requirements_text = await self._get_approved_requirements(
-                        run, trace_id=trace_id
-                    )
-                    report = create_fidelity_report(
-                        requirements_text,
-                        max_repair_attempts=self._fidelity_max_repair_attempts,
-                    )
-                    if pipeline_run.fidelity_report is not None:
-                        report = report.model_copy(
-                            update={
-                                "repair_attempts": pipeline_run.fidelity_report.repair_attempts,
-                            }
-                        )
-                    if report.total_requirements == 0:
-                        pipeline_run.fidelity_report = report
-                        raise DeploymentPipelineStepFailedError(
-                            "Requirement fidelity cannot run because the approved baseline "
-                            "contains no REQ IDs. Re-run Requirement Discovery and approve "
-                            "the resulting requirements before deployment."
-                        )
-                    generation_result = await self._orchestrator.execute_agent(
-                        agent_id="test-generation-agent",
-                        prompt_id="test-generation-v1",
-                        variables={
-                            "artifact": build_output_text,
-                            "requirements": requirements_text,
-                            "user_message": (
-                                "Generate black-box acceptance tests against the real deployed "
-                                "prototype. Read its URLs only from MISSION_BACKEND_URL and "
-                                "MISSION_FRONTEND_URL environment variables. Exercise real HTTP "
-                                "behavior. Do not use mocks, patches, monkeypatch, response "
-                                "interceptors, fabricated responses, or static assertions."
-                            ),
-                        },
-                        session_id=pipeline_run.session_id,
-                        trace_id=pipeline_run.id,
-                    )
-                    test_output_text = generation_result.output_text
-                    modules = extract_test_modules(test_output_text)
-                    if not has_pytest_discoverable_tests(modules):
-                        correction_result = await self._orchestrator.execute_agent(
-                            agent_id="test-generation-agent",
-                            prompt_id="test-generation-v1",
-                            variables={
-                                "artifact": build_output_text,
-                                "requirements": requirements_text,
-                                "user_message": (
-                                    "Your prior response contained no pytest-discoverable Python test. "
-                                    "Return one or more fenced python blocks containing module-level "
-                                    "test_<name> functions with real assertions."
-                                ),
-                            },
-                            session_id=pipeline_run.session_id,
-                            trace_id=pipeline_run.id,
-                        )
-                        test_output_text = correction_result.output_text
-                        modules = extract_test_modules(test_output_text)
-                    if not has_pytest_discoverable_tests(modules):
-                        raise DeploymentPipelineStepFailedError(
-                            "Test Generation Agent did not produce a pytest-discoverable test function "
-                            "after a corrective retry."
-                        )
-                    report = record_test_coverage(
-                        report,
-                        modules,
-                        minimum_coverage_percent=self._fidelity_min_coverage_percent,
-                    )
-                    missing_test_ids = [
-                        item.requirement_id
-                        for item in report.requirements
-                        if item.status == "missing"
-                    ]
-                    # Large approved-requirement sets can exceed what the agent
-                    # covers in a single completion; give it the same repair
-                    # budget used later for whole-prototype fidelity repairs
-                    # instead of giving up after exactly one corrective retry.
-                    # Each retry only asks for the STILL-missing IDs and its
-                    # new modules are ACCUMULATED alongside every earlier
-                    # completion's modules (never discarded) - a "complete
-                    # replacement suite" re-ask made large gaps unrecoverable
-                    # because every retry had to re-cover already-covered
-                    # requirements too within the same completion-length
-                    # budget that produced the gap in the first place.
-                    coverage_retry = 0
-                    while (
-                        report.coverage_percent < self._fidelity_min_coverage_percent
-                        and coverage_retry < self._fidelity_max_repair_attempts
-                    ):
-                        coverage_retry += 1
-                        correction_result = await self._orchestrator.execute_agent(
-                            agent_id="test-generation-agent",
-                            prompt_id="test-generation-v1",
-                            variables={
-                                "artifact": build_output_text,
-                                "requirements": requirements_text,
-                                "user_message": (
-                                    "Your prior suite omitted these approved requirement IDs: "
-                                    + ", ".join(missing_test_ids)
-                                    + ". Return ONLY new test module(s) covering these still-"
-                                    "missing requirement IDs - do not repeat tests for "
-                                    "requirement IDs you already covered. Every executable "
-                                    "test function name must include its normalized requirement ID "
-                                    "(for example, REQ-001 must use test_req_001_<behavior>) and "
-                                    "must assert that requirement's real behavior."
-                                ),
-                            },
-                            session_id=pipeline_run.session_id,
-                            trace_id=pipeline_run.id,
-                        )
-                        test_output_text = test_output_text + "\n\n" + correction_result.output_text
-                        modules = extract_test_modules(test_output_text)
-                        report = record_test_coverage(
-                            report,
-                            modules,
-                            minimum_coverage_percent=self._fidelity_min_coverage_percent,
-                        )
-                        missing_test_ids = [
-                            item.requirement_id
-                            for item in report.requirements
-                            if item.status == "missing"
-                        ]
-                    self._generated_test_outputs[pipeline_run.id] = test_output_text
-                    pipeline_run.fidelity_report = report
-                    if (
-                        not has_pytest_discoverable_tests(modules)
-                        or report.coverage_percent < self._fidelity_min_coverage_percent
-                    ):
-                        raise DeploymentPipelineStepFailedError(
-                            "Generated test suite does not meet the minimum executable coverage "
-                            f"threshold of {self._fidelity_min_coverage_percent:g}%; actual "
-                            f"coverage is {report.coverage_percent:g}%; missing requirement ids: "
-                            + ", ".join(missing_test_ids)
-                        )
-                    if pipeline_run.backend_url and pipeline_run.backend_url.startswith("https://"):
-                        materialized = self._materialized_builds[pipeline_run.id]
-                        ui_component = materialized.ui_component or ""
-                        require_attachment_handoff = bool(
-                            re.search(r"\btype\s*=\s*['\"]file['\"]", ui_component)
-                        )
-                        real_action_errors = validate_real_action_tests(
-                            modules,
-                            require_attachment_handoff=require_attachment_handoff,
-                        )
-                        real_action_retry = 0
-                        while (
-                            real_action_errors
-                            and real_action_retry < self._fidelity_max_repair_attempts
-                        ):
-                            real_action_retry += 1
-                            correction_result = await self._orchestrator.execute_agent(
-                                agent_id="test-generation-agent",
-                                prompt_id="test-generation-v1",
-                                variables={
-                                    "artifact": build_output_text,
-                                    "requirements": requirements_text,
-                                    "user_message": (
-                                        "Your prior suite failed this fail-closed check: "
-                                        + " ".join(real_action_errors)
-                                        + " Return a complete replacement suite. Every Python "
-                                        "test must exercise the real deployed prototype over "
-                                        "real HTTP using MISSION_BACKEND_URL and/or "
-                                        "MISSION_FRONTEND_URL from the environment - never "
-                                        "unittest.mock, MagicMock, patch(), monkeypatch, respx, "
-                                        "responses, or any other interception library."
-                                    ),
-                                },
-                                session_id=pipeline_run.session_id,
-                                trace_id=pipeline_run.id,
-                            )
-                            test_output_text = correction_result.output_text
-                            modules = extract_test_modules(test_output_text)
-                            if not has_pytest_discoverable_tests(modules):
-                                real_action_errors = validate_real_action_tests(
-                                    modules,
-                                    require_attachment_handoff=require_attachment_handoff,
-                                )
-                                continue
-                            report = record_test_coverage(
-                                report,
-                                modules,
-                                minimum_coverage_percent=self._fidelity_min_coverage_percent,
-                            )
-                            self._generated_test_outputs[pipeline_run.id] = test_output_text
-                            pipeline_run.fidelity_report = report
-                            real_action_errors = validate_real_action_tests(
-                                modules,
-                                require_attachment_handoff=require_attachment_handoff,
-                            )
-                        if real_action_errors:
-                            raise DeploymentPipelineStepFailedError(
-                                "Generated acceptance tests are not real-action tests: "
-                                + " ".join(real_action_errors)
-                            )
-                        # The real-action repair loop replaces the whole suite on
-                        # every attempt to purge mocks/patches, which can regress
-                        # the requirement coverage the earlier loop secured -
-                        # re-verify it here rather than silently shipping a gap.
-                        final_missing_ids = [
-                            item.requirement_id
-                            for item in report.requirements
-                            if item.status == "missing"
-                        ]
-                        if report.coverage_percent < self._fidelity_min_coverage_percent:
-                            raise DeploymentPipelineStepFailedError(
-                                "Generated test suite does not meet the minimum executable coverage "
-                                f"threshold of {self._fidelity_min_coverage_percent:g}%; actual "
-                                f"coverage is {report.coverage_percent:g}%; missing requirement ids: "
-                                + ", ".join(final_missing_ids)
-                            )
-                    detail = (
-                        f"Generated {len(modules)} requirement acceptance test module(s) "
-                        "for the real deployed prototype."
-                    )
-
-                elif step_id == "execute-test-suite":
-                    test_output_text = self._generated_test_outputs.get(
-                        pipeline_run.id, test_output_text
-                    )
-                    modules = extract_test_modules(test_output_text)
-                    timeout_minutes = max(1, round(self._test_execution_service.timeout_seconds / 60))
+                elif step_id == "security-copilot-scan":
                     step_result.detail = (
-                        f"Running {len(modules)} generated test module(s) with pytest against the "
-                        f"real deployed prototype (up to {timeout_minutes} minute(s))..."
+                        "Running a Microsoft Security Copilot scan against this mission's "
+                        "deployed prototype..."
                     )
-                    runtime_environment = {
-                        "MISSION_BACKEND_URL": pipeline_run.backend_url or "",
-                        "MISSION_FRONTEND_URL": pipeline_run.frontend_url or "",
-                    }
-                    test_result = await self._test_execution_service.run_tests(
-                        build_root=backend_root,
-                        test_output_text=test_output_text,
-                        runtime_environment=runtime_environment,
+                    scan_report = await self._security_copilot_gateway.scan(
+                        mission_slug=mission_slug,
+                        mission_title=mission_title,
+                        resource_group_name=pipeline_run.resource_group_name,
                     )
-                    pipeline_run.test_summary = test_result.summary
-                    # ``success`` fails closed even when pytest itself exits 0
-                    # (e.g. zero test functions were actually collected) - see
-                    # TestExecutionResult.success's docstring.
-                    report = pipeline_run.fidelity_report
-                    if report is None:
-                        raise DeploymentPipelineStepFailedError(
-                            "Requirement fidelity report is unavailable after test execution."
-                        )
-                    final_failure = report.repair_attempts >= report.max_repair_attempts
-                    pipeline_run.fidelity_report = record_fidelity_execution(
-                        report,
-                        success=test_result.success,
-                        summary=test_result.summary,
-                        passed_test_names=test_result.passed_test_names,
-                        failed_test_names=test_result.failed_test_names,
-                        errored_test_names=test_result.errored_test_names,
-                        skipped_test_names=test_result.skipped_test_names,
-                        final_failure=final_failure,
-                        execution_incomplete=test_result.timed_out,
-                        minimum_coverage_percent=self._fidelity_min_coverage_percent,
-                    )
-                    if pipeline_run.fidelity_report.status == "passed":
-                        detail = test_result.summary
-                    else:
-                        if final_failure:
-                            raise DeploymentPipelineStepFailedError(
-                                "Requirement fidelity gate failed after "
-                                f"{report.repair_attempts} automatic repair attempt(s): "
-                                f"{test_result.summary}"
-                            )
-                        raise _RequirementFidelityRepairNeeded(
-                            summary=(
-                                "Requirement fidelity evidence failed; automatically regenerating "
-                                f"the prototype (attempt {report.repair_attempts + 1} of "
-                                f"{report.max_repair_attempts})."
-                            ),
-                            evidence=test_result.raw_output or test_result.summary,
-                        )
+                    pipeline_run.security_scan_report = scan_report
+                    detail = scan_report.summary
 
-                elif step_id == "run-security-scan":
-                    step_result.detail = "Scanning the deployed backend build's dependencies and code for vulnerabilities..."
-                    scan_result = await self._security_scan_service.scan(build_root=backend_root)
-                    pipeline_run.security_findings_count = len(scan_result.findings)
-                    if scan_result.blocking:
-                        step_result.status = "failed"
-                        step_result.error = scan_result.summary
-                        step_result.completed_at = datetime.now(UTC)
-                        await self._publish(
-                            pipeline_run,
-                            step_id=step_id,
-                            event_type="step_failed",
-                            error=scan_result.summary,
-                        )
-                        raise DeploymentPipelineStepFailedError(
-                            f"Security scan found blocking findings: {scan_result.summary}"
-                        )
-                    detail = scan_result.summary
+                elif step_id == "finops-cost-report":
+                    step_result.detail = (
+                        "Querying Azure Cost Management for this mission's real spend..."
+                    )
+                    cost_report = await self._finops_cost_service.get_cost_report(
+                        resource_group_name=pipeline_run.resource_group_name or ""
+                    )
+                    pipeline_run.cost_report = cost_report
+                    detail = cost_report.summary
 
                 elif step_id == "launch-mission":
-                    report = pipeline_run.fidelity_report
-                    if (
-                        report is None
-                        or report.status != "passed"
-                        or report.coverage_percent < self._fidelity_min_coverage_percent
-                        or report.pass_percent != 100
-                    ):
+                    if not pipeline_run.frontend_url:
                         raise DeploymentPipelineStepFailedError(
-                            "Launch blocked: requirement fidelity must meet the minimum executable "
-                            f"coverage threshold of {self._fidelity_min_coverage_percent:g}% and "
-                            "have 100% passing executable evidence."
+                            "Launch blocked: no deployed frontend URL is available for this "
+                            "mission."
                         )
                     pipeline_run.launch_url = pipeline_run.frontend_url
                     detail = f"Mission launched at {pipeline_run.launch_url}."
@@ -3098,14 +2760,12 @@ def create_deployment_pipeline_service(
         mission_agent_provisioning_service=mission_agent_provisioning_service,
         backend_deployment_service=backend_deployment_service,
         frontend_deployment_service=frontend_deployment_service,
+        security_copilot_gateway=create_security_copilot_gateway(settings=settings),
+        finops_cost_service=create_finops_cost_service(settings=settings),
         run_repository=run_repository,
         prototype_default_ttl_days=settings.prototype_default_ttl_days,
         prototype_max_active_per_owner=settings.prototype_max_active_per_owner,
-        test_execution_service=TestExecutionService(
-            timeout_seconds=settings.deployment_test_execution_timeout_seconds
-        ),
-        security_scan_service=SecurityScanService(),
         build_workspace_root=settings.deployment_build_workspace_root,
-        fidelity_max_repair_attempts=settings.deployment_fidelity_max_repair_attempts,
-        fidelity_min_coverage_percent=settings.deployment_fidelity_min_coverage_percent,
+        max_repair_attempts=settings.deployment_max_repair_attempts,
     )
+

@@ -33,10 +33,12 @@ __all__ = [
     "DeploymentStepId",
     "DeploymentStepResult",
     "DeploymentStepStatus",
+    "FinOpsCostLineItem",
+    "FinOpsCostReport",
     "MissionIdentityInfo",
     "ProvisionedAgentStatus",
-    "RequirementFidelityItem",
-    "RequirementFidelityReport",
+    "SecurityCopilotFinding",
+    "SecurityCopilotScanReport",
 ]
 
 DeploymentStepId = Literal[
@@ -45,23 +47,23 @@ DeploymentStepId = Literal[
     "deploy-backend-service",
     "sync-frontend-integration",
     "deploy-frontend-app",
-    "generate-test-suite",
-    "execute-test-suite",
-    "run-security-scan",
+    "security-copilot-scan",
+    "finops-cost-report",
     "launch-mission",
 ]
 
-# The fixed, ordered pipeline for new runs. ``run-security-scan`` remains a
-# valid legacy step id so persisted historical runs still deserialize, but a
-# passing Requirement Fidelity Gate now proceeds directly to Launch.
+# The fixed, ordered pipeline for new runs. ``security-copilot-scan`` and
+# ``finops-cost-report`` are informational-only: neither can block Launch,
+# they only enrich the run with a real Microsoft Security Copilot scan and a
+# real Azure Cost Management report for the mission's own resource group.
 DEPLOYMENT_STEP_ORDER: tuple[DeploymentStepId, ...] = (
     "generate-access-policy",
     "provision-foundry-agents",
     "deploy-backend-service",
     "sync-frontend-integration",
     "deploy-frontend-app",
-    "generate-test-suite",
-    "execute-test-suite",
+    "security-copilot-scan",
+    "finops-cost-report",
     "launch-mission",
 )
 
@@ -71,47 +73,72 @@ DEPLOYMENT_STEP_NAMES: dict[DeploymentStepId, str] = {
     "deploy-backend-service": "Deploy Backend Service",
     "sync-frontend-integration": "Update Frontend Integrations",
     "deploy-frontend-app": "Deploy Frontend",
-    "generate-test-suite": "Generate Requirement Acceptance Tests",
-    "execute-test-suite": "Requirement Fidelity Gate",
-    "run-security-scan": "Security Scan (Backend & Frontend)",
+    "security-copilot-scan": "Microsoft Security Copilot Scan",
+    "finops-cost-report": "Azure FinOps Cost Report",
     "launch-mission": "Launch",
 }
 
 DeploymentStepStatus = Literal["pending", "running", "completed", "failed", "skipped"]
 DeploymentPipelineStatus = Literal["pending", "running", "completed", "failed"]
 PrototypeCleanupStatus = Literal["active", "deletion_pending", "deletion_failed"]
-RequirementFidelityStatus = Literal["pending", "testing", "repairing", "passed", "failed"]
-RequirementEvidenceStatus = Literal["pending", "covered", "passed", "failed", "missing"]
+SecurityFindingSeverity = Literal["informational", "low", "medium", "high", "critical"]
 
 
-class RequirementFidelityItem(BaseModel):
-    """Observed coverage and execution evidence for one approved requirement."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    requirement_id: str = Field(pattern=r"^REQ-\d{3,}$")
-    statement: str = Field(min_length=1)
-    status: RequirementEvidenceStatus = "pending"
-    test_names: list[str] = Field(default_factory=list)
-    evidence: str = ""
-
-
-class RequirementFidelityReport(BaseModel):
-    """Deterministic launch gate calculated from approved IDs and real test results."""
+class SecurityCopilotFinding(BaseModel):
+    """One real finding returned by a Microsoft Security Copilot promptbook run."""
 
     model_config = ConfigDict(extra="forbid")
 
-    status: RequirementFidelityStatus = "pending"
-    requirements: list[RequirementFidelityItem] = Field(default_factory=list)
-    total_requirements: int = Field(ge=0)
-    covered_requirements: int = Field(default=0, ge=0)
-    passed_requirements: int = Field(default=0, ge=0)
-    coverage_percent: float = Field(default=0, ge=0, le=100)
-    pass_percent: float = Field(default=0, ge=0, le=100)
-    repair_attempts: int = Field(default=0, ge=0)
-    max_repair_attempts: int = Field(default=0, ge=0)
-    gaps: list[str] = Field(default_factory=list)
-    execution_summary: str = ""
+    severity: SecurityFindingSeverity = "informational"
+    title: str = Field(min_length=1)
+    description: str = ""
+    resource: str | None = None
+
+
+class SecurityCopilotScanReport(BaseModel):
+    """Informational-only Security Copilot scan outcome for one mission's prototype.
+
+    Never gates Launch - ``available=False`` (no Logic App endpoint
+    configured, or the promptbook run itself failed) is a normal, honestly
+    reported outcome, not a pipeline failure.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    available: bool = False
+    summary: str = ""
+    findings: list[SecurityCopilotFinding] = Field(default_factory=list)
+    reference_url: str | None = None
+    scanned_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+
+class FinOpsCostLineItem(BaseModel):
+    """One resource type's real, observed Azure Cost Management spend."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    resource_type: str = Field(min_length=1)
+    cost: float = Field(ge=0)
+
+
+class FinOpsCostReport(BaseModel):
+    """Informational-only Azure Cost Management report for one mission's resource group.
+
+    Never gates Launch - ``available=False`` (Cost Management not
+    configured/enabled, or the query itself failed) is a normal, honestly
+    reported outcome, not a pipeline failure.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    available: bool = False
+    summary: str = ""
+    total_cost: float | None = None
+    currency: str | None = None
+    line_items: list[FinOpsCostLineItem] = Field(default_factory=list)
+    period_start: datetime | None = None
+    period_end: datetime | None = None
+    reported_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 class AgentAccessPolicy(BaseModel):
@@ -241,8 +268,7 @@ class DeploymentPipelineRun(BaseModel):
     backend_url: str | None = None
     frontend_url: str | None = None
     launch_url: str | None = None
-    test_summary: str | None = None
-    fidelity_report: RequirementFidelityReport | None = None
-    security_findings_count: int | None = None
+    security_scan_report: SecurityCopilotScanReport | None = None
+    cost_report: FinOpsCostReport | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))

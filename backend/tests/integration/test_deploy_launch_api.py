@@ -4,8 +4,8 @@ Exercises internal identity/session validation through the real ASGI app (confir
 ``app.main.create_app`` wires ``DeploymentPipelineService`` onto
 ``app.state`` correctly) - same minimal pattern as
 ``test_workflow_events_stream_api.py``. Step-execution logic against real
-collaborators (real sandboxed ``TestExecutionService``/
-``SecurityScanService`` runs) is covered by
+collaborators (the informational-only Security Copilot scan/FinOps cost
+report steps) is covered by
 ``tests/unit/deploy_launch/test_pipeline_service.py``.
 
 ``test_full_pipeline_runs_through_the_real_http_api`` below additionally
@@ -34,18 +34,17 @@ from pathlib import Path
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from app.agents.models import AgentExecutionResult
 from app.config.settings import Settings
 from app.deploy_launch.access_policy_service import AccessPolicyService
 from app.deploy_launch.backend_deployment_service import NullBackendDeploymentService
+from app.deploy_launch.finops_cost_service import NullFinOpsCostService
 from app.deploy_launch.frontend_deployment_service import NullFrontendDeploymentService
 from app.deploy_launch.mission_agent_provisioning_service import (
     NullMissionAgentProvisioningService,
 )
 from app.deploy_launch.mission_identity_service import NullMissionIdentityService
 from app.deploy_launch.pipeline_service import DeploymentPipelineService
-from app.deploy_launch.security_scan_service import SecurityScanService
-from app.deploy_launch.test_execution_service import TestExecutionService
+from app.deploy_launch.security_copilot_gateway import NullSecurityCopilotGateway
 from app.main import create_app
 from app.models.workflow_models import WorkflowRunResult, WorkflowStepResult
 
@@ -78,14 +77,6 @@ _ARCHITECTURE_DOCUMENT = """
 
 The Requirements Specialist agent extracts raw requirements.
 The orchestrator agent sequences every specialist.
-"""
-
-_PASSING_TEST_OUTPUT = """
-```python
-# REQ-001
-def test_req_001_always_passes():
-    assert 1 + 1 == 2
-```
 """
 
 _REQUIREMENTS_OUTPUT = "[REQ-001] The mission requires a search feature and an orchestrator agent."
@@ -138,11 +129,7 @@ class _StubUpstreamWorkflowOrchestrator:
     this pipeline reads ``design-architecture``/``build-solution``/
     ``analyze-requirements`` output from - completing that workflow for
     real through local-mode agents is not practical (see module
-    docstring). Also stubs ``execute_agent`` (the real, pre-deploy Test
-    Generation Agent call Deploy & Launch's own ``generate-test-suite``
-    step now makes - see ``pipeline_service.py``) with a canned passing
-    test suite, for the same reason. Everything downstream of this stub is
-    real.
+    docstring). Everything downstream of this stub is real.
     """
 
     def __init__(self, *, run: WorkflowRunResult) -> None:
@@ -155,19 +142,6 @@ class _StubUpstreamWorkflowOrchestrator:
         raise AssertionError(
             "resume_workflow should never be needed: the stub run already has "
             "every step DeploymentPipelineService requires completed."
-        )
-
-    async def execute_agent(
-        self,
-        *,
-        agent_id: str,
-        prompt_id: str,
-        variables: dict[str, str],
-        session_id: str | None = None,
-        trace_id: str | None = None,
-    ) -> AgentExecutionResult:
-        return AgentExecutionResult(
-            agent_id=agent_id, output_text=_PASSING_TEST_OUTPUT, correlation_id="test-correlation-id"
         )
 
 
@@ -253,8 +227,8 @@ async def test_full_pipeline_runs_through_the_real_http_api(
             mission_agent_provisioning_service=NullMissionAgentProvisioningService(),
             backend_deployment_service=NullBackendDeploymentService(),
             frontend_deployment_service=NullFrontendDeploymentService(),
-            test_execution_service=TestExecutionService(timeout_seconds=60),
-            security_scan_service=SecurityScanService(timeout_seconds=60),
+            security_copilot_gateway=NullSecurityCopilotGateway(),
+            finops_cost_service=NullFinOpsCostService(),
             build_workspace_root=tmp_path,
         )
 
@@ -274,7 +248,7 @@ async def test_full_pipeline_runs_through_the_real_http_api(
             assert start_resp.status_code == 200
             run_body = start_resp.json()
             run_id = run_body["id"]
-            # Q3's root cause: start() used to block for the whole 9-step
+            # Q3's root cause: start() used to block for the whole 8-step
             # pipeline. It must now return before the (real, subprocess-
             # driven) pipeline has finished - proving this never ties up
             # the HTTP request for the real work happening in the

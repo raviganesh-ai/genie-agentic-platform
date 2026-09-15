@@ -6,9 +6,8 @@ export type DeploymentStepId =
   | "deploy-backend-service"
   | "sync-frontend-integration"
   | "deploy-frontend-app"
-  | "generate-test-suite"
-  | "execute-test-suite"
-  | "run-security-scan"
+  | "security-copilot-scan"
+  | "finops-cost-report"
   | "launch-mission";
 
 /** Ordered pipeline - mirrors `DEPLOYMENT_STEP_ORDER`/`DEPLOYMENT_STEP_NAMES`. */
@@ -18,8 +17,8 @@ export const DEPLOYMENT_STEP_ORDER: DeploymentStepId[] = [
   "deploy-backend-service",
   "sync-frontend-integration",
   "deploy-frontend-app",
-  "generate-test-suite",
-  "execute-test-suite",
+  "security-copilot-scan",
+  "finops-cost-report",
   "launch-mission",
 ];
 
@@ -29,9 +28,8 @@ export const DEPLOYMENT_STEP_NAMES: Record<DeploymentStepId, string> = {
   "deploy-backend-service": "Deploy Backend Service",
   "sync-frontend-integration": "Update Frontend Integrations",
   "deploy-frontend-app": "Deploy Frontend",
-  "generate-test-suite": "Generate Requirement Acceptance Tests",
-  "execute-test-suite": "Requirement Fidelity Gate",
-  "run-security-scan": "Security Scan (Backend & Frontend)",
+  "security-copilot-scan": "Microsoft Security Copilot Scan",
+  "finops-cost-report": "Azure FinOps Cost Report",
   "launch-mission": "Launch",
 };
 
@@ -66,29 +64,37 @@ export interface ProvisionedAgentStatus {
   foundry_agent_name: string | null;
 }
 
-export type RequirementFidelityStatus = "pending" | "testing" | "repairing" | "passed" | "failed";
-export type RequirementEvidenceStatus = "pending" | "covered" | "passed" | "failed" | "missing";
+export type SecurityFindingSeverity = "informational" | "low" | "medium" | "high" | "critical";
 
-export interface RequirementFidelityItem {
-  requirement_id: string;
-  statement: string;
-  status: RequirementEvidenceStatus;
-  test_names: string[];
-  evidence: string;
+export interface SecurityCopilotFinding {
+  severity: SecurityFindingSeverity;
+  title: string;
+  description: string;
+  resource: string | null;
 }
 
-export interface RequirementFidelityReport {
-  status: RequirementFidelityStatus;
-  requirements: RequirementFidelityItem[];
-  total_requirements: number;
-  covered_requirements: number;
-  passed_requirements: number;
-  coverage_percent: number;
-  pass_percent: number;
-  repair_attempts: number;
-  max_repair_attempts: number;
-  gaps: string[];
-  execution_summary: string;
+export interface SecurityCopilotScanReport {
+  available: boolean;
+  summary: string;
+  findings: SecurityCopilotFinding[];
+  reference_url: string | null;
+  scanned_at: string | null;
+}
+
+export interface FinOpsCostLineItem {
+  resource_type: string;
+  cost: number;
+}
+
+export interface FinOpsCostReport {
+  available: boolean;
+  summary: string;
+  total_cost: number | null;
+  currency: string | null;
+  line_items: FinOpsCostLineItem[];
+  period_start: string | null;
+  period_end: string | null;
+  reported_at: string | null;
 }
 
 export interface DeploymentPipelineRun {
@@ -102,9 +108,9 @@ export interface DeploymentPipelineRun {
   backend_url: string | null;
   frontend_url: string | null;
   launch_url: string | null;
-  test_summary: string | null;
-  fidelity_report: RequirementFidelityReport | null;
-  security_findings_count: number | null;
+  security_scan_report: SecurityCopilotScanReport | null;
+  cost_report: FinOpsCostReport | null;
   created_at: string;
   updated_at: string;
 }
+

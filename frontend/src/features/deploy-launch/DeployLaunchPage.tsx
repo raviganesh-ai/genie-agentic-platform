@@ -58,9 +58,8 @@ const STEP_WORKING_LABELS: Record<DeploymentStepId, string> = {
   "deploy-backend-service": "Genie is working with the Orchestrator to deploy your backend service...",
   "sync-frontend-integration": "Genie is wiring your frontend to the newly deployed backend...",
   "deploy-frontend-app": "Genie is publishing your frontend application...",
-  "generate-test-suite": "Genie is deriving live acceptance tests from every approved requirement...",
-  "execute-test-suite": "Genie is exercising the real deployed prototype before launch...",
-  "run-security-scan": "Genie is scanning your backend and frontend for security issues...",
+  "security-copilot-scan": "Genie is running a Microsoft Security Copilot scan against your deployed prototype...",
+  "finops-cost-report": "Genie is querying Azure Cost Management for your mission's real spend...",
   "launch-mission": "Genie is minting your customer-facing launch link...",
 };
 const STARTING_LABEL =
@@ -76,9 +75,8 @@ const STEP_ICONS: Record<DeploymentStepId, string> = {
   "deploy-backend-service": "⚙️",
   "sync-frontend-integration": "🔗",
   "deploy-frontend-app": "🌐",
-  "generate-test-suite": "🧪",
-  "execute-test-suite": "✅",
-  "run-security-scan": "🛡️",
+  "security-copilot-scan": "🛡️",
+  "finops-cost-report": "💰",
   "launch-mission": "🚀",
 };
 
@@ -642,28 +640,48 @@ export function DeployLaunchPage(): JSX.Element {
           <AgentActivityAnimation label={activityLabel} events={liveEvents} startedAt={activeRun?.created_at} />
         ) : null}
 
-        {activeRun?.fidelity_report ? (
+        {activeRun?.security_scan_report ? (
           <SectionCard
-            title="Requirement Fidelity Gate"
+            title="🛡️ Microsoft Security Copilot Scan"
             action={
               <Badge
                 shape="rounded"
                 style={{
-                  backgroundColor:
-                    activeRun.fidelity_report.status === "passed"
-                      ? "#3fa66a"
-                      : activeRun.fidelity_report.status === "failed"
-                        ? "#d1495b"
-                        : "#2f83e0",
+                  backgroundColor: activeRun.security_scan_report.available ? "#3fa66a" : "#8a8f98",
                   color: "#0b0f14",
                 }}
               >
-                {activeRun.fidelity_report.pass_percent}% passed
+                {activeRun.security_scan_report.available
+                  ? `${activeRun.security_scan_report.findings.length} finding(s)`
+                  : "Not available"}
               </Badge>
             }
           >
-            <Text size={200} style={{ opacity: 0.7 }}>
-              See the Requirement Fidelity Gate tab for full per-requirement evidence.
+            <Text size={200} style={{ opacity: 0.85 }}>
+              {activeRun.security_scan_report.summary}
+            </Text>
+          </SectionCard>
+        ) : null}
+
+        {activeRun?.cost_report ? (
+          <SectionCard
+            title="💰 Azure FinOps Cost Report"
+            action={
+              <Badge
+                shape="rounded"
+                style={{
+                  backgroundColor: activeRun.cost_report.available ? "#3fa66a" : "#8a8f98",
+                  color: "#0b0f14",
+                }}
+              >
+                {activeRun.cost_report.available && activeRun.cost_report.total_cost !== null
+                  ? `${activeRun.cost_report.total_cost} ${activeRun.cost_report.currency ?? ""}`.trim()
+                  : "Not available"}
+              </Badge>
+            }
+          >
+            <Text size={200} style={{ opacity: 0.85 }}>
+              {activeRun.cost_report.summary}
             </Text>
           </SectionCard>
         ) : null}

@@ -170,18 +170,11 @@ class Settings(BaseSettings):
     prototype_api_gateway_publisher_name: str | None = None
     prototype_api_gateway_sku_name: Literal["StandardV2", "PremiumV2"] = "StandardV2"
     prototype_api_gateway_capacity: int = Field(default=1, ge=1, le=10)
-    deployment_fidelity_max_repair_attempts: int = 3
-    deployment_fidelity_min_coverage_percent: float = Field(default=90.0, gt=0, le=100)
-    # How long the Requirement Fidelity Gate's real pytest subprocess is
-    # allowed to run before being killed. This suite executes real black-box
-    # HTTP acceptance tests against a live deployed mission prototype (one
-    # test per approved requirement) - not fast in-process unit tests - so it
-    # scales with the number of approved requirements. A too-short timeout
-    # kills the whole pytest process before it can write any JUnit XML at
-    # all, which discards every real pass/fail outcome and misreports every
-    # single requirement as if its test didn't exist, rather than surfacing
-    # the real "the suite didn't finish in time" cause.
-    deployment_test_execution_timeout_seconds: int = 300
+    # Max automatic regenerate-and-redeploy attempts the pipeline makes when
+    # the generated build itself fails deterministic validation (see
+    # ``_GeneratedBuildRepairNeeded`` in ``app.deploy_launch.pipeline_service``)
+    # before failing closed.
+    deployment_max_repair_attempts: int = 3
     prototype_default_ttl_days: int = Field(default=7, ge=1, le=90)
     prototype_max_active_per_owner: int = Field(default=3, ge=1, le=20)
     prototype_cleanup_interval_seconds: int = Field(default=3600, ge=60, le=86400)
@@ -189,6 +182,24 @@ class Settings(BaseSettings):
     # build under (one subdirectory per pipeline run id) before packaging it
     # for ACR/Storage upload - never a customer-specific path in source.
     deployment_build_workspace_root: Path = Path("var/deploy-launch-builds")
+
+    # --- Deploy & Launch: Microsoft Security Copilot scan (informational-only) --
+    # Full Logic Apps HTTP-trigger URL (including its SAS signature query
+    # string) for a pre-configured Security Copilot "Automated Action" that
+    # runs a promptbook against the mission's own resources and returns its
+    # findings. Never a hardcoded real endpoint (Configuration Rules). Unset
+    # by default - the step then honestly reports "not configured" instead
+    # of blocking Launch; see app.deploy_launch.security_copilot_gateway.
+    security_copilot_logic_app_url: str | None = None
+    security_copilot_timeout_seconds: float = Field(default=120, gt=0, le=600)
+
+    # --- Deploy & Launch: Azure FinOps cost report (informational-only) ---------
+    # Explicit opt-in - real Azure Cost Management queries are only issued
+    # when this is true (and azure_subscription_id is configured); otherwise
+    # the step honestly reports "not configured" instead of blocking Launch.
+    # See app.deploy_launch.finops_cost_service.
+    finops_cost_report_enabled: bool = False
+    finops_cost_report_timeout_seconds: float = Field(default=30, gt=0, le=300)
 
     @property
     def cors_allowed_origins_list(self) -> list[str]:
@@ -232,6 +243,7 @@ class Settings(BaseSettings):
         "deployment_location",
         "prototype_api_gateway_publisher_email",
         "prototype_api_gateway_publisher_name",
+        "security_copilot_logic_app_url",
         mode="after",
     )
     @classmethod
