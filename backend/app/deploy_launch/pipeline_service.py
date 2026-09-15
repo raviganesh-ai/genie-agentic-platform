@@ -2802,7 +2802,9 @@ def create_deployment_pipeline_service(
         frontend_deployment_service=frontend_deployment_service,
         security_copilot_gateway=create_security_copilot_gateway(settings=settings),
         defender_for_cloud_gateway=create_defender_for_cloud_gateway(settings=settings),
-        finops_cost_service=create_finops_cost_service(settings=settings),
+        finops_cost_service=create_finops_cost_service(
+            settings=settings, agent_gateway=orchestrator.agent_gateway
+        ),
         run_repository=run_repository,
         prototype_default_ttl_days=settings.prototype_default_ttl_days,
         prototype_max_active_per_owner=settings.prototype_max_active_per_owner,

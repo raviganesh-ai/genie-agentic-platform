@@ -213,17 +213,29 @@ class Settings(BaseSettings):
     # --- Deploy & Launch: FinOps toolkit hub (optional, richer cost data) -------
     # When a FinOps hub (a Data Explorer cluster ingesting an operator's own
     # cost exports, per Microsoft's open-source FinOps toolkit) is already
-    # provisioned and all three of these are configured, the FinOps cost
-    # report step queries it directly via the Kusto REST API instead of Cost
-    # Management. finops_hub_kusto_query must be KQL that projects result
-    # columns named ResourceType, Cost, and optionally Currency - Genie does
-    # not assume any particular FinOps toolkit table/schema version, since
-    # that depends on the operator's own hub. Falls back to the direct Cost
-    # Management query above when unset or when the hub query itself fails.
+    # provisioned, and all three of these plus finops_hub_mcp_server_url are
+    # configured, the FinOps cost report step queries it via the
+    # finops-hub-agent Foundry agent (AzureAgentGateway) instead of Cost
+    # Management - see app.deploy_launch.finops_cost_service. Genie does not
+    # assume any particular FinOps toolkit table/schema version beyond what
+    # config/prompts/registry.yaml's finops-hub-query-v1 prompt documents,
+    # since the exact hub layout depends on the operator's own deployment.
+    # Falls back to the direct Cost Management query above when unset, when
+    # the agent/MCP server is unavailable, or when the hub query itself
+    # fails or returns no data.
     finops_hub_kusto_cluster_uri: str | None = None
     finops_hub_kusto_database: str | None = None
-    finops_hub_kusto_query: str | None = None
     finops_hub_timeout_seconds: float = Field(default=30, gt=0, le=300)
+
+    # Endpoint of a self-hosted Azure MCP Server (mcr.microsoft.com/azure-sdk/
+    # azure-mcp) Container App exposing (at minimum) the Kusto query tool -
+    # never a hardcoded/shared value, always the operator's own deployment.
+    # Resolved at run time by AgentMcpToolDefinition.server_url_setting for
+    # the finops-hub-agent's azure-mcp-kusto tool (config/agents/registry.yaml)
+    # and used both by scripts/provision_foundry_agents.py (to discover and
+    # persist the server's real tool schemas) and by FoundryAgentProvider (to
+    # build the runtime agent_framework.MCPStreamableHTTPTool).
+    finops_hub_mcp_server_url: str | None = None
 
     @property
     def cors_allowed_origins_list(self) -> list[str]:
@@ -270,7 +282,7 @@ class Settings(BaseSettings):
         "security_copilot_logic_app_url",
         "finops_hub_kusto_cluster_uri",
         "finops_hub_kusto_database",
-        "finops_hub_kusto_query",
+        "finops_hub_mcp_server_url",
         mode="after",
     )
     @classmethod

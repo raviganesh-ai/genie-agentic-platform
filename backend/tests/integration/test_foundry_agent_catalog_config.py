@@ -51,8 +51,8 @@ def test_real_config_agent_registry_loads_every_catalog_agent(
 
     # requirements-analyst, architecture-designer, debugging-agent,
     # build-agent, genie-orchestrator, security-assessment-agent,
-    # test-generation-agent.
-    assert len(registry) == 7
+    # test-generation-agent, finops-hub-agent.
+    assert len(registry) == 8
     assert "requirements-analyst" in registry
     assert "genie-orchestrator" in registry
     assert "build-agent" in registry

@@ -323,3 +323,38 @@ agents:
     governance_policy_id: debugging-governance-policy-v1
     prompt_template_ref: failure-diagnosis-v1
     enabled: true
+
+  - id: finops-hub-agent
+    name: FinOps Hub Agent
+    role: finops_reporting
+    description: >-
+      Queries an operator-configured FinOps toolkit hub (an Azure Data
+      Explorer/Kusto cluster ingesting the operator's own Cost Management
+      exports) for one mission's resource-group spend, via a self-hosted
+      Azure MCP Server's Kusto query tool - never Genie's own database,
+      never simulated data. Used exclusively by the Deploy & Launch
+      pipeline's informational-only finops-cost-report step
+      (app.deploy_launch.finops_cost_service), which falls back to the
+      Azure Cost Management API when this agent or its MCP server is
+      unavailable/unconfigured.
+    capabilities:
+      - finops_hub_query
+    allowed_tools: []
+    memory_access:
+      - personal
+    foundry_agent_id: finops-hub-agent
+    owner: platform-engineering-team
+    governance_policy_id: finops-hub-agent-governance-policy-v1
+    prompt_template_ref: finops-hub-query-v1
+    mcp_tools:
+      - name: azure-mcp-kusto
+        description: >-
+          Azure MCP Server (self-hosted), restricted to the Kusto/Azure
+          Data Explorer tool namespace, used to query the operator's
+          FinOps hub cluster.
+        server_url_setting: finops_hub_mcp_server_url
+        allowed_tools:
+          - kusto_query
+        approval_mode: never_require
+    enabled: true
+

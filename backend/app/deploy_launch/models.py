@@ -9,6 +9,17 @@ the required settings are not configured, mirroring ``AzureAgentGateway`` /
 ``LocalAgentGateway``), never fabricating a result for a step it did not
 actually perform.
 
+EXPLICIT, SCOPED EXCEPTION: the informational-only ``finops-cost-report``
+step's FinOps-hub path is a deliberate, narrow deviation from the rule
+above. Per an explicit product decision, it invokes a real Foundry LLM
+agent (``finops-hub-agent``, via ``AzureAgentGateway``) that itself calls a
+self-hosted Azure MCP Server's Kusto query tool against the operator's
+FinOps hub, rather than a deterministic direct Kusto REST call. This
+step's own non-blocking, honest-``available=False``-on-failure design
+(see ``FinOpsCostReport``) already tolerates this: an LLM-authored KQL
+query or malformed response degrades to "unavailable", not a fabricated
+number or a pipeline failure. No other Deploy & Launch step is LLM-driven.
+
 Not to be confused with ``app.deployment`` (an unrelated, pre-existing
 package that checks whether an Azure *subscription* has the resource
 providers Genie's own infrastructure needs registered - a Phase 10
@@ -134,18 +145,20 @@ class FinOpsCostLineItem(BaseModel):
     cost: float = Field(ge=0)
 
 
-FinOpsDataSource = Literal["azure-cost-management", "finops-hub"]
+FinOpsDataSource = Literal["azure-cost-management", "finops-hub-agent"]
 
 
 class FinOpsCostReport(BaseModel):
     """Informational-only Azure cost report for one mission's resource group.
 
-    Sourced from a FinOps toolkit hub (Data Explorer cluster) when one is
-    configured, falling back to a direct Azure Cost Management query
-    otherwise - see ``data_source`` and ``app.deploy_launch.finops_cost_service``.
-    Never gates Launch - ``available=False`` (neither source
-    configured/enabled, or the query itself failed) is a normal, honestly
-    reported outcome, not a pipeline failure.
+    Sourced from the ``finops-hub-agent`` Foundry agent (queries an
+    operator's FinOps toolkit hub via a self-hosted Azure MCP Server's
+    Kusto tool - see ``app.deploy_launch.finops_cost_service`` and
+    ``config/agents/registry.yaml``) when a hub is configured, falling back
+    to a direct Azure Cost Management query otherwise - see
+    ``data_source``. Never gates Launch - ``available=False`` (neither
+    source configured/enabled, or the query itself failed) is a normal,
+    honestly reported outcome, not a pipeline failure.
     """
 
     model_config = ConfigDict(extra="forbid")

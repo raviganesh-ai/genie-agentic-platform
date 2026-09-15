@@ -88,7 +88,7 @@ export interface FinOpsCostLineItem {
   cost: number;
 }
 
-export type FinOpsDataSource = "azure-cost-management" | "finops-hub";
+export type FinOpsDataSource = "azure-cost-management" | "finops-hub-agent";
 
 export interface FinOpsCostReport {
   available: boolean;
