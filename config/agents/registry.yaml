@@ -353,8 +353,9 @@ agents:
           Data Explorer tool namespace, used to query the operator's
           FinOps hub cluster.
         server_url_setting: finops_hub_mcp_server_url
+        client_id_setting: finops_hub_mcp_client_id
         allowed_tools:
-          - kusto_query
+          - azmcp_kusto_query
         approval_mode: never_require
     enabled: true
 

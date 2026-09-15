@@ -80,13 +80,40 @@ class AgentMcpToolDefinition(BaseModel):
     name: str = Field(min_length=1)
     description: str = Field(min_length=1)
     server_url_setting: str = Field(min_length=1)
+    client_id_setting: str | None = Field(
+        default=None,
+        description=(
+            "Optional Settings attribute naming the Microsoft Entra ID "
+            "application (client) ID that the remote MCP server's incoming "
+            "HTTP requests are secured with (its Entra App Registration's "
+            "App ID, used as the OAuth2 audience 'api://<client-id>'). When "
+            "set, FoundryAgentProvider and provision_foundry_agents.py "
+            "acquire a Microsoft Entra ID access token for that audience "
+            "via the caller's own managed identity/DefaultAzureCredential "
+            "and attach it as an 'Authorization: Bearer' header on every "
+            "MCP request - never a client secret or static token. Verified "
+            "against Microsoft's own reference deployment for Azure MCP "
+            "Server on Container Apps (Azure-Samples/azmcp-foundry-aca-mi): "
+            "the server enforces Microsoft Entra ID authentication on all "
+            "incoming HTTP requests by default (`azmcp server start "
+            "--transport http` without the dangerous "
+            "`--dangerously-disable-http-incoming-auth` escape hatch, which "
+            "must never be used - see infra/modules/finops-mcp-server.bicep). "
+            "Left unset only for MCP servers that are not Genie-managed "
+            "self-hosted Azure MCP Server deployments (e.g. a local dev "
+            "server with auth intentionally disabled)."
+        ),
+    )
     allowed_tools: list[str] | None = Field(
         default=None,
         description=(
             "Optional allow-list restricting which of the MCP server's own "
-            "tools are exposed to this agent (e.g. ['kusto_query'] out of a "
-            "general-purpose Azure MCP Server exposing many namespaces). "
-            "None exposes every tool the server advertises."
+            "tools are exposed to this agent (e.g. ['azmcp_kusto_query'] out "
+            "of a general-purpose Azure MCP Server exposing many "
+            "namespaces - tool names follow azure-mcp's 'azmcp_<namespace>_"
+            "<command>' convention in '--mode all', not the bare CLI "
+            "subcommand name). None exposes every tool the server "
+            "advertises."
         ),
     )
     approval_mode: McpApprovalMode = Field(

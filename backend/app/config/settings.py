@@ -237,6 +237,18 @@ class Settings(BaseSettings):
     # build the runtime agent_framework.MCPStreamableHTTPTool).
     finops_hub_mcp_server_url: str | None = None
 
+    # Microsoft Entra ID application (client) ID of the self-hosted MCP
+    # server's own Entra App Registration (infra/modules/
+    # finops-mcp-server-entra-app.bicep), used as the OAuth2 audience
+    # ('api://<client-id>') when acquiring an access token to authenticate
+    # Genie's outgoing MCP requests - the server enforces Microsoft Entra ID
+    # auth on every incoming HTTP request by default (verified against
+    # Microsoft's own azmcp-foundry-aca-mi reference deployment; see
+    # AgentMcpToolDefinition.client_id_setting). Required for the
+    # finops-hub-agent's azure-mcp-kusto tool to authenticate successfully
+    # once deployed with the (never-disabled) default incoming-auth posture.
+    finops_hub_mcp_client_id: str | None = None
+
     @property
     def cors_allowed_origins_list(self) -> list[str]:
         return [origin.strip() for origin in self.cors_allowed_origins.split(",") if origin.strip()]
@@ -283,6 +295,7 @@ class Settings(BaseSettings):
         "finops_hub_kusto_cluster_uri",
         "finops_hub_kusto_database",
         "finops_hub_mcp_server_url",
+        "finops_hub_mcp_client_id",
         mode="after",
     )
     @classmethod

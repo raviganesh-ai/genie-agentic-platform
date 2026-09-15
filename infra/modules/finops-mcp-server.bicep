@@ -13,25 +13,42 @@
 // (GENIE_FINOPS_HUB_MCP_SERVER_URL) rather than the default Azure Cost
 // Management fallback. Deploy it into the SAME resource group/Container
 // Apps environment as the Genie backend (see infra/main.bicep's
-// `containerAppsEnvironmentId` output) via:
+// `containerAppsEnvironmentId` output). It requires an Entra App
+// Registration deployed first (finops-mcp-server-entra-app.bicep) and a
+// role assignment granting the Genie backend's own managed identity that
+// app's custom role (finops-mcp-server-role-assignment.bicep) - see
+// those modules' own headers - then:
 //   az deployment group create \
 //     --resource-group <genie-resource-group> \
 //     --template-file infra/modules/finops-mcp-server.bicep \
-//     --parameters containerAppsEnvironmentId=<id> ...
+//     --parameters containerAppsEnvironmentId=<id> \
+//                  entraAppClientId=<from finops-mcp-server-entra-app output> \
+//                  entraAppTenantId=<tenant-id> ...
 //
-// ASSUMPTION CALLED OUT EXPLICITLY (per .github/copilot-instructions.md's
-// "never invent undocumented APIs" / "isolate assumptions behind
-// interfaces" rules): the exact container `command`/`args` needed to run
-// azure-mcp in remote HTTP/streamable-HTTP mode (vs. its default stdio
-// mode) and the port it listens on were NOT independently verified against
-// a real deployment in this session - the public docs (microsoft/mcp's
-// Azure.Mcp.Server README, "Remote Setup" section) point to azd templates
-// under servers/Azure.Mcp.Server/azd-templates for the verified,
-// supported values instead of documenting them inline. Rather than
-// guessing and silently shipping a wrong default, `containerCommand`,
-// `containerArgs`, and `containerPort` are REQUIRED parameters here with
-// no default - populate them from that azd template (or `azmcp server
-// start --help`) before deploying.
+// Container image, entrypoint, arguments, listening port, and required
+// environment variables below are copied/adapted (single `kusto`
+// namespace, `--read-only`, no VS Code/PRM-client support since only
+// Genie's own backend ever connects) from Microsoft's own verified
+// reference deployment for exactly this scenario - Azure MCP Server on
+// Container Apps for Foundry-agent consumption -
+// https://github.com/Azure-Samples/azmcp-foundry-aca-mi
+// (infra/modules/aca-infrastructure.bicep), per the "never invent
+// undocumented APIs" rule: nothing below is guessed.
+//
+// SECURITY NOTE: the container is started with `--read-only` (Genie's
+// FinOps hub tool only ever queries, never mutates) and Microsoft Entra ID
+// authentication REMAINS ENABLED on every incoming HTTP request (the
+// image's default posture) - never add
+// `--dangerously-disable-http-incoming-auth` to containerArgs. Genie's
+// own backend (not Foundry natively - see
+// backend/app/agents/foundry/agent_provider.py's module docstring on why
+// Genie's MCP integration differs from azmcp-foundry-aca-mi's "native
+// Foundry Tools" connection pattern) authenticates its outgoing MCP
+// requests with a Microsoft Entra ID access token for this server's own
+// Entra App Registration audience, acquired via its own managed identity
+// (AgentMcpToolDefinition.client_id_setting /
+// FoundryAgentProvider._build_mcp_header_provider) - never a shared
+// secret or disabled auth.
 @description('Azure region for the Container App (must match the Container Apps environment\'s region).')
 param location string
 
@@ -44,14 +61,25 @@ param containerAppsEnvironmentId string
 @description('Full container image reference, e.g. mcr.microsoft.com/azure-sdk/azure-mcp:<verified-tag> - never `:latest` in production, per immutable-deployment practice.')
 param containerImage string
 
-@description('Container entrypoint override, if the image requires one to start in remote/HTTP mode - see module header ASSUMPTION note.')
-param containerCommand string[]
+@description('Azure MCP Server namespaces to expose (kusto-only by default, since Genie only ever calls the Kusto query tool). Passed as one repeated --namespace flag per entry.')
+param namespaces string[] = [
+  'kusto'
+]
 
-@description('Container arguments to start azure-mcp in remote/HTTP (streamable) mode restricted to the Kusto tool namespace - see module header ASSUMPTION note.')
-param containerArgs string[]
+@description('TCP port the container listens on for MCP HTTP traffic. 8080 is the port the upstream image\'s ASPNETCORE_URLS/ingress targetPort are verified to use - do not change unless the image itself changes.')
+param containerPort int = 8080
 
-@description('TCP port the container listens on for MCP HTTP/SSE traffic - see module header ASSUMPTION note.')
-param containerPort int
+@description('Microsoft Entra ID application (client) ID of this server\'s own Entra App Registration (finops-mcp-server-entra-app.bicep output entraAppClientId) - used for incoming-request token validation (AzureAd__ClientId).')
+param entraAppClientId string
+
+@description('Microsoft Entra ID tenant ID the Entra App Registration above was created in (AzureAd__TenantId).')
+param entraAppTenantId string
+
+@description('Application Insights connection string for the MCP server\'s own telemetry. Leave empty to disable.')
+param appInsightsConnectionString string = ''
+
+@description('Whether azure-mcp reports its own anonymous usage telemetry to Microsoft (AZURE_MCP_COLLECT_TELEMETRY) - defaults to false since this is a customer/operator deployment, not a Microsoft-operated one.')
+param collectTelemetry bool = false
 
 @description('Tags applied to every resource this module creates.')
 param tags object
@@ -85,6 +113,29 @@ module identity 'managed-identity.bicep' = {
   }
 }
 
+// Verified server-start arguments (Azure-Samples/azmcp-foundry-aca-mi's
+// infra/modules/aca-infrastructure.bicep `baseArgs`/`serverArgs`), adapted
+// to this deployment's read-only, Kusto-only scope. The container image's
+// own ENTRYPOINT already runs `server start` - `command` is intentionally
+// left empty (the image does not support overriding it; see
+// https://github.com/microsoft/mcp/blob/main/servers/Azure.Mcp.Server/docs/azmcp-commands.md's
+// "Using azmcp locally vs in container images" section).
+var baseArgs = [
+  '--transport'
+  'http'
+  '--outgoing-auth-strategy'
+  'UseHostingEnvironmentIdentity'
+  '--mode'
+  'all'
+  // SECURITY NOTE: read-only - this deployment only ever needs to query
+  // the operator's FinOps hub, never mutate Azure resources through it.
+  '--read-only'
+  // SECURITY NOTE: never add '--dangerously-disable-http-incoming-auth' -
+  // see this module's header.
+]
+var namespaceArgs = [for ns in namespaces: ['--namespace', ns]]
+var serverArgs = flatten(concat([baseArgs], namespaceArgs))
+
 resource mcpServerContainerApp 'Microsoft.App/containerApps@2024-03-01' = {
   name: name
   location: location
@@ -106,7 +157,10 @@ resource mcpServerContainerApp 'Microsoft.App/containerApps@2024-03-01' = {
       // Container Apps environment (i.e. the Genie backend, which is what
       // calls this server's MCP endpoint via
       // agent_framework.MCPStreamableHTTPTool) - never exposed to the
-      // public internet.
+      // public internet. Microsoft Entra ID auth (AzureAd__* below) is
+      // still enforced as defense-in-depth on top of this network
+      // boundary, exactly as the upstream reference deployment does for
+      // its own (public/external) ingress.
       ingress: {
         external: false
         targetPort: containerPort
@@ -120,21 +174,84 @@ resource mcpServerContainerApp 'Microsoft.App/containerApps@2024-03-01' = {
         {
           name: 'azure-mcp-server'
           image: containerImage
-          command: containerCommand
-          args: containerArgs
+          command: []
+          args: serverArgs
           resources: {
             cpu: json(cpuCores)
             memory: memory
           }
-          env: [
-            {
-              // Authenticates to Azure/Kusto via this Container App's own
-              // user-assigned managed identity - never a client secret or
-              // connection string (per Security Requirements).
-              name: 'AZURE_CLIENT_ID'
-              value: identity.outputs.clientId
-            }
-          ]
+          env: concat(
+            [
+              {
+                name: 'ASPNETCORE_ENVIRONMENT'
+                value: 'Production'
+              }
+              {
+                name: 'ASPNETCORE_URLS'
+                value: 'http://+:${containerPort}'
+              }
+              {
+                // Authenticates OUTGOING requests to Azure/Kusto via this
+                // Container App's own user-assigned managed identity -
+                // never a client secret or connection string (per
+                // Security Requirements).
+                name: 'AZURE_TOKEN_CREDENTIALS'
+                value: 'managedidentitycredential'
+              }
+              {
+                name: 'AZURE_CLIENT_ID'
+                value: identity.outputs.clientId
+              }
+              {
+                name: 'AZURE_MCP_INCLUDE_PRODUCTION_CREDENTIALS'
+                value: 'true'
+              }
+              {
+                name: 'AZURE_MCP_COLLECT_TELEMETRY'
+                value: string(collectTelemetry)
+              }
+              {
+                // Secures INCOMING requests: only callers presenting a
+                // valid Microsoft Entra ID token for this app's own
+                // audience (api://<entraAppClientId>) are accepted - see
+                // this module's header and
+                // finops-mcp-server-entra-app.bicep.
+                name: 'AzureAd__Instance'
+                value: environment().authentication.loginEndpoint
+              }
+              {
+                name: 'AzureAd__TenantId'
+                value: entraAppTenantId
+              }
+              {
+                name: 'AzureAd__ClientId'
+                value: entraAppClientId
+              }
+              {
+                name: 'AZURE_LOG_LEVEL'
+                value: 'Verbose'
+              }
+              // SECURITY NOTE: azure-mcp listens on plain HTTP inside the
+              // pod (ASPNETCORE_URLS above); Container Apps' own Envoy
+              // proxy terminates TLS at the ingress boundary before
+              // routing internally over HTTP within the secure pod
+              // network namespace, so external/environment traffic never
+              // leaves TLS. See
+              // https://learn.microsoft.com/en-us/azure/container-apps/ingress-overview
+              {
+                name: 'AZURE_MCP_DANGEROUSLY_DISABLE_HTTPS_REDIRECTION'
+                value: 'true'
+              }
+            ],
+            !empty(appInsightsConnectionString)
+              ? [
+                  {
+                    name: 'APPLICATIONINSIGHTS_CONNECTION_STRING'
+                    value: appInsightsConnectionString
+                  }
+                ]
+              : []
+          )
         }
       ]
       scale: {
@@ -149,3 +266,4 @@ resource mcpServerContainerApp 'Microsoft.App/containerApps@2024-03-01' = {
 output url string = 'https://${mcpServerContainerApp.properties.configuration.ingress.fqdn}'
 output identityPrincipalId string = identity.outputs.principalId
 output identityClientId string = identity.outputs.clientId
+

@@ -9,7 +9,9 @@ abstraction (for admin-plane operations - existence checks, per-customer
 agent create/delete) or the raw async ``AIProjectClient`` (for
 ``agent_framework.foundry.FoundryAgent`` to execute runs against - see
 ``app.agents.foundry.agent_provider``), never a credential or endpoint
-string directly.
+string directly. Also owns ``get_mcp_access_token`` (see below), the sole
+place a Microsoft Entra ID token for a secured MCP server is acquired, for
+the same "only the Foundry access layer touches azure-identity" reason.
 """
 from __future__ import annotations
 
@@ -39,6 +41,13 @@ class FoundryProjectService:
         self._project_name = project_name
         self._api_client: AgentApiClient | None = None
         self._async_project_client: Any | None = None
+        # Lazily created and cached on first use by get_mcp_access_token -
+        # a separate DefaultAzureCredential instance from the ones
+        # get_api_client()/get_async_project_client() construct for the
+        # Foundry SDK clients themselves, since it is used for a different
+        # audience (a self-hosted MCP server's own Entra App Registration,
+        # not Azure AI Foundry).
+        self._mcp_credential: Any | None = None
 
     @property
     def project_name(self) -> str:
@@ -102,4 +111,44 @@ class FoundryProjectService:
             ) from exc
 
         return self._async_project_client
+
+    def get_mcp_access_token(self, client_id: str) -> str:
+        """Acquires a Microsoft Entra ID access token for a secured MCP server.
+
+        Self-hosted Azure MCP Server deployments enforce Microsoft Entra ID
+        authentication on every incoming HTTP request by default (verified
+        against Microsoft's own reference deployment,
+        Azure-Samples/azmcp-foundry-aca-mi - see
+        ``infra/modules/finops-mcp-server.bicep``). ``client_id`` is that
+        server's own Entra App Registration's application (client) ID,
+        used as the OAuth2 audience (``api://<client-id>``). The token is
+        obtained via this same process's managed identity/developer
+        credential (``DefaultAzureCredential``) - never a client secret or
+        static token - kept isolated to this one Foundry-access-layer
+        module per the architecture boundary enforced by
+        ``tests/unit/test_architecture_boundary.py``. Only
+        ``FoundryAgentProvider`` calls this (via a ``header_provider``
+        passed to ``agent_framework.MCPStreamableHTTPTool``).
+        """
+
+        try:
+            from azure.identity import DefaultAzureCredential
+        except ImportError as exc:
+            raise FoundryUnavailableError(
+                "azure-identity is not installed; cannot authenticate to the MCP server."
+            ) from exc
+
+        try:
+            credential = self._mcp_credential
+            if credential is None:
+                credential = DefaultAzureCredential()
+                self._mcp_credential = credential
+            token = credential.get_token(f"api://{client_id}/.default")
+        except Exception as exc:
+            raise FoundryUnavailableError(
+                f"Failed to acquire a Microsoft Entra ID access token for MCP "
+                f"server audience 'api://{client_id}': {exc}"
+            ) from exc
+
+        return token.token
 

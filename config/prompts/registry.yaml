@@ -1745,8 +1745,9 @@ prompts:
       fabricated figures.
     template: >-
       You are the FinOps Hub Agent for the Genie Agentic Experience
-      Center. Call the azure-mcp-kusto tool's kusto_query function exactly
-      once against cluster URI {cluster_uri}, database {database_name},
+      Center. Call the azure-mcp-kusto tool's azmcp_kusto_query function
+      exactly once against cluster URI {cluster_uri}, database
+      {database_name},
       using a KQL query that projects the current month's total cost for
       resource group '{resource_group_name}', broken down by
       ResourceType, from the hub's Costs table (the FinOps toolkit's own

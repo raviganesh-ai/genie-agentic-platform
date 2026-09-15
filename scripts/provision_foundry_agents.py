@@ -162,6 +162,16 @@ def main() -> None:
         Skips (with a printed warning) any MCP tool whose
         ``server_url_setting`` is not configured, rather than failing the
         whole provisioning run for one unavailable server.
+
+        When ``client_id_setting`` is configured, acquires a Microsoft
+        Entra ID access token (via this script's own ``DefaultAzureCredential``,
+        i.e. the operator's own signed-in identity) for the MCP server's
+        Entra App Registration audience and attaches it as an
+        ``Authorization: Bearer`` header - self-hosted Azure MCP Server
+        deployments enforce Entra ID auth on every incoming HTTP request by
+        default (verified against Microsoft's own reference deployment,
+        Azure-Samples/azmcp-foundry-aca-mi), so discovery would otherwise
+        be rejected. Mirrors ``FoundryAgentProvider._build_mcp_header_provider``.
         """
 
         from agent_framework import MCPStreamableHTTPTool
@@ -177,12 +187,32 @@ def main() -> None:
                 )
                 continue
 
+            header_provider = None
+            client_id = getattr(settings, mcp_definition.client_id_setting or "", None)
+            if client_id:
+                credential = DefaultAzureCredential()
+
+                # Matches agent_framework.MCPStreamableHTTPTool's own
+                # documented header_provider contract (verified by reading
+                # the installed package's source): it receives the
+                # in-flight call's own function arguments, not any
+                # pre-existing headers, and the return value becomes the
+                # entire headers dict for that request - no merging needed.
+                def _provide_headers(
+                    call_arguments: dict, *, _credential=credential, _client_id=client_id
+                ) -> dict:
+                    token = _credential.get_token(f"api://{_client_id}/.default")
+                    return {"Authorization": f"Bearer {token.token}"}
+
+                header_provider = _provide_headers
+
             mcp_tool = MCPStreamableHTTPTool(
                 name=mcp_definition.name,
                 url=server_url,
                 description=mcp_definition.description,
                 allowed_tools=mcp_definition.allowed_tools,
                 approval_mode=mcp_definition.approval_mode,
+                header_provider=header_provider,
             )
             async with mcp_tool:
                 for discovered_function in mcp_tool.functions:

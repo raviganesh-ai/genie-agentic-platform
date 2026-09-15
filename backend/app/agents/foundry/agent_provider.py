@@ -42,7 +42,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -321,6 +321,7 @@ class FoundryAgentProvider:
                 # fail this one tool closed (the model simply won't have it
                 # available) rather than the whole run.
                 continue
+            header_provider = self._build_mcp_header_provider(mcp_definition)
             tools.append(
                 MCPStreamableHTTPTool(
                     name=mcp_definition.name,
@@ -328,9 +329,53 @@ class FoundryAgentProvider:
                     description=mcp_definition.description,
                     allowed_tools=mcp_definition.allowed_tools,
                     approval_mode=mcp_definition.approval_mode,
+                    header_provider=header_provider,
                 )
             )
         return tools
+
+    def _build_mcp_header_provider(
+        self, mcp_definition: Any
+    ) -> Callable[[dict[str, Any]], dict[str, str]] | None:
+        """Builds the ``Authorization: Bearer`` header for a secured MCP server.
+
+        Self-hosted Azure MCP Server deployments enforce Microsoft Entra ID
+        authentication on every incoming HTTP request by default (verified
+        against Microsoft's own reference deployment,
+        Azure-Samples/azmcp-foundry-aca-mi - see
+        ``infra/modules/finops-mcp-server.bicep``); disabling that check
+        (``--dangerously-disable-http-incoming-auth``) is never done here.
+        Returns ``None`` (no header attached) when ``client_id_setting`` is
+        unset, for MCP servers that are not Genie-managed secured
+        deployments.
+
+        The returned callable matches ``agent_framework.MCPStreamableHTTPTool``'s
+        own documented ``header_provider`` contract (confirmed by reading
+        the installed package's source): it receives the in-flight tool
+        call's own function arguments (``FunctionInvocationContext.kwargs``)
+        - not any pre-existing headers - and its return value becomes the
+        *entire* headers dict attached to that one outbound MCP request, so
+        no merging with prior headers is needed or possible here. Token
+        acquisition itself is delegated to
+        ``FoundryProjectService.get_mcp_access_token`` rather than importing
+        ``azure.identity`` here, since only that module and ``api_client.py``
+        are permitted to import Azure SDK packages directly (see
+        ``tests/unit/test_architecture_boundary.py``).
+        """
+
+        client_id_setting = getattr(mcp_definition, "client_id_setting", None)
+        if not client_id_setting:
+            return None
+        client_id = getattr(self._settings, client_id_setting, None)
+        if not client_id:
+            return None
+
+        def _provide_headers(call_arguments: dict[str, Any]) -> dict[str, str]:
+            token = self._project_service.get_mcp_access_token(client_id)
+            return {"Authorization": f"Bearer {token}"}
+
+        return _provide_headers
+
 
     def _build_one_tool(
         self, tool_definition: AgentToolDefinition, tool_context: ToolCallContext

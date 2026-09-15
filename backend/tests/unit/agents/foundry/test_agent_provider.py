@@ -14,7 +14,12 @@ import pytest
 
 from app.agents.foundry.agent_provider import FoundryAgentProvider
 from app.agents.foundry.errors import FoundryUnavailableError
-from app.agents.models import AgentDefinition, AgentToolDefinition, AgentToolParameter
+from app.agents.models import (
+    AgentDefinition,
+    AgentMcpToolDefinition,
+    AgentToolDefinition,
+    AgentToolParameter,
+)
 from app.agents.tool_execution import AgentToolRegistry, ToolCallContext
 
 
@@ -43,12 +48,21 @@ class _FakeApiClient:
 class _FakeProjectService:
     api_client: _FakeApiClient
     async_project_client: object = field(default_factory=object)
+    mcp_access_token: str | None = "fake-access-token"
+    mcp_access_token_error: Exception | None = None
 
     def get_api_client(self) -> _FakeApiClient:
         return self.api_client
 
     def get_async_project_client(self) -> object:
         return self.async_project_client
+
+    def get_mcp_access_token(self, client_id: str) -> str:
+        self.mcp_access_token_requested_for = client_id
+        if self.mcp_access_token_error is not None:
+            raise self.mcp_access_token_error
+        assert self.mcp_access_token is not None
+        return self.mcp_access_token
 
 
 @dataclass
@@ -309,4 +323,116 @@ async def test_run_stream_wraps_unexpected_exceptions_as_foundry_unavailable():
     with pytest.raises(FoundryUnavailableError, match="credential expired"):
         async for _ in provider.run_stream(foundry_agent_id="agent-123", input_text="hello"):
             pass
+
+
+class _FakeSettings:
+    def __init__(self, **values: Any) -> None:
+        for key, value in values.items():
+            setattr(self, key, value)
+
+
+def _mcp_agent_definition(mcp_tools: list[AgentMcpToolDefinition]) -> AgentDefinition:
+    return AgentDefinition(
+        id="finops-hub-agent",
+        name="FinOps Hub Agent",
+        role="finops",
+        description="Queries the FinOps hub.",
+        foundry_agent_id="finops-hub-agent",
+        mcp_tools=mcp_tools,
+    )
+
+
+def test_build_mcp_tools_skips_tool_when_server_url_not_configured():
+    provider = FoundryAgentProvider(_FakeProjectService(api_client=_FakeApiClient()), settings=_FakeSettings())
+    mcp_definition = AgentMcpToolDefinition(
+        name="azure-mcp-kusto",
+        description="Kusto query tool.",
+        server_url_setting="finops_hub_mcp_server_url",
+    )
+    tool_context = ToolCallContext(
+        agent=_mcp_agent_definition([mcp_definition]), session_id="s1", trace_id="t1"
+    )
+
+    tools = provider._build_mcp_tools(tool_context)
+
+    assert tools == []
+
+
+def test_build_mcp_tools_builds_tool_without_auth_header_when_client_id_not_configured():
+    settings = _FakeSettings(finops_hub_mcp_server_url="https://mcp.example.com")
+    provider = FoundryAgentProvider(_FakeProjectService(api_client=_FakeApiClient()), settings=settings)
+    mcp_definition = AgentMcpToolDefinition(
+        name="azure-mcp-kusto",
+        description="Kusto query tool.",
+        server_url_setting="finops_hub_mcp_server_url",
+        allowed_tools=["azmcp_kusto_query"],
+    )
+    tool_context = ToolCallContext(
+        agent=_mcp_agent_definition([mcp_definition]), session_id="s1", trace_id="t1"
+    )
+
+    [tool] = provider._build_mcp_tools(tool_context)
+
+    assert tool.name == "azure-mcp-kusto"
+    assert tool.url == "https://mcp.example.com"
+
+
+def test_build_mcp_tools_attaches_bearer_token_header_when_client_id_configured():
+    settings = _FakeSettings(
+        finops_hub_mcp_server_url="https://mcp.example.com",
+        finops_hub_mcp_client_id="11111111-1111-1111-1111-111111111111",
+    )
+    project_service = _FakeProjectService(api_client=_FakeApiClient(), mcp_access_token="fake-access-token")
+    provider = FoundryAgentProvider(project_service, settings=settings)
+    mcp_definition = AgentMcpToolDefinition(
+        name="azure-mcp-kusto",
+        description="Kusto query tool.",
+        server_url_setting="finops_hub_mcp_server_url",
+        client_id_setting="finops_hub_mcp_client_id",
+    )
+    tool_context = ToolCallContext(
+        agent=_mcp_agent_definition([mcp_definition]), session_id="s1", trace_id="t1"
+    )
+
+    [tool] = provider._build_mcp_tools(tool_context)
+
+    # agent_framework.MCPStreamableHTTPTool only stores header_provider
+    # privately (no public accessor - confirmed by reading the installed
+    # package's source); its own call_tool() invokes it with the in-flight
+    # call's function arguments, and the return value becomes the entire
+    # headers dict for that request (no pre-existing headers to merge).
+    assert tool._header_provider is not None
+    headers = tool._header_provider({"cluster_uri": "https://cluster.example.com"})
+    assert headers == {"Authorization": "Bearer fake-access-token"}
+    assert project_service.mcp_access_token_requested_for == "11111111-1111-1111-1111-111111111111"
+
+
+def test_build_mcp_tools_header_provider_raises_foundry_unavailable_on_token_failure():
+    settings = _FakeSettings(
+        finops_hub_mcp_server_url="https://mcp.example.com",
+        finops_hub_mcp_client_id="11111111-1111-1111-1111-111111111111",
+    )
+    project_service = _FakeProjectService(
+        api_client=_FakeApiClient(),
+        mcp_access_token_error=FoundryUnavailableError(
+            "Failed to acquire a Microsoft Entra ID access token for MCP server "
+            "audience 'api://11111111-1111-1111-1111-111111111111': no managed "
+            "identity available"
+        ),
+    )
+    provider = FoundryAgentProvider(project_service, settings=settings)
+    mcp_definition = AgentMcpToolDefinition(
+        name="azure-mcp-kusto",
+        description="Kusto query tool.",
+        server_url_setting="finops_hub_mcp_server_url",
+        client_id_setting="finops_hub_mcp_client_id",
+    )
+    tool_context = ToolCallContext(
+        agent=_mcp_agent_definition([mcp_definition]), session_id="s1", trace_id="t1"
+    )
+
+    [tool] = provider._build_mcp_tools(tool_context)
+
+    with pytest.raises(FoundryUnavailableError, match="Microsoft Entra ID access token"):
+        tool._header_provider({})
 
