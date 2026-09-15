@@ -37,6 +37,7 @@ from httpx import ASGITransport, AsyncClient
 from app.config.settings import Settings
 from app.deploy_launch.access_policy_service import AccessPolicyService
 from app.deploy_launch.backend_deployment_service import NullBackendDeploymentService
+from app.deploy_launch.defender_for_cloud_gateway import NullDefenderForCloudGateway
 from app.deploy_launch.finops_cost_service import NullFinOpsCostService
 from app.deploy_launch.frontend_deployment_service import NullFrontendDeploymentService
 from app.deploy_launch.mission_agent_provisioning_service import (
@@ -228,6 +229,7 @@ async def test_full_pipeline_runs_through_the_real_http_api(
             backend_deployment_service=NullBackendDeploymentService(),
             frontend_deployment_service=NullFrontendDeploymentService(),
             security_copilot_gateway=NullSecurityCopilotGateway(),
+            defender_for_cloud_gateway=NullDefenderForCloudGateway(),
             finops_cost_service=NullFinOpsCostService(),
             build_workspace_root=tmp_path,
         )

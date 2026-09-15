@@ -27,6 +27,7 @@ from app.deploy_launch.backend_deployment_service import (
     BackendDeploymentResult,
     NullBackendDeploymentService,
 )
+from app.deploy_launch.defender_for_cloud_gateway import NullDefenderForCloudGateway
 from app.deploy_launch.finops_cost_service import NullFinOpsCostService
 from app.deploy_launch.frontend_deployment_service import (
     FrontendDeploymentError,
@@ -320,6 +321,7 @@ def _build_service(
     run_repository=None,
     prototype_max_active_per_owner: int = 3,
     security_copilot_gateway=None,
+    defender_for_cloud_gateway=None,
     finops_cost_service=None,
 ) -> DeploymentPipelineService:
     return DeploymentPipelineService(
@@ -336,6 +338,7 @@ def _build_service(
         backend_deployment_service=backend_deployment_service or NullBackendDeploymentService(),
         frontend_deployment_service=NullFrontendDeploymentService(),
         security_copilot_gateway=security_copilot_gateway or NullSecurityCopilotGateway(),
+        defender_for_cloud_gateway=defender_for_cloud_gateway or NullDefenderForCloudGateway(),
         finops_cost_service=finops_cost_service or NullFinOpsCostService(),
         build_workspace_root=tmp_path,
         run_repository=run_repository,
@@ -442,6 +445,7 @@ class _FakeSecurityCopilotGateway:
             summary="1 finding across the deployed prototype.",
             findings=[
                 SecurityCopilotFinding(
+                    source="security-copilot",
                     severity="medium",
                     title="Outdated dependency detected",
                     description="A generated dependency has a known advisory.",
@@ -459,6 +463,27 @@ class _FakeSecurityCopilotGateway:
                 "resource_group_name": resource_group_name,
             }
         )
+        return self._report
+
+
+class _FakeDefenderForCloudGateway:
+    def __init__(self, *, report: SecurityCopilotScanReport | None = None) -> None:
+        self.calls: list[str | None] = []
+        self._report = report or SecurityCopilotScanReport(
+            available=True,
+            summary="1 unhealthy assessment for the deployed prototype.",
+            findings=[
+                SecurityCopilotFinding(
+                    source="defender-for-cloud",
+                    severity="high",
+                    title="Storage account allows public network access",
+                    description="A generated resource is not restricted to private access.",
+                )
+            ],
+        )
+
+    async def scan(self, *, resource_group_name: str | None) -> SecurityCopilotScanReport:
+        self.calls.append(resource_group_name)
         return self._report
 
 
@@ -493,6 +518,48 @@ async def test_security_copilot_scan_reports_findings_without_blocking_launch(tm
     assert run.security_scan_report.available is True
     assert len(run.security_scan_report.findings) == 1
     assert gateway.calls[0]["mission_slug"] == run.mission_slug
+
+
+async def test_security_scan_merges_defender_for_cloud_and_security_copilot_findings(
+    tmp_path: Path,
+):
+    """Both real Microsoft sources - Defender for Cloud (deterministic,
+    primary) and Security Copilot (optional narrative overlay) - must
+    contribute to the same report, never overwrite one another."""
+    copilot_gateway = _FakeSecurityCopilotGateway()
+    defender_gateway = _FakeDefenderForCloudGateway()
+    service = _build_service(
+        tmp_path=tmp_path,
+        security_copilot_gateway=copilot_gateway,
+        defender_for_cloud_gateway=defender_gateway,
+    )
+
+    run = await service.start(session_id="session-1", requesting_user_id="user-1", workflow_run_id="run-1")
+    run = await service.wait_for_run(run.id)
+
+    assert run.status == "completed"
+    assert run.security_scan_report is not None
+    assert run.security_scan_report.available is True
+    sources = {finding.source for finding in run.security_scan_report.findings}
+    assert sources == {"defender-for-cloud", "security-copilot"}
+    assert len(run.security_scan_report.findings) == 2
+    assert defender_gateway.calls == [run.resource_group_name]
+
+
+async def test_security_scan_is_available_from_defender_for_cloud_alone(tmp_path: Path):
+    """Defender for Cloud requires no pre-wired Logic App, so it must still
+    produce an available report even when Security Copilot is unconfigured
+    (the Null gateway's default in _build_service)."""
+    defender_gateway = _FakeDefenderForCloudGateway()
+    service = _build_service(tmp_path=tmp_path, defender_for_cloud_gateway=defender_gateway)
+
+    run = await service.start(session_id="session-1", requesting_user_id="user-1", workflow_run_id="run-1")
+    run = await service.wait_for_run(run.id)
+
+    assert run.status == "completed"
+    assert run.security_scan_report is not None
+    assert run.security_scan_report.available is True
+    assert [finding.source for finding in run.security_scan_report.findings] == ["defender-for-cloud"]
 
 
 async def test_finops_cost_report_reports_spend_without_blocking_launch(tmp_path: Path):
@@ -566,6 +633,7 @@ async def test_prototype_pipeline_uses_anonymous_apim_without_entra(tmp_path: Pa
         backend_deployment_service=backend_service,  # type: ignore[arg-type]
         frontend_deployment_service=frontend_service,  # type: ignore[arg-type]
         security_copilot_gateway=NullSecurityCopilotGateway(),
+        defender_for_cloud_gateway=NullDefenderForCloudGateway(),
         finops_cost_service=NullFinOpsCostService(),
         build_workspace_root=tmp_path,
     )
@@ -628,6 +696,7 @@ async def test_provisioning_uses_the_landing_page_approved_model(tmp_path: Path)
         backend_deployment_service=NullBackendDeploymentService(),
         frontend_deployment_service=NullFrontendDeploymentService(),
         security_copilot_gateway=NullSecurityCopilotGateway(),
+        defender_for_cloud_gateway=NullDefenderForCloudGateway(),
         finops_cost_service=NullFinOpsCostService(),
         build_workspace_root=tmp_path,
     )
@@ -655,6 +724,7 @@ async def test_provisioning_falls_back_to_default_model_when_no_scope_was_select
         backend_deployment_service=NullBackendDeploymentService(),
         frontend_deployment_service=NullFrontendDeploymentService(),
         security_copilot_gateway=NullSecurityCopilotGateway(),
+        defender_for_cloud_gateway=NullDefenderForCloudGateway(),
         finops_cost_service=NullFinOpsCostService(),
         build_workspace_root=tmp_path,
     )
@@ -706,6 +776,7 @@ async def test_abandon_deletes_complete_prototype_boundary_in_dependency_order(
         backend_deployment_service=_FakeProtectedBackendDeploymentService(delete_events),  # type: ignore[arg-type]
         frontend_deployment_service=_FakeProtectedFrontendDeploymentService(delete_events),  # type: ignore[arg-type]
         security_copilot_gateway=NullSecurityCopilotGateway(),
+        defender_for_cloud_gateway=NullDefenderForCloudGateway(),
         finops_cost_service=NullFinOpsCostService(),
         build_workspace_root=tmp_path,
     )
@@ -750,6 +821,7 @@ async def test_start_self_heals_incomplete_build_solution_with_safe_policy_defau
         backend_deployment_service=NullBackendDeploymentService(),
         frontend_deployment_service=NullFrontendDeploymentService(),
         security_copilot_gateway=NullSecurityCopilotGateway(),
+        defender_for_cloud_gateway=NullDefenderForCloudGateway(),
         finops_cost_service=NullFinOpsCostService(),
         build_workspace_root=tmp_path,
     )
@@ -819,6 +891,7 @@ async def test_start_uses_shared_memory_output_without_waiting_for_official_step
         backend_deployment_service=NullBackendDeploymentService(),
         frontend_deployment_service=NullFrontendDeploymentService(),
         security_copilot_gateway=NullSecurityCopilotGateway(),
+        defender_for_cloud_gateway=NullDefenderForCloudGateway(),
         finops_cost_service=NullFinOpsCostService(),
         build_workspace_root=tmp_path,
     )
@@ -849,6 +922,7 @@ async def test_start_fails_closed_with_actionable_error_when_stuck_on_earlier_ga
         backend_deployment_service=NullBackendDeploymentService(),
         frontend_deployment_service=NullFrontendDeploymentService(),
         security_copilot_gateway=NullSecurityCopilotGateway(),
+        defender_for_cloud_gateway=NullDefenderForCloudGateway(),
         finops_cost_service=NullFinOpsCostService(),
         build_workspace_root=tmp_path,
     )
@@ -919,6 +993,7 @@ async def test_pipeline_repairs_invalid_generated_ui_before_provisioning(
         backend_deployment_service=NullBackendDeploymentService(),
         frontend_deployment_service=NullFrontendDeploymentService(),
         security_copilot_gateway=NullSecurityCopilotGateway(),
+        defender_for_cloud_gateway=NullDefenderForCloudGateway(),
         finops_cost_service=NullFinOpsCostService(),
         build_workspace_root=tmp_path,
         max_repair_attempts=3,
@@ -959,6 +1034,7 @@ async def test_pipeline_exposes_validation_evidence_after_build_repair_is_exhaus
         backend_deployment_service=NullBackendDeploymentService(),
         frontend_deployment_service=NullFrontendDeploymentService(),
         security_copilot_gateway=NullSecurityCopilotGateway(),
+        defender_for_cloud_gateway=NullDefenderForCloudGateway(),
         finops_cost_service=NullFinOpsCostService(),
         build_workspace_root=tmp_path,
         max_repair_attempts=1,

@@ -58,8 +58,8 @@ const STEP_WORKING_LABELS: Record<DeploymentStepId, string> = {
   "deploy-backend-service": "Genie is working with the Orchestrator to deploy your backend service...",
   "sync-frontend-integration": "Genie is wiring your frontend to the newly deployed backend...",
   "deploy-frontend-app": "Genie is publishing your frontend application...",
-  "security-copilot-scan": "Genie is running a Microsoft Security Copilot scan against your deployed prototype...",
-  "finops-cost-report": "Genie is querying Azure Cost Management for your mission's real spend...",
+  "security-copilot-scan": "Genie is querying Microsoft Defender for Cloud and Security Copilot against your deployed prototype...",
+  "finops-cost-report": "Genie is querying Azure Cost Management (and your FinOps hub, if configured) for your mission's real spend...",
   "launch-mission": "Genie is minting your customer-facing launch link...",
 };
 const STARTING_LABEL =
@@ -642,7 +642,7 @@ export function DeployLaunchPage(): JSX.Element {
 
         {activeRun?.security_scan_report ? (
           <SectionCard
-            title="🛡️ Microsoft Security Copilot Scan"
+            title="🛡️ Microsoft Defender & Security Copilot Scan"
             action={
               <Badge
                 shape="rounded"

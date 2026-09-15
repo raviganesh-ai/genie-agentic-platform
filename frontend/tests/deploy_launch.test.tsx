@@ -115,6 +115,7 @@ describe("DeployLaunchPage", () => {
               summary: "2 findings reviewed - none blocking.",
               findings: [
                 {
+                  source: "security-copilot",
                   severity: "medium",
                   title: "Missing security header",
                   description: "Content-Security-Policy header not set.",
@@ -134,7 +135,7 @@ describe("DeployLaunchPage", () => {
       workflowRunId: FIXTURE_WORKFLOW_RUN_ID,
     });
 
-    expect(await screen.findByText("🛡️ Microsoft Security Copilot Scan")).toBeInTheDocument();
+    expect(await screen.findByText("🛡️ Microsoft Defender & Security Copilot Scan")).toBeInTheDocument();
     expect(await screen.findByText("2 findings reviewed - none blocking.")).toBeInTheDocument();
     expect(screen.getByText("1 finding(s)")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^Launch$/i })).toBeInTheDocument();
@@ -151,6 +152,7 @@ describe("DeployLaunchPage", () => {
             cost_report: {
               available: true,
               summary: "Estimated spend for this mission so far.",
+              data_source: "azure-cost-management",
               total_cost: 12.5,
               currency: "USD",
               line_items: [{ resource_type: "Container App", cost: 12.5 }],

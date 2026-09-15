@@ -10,6 +10,12 @@ gateway therefore posts the mission's own context to a pre-configured
 Logic App HTTP trigger and parses whatever findings it returns; it never
 fabricates a scan result of its own.
 
+This is the optional, narrative overlay source composed into
+``app.deploy_launch.models.SecurityCopilotScanReport`` - Microsoft Defender
+for Cloud's deterministic assessment API
+(``app.deploy_launch.defender_for_cloud_gateway``) is the primary source,
+since it requires no pre-wired Logic App/promptbook.
+
 This step is explicitly informational-only and must never block Launch
 (see ``app.deploy_launch.models.SecurityCopilotScanReport``): when no
 Logic App endpoint is configured, or the request itself fails,
@@ -86,6 +92,7 @@ class SecurityCopilotGateway:
         raw_findings = body.get("findings", []) if isinstance(body, dict) else []
         findings = [
             SecurityCopilotFinding(
+                source="security-copilot",
                 severity=finding.get("severity") or "informational",
                 title=finding.get("title") or "Untitled finding",
                 description=finding.get("description") or "",

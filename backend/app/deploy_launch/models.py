@@ -35,10 +35,12 @@ __all__ = [
     "DeploymentStepStatus",
     "FinOpsCostLineItem",
     "FinOpsCostReport",
+    "FinOpsDataSource",
     "MissionIdentityInfo",
     "ProvisionedAgentStatus",
     "SecurityCopilotFinding",
     "SecurityCopilotScanReport",
+    "SecurityFindingSource",
 ]
 
 DeploymentStepId = Literal[
@@ -54,8 +56,10 @@ DeploymentStepId = Literal[
 
 # The fixed, ordered pipeline for new runs. ``security-copilot-scan`` and
 # ``finops-cost-report`` are informational-only: neither can block Launch,
-# they only enrich the run with a real Microsoft Security Copilot scan and a
-# real Azure Cost Management report for the mission's own resource group.
+# they only enrich the run with a real Microsoft Defender for Cloud
+# assessment scan (plus an optional Security Copilot narrative overlay) and
+# a real Azure cost report (Cost Management, or a FinOps toolkit hub when
+# configured) for the mission's own resource group.
 DEPLOYMENT_STEP_ORDER: tuple[DeploymentStepId, ...] = (
     "generate-access-policy",
     "provision-foundry-agents",
@@ -73,7 +77,7 @@ DEPLOYMENT_STEP_NAMES: dict[DeploymentStepId, str] = {
     "deploy-backend-service": "Deploy Backend Service",
     "sync-frontend-integration": "Update Frontend Integrations",
     "deploy-frontend-app": "Deploy Frontend",
-    "security-copilot-scan": "Microsoft Security Copilot Scan",
+    "security-copilot-scan": "Microsoft Defender & Security Copilot Scan",
     "finops-cost-report": "Azure FinOps Cost Report",
     "launch-mission": "Launch",
 }
@@ -84,11 +88,15 @@ PrototypeCleanupStatus = Literal["active", "deletion_pending", "deletion_failed"
 SecurityFindingSeverity = Literal["informational", "low", "medium", "high", "critical"]
 
 
+SecurityFindingSource = Literal["defender-for-cloud", "security-copilot"]
+
+
 class SecurityCopilotFinding(BaseModel):
-    """One real finding returned by a Microsoft Security Copilot promptbook run."""
+    """One real finding from Defender for Cloud or a Security Copilot promptbook run."""
 
     model_config = ConfigDict(extra="forbid")
 
+    source: SecurityFindingSource = "defender-for-cloud"
     severity: SecurityFindingSeverity = "informational"
     title: str = Field(min_length=1)
     description: str = ""
@@ -96,11 +104,16 @@ class SecurityCopilotFinding(BaseModel):
 
 
 class SecurityCopilotScanReport(BaseModel):
-    """Informational-only Security Copilot scan outcome for one mission's prototype.
+    """Informational-only security scan outcome for one mission's prototype.
 
-    Never gates Launch - ``available=False`` (no Logic App endpoint
-    configured, or the promptbook run itself failed) is a normal, honestly
-    reported outcome, not a pipeline failure.
+    Aggregates two independent, real Microsoft sources - Defender for
+    Cloud's deterministic per-resource assessments (the primary source;
+    see ``app.deploy_launch.defender_for_cloud_gateway``) and an optional
+    Security Copilot Automated Action narrative overlay (see
+    ``app.deploy_launch.security_copilot_gateway``) - into one report.
+    Never gates Launch - ``available=False`` (neither source configured, or
+    both queries failed) is a normal, honestly reported outcome, not a
+    pipeline failure.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -121,10 +134,16 @@ class FinOpsCostLineItem(BaseModel):
     cost: float = Field(ge=0)
 
 
-class FinOpsCostReport(BaseModel):
-    """Informational-only Azure Cost Management report for one mission's resource group.
+FinOpsDataSource = Literal["azure-cost-management", "finops-hub"]
 
-    Never gates Launch - ``available=False`` (Cost Management not
+
+class FinOpsCostReport(BaseModel):
+    """Informational-only Azure cost report for one mission's resource group.
+
+    Sourced from a FinOps toolkit hub (Data Explorer cluster) when one is
+    configured, falling back to a direct Azure Cost Management query
+    otherwise - see ``data_source`` and ``app.deploy_launch.finops_cost_service``.
+    Never gates Launch - ``available=False`` (neither source
     configured/enabled, or the query itself failed) is a normal, honestly
     reported outcome, not a pipeline failure.
     """
@@ -133,6 +152,7 @@ class FinOpsCostReport(BaseModel):
 
     available: bool = False
     summary: str = ""
+    data_source: FinOpsDataSource = "azure-cost-management"
     total_cost: float | None = None
     currency: str | None = None
     line_items: list[FinOpsCostLineItem] = Field(default_factory=list)

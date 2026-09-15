@@ -9,10 +9,13 @@ result. This is explicitly NOT an LLM-driven workflow step: it is invoked
 only after the ``solution-discovery-workflow`` has already produced an
 approved architecture (``design-architecture``) and generated build
 (``build-solution``). Two of its steps are informational-only and can
-never block Launch: ``security-copilot-scan`` (a Microsoft Security
-Copilot Automated Action run against the mission's own deployed
-prototype - see ``app.deploy_launch.security_copilot_gateway``) and
-``finops-cost-report`` (a real Azure Cost Management query scoped to the
+never block Launch: ``security-copilot-scan`` (Microsoft Defender for
+Cloud's real assessment API - the deterministic primary source, see
+``app.deploy_launch.defender_for_cloud_gateway`` - plus an optional
+Security Copilot Automated Action narrative overlay, see
+``app.deploy_launch.security_copilot_gateway``) and ``finops-cost-report``
+(a real Azure cost report from a FinOps toolkit hub when configured,
+otherwise a direct Azure Cost Management query, both scoped to the
 mission's own resource group - see
 ``app.deploy_launch.finops_cost_service``); both honestly report
 ``available=False`` when not configured or when the underlying request
@@ -65,6 +68,11 @@ from app.deploy_launch.container_app_frontend_deployment_service import (
     ContainerAppFrontendDeploymentService,
     NullContainerAppFrontendDeploymentService,
 )
+from app.deploy_launch.defender_for_cloud_gateway import (
+    DefenderForCloudGateway,
+    NullDefenderForCloudGateway,
+    create_defender_for_cloud_gateway,
+)
 from app.deploy_launch.finops_cost_service import (
     FinOpsCostService,
     NullFinOpsCostService,
@@ -86,6 +94,7 @@ from app.deploy_launch.models import (
     DeploymentStepId,
     DeploymentStepResult,
     ProvisionedAgentStatus,
+    SecurityCopilotScanReport,
 )
 from app.deploy_launch.resource_naming import prototype_resource_group_name
 from app.deploy_launch.security_copilot_gateway import (
@@ -135,6 +144,31 @@ def _approved_model_deployment_ref(run: WorkflowRunResult) -> str | None:
         return None
     ref = scope_id[len(_APPROVED_MODEL_SCOPE_PREFIX) :].strip()
     return ref or None
+
+
+def _merge_security_scan_reports(
+    defender_report: SecurityCopilotScanReport, copilot_report: SecurityCopilotScanReport
+) -> SecurityCopilotScanReport:
+    """Combines Defender for Cloud's deterministic findings with Security
+    Copilot's optional narrative overlay into one report - see
+    ``app.deploy_launch.models.SecurityCopilotScanReport``. Available if
+    either source produced real data; each source's own summary is kept so
+    neither is silently dropped."""
+
+    findings = [*defender_report.findings, *copilot_report.findings]
+    summaries = [
+        report.summary
+        for report in (defender_report, copilot_report)
+        if report.available and report.summary
+    ]
+    if not summaries:
+        summaries = [defender_report.summary, copilot_report.summary]
+    return SecurityCopilotScanReport(
+        available=defender_report.available or copilot_report.available,
+        summary=" ".join(summary for summary in summaries if summary),
+        findings=findings,
+        reference_url=copilot_report.reference_url,
+    )
 
 
 _FRONTEND_INDEX_HTML_TEMPLATE = """<!doctype html>
@@ -1488,6 +1522,7 @@ class DeploymentPipelineService:
             ContainerAppFrontendDeploymentService | NullContainerAppFrontendDeploymentService
         ),
         security_copilot_gateway: SecurityCopilotGateway | NullSecurityCopilotGateway,
+        defender_for_cloud_gateway: DefenderForCloudGateway | NullDefenderForCloudGateway,
         finops_cost_service: FinOpsCostService | NullFinOpsCostService,
         build_workspace_root: Path,
         run_repository: DeploymentRunRepository | None = None,
@@ -1509,6 +1544,7 @@ class DeploymentPipelineService:
         self._backend_deployment_service = backend_deployment_service
         self._frontend_deployment_service = frontend_deployment_service
         self._security_copilot_gateway = security_copilot_gateway
+        self._defender_for_cloud_gateway = defender_for_cloud_gateway
         self._finops_cost_service = finops_cost_service
         self._run_repository = run_repository or InMemoryDeploymentRunRepository()
         self._prototype_default_ttl_days = prototype_default_ttl_days
@@ -2615,14 +2651,18 @@ class DeploymentPipelineService:
 
                 elif step_id == "security-copilot-scan":
                     step_result.detail = (
-                        "Running a Microsoft Security Copilot scan against this mission's "
-                        "deployed prototype..."
+                        "Checking Microsoft Defender for Cloud and Security Copilot for "
+                        "this mission's deployed prototype..."
                     )
-                    scan_report = await self._security_copilot_gateway.scan(
+                    defender_report = await self._defender_for_cloud_gateway.scan(
+                        resource_group_name=pipeline_run.resource_group_name,
+                    )
+                    copilot_report = await self._security_copilot_gateway.scan(
                         mission_slug=mission_slug,
                         mission_title=mission_title,
                         resource_group_name=pipeline_run.resource_group_name,
                     )
+                    scan_report = _merge_security_scan_reports(defender_report, copilot_report)
                     pipeline_run.security_scan_report = scan_report
                     detail = scan_report.summary
 
@@ -2761,6 +2801,7 @@ def create_deployment_pipeline_service(
         backend_deployment_service=backend_deployment_service,
         frontend_deployment_service=frontend_deployment_service,
         security_copilot_gateway=create_security_copilot_gateway(settings=settings),
+        defender_for_cloud_gateway=create_defender_for_cloud_gateway(settings=settings),
         finops_cost_service=create_finops_cost_service(settings=settings),
         run_repository=run_repository,
         prototype_default_ttl_days=settings.prototype_default_ttl_days,

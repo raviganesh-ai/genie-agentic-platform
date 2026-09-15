@@ -47,7 +47,12 @@ directly, each isolating that SDK behind its own interface:
   ``DefaultAzureCredential`` lifecycle used to call the Azure Cost
   Management REST API directly (no ``azure-mgmt-costmanagement``
   dependency) for the Deploy & Launch pipeline's informational-only
-  FinOps cost report step.
+  FinOps cost report step (and, when configured, an operator's own FinOps
+  toolkit hub via the Kusto REST API).
+- ``app/deploy_launch/defender_for_cloud_gateway.py`` owns the
+  ``DefaultAzureCredential`` lifecycle used to call the Microsoft Defender
+  for Cloud assessments REST API directly for the Deploy & Launch
+  pipeline's informational-only security scan step.
 
 Every other module must depend only on those protocols, never on the SDK
 directly. This test fails closed if that boundary is ever violated.
@@ -76,6 +81,7 @@ _ALLOWED_RELATIVE_PATHS = {
     Path("deploy_launch/code_materializer.py"),
     Path("deploy_launch/mission_identity_service.py"),
     Path("deploy_launch/finops_cost_service.py"),
+    Path("deploy_launch/defender_for_cloud_gateway.py"),
 }
 
 

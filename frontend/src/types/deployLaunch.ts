@@ -28,7 +28,7 @@ export const DEPLOYMENT_STEP_NAMES: Record<DeploymentStepId, string> = {
   "deploy-backend-service": "Deploy Backend Service",
   "sync-frontend-integration": "Update Frontend Integrations",
   "deploy-frontend-app": "Deploy Frontend",
-  "security-copilot-scan": "Microsoft Security Copilot Scan",
+  "security-copilot-scan": "Microsoft Defender & Security Copilot Scan",
   "finops-cost-report": "Azure FinOps Cost Report",
   "launch-mission": "Launch",
 };
@@ -65,8 +65,10 @@ export interface ProvisionedAgentStatus {
 }
 
 export type SecurityFindingSeverity = "informational" | "low" | "medium" | "high" | "critical";
+export type SecurityFindingSource = "defender-for-cloud" | "security-copilot";
 
 export interface SecurityCopilotFinding {
+  source: SecurityFindingSource;
   severity: SecurityFindingSeverity;
   title: string;
   description: string;
@@ -86,9 +88,12 @@ export interface FinOpsCostLineItem {
   cost: number;
 }
 
+export type FinOpsDataSource = "azure-cost-management" | "finops-hub";
+
 export interface FinOpsCostReport {
   available: boolean;
   summary: string;
+  data_source: FinOpsDataSource;
   total_cost: number | null;
   currency: string | null;
   line_items: FinOpsCostLineItem[];

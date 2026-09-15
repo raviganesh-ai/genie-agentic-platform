@@ -193,6 +193,15 @@ class Settings(BaseSettings):
     security_copilot_logic_app_url: str | None = None
     security_copilot_timeout_seconds: float = Field(default=120, gt=0, le=600)
 
+    # --- Deploy & Launch: Microsoft Defender for Cloud scan (informational-only) -
+    # Explicit opt-in - real Defender for Cloud assessment queries are only
+    # issued when this is true (and azure_subscription_id is configured);
+    # otherwise the step honestly reports "not configured" instead of
+    # blocking Launch. This is the deterministic, primary source for the
+    # security-copilot-scan step; see app.deploy_launch.defender_for_cloud_gateway.
+    defender_for_cloud_enabled: bool = False
+    defender_for_cloud_timeout_seconds: float = Field(default=60, gt=0, le=300)
+
     # --- Deploy & Launch: Azure FinOps cost report (informational-only) ---------
     # Explicit opt-in - real Azure Cost Management queries are only issued
     # when this is true (and azure_subscription_id is configured); otherwise
@@ -200,6 +209,21 @@ class Settings(BaseSettings):
     # See app.deploy_launch.finops_cost_service.
     finops_cost_report_enabled: bool = False
     finops_cost_report_timeout_seconds: float = Field(default=30, gt=0, le=300)
+
+    # --- Deploy & Launch: FinOps toolkit hub (optional, richer cost data) -------
+    # When a FinOps hub (a Data Explorer cluster ingesting an operator's own
+    # cost exports, per Microsoft's open-source FinOps toolkit) is already
+    # provisioned and all three of these are configured, the FinOps cost
+    # report step queries it directly via the Kusto REST API instead of Cost
+    # Management. finops_hub_kusto_query must be KQL that projects result
+    # columns named ResourceType, Cost, and optionally Currency - Genie does
+    # not assume any particular FinOps toolkit table/schema version, since
+    # that depends on the operator's own hub. Falls back to the direct Cost
+    # Management query above when unset or when the hub query itself fails.
+    finops_hub_kusto_cluster_uri: str | None = None
+    finops_hub_kusto_database: str | None = None
+    finops_hub_kusto_query: str | None = None
+    finops_hub_timeout_seconds: float = Field(default=30, gt=0, le=300)
 
     @property
     def cors_allowed_origins_list(self) -> list[str]:
@@ -244,6 +268,9 @@ class Settings(BaseSettings):
         "prototype_api_gateway_publisher_email",
         "prototype_api_gateway_publisher_name",
         "security_copilot_logic_app_url",
+        "finops_hub_kusto_cluster_uri",
+        "finops_hub_kusto_database",
+        "finops_hub_kusto_query",
         mode="after",
     )
     @classmethod

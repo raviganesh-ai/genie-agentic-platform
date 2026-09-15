@@ -24,11 +24,10 @@
 # Deploy & Launch is deliberately NOT a workflow step: it is a separate,
 # real (non-LLM-narrative) multi-step Azure provisioning pipeline - see
 # app.deploy_launch.pipeline_service - started directly from the Deploy &
-# Launch page once the human clicks Start. Test generation (and its real
-# execution) also happens there now, as the pipeline's own
-# generate-test-suite/execute-test-suite steps AFTER the app is actually
-# deployed - not as a discovery-workflow step - so the generated tests
-# cover the real, deployed build rather than a pre-deploy narrative pass.
+# Launch page once the human clicks Start. It ends with two informational-
+# only steps (security-copilot-scan, finops-cost-report) that report real
+# evidence against the actually-deployed build without ever blocking
+# Launch - not as a discovery-workflow step.
 #
 # Every step below has a `variable_sources` mapping so the whole graph can
 # run automatically from nothing but an uploaded call transcript/recording:
