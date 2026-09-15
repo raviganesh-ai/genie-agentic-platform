@@ -101,6 +101,44 @@ async def test_cosmos_deployment_repository_round_trips_owner_and_ttl() -> None:
     assert await repository.list_all() == []
 
 
+async def test_cosmos_deployment_repository_skips_runs_from_a_removed_schema() -> None:
+    store = _FakeDocumentStore()
+    repository = CosmosDeploymentRunRepository(store=store)
+    now = datetime.now(UTC)
+    valid_run = DeploymentPipelineRun(
+        id="prototype-1",
+        session_id="session-1",
+        workflow_run_id="workflow-1",
+        owner_user_id="tenant-1:object-1",
+        owner_tenant_id="tenant-1",
+        owner_object_id="object-1",
+        status="completed",
+        created_at=now,
+        updated_at=now,
+    )
+    await repository.put(valid_run)
+    # Simulate a run persisted under a since-removed step id/schema (e.g. the
+    # old `generate-test-suite` Requirement Fidelity Gate step).
+    await store.upsert(
+        {
+            "id": "prototype-legacy",
+            "partitionKey": "deployment-runs",
+            "recordType": "deployment-run",
+            "session_id": "session-1",
+            "workflow_run_id": "workflow-legacy",
+            "status": "completed",
+            "steps": [{"step_id": "generate-test-suite", "name": "x", "status": "completed"}],
+            "test_summary": "0 passed, 34 failed, 0 errors",
+            "created_at": now.isoformat(),
+            "updated_at": now.isoformat(),
+        }
+    )
+
+    runs = await repository.list_all()
+
+    assert runs == [valid_run]
+
+
 async def test_cosmos_workflow_repository_survives_repository_recreation() -> None:
     store = _FakeDocumentStore()
     now = datetime.now(UTC)
