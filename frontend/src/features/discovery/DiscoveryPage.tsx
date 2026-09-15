@@ -44,7 +44,6 @@ import type {
   ArchitectureNode,
   DiscoveryCase,
   DiscoveryQaMode,
-  PricingCommitment,
   ProposedSolution,
 } from "@/types/discovery";
 import type { UploadType } from "@/types/upload";
@@ -158,13 +157,6 @@ function ArchitectureDiagram({ solution }: { solution: ProposedSolution }): JSX.
   );
 }
 
-const commitmentLabels: Record<PricingCommitment, string> = {
-  reserved_1yr: "Reserved (1yr)",
-  reserved_3yr: "Reserved (3yr)",
-  savings_plan_1yr: "Savings Plan (1yr)",
-  savings_plan_3yr: "Savings Plan (3yr)",
-};
-
 function SolutionCard({
   solution,
   selected,
@@ -176,15 +168,6 @@ function SolutionCard({
   disabled: boolean;
   onSelect: () => void;
 }): JSX.Element {
-  const cost = solution.cost_estimate;
-  const currencyFormatter = new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: cost.currency_code,
-    maximumFractionDigits: 2,
-  });
-  const formatCost = (amount: number | null) => (
-    amount === null ? "Unavailable" : currencyFormatter.format(amount)
-  );
   return (
     <article className={`discovery-card${selected ? " selected" : ""}`}>
       <div>

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { screen, waitFor, within } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { DiscoveryPage } from "@/features/discovery/DiscoveryPage";
 import { mockFetchSequence, renderWithProviders } from "./testUtils";
