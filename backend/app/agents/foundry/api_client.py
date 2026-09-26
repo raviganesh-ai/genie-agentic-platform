@@ -61,10 +61,9 @@ class AgentApiClient(Protocol):
     def agent_exists(self, agent_id: str) -> bool:
         """Return True if a Foundry agent resource named ``agent_id`` exists.
 
-        Used only for pre-execution synchronization checks (see
-        ``FoundryAgentSynchronizationService``) and to resolve whether a
-        catalog agent still needs provisioning, never for run execution
-        itself.
+        Used for pre-execution synchronization checks, catalog provisioning,
+        and immediate read-back verification after mission-agent creation;
+        never for run execution itself.
         """
         ...
 

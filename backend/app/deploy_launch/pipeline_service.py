@@ -2605,6 +2605,31 @@ class DeploymentPipelineService:
                         model_deployment_ref=_approved_model_deployment_ref(run),
                     )
                     provisioned_by_name = {record.agent_name: record for record in provisioned}
+                    foundry_names = [record.foundry_agent_name.strip() for record in provisioned]
+                    expected_agent_names = set(agent_names)
+                    actual_agent_names = {record.agent_name for record in provisioned}
+                    invalid_fleet = (
+                        len(provisioned) != len(agent_names)
+                        or actual_agent_names != expected_agent_names
+                        or any(not foundry_name for foundry_name in foundry_names)
+                        or len(set(foundry_names)) != len(foundry_names)
+                    )
+                    if invalid_fleet:
+                        pipeline_run.provisioned_agents = [
+                            ProvisionedAgentStatus(
+                                agent_name=name,
+                                status="failed",
+                            )
+                            for name in agent_names
+                        ]
+                        if foundry_names:
+                            await self._mission_agent_provisioning_service.delete(
+                                foundry_agent_names=[name for name in foundry_names if name]
+                            )
+                        raise DeploymentPipelineStepFailedError(
+                            "Foundry provisioning did not return one unique, verified resource "
+                            "for every specialist and the orchestrator."
+                        )
                     pipeline_run.provisioned_agents = [
                         ProvisionedAgentStatus(
                             agent_name=name,
@@ -2765,12 +2790,12 @@ class DeploymentPipelineService:
                 # to a terminal, detailed status (completed or failed).
                 if step_id == "provision-foundry-agents":
                     # Provisioning is atomic (all-or-nothing, see
-                    # MissionAgentProvisioningService.provision) - any agent
-                    # still "running" here never actually finished.
+                    # MissionAgentProvisioningService.provision) - every
+                    # resource created by a failed attempt has been rolled
+                    # back, including agents whose progress callback had
+                    # already marked them completed.
                     pipeline_run.provisioned_agents = [
-                        agent.model_copy(update={"status": "failed"})
-                        if agent.status == "running"
-                        else agent
+                        ProvisionedAgentStatus(agent_name=agent.agent_name, status="failed")
                         for agent in pipeline_run.provisioned_agents
                     ]
                 step_result.status = "failed"

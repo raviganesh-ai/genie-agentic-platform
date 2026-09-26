@@ -226,7 +226,7 @@ Deploy & Launch is deliberately **not** an LLM-narrative workflow step — it is
 | # | Step id | Customer-facing name | What actually happens |
 |---|---|---|---|
 | 1 | `generate-access-policy` | Generate Access Policy & Least Access | Derives a least-privilege access policy for the mission's generated agents |
-| 2 | `provision-foundry-agents` | Deploy Agents to Foundry | Deterministically materializes and validates the complete generated build, performs bounded repair before creating any cloud resources when validation fails, then provisions each generated specialist + orchestrator agent as a real Azure AI Foundry resource |
+| 2 | `provision-foundry-agents` | Deploy Agents to Foundry | Deterministically materializes and validates the complete generated build, performs bounded repair before creating any cloud resources when validation fails, then provisions and reads back each generated specialist + orchestrator as a unique Azure AI Foundry resource; an incomplete, duplicate, empty, or unverified fleet is deleted and fails before backend deployment |
 | 3 | `deploy-backend-service` | Deploy Backend Service | Provisions a prototype-owned VNet, private DNS zone, internal Container Apps environment, and dedicated Standard v2 API Management service; builds FastAPI; and enables app-boundary ingress inside the internal environment. APIM is the only public API endpoint and reaches FastAPI only over the prototype private network |
 | 4 | `sync-frontend-integration` | Update Frontend Integrations | Wires the generated anonymous UI to the dedicated APIM endpoint; no Entra, MSAL, bearer-token, or acceptance-key runtime configuration is generated |
 | 5 | `deploy-frontend-app` | Deploy Frontend | Builds the mission UI under Node 22, runs the pinned Apache-2.0 Impeccable `3.6.0` detector over generated TSX/CSS, fails closed on deterministic design anti-patterns, provisions a prototype-owned public Consumption Container Apps environment, then deploys a mission-specific frontend Container App. APIM's deny-by-default bootstrap CORS origin is replaced with the returned exact HTTPS origin |
@@ -699,6 +699,12 @@ The script uses Microsoft Entra authentication, creates only missing model deplo
 ## Deploy log
 
 Every deployment to the shared Azure evaluation environment (backend Container App and/or frontend Static Web App) is recorded here: commit, what changed, and why. Update this section as part of the same commit that ships the fix/feature, before pushing to `master` triggers [Continuous deployment](#continuous-deployment-github-actions).
+
+### 2026-09-26 — Generated Foundry fleets are exact and read-back verified
+
+- **Fail-closed provisioning**: every generated specialist and orchestrator must return its exact requested, non-empty Foundry resource name and be immediately readable through the Foundry API. Empty expected fleets, duplicate logical names, empty model references, unexpected or missing resources, partial returned fleets, and duplicate resource names now fail the provisioning step; every resource created by the failed attempt is deleted before backend deployment can begin.
+- **Collision resistance**: generated names that exceed Foundry's 63-character limit now retain a deterministic SHA-256 suffix, preventing long specialist names with the same truncated prefix from collapsing onto one resource.
+- **Production evidence**: the DerekPoC deployment plan resolves to 14 expected and 14 unique resource names, all within the Foundry limit. The live backend managed identity has `Cognitive Services User` scoped to the configured Foundry account. Focused regressions cover read-back failure rollback, long-name uniqueness, and partial-fleet rejection before backend deployment.
 
 ### 2026-09-26 — Foundry deployment accepts proven shared orchestrator helpers
 

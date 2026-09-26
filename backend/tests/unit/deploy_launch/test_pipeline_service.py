@@ -37,7 +37,9 @@ from app.deploy_launch.frontend_deployment_service import (
     NullFrontendDeploymentService,
 )
 from app.deploy_launch.mission_agent_provisioning_service import (
+    MissionAgentProvisioningError,
     NullMissionAgentProvisioningService,
+    ProvisionedMissionAgent,
 )
 from app.deploy_launch.mission_identity_service import NullMissionIdentityService
 from app.deploy_launch.models import (
@@ -469,6 +471,86 @@ async def test_full_pipeline_runs_every_step(tmp_path: Path):
     )
     assert 'window.__MISSION_BACKEND_URL__ = null' not in runtime_config_source
     assert '__MISSION_AGENTS__ = ["Requirements Specialist"]' in runtime_config_source
+
+
+class _PartialMissionAgentProvisioningService(NullMissionAgentProvisioningService):
+    def __init__(self) -> None:
+        self.deleted_names: list[str] = []
+
+    async def provision(self, **kwargs):
+        record = ProvisionedMissionAgent(
+            agent_name="Requirements Specialist",
+            foundry_agent_name="foundry-requirements-specialist",
+            provisioned_at=datetime.now(UTC),
+        )
+        callback = kwargs.get("on_agent_provisioned")
+        if callback is not None:
+            await callback(record)
+        return [record]
+
+    async def delete(self, *, foundry_agent_names: list[str]) -> None:
+        self.deleted_names.extend(foundry_agent_names)
+
+
+async def test_pipeline_fails_before_backend_when_foundry_fleet_is_partial(tmp_path: Path):
+    provisioning_service = _PartialMissionAgentProvisioningService()
+    service = _build_service(
+        tmp_path=tmp_path,
+        mission_agent_provisioning_service=provisioning_service,
+    )
+
+    run = await service.start(
+        session_id="session-1", requesting_user_id="user-1", workflow_run_id="run-1"
+    )
+    run = await service.wait_for_run(run.id)
+
+    provision_step = next(
+        step for step in run.steps if step.step_id == "provision-foundry-agents"
+    )
+    backend_step = next(step for step in run.steps if step.step_id == "deploy-backend-service")
+    assert run.status == "failed"
+    assert provision_step.status == "failed"
+    assert "one unique, verified resource" in (provision_step.error or "")
+    assert backend_step.status == "pending"
+    assert all(agent.status == "failed" for agent in run.provisioned_agents)
+    assert all(agent.foundry_agent_name is None for agent in run.provisioned_agents)
+    assert provisioning_service.deleted_names == ["foundry-requirements-specialist"]
+
+
+class _FailingAfterFirstMissionAgentProvisioningService(NullMissionAgentProvisioningService):
+    async def provision(self, **kwargs):
+        callback = kwargs.get("on_agent_provisioned")
+        assert callback is not None
+        await callback(
+            ProvisionedMissionAgent(
+                agent_name="Requirements Specialist",
+                foundry_agent_name="foundry-requirements-specialist",
+                provisioned_at=datetime.now(UTC),
+            )
+        )
+        raise MissionAgentProvisioningError("Foundry did not confirm the orchestrator")
+
+
+async def test_pipeline_clears_completed_agents_after_provisioning_rollback(tmp_path: Path):
+    service = _build_service(
+        tmp_path=tmp_path,
+        mission_agent_provisioning_service=_FailingAfterFirstMissionAgentProvisioningService(),
+    )
+
+    run = await service.start(
+        session_id="session-1", requesting_user_id="user-1", workflow_run_id="run-1"
+    )
+    run = await service.wait_for_run(run.id)
+
+    provision_step = next(
+        step for step in run.steps if step.step_id == "provision-foundry-agents"
+    )
+    backend_step = next(step for step in run.steps if step.step_id == "deploy-backend-service")
+    assert run.status == "failed"
+    assert provision_step.status == "failed"
+    assert backend_step.status == "pending"
+    assert all(agent.status == "failed" for agent in run.provisioned_agents)
+    assert all(agent.foundry_agent_name is None for agent in run.provisioned_agents)
 
 
 class _FakeSecurityCopilotGateway:

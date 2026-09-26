@@ -22,6 +22,7 @@ import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from hashlib import sha256
 
 from app.agents.foundry.errors import FoundryUnavailableError
 from app.agents.foundry.project_service import FoundryProjectService
@@ -77,17 +78,15 @@ def _build_foundry_agent_name(mission_slug: str, agent_name: str) -> str:
     """Builds a Foundry-valid agent name, truncating as needed to fit 63 chars."""
 
     agent_slug = _slugify(agent_name)
-    prefix = f"{mission_slug}-"
-    available = _FOUNDRY_AGENT_NAME_MAX_LENGTH - len(prefix)
-    if available <= 0:
-        # mission_slug alone (plus separator) already exceeds the limit -
-        # fall back to a hard truncation of just the slug so this never
-        # raises here; Foundry's own validation still fails closed if this
-        # somehow still isn't valid.
-        return mission_slug[:_FOUNDRY_AGENT_NAME_MAX_LENGTH].strip("-") or "agent"
+    candidate = f"{mission_slug}-{agent_slug}"
+    if len(candidate) <= _FOUNDRY_AGENT_NAME_MAX_LENGTH:
+        return candidate
 
-    truncated_slug = agent_slug[:available].strip("-") or "agent"
-    return f"{prefix}{truncated_slug}"
+    digest = sha256(agent_name.encode("utf-8")).hexdigest()[:8]
+    suffix = f"-{digest}"
+    stem_length = _FOUNDRY_AGENT_NAME_MAX_LENGTH - len(suffix)
+    stem = candidate[:stem_length].strip("-") or "agent"
+    return f"{stem}{suffix}"
 
 
 def _extract_agent_instructions(architecture_document: str, agent_name: str) -> str:
@@ -144,6 +143,15 @@ class MissionAgentProvisioningService:
         user approved, not always the platform default.
         """
 
+        if not agent_names:
+            raise MissionAgentProvisioningError(
+                "Cannot provision mission agents: the expected agent fleet is empty."
+            )
+        if len(set(agent_names)) != len(agent_names):
+            raise MissionAgentProvisioningError(
+                "Cannot provision mission agents: logical agent names must be unique."
+            )
+
         try:
             client = self._project_service.get_api_client()
         except FoundryUnavailableError as exc:
@@ -152,15 +160,36 @@ class MissionAgentProvisioningService:
             ) from exc
 
         effective_model = (model_deployment_ref or self._model_deployment_ref).strip()
+        if not effective_model:
+            raise MissionAgentProvisioningError(
+                "Cannot provision mission agents: the model deployment reference is empty."
+            )
         provisioned: list[ProvisionedMissionAgent] = []
+        created_foundry_names: list[str] = []
         try:
             for agent_name in agent_names:
+                requested_foundry_name = _build_foundry_agent_name(mission_slug, agent_name)
                 foundry_agent_name = client.create_agent(
-                    name=_build_foundry_agent_name(mission_slug, agent_name),
+                    name=requested_foundry_name,
                     model=effective_model,
                     instructions=_extract_agent_instructions(architecture_document, agent_name),
                     description=agent_name,
                 )
+                created_foundry_names.append(requested_foundry_name)
+                if not foundry_agent_name or not foundry_agent_name.strip():
+                    raise MissionAgentProvisioningError(
+                        f"Foundry returned an empty resource name for '{agent_name}'."
+                    )
+                foundry_agent_name = foundry_agent_name.strip()
+                if foundry_agent_name != requested_foundry_name:
+                    raise MissionAgentProvisioningError(
+                        "Foundry returned unexpected resource name "
+                        f"'{foundry_agent_name}' for requested agent '{requested_foundry_name}'."
+                    )
+                if not client.agent_exists(foundry_agent_name):
+                    raise MissionAgentProvisioningError(
+                        f"Foundry did not confirm the created agent '{foundry_agent_name}'."
+                    )
                 record = ProvisionedMissionAgent(
                     agent_name=agent_name,
                     foundry_agent_name=foundry_agent_name,
@@ -170,11 +199,19 @@ class MissionAgentProvisioningService:
                 if on_agent_provisioned is not None:
                     await on_agent_provisioned(record)
         except Exception as exc:
-            for record in provisioned:
-                self._safe_delete(record.foundry_agent_name)
+            for foundry_agent_name in reversed(created_foundry_names):
+                self._safe_delete(foundry_agent_name)
             raise MissionAgentProvisioningError(
                 f"Failed to provision mission agents for '{mission_slug}': {exc}"
             ) from exc
+
+        foundry_names = [record.foundry_agent_name for record in provisioned]
+        if len(provisioned) != len(agent_names) or len(set(foundry_names)) != len(foundry_names):
+            for foundry_agent_name in reversed(created_foundry_names):
+                self._safe_delete(foundry_agent_name)
+            raise MissionAgentProvisioningError(
+                "Foundry provisioning did not produce one unique resource per expected agent."
+            )
 
         return provisioned
 

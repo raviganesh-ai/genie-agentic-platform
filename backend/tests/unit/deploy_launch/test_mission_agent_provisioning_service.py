@@ -67,6 +67,9 @@ def test_extract_agent_instructions_falls_back_when_not_found():
 @dataclass
 class _FakeAgentApiClient:
     created: list[dict[str, str | None]] = field(default_factory=list)
+    deleted: list[str] = field(default_factory=list)
+    unconfirmed_names: set[str] = field(default_factory=set)
+    returned_names: dict[str, str] = field(default_factory=dict)
 
     def create_agent(
         self, *, name: str, model: str, instructions: str, description: str | None = None
@@ -74,10 +77,13 @@ class _FakeAgentApiClient:
         self.created.append(
             {"name": name, "model": model, "instructions": instructions, "description": description}
         )
-        return f"foundry-{name}"
+        return self.returned_names.get(name, name)
 
-    def delete_agent(self, agent_id: str) -> None:  # pragma: no cover - not exercised here
-        pass
+    def agent_exists(self, agent_id: str) -> bool:
+        return agent_id not in self.unconfirmed_names
+
+    def delete_agent(self, agent_id: str) -> None:
+        self.deleted.append(agent_id)
 
 
 @dataclass
@@ -135,6 +141,64 @@ async def test_provision_truncates_a_long_agent_name_to_stay_within_63_character
     assert created_name[0].isalnum()
     assert created_name[-1].isalnum()
     assert created_name.startswith("sample-mission-c753ba86-")
+
+
+async def test_provision_keeps_truncated_foundry_names_unique():
+    api_client = _FakeAgentApiClient()
+    service = MissionAgentProvisioningService(
+        project_service=_FakeProjectService(api_client=api_client), model_deployment_ref="gpt-4o"
+    )
+
+    provisioned = await service.provision(
+        mission_slug="sample-mission-c753ba86",
+        agent_names=[
+            "Customer Relationship Management and Escalation Handling Specialist Alpha",
+            "Customer Relationship Management and Escalation Handling Specialist Beta",
+        ],
+        architecture_document=_ARCHITECTURE_DOCUMENT,
+    )
+
+    assert len(provisioned) == 2
+    requested_names = [created["name"] for created in api_client.created]
+    assert len(set(requested_names)) == 2
+    assert all(name is not None and len(name) <= 63 for name in requested_names)
+
+
+async def test_provision_fails_closed_and_rolls_back_when_foundry_cannot_confirm_agent():
+    api_client = _FakeAgentApiClient(unconfirmed_names={"acme-mission-orchestrator"})
+    service = MissionAgentProvisioningService(
+        project_service=_FakeProjectService(api_client=api_client), model_deployment_ref="gpt-4o"
+    )
+
+    with pytest.raises(MissionAgentProvisioningError, match="did not confirm"):
+        await service.provision(
+            mission_slug="acme-mission",
+            agent_names=["requirements-specialist", "orchestrator"],
+            architecture_document=_ARCHITECTURE_DOCUMENT,
+        )
+
+    assert api_client.deleted == [
+        "acme-mission-orchestrator",
+        "acme-mission-requirements-specialist",
+    ]
+
+
+async def test_provision_rejects_unexpected_returned_name_and_deletes_requested_resource():
+    api_client = _FakeAgentApiClient(
+        returned_names={"acme-mission-orchestrator": "unexpected-resource"}
+    )
+    service = MissionAgentProvisioningService(
+        project_service=_FakeProjectService(api_client=api_client), model_deployment_ref="gpt-4o"
+    )
+
+    with pytest.raises(MissionAgentProvisioningError, match="unexpected resource name"):
+        await service.provision(
+            mission_slug="acme-mission",
+            agent_names=["orchestrator"],
+            architecture_document=_ARCHITECTURE_DOCUMENT,
+        )
+
+    assert api_client.deleted == ["acme-mission-orchestrator"]
 
 
 async def test_provision_uses_platform_default_model_when_no_override_given():
