@@ -12,6 +12,7 @@ near the bottom of this file.
 """
 from __future__ import annotations
 
+import asyncio
 import shutil
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -1134,6 +1135,63 @@ class _FailOnceThenSucceedBackendDeploymentService:
         self, *, mission_slug: str, frontend_origin: str
     ) -> None:
         del mission_slug, frontend_origin
+
+
+class _ProgressBlockingBackendDeploymentService:
+    def __init__(self) -> None:
+        self.progress_reported = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def deploy(
+        self,
+        *,
+        mission_slug: str,
+        build_root: Path,
+        mission_identity_resource_id: str | None = None,
+        on_progress=None,
+    ) -> BackendDeploymentResult:
+        del build_root, mission_identity_resource_id
+        assert on_progress is not None
+        await on_progress("Provisioning the prototype internal Container Apps environment...")
+        self.progress_reported.set()
+        await self.release.wait()
+        return BackendDeploymentResult(
+            image_tag=f"local/{mission_slug}:dev",
+            backend_url=f"http://localhost/missions/{mission_slug}/backend",
+        )
+
+    async def configure_gateway_frontend_origin(
+        self, *, mission_slug: str, frontend_origin: str
+    ) -> None:
+        del mission_slug, frontend_origin
+
+
+async def test_backend_progress_is_persisted_while_deployment_is_running(tmp_path: Path):
+    repository = InMemoryDeploymentRunRepository()
+    backend = _ProgressBlockingBackendDeploymentService()
+    service = _build_service(
+        tmp_path=tmp_path,
+        backend_deployment_service=backend,
+        run_repository=repository,
+    )
+
+    run = await service.start(
+        session_id="session-1", requesting_user_id="user-1", workflow_run_id="run-1"
+    )
+    await backend.progress_reported.wait()
+
+    persisted_run = next(item for item in await repository.list_all() if item.id == run.id)
+    backend_step = next(
+        step for step in persisted_run.steps if step.step_id == "deploy-backend-service"
+    )
+    assert backend_step.status == "running"
+    assert backend_step.detail == (
+        "Provisioning the prototype internal Container Apps environment..."
+    )
+
+    backend.release.set()
+    completed = await service.wait_for_run(run.id)
+    assert completed.status == "completed"
 
 
 class _CountingMissionAgentProvisioningService(NullMissionAgentProvisioningService):

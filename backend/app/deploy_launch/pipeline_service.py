@@ -2591,6 +2591,8 @@ class DeploymentPipelineService:
                         message: str, *, _step_result: DeploymentStepResult = step_result
                     ) -> None:
                         _step_result.detail = message
+                        pipeline_run.updated_at = datetime.now(UTC)
+                        await self._persist_run(pipeline_run)
 
                     mission_identity_resource_id = (
                         pipeline_run.access_policy.mission_identity.identity_resource_id

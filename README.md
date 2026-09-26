@@ -243,6 +243,8 @@ Deploy & Launch is deliberately **not** an LLM-narrative workflow step — it is
 
 Each step's real status (`pending` → `running` → `completed`/`failed`/`skipped`) streams live to the Deploy & Launch page so the human watches actual provisioning happen — never a simulated progress bar. Steps 6 and 7 (Defender & Security Copilot scan, FinOps cost report) are deliberately informational-only — unlike every other step, neither can ever fail the pipeline or block Launch; they surface real evidence for the human to review without gating the mission on it.
 
+Backend deployment persists every ACR, private-network, Container Apps environment, APIM, Container App, and readiness sub-stage while it runs. Synchronous Azure management and blob SDK operations execute outside the FastAPI event loop, so lengthy control-plane provisioning does not freeze status polling or other API traffic. Genuine build, identity, network, gateway, runtime-readiness, quota, or Azure service failures remain fail-closed and are reported on the owning deployment step.
+
 ---
 
 ## Repository layout

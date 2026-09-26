@@ -333,12 +333,14 @@ class BackendDeploymentService:
             from azure.storage.blob import BlobClient
 
             await _report("Packaging backend build and uploading source to Azure Container Registry...")
-            upload_source = acr_client.registries.get_build_source_upload_url(
-                self._resource_group, self._acr_name
+            upload_source = await asyncio.to_thread(
+                acr_client.registries.get_build_source_upload_url,
+                self._resource_group,
+                self._acr_name,
             )
             tarball = _tar_gzip_directory(build_root)
             blob_client = BlobClient.from_blob_url(upload_source.upload_url)
-            blob_client.upload_blob(tarball, overwrite=True)
+            await asyncio.to_thread(blob_client.upload_blob, tarball, overwrite=True)
 
             from azure.mgmt.containerregistry.v2019_06_01_preview.models import (
                 DockerBuildRequest,
@@ -354,10 +356,13 @@ class BackendDeploymentService:
                 no_cache=False,
             )
             await _report("Building container image in Azure Container Registry (this can take a minute or two)...")
-            poller = acr_client.registries.begin_schedule_run(
-                self._resource_group, self._acr_name, build_request
+            poller = await asyncio.to_thread(
+                acr_client.registries.begin_schedule_run,
+                self._resource_group,
+                self._acr_name,
+                build_request,
             )
-            run_result = poller.result()
+            run_result = await asyncio.to_thread(poller.result)
 
             # The ARM long-running-operation (poller.result()) only confirms the
             # ACR "Run" resource itself was created/updated successfully - it does
@@ -389,8 +394,11 @@ class BackendDeploymentService:
                     )
                 
                 # Fetch latest run status
-                run_detail = acr_client.runs.get(
-                    self._resource_group, self._acr_name, run_id
+                run_detail = await asyncio.to_thread(
+                    acr_client.runs.get,
+                    self._resource_group,
+                    self._acr_name,
+                    run_id,
                 )
                 run_status = getattr(run_detail, "status", None)
                 
@@ -443,8 +451,10 @@ class BackendDeploymentService:
             try:
                 await _report("Reading Azure Container Registry credentials...")
                 credentials_client = self._acr_credentials_client()
-                credentials = credentials_client.registries.list_credentials(
-                    self._resource_group, self._acr_name
+                credentials = await asyncio.to_thread(
+                    credentials_client.registries.list_credentials,
+                    self._resource_group,
+                    self._acr_name,
                 )
                 registry_username = credentials.username
                 registry_password = credentials.passwords[0].value
@@ -487,8 +497,9 @@ class BackendDeploymentService:
             # MissionIdentityService, so the app can authenticate without credentials.
             identity_config = None
             if mission_identity_resource_id:
-                mission_identity_client_id = self._configure_mission_identity(
-                    mission_identity_resource_id
+                mission_identity_client_id = await asyncio.to_thread(
+                    self._configure_mission_identity,
+                    mission_identity_resource_id,
                 )
                 env_vars.append(
                     EnvironmentVar(name="AZURE_CLIENT_ID", value=mission_identity_client_id)
@@ -536,10 +547,13 @@ class BackendDeploymentService:
                 ),
             )
             await _report("Creating/updating the Azure Container App revision...")
-            poller = container_apps_client.container_apps.begin_create_or_update(
-                prototype_resource_group_name(mission_slug), app_name, envelope
+            poller = await asyncio.to_thread(
+                container_apps_client.container_apps.begin_create_or_update,
+                prototype_resource_group_name(mission_slug),
+                app_name,
+                envelope,
             )
-            result = poller.result()
+            result = await asyncio.to_thread(poller.result)
         except Exception as exc:
             raise BackendDeploymentError(f"Failed to deploy Container App: {exc}") from exc
 
