@@ -911,7 +911,11 @@ prompts:
       classes, or nested cards. Build semantic form structure with
       `genie-form`, `genie-form-section`, `genie-form-grid`, `genie-field`,
       `genie-field-help`, `genie-actions`, `genie-dropzone`, `genie-btn`, and
-      `genie-btn-primary` as appropriate. Render every field-level or form-level validation
+      `genie-btn-primary` as appropriate. Every form with multiple controls
+      MUST group its fields inside `genie-form-section` and `genie-form-grid`,
+      with each individual control and its label/help text contained by one
+      `genie-field`; never place controls directly beside one another or assign
+      widths/columns in TSX. Render every field-level or form-level validation
       failure with both `role="alert"` and the `genie-error` class so it is
       announced and receives the shell's readable error panel. Keep helper
       text adjacent to its field and concise; must not encode meaning by color
@@ -1276,7 +1280,11 @@ prompts:
       classes, or nested cards. Build semantic form structure with
       `genie-form`, `genie-form-section`, `genie-form-grid`, `genie-field`,
       `genie-field-help`, `genie-actions`, `genie-dropzone`, `genie-btn`, and
-      `genie-btn-primary` as appropriate. Render every field-level or form-level validation
+      `genie-btn-primary` as appropriate. Every form with multiple controls
+      MUST group its fields inside `genie-form-section` and `genie-form-grid`,
+      with each individual control and its label/help text contained by one
+      `genie-field`; never place controls directly beside one another or assign
+      widths/columns in TSX. Render every field-level or form-level validation
       failure with both `role="alert"` and the `genie-error` class so it is
       announced and receives the shell's readable error panel. Keep helper
       text adjacent to its field and concise; must not encode meaning by color
@@ -1388,7 +1396,11 @@ prompts:
       classes, or nested cards. Use semantic HTML with `genie-form`,
       `genie-form-section`, `genie-form-grid`, `genie-field`,
       `genie-field-help`, `genie-actions`, `genie-dropzone`, `genie-btn`, and
-      `genie-btn-primary` as appropriate. Every field-level or form-level validation failure must use both
+      `genie-btn-primary` as appropriate. Every form with multiple controls
+      MUST group its fields inside `genie-form-section` and `genie-form-grid`,
+      with each individual control and its label/help text contained by one
+      `genie-field`; never place controls directly beside one another or assign
+      widths/columns in TSX. Every field-level or form-level validation failure must use both
       `role="alert"` and the `genie-error` class; helper text must remain
       concise, adjacent to its field, and must not encode meaning by color
       alone. Before returning a revised UI component, search its complete TSX

@@ -967,6 +967,12 @@ def test_generated_mission_shell_uses_one_visual_system_without_nested_cards() -
     assert ".genie-input-surface form > section {" in _FRONTEND_STYLES_CSS
     assert "background: transparent !important;" in _FRONTEND_STYLES_CSS
     assert ".genie-input-surface fieldset label {" in _FRONTEND_STYLES_CSS
+    assert '.genie-input-surface input[type="file"] {' in _FRONTEND_STYLES_CSS
+    assert "max-width: 100%;" in _FRONTEND_STYLES_CSS
+    assert "overflow-wrap: anywhere;" in _FRONTEND_STYLES_CSS
+    assert ".genie-input-surface .genie-dropzone {" in _FRONTEND_STYLES_CSS
+    assert "minmax(min(280px, 100%), 1fr)" in _FRONTEND_STYLES_CSS
+    assert ".genie-input-surface fieldset legend {" in _FRONTEND_STYLES_CSS
     assert '.genie-input-surface [role="alert"] {' in _FRONTEND_STYLES_CSS
     assert "background-color: var(--genie-danger-soft);" in _FRONTEND_STYLES_CSS
     assert '.genie-input-surface :where(input, textarea, select) {' in _FRONTEND_STYLES_CSS

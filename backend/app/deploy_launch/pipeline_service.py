@@ -410,10 +410,18 @@ input:focus, textarea:focus, select:focus {
     color: var(--genie-text);
     background-color: var(--genie-surface);
     border-color: var(--genie-border-strong);
+    min-width: 0;
+    max-width: 100%;
 }
 
 .genie-input-surface :where(input[type="text"], input[type="number"], input[type="date"], input[type="datetime-local"], textarea, select) {
+    width: 100%;
     min-height: 42px;
+}
+
+.genie-input-surface input[type="file"] {
+    width: 100%;
+    overflow: hidden;
 }
 
 .genie-input-surface :where(input[type="range"]) {
@@ -448,16 +456,33 @@ input:focus, textarea:focus, select:focus {
 }
 
 .genie-input-surface fieldset {
+    width: 100%;
     min-width: 0;
+    margin: 0;
+    padding: 12px;
+    border: 1px solid var(--genie-border-strong);
+    border-radius: 6px;
+}
+
+.genie-input-surface fieldset legend {
+    max-width: 100%;
+    padding: 0 4px;
+    overflow-wrap: anywhere;
 }
 
 .genie-input-surface fieldset label {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    width: 100%;
+    min-width: 0;
     min-height: 36px;
     padding: 7px 9px;
     background-color: var(--genie-surface-subtle);
     border: 1px solid var(--genie-border);
     border-radius: 4px;
     cursor: pointer;
+    overflow-wrap: anywhere;
 }
 
 .genie-input-surface fieldset label:hover {
@@ -466,11 +491,15 @@ input:focus, textarea:focus, select:focus {
 }
 
 .genie-input-surface .genie-dropzone {
+    display: block;
+    width: 100%;
+    min-width: 0;
     color: var(--genie-text);
     background-color: var(--genie-surface-subtle) !important;
     border: 1px dashed var(--genie-border-strong) !important;
     border-radius: 6px !important;
     padding: 22px !important;
+    overflow: hidden;
 }
 
 .genie-input-surface .genie-dropzone:hover,
@@ -920,7 +949,8 @@ input:focus, textarea:focus, select:focus {
 
 .genie-form-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr));
+    align-items: start;
     gap: 16px;
 }
 
@@ -928,6 +958,7 @@ input:focus, textarea:focus, select:focus {
     display: grid;
     align-content: start;
     gap: 6px;
+    width: 100%;
     min-width: 0;
 }
 

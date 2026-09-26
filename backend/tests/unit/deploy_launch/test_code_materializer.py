@@ -211,6 +211,25 @@ def test_materialize_build_rejects_interactive_ui_without_shell_semantics():
         materialize_build(output)
 
 
+def test_materialize_build_rejects_multi_control_form_without_responsive_grid():
+    output = _SAMPLE_OUTPUT.replace(
+        "export function MissionApp() {\n    return null;",
+        """export function MissionApp({ onSubmit }) {
+    const submit = () => onSubmit(JSON.stringify({ first: "a", second: "b" }));
+    return <form className=\"genie-form\">
+        <label className=\"genie-field\"><input aria-label=\"First\" /></label>
+        <label className=\"genie-field\"><input aria-label=\"Second\" /></label>
+        <button className=\"genie-btn\" onClick={submit}>Run</button>
+    </form>;""",
+    )
+
+    with pytest.raises(
+        MaterializedCodeError,
+        match="genie-form-section, genie-form-grid",
+    ):
+        materialize_build(output)
+
+
 def test_materialize_build_rejects_generated_ui_direct_backend_invoke():
     output = _SAMPLE_OUTPUT.replace(
         "export function MissionApp() {",

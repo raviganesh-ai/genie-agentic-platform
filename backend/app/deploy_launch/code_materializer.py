@@ -416,10 +416,18 @@ def materialize_build(output_text: str) -> MaterializedBuild:
 
     if ui_component is not None:
         missing_semantic_classes: list[str] = []
+        interactive_control_count = len(
+            _INTERACTIVE_INPUT_PATTERN.findall(ui_component)
+        )
         if _FORM_PATTERN.search(ui_component) and "genie-form" not in ui_component:
             missing_semantic_classes.append("genie-form")
+        if interactive_control_count > 1:
+            if "genie-form-section" not in ui_component:
+                missing_semantic_classes.append("genie-form-section")
+            if "genie-form-grid" not in ui_component:
+                missing_semantic_classes.append("genie-form-grid")
         if (
-            _INTERACTIVE_INPUT_PATTERN.search(ui_component)
+            interactive_control_count
             and "genie-field" not in ui_component
         ):
             missing_semantic_classes.append("genie-field")
