@@ -178,6 +178,100 @@ async def run() -> None:
 
     assert set(build.agent_modules) == {"Requirements Specialist", "Review Specialist"}
 
+    unrelated_run_mask = output.replace(
+        "review = await reviewer.run(ui_message)",
+        'await unrelated.run()\n            review = {"skipped": True}',
+    )
+    with pytest.raises(MaterializedCodeError, match="awaited specialist runs"):
+        materialize_build(unrelated_run_mask)
+
+
+def test_materialize_build_accepts_exact_name_tools_through_shared_mapped_helper():
+    second_specialist = '''
+```python
+# agent: Review Specialist
+async def run() -> None:
+    pass
+```
+
+'''
+    indirect_orchestrator = '''```python
+# agent: orchestrator
+from agent_config import AGENT_FOUNDRY_NAMES
+from agent_framework import FunctionTool
+from mission_foundry_runtime import MissionFoundryAgent
+
+class OrchestratorAgent:
+    def __init__(self):
+        self.requirements_tool = FunctionTool(
+            name="Requirements Specialist",
+            coroutine=self._call_requirements,
+        )
+        self.review_tool = FunctionTool(
+            name="Review Specialist",
+            coroutine=self._call_review,
+        )
+
+    async def _invoke(self, agent_logical_name, payload):
+        foundry_name = AGENT_FOUNDRY_NAMES[agent_logical_name]
+        agent = MissionFoundryAgent(agent_name=foundry_name)
+        return await agent.run(payload)
+
+    async def _call_requirements(self, payload):
+        return await self._invoke("Requirements Specialist", payload)
+
+    async def _call_review(self, payload):
+        return await self._invoke("Review Specialist", payload)
+
+    async def _narrate(self, on_progress, message):
+        if on_progress is not None:
+            await on_progress(message)
+
+    async def run(self, ui_message: str, on_progress=None):
+        await self._narrate(on_progress, "Handing off to Requirements Specialist...")
+        requirements = await self.requirements_tool({"message": ui_message})
+        await self._narrate(on_progress, "Requirements Specialist completed.")
+        await self._narrate(on_progress, "Handing off to Review Specialist...")
+        review = await self.review_tool({"requirements": requirements})
+        await self._narrate(on_progress, "Review Specialist completed.")
+        return {"requirements": requirements, "review": review}
+```
+'''
+    output = _SAMPLE_OUTPUT.replace(
+        "```python\n# agent: orchestrator",
+        second_specialist + "```python\n# agent: orchestrator",
+    )
+    output = re.sub(
+        r"```python\n# agent: orchestrator.*?```\n",
+        indirect_orchestrator,
+        output,
+        flags=re.DOTALL,
+    )
+
+    build = materialize_build(output)
+
+    assert set(build.agent_modules) == {"Requirements Specialist", "Review Specialist"}
+
+    mismatched_tool = output.replace(
+        "coroutine=self._call_review",
+        "coroutine=self._call_requirements",
+    )
+    with pytest.raises(
+        MaterializedCodeError,
+        match="does not execute and visibly report every specialist",
+    ):
+        materialize_build(mismatched_tool)
+
+    unawaited_resolver = output.replace(
+        'return await self._invoke("Review Specialist", payload)',
+        'return self._invoke("Review Specialist", payload)',
+    )
+    with pytest.raises(
+        MaterializedCodeError,
+        match="does not execute and visibly report every specialist",
+    ):
+        materialize_build(unawaited_resolver)
+
 
 def test_materialize_build_rejects_unawaited_progress_mentions():
     output = _SAMPLE_OUTPUT.replace(

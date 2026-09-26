@@ -108,6 +108,19 @@ def _validate_orchestrator_delegations(
             f"The generated orchestrator module is not valid Python: {exc}."
         ) from exc
 
+    parents = {
+        child: parent
+        for parent in ast.walk(tree)
+        for child in ast.iter_child_nodes(parent)
+    }
+
+    def called_name(call: ast.Call) -> str | None:
+        if isinstance(call.func, ast.Name):
+            return call.func.id
+        if isinstance(call.func, ast.Attribute):
+            return call.func.attr
+        return None
+
     def configured_agent_name(value: ast.expr) -> str | None:
         if (
             isinstance(value, ast.Subscript)
@@ -118,6 +131,164 @@ def _validate_orchestrator_delegations(
         ):
             return value.slice.value
         return None
+
+    def expression_reference(value: ast.expr) -> str | None:
+        if isinstance(value, ast.Name):
+            return value.id
+        if (
+            isinstance(value, ast.Attribute)
+            and isinstance(value.value, ast.Name)
+            and value.value.id == "self"
+        ):
+            return f"self.{value.attr}"
+        return None
+
+    def enclosing_scope(node: ast.AST, *, class_scope: bool = False) -> ast.AST:
+        current = parents.get(node)
+        scope_types = (ast.ClassDef,) if class_scope else (ast.FunctionDef, ast.AsyncFunctionDef)
+        while current is not None:
+            if isinstance(current, scope_types):
+                return current
+            current = parents.get(current)
+        return tree
+
+    def scoped_reference(value: ast.expr, node: ast.AST) -> tuple[ast.AST, str] | None:
+        reference = expression_reference(value)
+        if reference is None:
+            return None
+        scope = enclosing_scope(node, class_scope=reference.startswith("self."))
+        return scope, reference
+
+    function_definitions = {
+        node.name: node
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+
+    dynamic_resolvers: dict[str, dict[str, int]] = {}
+    narration_helpers: dict[str, dict[str, int]] = {}
+    for function_name, function in function_definitions.items():
+        argument_names = [argument.arg for argument in function.args.args]
+        method_offset = int(bool(argument_names and argument_names[0] in {"self", "cls"}))
+        call_positions = {
+            name: index - method_offset
+            for index, name in enumerate(argument_names)
+            if index >= method_offset
+        }
+        mapped_aliases: dict[str, str] = {}
+        mapped_parameters: set[str] = set()
+        resolver_agent_references: set[str] = set()
+        has_awaited_run = False
+
+        for node in ast.walk(function):
+            assigned_value: ast.expr | None = None
+            assigned_targets: list[ast.expr] = []
+            if isinstance(node, ast.Assign):
+                assigned_value = node.value
+                assigned_targets = node.targets
+            elif isinstance(node, ast.AnnAssign) and node.value is not None:
+                assigned_value = node.value
+                assigned_targets = [node.target]
+            if (
+                isinstance(assigned_value, ast.Subscript)
+                and isinstance(assigned_value.value, ast.Name)
+                and assigned_value.value.id == "AGENT_FOUNDRY_NAMES"
+                and isinstance(assigned_value.slice, ast.Name)
+                and assigned_value.slice.id in call_positions
+            ):
+                for target in assigned_targets:
+                    if isinstance(target, ast.Name):
+                        mapped_aliases[target.id] = assigned_value.slice.id
+
+            if isinstance(node, ast.Call) and called_name(node) == "MissionFoundryAgent":
+                for keyword in node.keywords:
+                    if keyword.arg != "agent_name":
+                        continue
+                    mapped_parameter: str | None = None
+                    if (
+                        isinstance(keyword.value, ast.Subscript)
+                        and isinstance(keyword.value.value, ast.Name)
+                        and keyword.value.value.id == "AGENT_FOUNDRY_NAMES"
+                        and isinstance(keyword.value.slice, ast.Name)
+                        and keyword.value.slice.id in call_positions
+                    ):
+                        mapped_parameter = keyword.value.slice.id
+                    elif isinstance(keyword.value, ast.Name):
+                        mapped_parameter = mapped_aliases.get(keyword.value.id)
+                    if mapped_parameter is None:
+                        continue
+                    mapped_parameters.add(mapped_parameter)
+                    parent = parents.get(node)
+                    targets: list[ast.expr] = []
+                    if isinstance(parent, ast.Assign):
+                        targets = parent.targets
+                    elif isinstance(parent, ast.AnnAssign):
+                        targets = [parent.target]
+                    resolver_agent_references.update(
+                        reference
+                        for target in targets
+                        if (reference := expression_reference(target)) is not None
+                    )
+
+            if not isinstance(node, ast.Await) or not isinstance(node.value, ast.Call):
+                continue
+            awaited_call = node.value
+            if (
+                isinstance(awaited_call.func, ast.Attribute)
+                and awaited_call.func.attr == "run"
+                and expression_reference(awaited_call.func.value)
+                in resolver_agent_references
+            ):
+                has_awaited_run = True
+            if (
+                isinstance(awaited_call.func, ast.Name)
+                and awaited_call.func.id in call_positions
+            ):
+                forwarded_parameters = {
+                    argument.id: call_positions[argument.id]
+                    for argument in awaited_call.args
+                    if isinstance(argument, ast.Name)
+                    and argument.id in call_positions
+                }
+                if forwarded_parameters:
+                    narration_helpers.setdefault(function_name, {}).update(
+                        forwarded_parameters
+                    )
+
+        if has_awaited_run and mapped_parameters:
+            dynamic_resolvers[function_name] = {
+                parameter: call_positions[parameter] for parameter in mapped_parameters
+            }
+
+    wrapper_agents: dict[str, set[str]] = {}
+    for function_name, function in function_definitions.items():
+        for node in ast.walk(function):
+            if not isinstance(node, ast.Call):
+                continue
+            resolver_parameters = dynamic_resolvers.get(called_name(node) or "")
+            if resolver_parameters is None or not isinstance(
+                parents.get(node), ast.Await
+            ):
+                continue
+            for parameter, position in resolver_parameters.items():
+                argument: ast.expr | None = (
+                    node.args[position] if position < len(node.args) else None
+                )
+                if argument is None:
+                    argument = next(
+                        (
+                            keyword.value
+                            for keyword in node.keywords
+                            if keyword.arg == parameter
+                        ),
+                        None,
+                    )
+                if (
+                    isinstance(argument, ast.Constant)
+                    and isinstance(argument.value, str)
+                    and argument.value in agent_names
+                ):
+                    wrapper_agents.setdefault(function_name, set()).add(argument.value)
 
     configured_name_aliases: dict[str, set[str]] = {}
     for node in ast.walk(tree):
@@ -132,45 +303,168 @@ def _validate_orchestrator_delegations(
             if mapped_name is not None and isinstance(node.target, ast.Name):
                 configured_name_aliases.setdefault(node.target.id, set()).add(mapped_name)
 
-    mapped_agents: set[str] = set()
-    narration_counts = {name: 0 for name in agent_names}
-    function_tool_count = 0
-    specialist_run_count = 0
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Call):
-            called_name = (
-                node.func.id
-                if isinstance(node.func, ast.Name)
-                else node.func.attr
-                if isinstance(node.func, ast.Attribute)
-                else None
-            )
-            if called_name == "FunctionTool":
-                function_tool_count += 1
-            if called_name == "MissionFoundryAgent":
-                for keyword in node.keywords:
-                    value = keyword.value
-                    if keyword.arg != "agent_name":
-                        continue
-                    mapped_name = configured_agent_name(value)
-                    if mapped_name is not None:
-                        mapped_agents.add(mapped_name)
-                    elif isinstance(value, ast.Name):
-                        mapped_agents.update(configured_name_aliases.get(value.id, set()))
+    direct_aliases: dict[tuple[ast.AST, str], str] = {}
+    direct_agent_instances: dict[tuple[ast.AST, str], str] = {}
+    directly_awaited_agents: set[str] = set()
+    ordered_nodes = sorted(
+        ast.walk(tree),
+        key=lambda node: (
+            getattr(node, "lineno", -1),
+            getattr(node, "col_offset", -1),
+        ),
+    )
+    for node in ordered_nodes:
+        assigned_value: ast.expr | None = None
+        assigned_targets: list[ast.expr] = []
+        if isinstance(node, ast.Assign):
+            assigned_value = node.value
+            assigned_targets = node.targets
+        elif isinstance(node, ast.AnnAssign) and node.value is not None:
+            assigned_value = node.value
+            assigned_targets = [node.target]
+
+        mapped_name = (
+            configured_agent_name(assigned_value)
+            if assigned_value is not None
+            else None
+        )
+        if mapped_name in agent_names:
+            for target in assigned_targets:
+                reference = scoped_reference(target, node)
+                if reference is not None:
+                    direct_aliases[reference] = mapped_name
+
+        if (
+            isinstance(assigned_value, ast.Call)
+            and called_name(assigned_value) == "MissionFoundryAgent"
+        ):
+            agent_name: str | None = None
+            for keyword in assigned_value.keywords:
+                if keyword.arg != "agent_name":
+                    continue
+                agent_name = configured_agent_name(keyword.value)
+                if agent_name is None:
+                    alias_reference = scoped_reference(keyword.value, node)
+                    if alias_reference is not None:
+                        agent_name = direct_aliases.get(alias_reference)
+            if agent_name in agent_names:
+                for target in assigned_targets:
+                    instance_reference = scoped_reference(target, node)
+                    if instance_reference is not None:
+                        direct_agent_instances[instance_reference] = agent_name
+
         if not isinstance(node, ast.Await) or not isinstance(node.value, ast.Call):
             continue
         awaited_call = node.value
-        if isinstance(awaited_call.func, ast.Attribute) and awaited_call.func.attr == "run":
-            specialist_run_count += 1
         if not (
-            isinstance(awaited_call.func, ast.Name)
-            and awaited_call.func.id == "on_progress"
-            and awaited_call.args
-            and isinstance(awaited_call.args[0], ast.Constant)
-            and isinstance(awaited_call.args[0].value, str)
+            isinstance(awaited_call.func, ast.Attribute)
+            and awaited_call.func.attr == "run"
         ):
             continue
-        narration = awaited_call.args[0].value
+        instance_reference = scoped_reference(awaited_call.func.value, node)
+        if instance_reference is not None:
+            agent_name = direct_agent_instances.get(instance_reference)
+            if agent_name is not None:
+                directly_awaited_agents.add(agent_name)
+
+    mapped_agents: set[str] = set()
+    indirect_tool_agents: dict[str, str] = {}
+    function_tool_count = 0
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call) or called_name(node) != "FunctionTool":
+            continue
+        function_tool_count += 1
+        tool_agent_name = next(
+            (
+                keyword.value.value
+                for keyword in node.keywords
+                if keyword.arg == "name"
+                and isinstance(keyword.value, ast.Constant)
+                and isinstance(keyword.value.value, str)
+                and keyword.value.value in agent_names
+            ),
+            None,
+        )
+        wrapper_name = next(
+            (
+                keyword.value.attr
+                for keyword in node.keywords
+                if keyword.arg in {"coroutine", "func"}
+                and isinstance(keyword.value, ast.Attribute)
+            ),
+            None,
+        )
+        if (
+            tool_agent_name is None
+            or wrapper_name is None
+            or tool_agent_name not in wrapper_agents.get(wrapper_name, set())
+        ):
+            continue
+        parent = parents.get(node)
+        targets: list[ast.expr] = []
+        if isinstance(parent, ast.Assign):
+            targets = parent.targets
+        elif isinstance(parent, ast.AnnAssign):
+            targets = [parent.target]
+        for target in targets:
+            if (
+                isinstance(target, ast.Attribute)
+                and isinstance(target.value, ast.Name)
+                and target.value.id == "self"
+            ):
+                indirect_tool_agents[target.attr] = tool_agent_name
+                mapped_agents.add(tool_agent_name)
+
+    narration_counts = {name: 0 for name in agent_names}
+    awaited_tool_agents: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and called_name(node) == "MissionFoundryAgent":
+            for keyword in node.keywords:
+                value = keyword.value
+                if keyword.arg != "agent_name":
+                    continue
+                mapped_name = configured_agent_name(value)
+                if mapped_name is not None:
+                    mapped_agents.add(mapped_name)
+                elif isinstance(value, ast.Name):
+                    mapped_agents.update(configured_name_aliases.get(value.id, set()))
+        if not isinstance(node, ast.Await) or not isinstance(node.value, ast.Call):
+            continue
+        awaited_call = node.value
+        if (
+            isinstance(awaited_call.func, ast.Attribute)
+            and isinstance(awaited_call.func.value, ast.Name)
+            and awaited_call.func.value.id == "self"
+        ):
+            indirect_agent = indirect_tool_agents.get(awaited_call.func.attr)
+            if indirect_agent is not None:
+                awaited_tool_agents.add(indirect_agent)
+        awaited_name = called_name(awaited_call)
+        narration_arguments: list[ast.expr] = []
+        if awaited_name == "on_progress":
+            narration_arguments = awaited_call.args
+        elif awaited_name in narration_helpers:
+            for parameter, position in narration_helpers[awaited_name].items():
+                if position < len(awaited_call.args):
+                    narration_arguments.append(awaited_call.args[position])
+                    continue
+                narration_arguments.extend(
+                    keyword.value
+                    for keyword in awaited_call.keywords
+                    if keyword.arg == parameter
+                )
+        else:
+            continue
+        narration = next(
+            (
+                argument.value
+                for argument in narration_arguments
+                if isinstance(argument, ast.Constant) and isinstance(argument.value, str)
+            ),
+            None,
+        )
+        if narration is None:
+            continue
         for agent_name in agent_names:
             if agent_name in narration:
                 narration_counts[agent_name] += 1
@@ -184,9 +478,10 @@ def _validate_orchestrator_delegations(
         failures.append(
             f"FunctionTool delegations ({function_tool_count}/{len(agent_names)})"
         )
-    if specialist_run_count < len(agent_names):
+    executed_specialist_count = len(directly_awaited_agents | awaited_tool_agents)
+    if executed_specialist_count < len(agent_names):
         failures.append(
-            f"awaited specialist runs ({specialist_run_count}/{len(agent_names)})"
+            f"awaited specialist runs ({executed_specialist_count}/{len(agent_names)})"
         )
     if missing_mappings:
         failures.append(

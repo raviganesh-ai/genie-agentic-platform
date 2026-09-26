@@ -238,7 +238,7 @@ Each step's real status (`pending` → `running` → `completed`/`failed`/`skipp
 
 Backend deployment persists every ACR, private-network, Container Apps environment, APIM, Container App, and readiness sub-stage while it runs. Synchronous Azure management and blob SDK operations execute outside the FastAPI event loop, so lengthy control-plane provisioning does not freeze status polling or other API traffic. Genuine build, identity, network, gateway, runtime-readiness, quota, or Azure service failures remain fail-closed and are reported on the owning deployment step.
 
-The `provision-foundry-agents` step can temporarily report generated-build repair before any Foundry agent exists. Repair keeps valid specialist components from the rejected build and regenerates the integration-owning orchestrator and UI, then reruns deterministic validation. Foundry provisioning starts only after that validation succeeds; exhausting the configured repair budget fails the run closed.
+The `provision-foundry-agents` step can temporarily report generated-build repair before any Foundry agent exists. Repair keeps valid specialist components from the rejected build and regenerates the integration-owning orchestrator and UI, then reruns deterministic validation. The validator accepts direct specialist calls and shared audited helpers only when it can statically prove an exact `FunctionTool` name, a constant logical specialist name resolved through `AGENT_FOUNDRY_NAMES`, awaited wrapper/tool execution, and start/completion narration forwarded to the progress callback. Foundry provisioning starts only after that validation succeeds; unknown or mismatched indirection and exhausting the configured repair budget fail the run closed.
 
 ---
 
@@ -699,6 +699,12 @@ The script uses Microsoft Entra authentication, creates only missing model deplo
 ## Deploy log
 
 Every deployment to the shared Azure evaluation environment (backend Container App and/or frontend Static Web App) is recorded here: commit, what changed, and why. Update this section as part of the same commit that ships the fix/feature, before pushing to `master` triggers [Continuous deployment](#continuous-deployment-github-actions).
+
+### 2026-09-26 — Foundry deployment accepts proven shared orchestrator helpers
+
+- **Incident**: deployment `bf685885-e14f-49ef-b08c-9bef2854ae4e` exhausted all three bounded generated-build repairs before Foundry provisioning. Its valid 13-specialist orchestrator used exact-name `FunctionTool` wrappers, one shared audited `AGENT_FOUNDRY_NAMES` resolver, and a shared narration helper; the AST validator counted only the helper's single syntactic `.run(...)` and rejected every regenerated equivalent.
+- **Fix**: deterministic validation now follows only statically provable helper indirection: an awaited wrapper must pass a constant known specialist name to a mapped Foundry resolver, its exact-name tool must point to that wrapper and be awaited, and narration helpers must forward the literal-bearing message parameter to the progress callback. Mismatched tools, dynamic names, unawaited resolver calls, hardcoded Foundry resource names, missing execution, and missing narration remain fail-closed.
+- **Verification**: the materializer regression suite covers the production wrapper/helper shape plus mismatched-tool and unawaited-resolver rejection; the adjacent bounded-repair pipeline suite remains green.
 
 ### 2026-09-26 — Generated-build repair resumes incrementally before Foundry provisioning
 
