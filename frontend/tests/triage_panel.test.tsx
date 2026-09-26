@@ -113,6 +113,37 @@ describe("TriagePanel", () => {
     expect(screen.getByText(/delegating to build-agent/i)).toBeInTheDocument();
   });
 
+  it("shows Build as proceeded immediately after architecture approval navigates to Workshop", async () => {
+    mockFetchSequence([
+      {
+        match: "/peer-review/events",
+        response: [
+          buildAgentExecutionEvent(),
+          buildAgentExecutionEvent({
+            id: "event-2",
+            agent_id: "architecture-designer",
+            detail: {
+              step_id: "design-architecture",
+              workflow_step: false,
+              output_preview: "Recommended an Azure Container Apps based architecture.",
+            },
+          }),
+        ],
+      },
+    ]);
+
+    renderWithProviders(<TriagePanel enabled />, {
+      sessionId: FIXTURE_SESSION_ID,
+      workflowRunId: FIXTURE_WORKFLOW_RUN_ID,
+      missionStartedAt: Date.now() - 5000,
+      route: "/workshop",
+    });
+
+    await waitFor(() => expect(screen.getAllByText(/Human: proceeded/i)).toHaveLength(2));
+    expect(screen.queryByText(/Awaiting your proceed/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Awaiting your review to proceed/i)).not.toBeInTheDocument();
+  });
+
   it("shows a phase's real error message the instant its SSE step_failed event arrives", async () => {
     mockFetchSequence([
       { match: "/peer-review/events", response: [] },

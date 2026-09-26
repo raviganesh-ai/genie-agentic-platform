@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { MessageBar, Spinner, Text } from "@fluentui/react-components";
+import { useLocation } from "react-router-dom";
 import { useSessionContext } from "@/state/SessionContext";
 import { useAsyncResource } from "@/hooks/useAsyncResource";
 import { useWorkflowEventStream, workflowStepDeltaKey } from "@/hooks/useWorkflowEventStream";
@@ -74,6 +75,7 @@ function computePhaseTraces(
   governanceCompletedStepIds: Set<string>,
   governanceOutputByStep: Map<string, string>,
   governanceAgentByStep: Map<string, string>,
+  proceededStepIds: Set<string>,
 ): PhaseTrace[] {
   const traces: PhaseTrace[] = [];
   let previousCompleted = true; // the first phase is free to start the instant the mission begins
@@ -117,7 +119,7 @@ function computePhaseTraces(
     } else if (!previousCompleted) {
       status = "pending";
     } else if (phase.requiresProceed) {
-      status = "awaiting-proceed";
+      status = proceededStepIds.has(phase.stepId) ? "running" : "awaiting-proceed";
     } else {
       status = "pending";
     }
@@ -332,6 +334,21 @@ function PhaseCard({ phase, trace }: { phase: MissionPhase; trace: PhaseTrace })
  */
 export function TriagePanel({ enabled }: { enabled: boolean }): JSX.Element | null {
   const { sessionId, missionStartedAt } = useSessionContext();
+  const { pathname } = useLocation();
+
+  // Approval handlers navigate first and resume the workflow in the
+  // background, so the route is immediate evidence that the user already
+  // cleared a gate even before the first backend SSE event arrives.
+  const proceededStepIds = useMemo(() => {
+    const ids = new Set<string>();
+    if (pathname === "/architecture-studio" || pathname === "/workshop" || pathname.startsWith("/outputs")) {
+      ids.add("design-architecture");
+    }
+    if (pathname === "/workshop" || pathname.startsWith("/outputs")) {
+      ids.add("build-solution");
+    }
+    return ids;
+  }, [pathname]);
 
   const eventsFetcher = useCallback(
     () =>
@@ -390,8 +407,9 @@ export function TriagePanel({ enabled }: { enabled: boolean }): JSX.Element | nu
         governanceCompletedStepIds,
         governanceOutputByStep,
         governanceAgentByStep,
+        proceededStepIds,
       ),
-    [sseEvents, stepDeltaText, governanceCompletedStepIds, governanceOutputByStep, governanceAgentByStep],
+    [sseEvents, stepDeltaText, governanceCompletedStepIds, governanceOutputByStep, governanceAgentByStep, proceededStepIds],
   );
 
   const missionComplete = traces.length > 0 && traces.every((trace) => trace.status === "completed");
