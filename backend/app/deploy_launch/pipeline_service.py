@@ -49,6 +49,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Final
+from urllib.parse import urlsplit
 from uuid import uuid4
 
 from app.agents.gateway import get_enabled_agent
@@ -1791,6 +1792,12 @@ class DeploymentPipelineService:
         when a retry resumes at/after ``deploy-frontend-app`` (that step reads this
         directory but never writes it itself; ``sync-frontend-integration``, the step
         that normally writes it, is skipped on such a retry)."""
+        parsed_backend_url = urlsplit(backend_url or "")
+        if parsed_backend_url.scheme not in {"http", "https"} or not parsed_backend_url.netloc:
+            raise DeploymentPipelineStepFailedError(
+                "Cannot generate the mission frontend without an absolute HTTP(S) "
+                "backend URL. Backend deployment must complete before frontend integration."
+            )
         frontend_root.mkdir(parents=True, exist_ok=True)
         (frontend_root / "MissionApp.tsx").write_text(
             materialized.ui_component or "", encoding="utf-8"
@@ -1813,7 +1820,7 @@ class DeploymentPipelineService:
         # internal coordinator, not shown as its own collaborator).
         mission_agent_names = [name for name in agent_foundry_names if name != "orchestrator"]
         (public_root / "runtime-config.js").write_text(
-            f'window.__MISSION_BACKEND_URL__ = "{backend_url}";\n'
+            f"window.__MISSION_BACKEND_URL__ = {json.dumps(backend_url)};\n"
             f"window.__MISSION_TITLE__ = {json.dumps(mission_title)};\n"
             f"window.__MISSION_AGENTS__ = {json.dumps(mission_agent_names)};\n",
             encoding="utf-8",

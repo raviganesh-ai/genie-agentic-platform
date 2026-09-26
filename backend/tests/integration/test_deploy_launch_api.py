@@ -78,8 +78,8 @@ class OrchestratorAgent:
 
 ```tsx
 // agent: ui
-export function MissionApp() {
-    return null;
+export function MissionApp({ onSubmit }) {
+    return <button className="genie-btn" onClick={() => onSubmit(JSON.stringify({ request: "run" }))}>Run</button>;
 }
 ```
 '''

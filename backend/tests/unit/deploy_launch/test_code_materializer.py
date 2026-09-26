@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import sys
 import types
 from pathlib import Path
@@ -15,6 +16,13 @@ from app.deploy_launch.code_materializer import (
     generate_backend_service_scaffold,
     materialize_build,
 )
+
+_SAMPLE_UI_SIGNATURE = "export function MissionApp({ onSubmit }) {"
+_SAMPLE_UI_RETURN = (
+    'return <button className="genie-btn" '
+    'onClick={() => onSubmit(JSON.stringify({ request: "run" }))}>Run</button>;'
+)
+_SAMPLE_UI_COMPONENT = f"{_SAMPLE_UI_SIGNATURE}\n    {_SAMPLE_UI_RETURN}\n}}"
 
 _SAMPLE_OUTPUT = '''
 Some narrative text before the code.
@@ -45,9 +53,7 @@ class OrchestratorAgent:
 
 ```tsx
 // agent: ui
-export function MissionApp() {
-    return null;
-}
+''' + _SAMPLE_UI_COMPONENT + '''
 ```
 '''
 
@@ -84,6 +90,28 @@ class FactoryOrchestratorAgent:
         materialize_build(misnamed_output)
 
 
+@pytest.mark.parametrize(
+    ("missing_block", "expected_component"),
+    [
+        ("specialist", "specialist agent modules"),
+        ("orchestrator", "orchestrator module"),
+        ("ui", "UI component"),
+    ],
+)
+def test_materialize_build_rejects_incomplete_end_to_end_build(
+    missing_block: str, expected_component: str
+):
+    block_patterns = {
+        "specialist": r"```python\n# agent: Requirements Specialist.*?```\n",
+        "orchestrator": r"```python\n# agent: orchestrator.*?```\n",
+        "ui": r"```tsx\n// agent: ui.*?```\n",
+    }
+    output = re.sub(block_patterns[missing_block], "", _SAMPLE_OUTPUT, flags=re.DOTALL)
+
+    with pytest.raises(MaterializedCodeError, match=expected_component):
+        materialize_build(output)
+
+
 def test_materialize_build_rejects_orchestrator_that_omits_specialist_execution():
     output = _SAMPLE_OUTPUT.replace(
         'agent_name=AGENT_FOUNDRY_NAMES["Requirements Specialist"]',
@@ -109,8 +137,8 @@ def test_materialize_build_rejects_unawaited_progress_mentions():
 
 def test_materialize_build_rejects_exact_uploaded_filename_gate():
     output = _SAMPLE_OUTPUT.replace(
-        "export function MissionApp() {",
-        """export function MissionApp() {
+        _SAMPLE_UI_SIGNATURE,
+        """export function MissionApp({ onSubmit }) {
     const validateUpload = (file: File) => {
         if (file.name !== "blind_mqm_n30_package.json") {
             return "Please select the expected package";
@@ -125,8 +153,8 @@ def test_materialize_build_rejects_exact_uploaded_filename_gate():
 
 def test_materialize_build_allows_non_file_name_comparison():
     output = _SAMPLE_OUTPUT.replace(
-        "export function MissionApp() {",
-        'export function MissionApp() {\n  const isOrchestrator = agent.name === "orchestrator";',
+        _SAMPLE_UI_SIGNATURE,
+        'export function MissionApp({ onSubmit }) {\n  const isOrchestrator = agent.name === "orchestrator";',
     )
 
     build = materialize_build(output)
@@ -137,7 +165,7 @@ def test_materialize_build_allows_non_file_name_comparison():
 
 def test_materialize_build_rejects_browser_side_uploaded_json_schema_gate():
     output = _SAMPLE_OUTPUT.replace(
-        "export function MissionApp() {\n    return null;",
+        _SAMPLE_UI_COMPONENT,
         """export function MissionApp() {
     const validatePacket = async (file: File) => {
         const packet = JSON.parse(await file.text());
@@ -152,7 +180,7 @@ def test_materialize_build_rejects_browser_side_uploaded_json_schema_gate():
 
 def test_materialize_build_rejects_browser_side_wildcard_key_scan():
     output = _SAMPLE_OUTPUT.replace(
-        "export function MissionApp() {\n    return null;",
+        _SAMPLE_UI_COMPONENT,
         """export function MissionApp() {
     const containsKeyMaterial = (content: string) =>
         content.toLowerCase().includes("key");
@@ -165,8 +193,8 @@ def test_materialize_build_rejects_browser_side_wildcard_key_scan():
 
 def test_materialize_build_allows_non_upload_json_parsing():
     output = _SAMPLE_OUTPUT.replace(
-        "export function MissionApp() {",
-        """export function MissionApp() {
+        _SAMPLE_UI_SIGNATURE,
+        """export function MissionApp({ onSubmit }) {
     const parseStructuredText = (value: string) => JSON.parse(value);""",
     )
 
@@ -178,8 +206,18 @@ def test_materialize_build_allows_non_upload_json_parsing():
 
 def test_materialize_build_rejects_interactive_ui_without_backend_handoff():
     output = _SAMPLE_OUTPUT.replace(
-        "return null;",
+        _SAMPLE_UI_RETURN,
         'return <input aria-label="Mission request" />;',
+    )
+
+    with pytest.raises(MaterializedCodeError, match="never calls its onSubmit prop"):
+        materialize_build(output)
+
+
+def test_materialize_build_rejects_button_only_ui_without_backend_handoff():
+    output = _SAMPLE_OUTPUT.replace(
+        _SAMPLE_UI_RETURN,
+        'return <button className="genie-btn">Run</button>;',
     )
 
     with pytest.raises(MaterializedCodeError, match="never calls its onSubmit prop"):
@@ -188,7 +226,7 @@ def test_materialize_build_rejects_interactive_ui_without_backend_handoff():
 
 def test_materialize_build_rejects_file_input_without_attachment_handoff():
     output = _SAMPLE_OUTPUT.replace(
-        "export function MissionApp() {\n    return null;",
+        _SAMPLE_UI_COMPONENT,
         """export function MissionApp({ onSubmit }) {
     const handleFile = async (file: File) => {
         const content = await file.text();
@@ -203,7 +241,7 @@ def test_materialize_build_rejects_file_input_without_attachment_handoff():
 
 def test_materialize_build_allows_file_input_handed_to_provisioned_backend():
     output = _SAMPLE_OUTPUT.replace(
-        "export function MissionApp() {\n    return null;",
+        _SAMPLE_UI_COMPONENT,
         """export function MissionApp({ onSubmit }) {
     const handleFile = async (file: File) => {
         const content = await file.text();
@@ -225,7 +263,7 @@ def test_materialize_build_allows_file_input_handed_to_provisioned_backend():
 
 def test_materialize_build_rejects_hidden_style_on_non_file_input():
     output = _SAMPLE_OUTPUT.replace(
-        "return null;",
+        _SAMPLE_UI_RETURN,
         'return <input type="text" style={{ display: "none" }} />;',
     )
 
@@ -235,7 +273,7 @@ def test_materialize_build_rejects_hidden_style_on_non_file_input():
 
 def test_materialize_build_rejects_interactive_ui_without_shell_semantics():
     output = _SAMPLE_OUTPUT.replace(
-        "export function MissionApp() {\n    return null;",
+        _SAMPLE_UI_COMPONENT,
         """export function MissionApp({ onSubmit }) {
     const submit = () => onSubmit(JSON.stringify({ request: "review" }));
     return <form><input aria-label="Request" /><button onClick={submit}>Run</button></form>;""",
@@ -247,7 +285,7 @@ def test_materialize_build_rejects_interactive_ui_without_shell_semantics():
 
 def test_materialize_build_rejects_multi_control_form_without_responsive_grid():
     output = _SAMPLE_OUTPUT.replace(
-        "export function MissionApp() {\n    return null;",
+        _SAMPLE_UI_COMPONENT,
         """export function MissionApp({ onSubmit }) {
     const submit = () => onSubmit(JSON.stringify({ first: "a", second: "b" }));
     return <form className=\"genie-form\">
@@ -266,8 +304,8 @@ def test_materialize_build_rejects_multi_control_form_without_responsive_grid():
 
 def test_materialize_build_rejects_generated_ui_direct_backend_invoke():
     output = _SAMPLE_OUTPUT.replace(
-        "export function MissionApp() {",
-        """export function MissionApp() {
+        _SAMPLE_UI_SIGNATURE,
+        """export function MissionApp({ onSubmit }) {
     const run = () => fetch(`/invoke/stream`, { method: \"POST\" });""",
     )
 
@@ -288,7 +326,7 @@ def test_materialize_build_rejects_inline_styles_that_override_shell_system(
     inline_style: str,
 ):
     output = _SAMPLE_OUTPUT.replace(
-        "return null;",
+        _SAMPLE_UI_RETURN,
         f"return <form {inline_style}>Mission input</form>;",
     )
 
@@ -301,7 +339,7 @@ def test_materialize_build_rejects_nested_submit_payload():
     # orchestrator's flat `config.get("primary_model_id")` read silently found
     # nothing, surfacing as "Primary strong-model identifier is required".
     output = _SAMPLE_OUTPUT.replace(
-        "export function MissionApp() {\n    return null;\n}",
+        _SAMPLE_UI_COMPONENT,
         """export function MissionApp() {
     const handleSubmit = () => {
         const payload = {
@@ -321,7 +359,7 @@ def test_materialize_build_rejects_nested_submit_payload():
 
 def test_materialize_build_allows_flat_submit_payload():
     output = _SAMPLE_OUTPUT.replace(
-        "export function MissionApp() {\n    return null;\n}",
+        _SAMPLE_UI_COMPONENT,
         """export function MissionApp() {
     const handleSubmit = () => {
         const payload = {
@@ -345,7 +383,7 @@ def test_materialize_build_allows_flat_submit_payload():
 
 def test_materialize_build_allows_unrelated_nested_serialization():
     output = _SAMPLE_OUTPUT.replace(
-        "export function MissionApp() {\n    return null;\n}",
+        _SAMPLE_UI_COMPONENT,
         """export function MissionApp() {
     const preview = JSON.stringify({counts: {valid: 3, invalid: 0}});
     const message = JSON.stringify({primary_model_id: primaryModel});
@@ -400,19 +438,14 @@ def test_write_to_directory_includes_backend_service_scaffold(tmp_path: Path):
 
 
 def test_write_to_directory_routes_generated_foundry_imports_through_runtime(tmp_path: Path):
-    output = '''
-```python
-# agent: Requirements Specialist
-from agent_framework.foundry import FoundryAgent
-agent = FoundryAgent("requirements-specialist")
-```
-```python
-# agent: orchestrator
-from agent_framework.foundry import FoundryAgent  # type: ignore
-class OrchestratorAgent:
-    pass
-```
-'''
+    output = _SAMPLE_OUTPUT.replace(
+        "# agent: Requirements Specialist\n",
+        "# agent: Requirements Specialist\nfrom agent_framework.foundry import FoundryAgent\n",
+    ).replace(
+        "from agent_config import AGENT_FOUNDRY_NAMES\n",
+        "from agent_config import AGENT_FOUNDRY_NAMES\n"
+        "from agent_framework.foundry import FoundryAgent  # type: ignore\n",
+    )
     build = materialize_build(output)
 
     build.write_to_directory(

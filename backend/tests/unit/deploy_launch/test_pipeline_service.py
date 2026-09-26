@@ -28,6 +28,7 @@ from app.deploy_launch.backend_deployment_service import (
     BackendDeploymentResult,
     NullBackendDeploymentService,
 )
+from app.deploy_launch.code_materializer import materialize_build
 from app.deploy_launch.defender_for_cloud_gateway import NullDefenderForCloudGateway
 from app.deploy_launch.finops_cost_service import NullFinOpsCostService
 from app.deploy_launch.frontend_deployment_service import (
@@ -83,8 +84,8 @@ class OrchestratorAgent:
 
 ```tsx
 // agent: ui
-export function MissionApp() {
-    return null;
+export function MissionApp({ onSubmit }) {
+    return <button className="genie-btn" onClick={() => onSubmit(JSON.stringify({ request: "run" }))}>Run</button>;
 }
 ```
 '''
@@ -151,8 +152,8 @@ class _BuildValidationRepairingFakeOrchestrator(_FakeOrchestrator):
         super().__init__()
         self.resume_calls: list[dict[str, WorkflowStepInput]] = []
         invalid_build = _BUILD_OUTPUT.replace(
-            "export function MissionApp() {",
-            'export function MissionApp() {\n    const invalid = file.name !== "fixed.json";',
+            "export function MissionApp({ onSubmit }) {",
+            'export function MissionApp({ onSubmit }) {\n    const invalid = file.name !== "fixed.json";',
         )
         self._run.step_results[-1] = _completed_step(
             "build-solution", "genie-orchestrator", invalid_build
@@ -358,6 +359,22 @@ def _build_service(
     )
 
 
+@pytest.mark.parametrize("backend_url", [None, "", "/invoke", "ftp://backend.example.com"])
+def test_frontend_workspace_rejects_invalid_backend_url(
+    tmp_path: Path, backend_url: str | None
+) -> None:
+    service = _build_service(tmp_path=tmp_path)
+
+    with pytest.raises(DeploymentPipelineStepFailedError, match="backend URL"):
+        service._write_frontend_workspace(
+            frontend_root=tmp_path / "frontend",
+            materialized=materialize_build(_BUILD_OUTPUT),
+            mission_title="Acme Mission",
+            backend_url=backend_url,
+            agent_foundry_names={"Requirements Specialist": "requirements-agent"},
+        )
+
+
 async def test_discovery_build_run_supplies_deploy_requirements_and_architecture(
     tmp_path: Path,
 ) -> None:
@@ -446,6 +463,11 @@ async def test_full_pipeline_runs_every_step(tmp_path: Path):
     runtime_config_source = (build_root.parent / "frontend" / "public" / "runtime-config.js").read_text(
         encoding="utf-8"
     )
+    assert (
+        'window.__MISSION_BACKEND_URL__ = "http://localhost/missions/'
+        in runtime_config_source
+    )
+    assert 'window.__MISSION_BACKEND_URL__ = null' not in runtime_config_source
     assert '__MISSION_AGENTS__ = ["Requirements Specialist"]' in runtime_config_source
 
 
@@ -1036,8 +1058,8 @@ async def test_pipeline_exposes_validation_evidence_after_build_repair_is_exhaus
 ) -> None:
     orchestrator = _NonFixingResumeOrchestrator()
     invalid_build = _BUILD_OUTPUT.replace(
-        "export function MissionApp() {",
-        'export function MissionApp() {\n    const invalid = file.name !== "fixed.json";',
+        "export function MissionApp({ onSubmit }) {",
+        'export function MissionApp({ onSubmit }) {\n    const invalid = file.name !== "fixed.json";',
     )
     orchestrator._run.step_results[-1] = _completed_step(
         "build-solution", "genie-orchestrator", invalid_build

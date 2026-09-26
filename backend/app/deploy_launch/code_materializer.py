@@ -429,8 +429,20 @@ def materialize_build(output_text: str) -> MaterializedBuild:
             "reply instead of running this mission's real pipeline."
         )
 
-    if orchestrator_module is not None and agent_modules and ui_component is not None:
-        _validate_orchestrator_delegations(orchestrator_module, set(agent_modules))
+    missing_components: list[str] = []
+    if not agent_modules:
+        missing_components.append("specialist agent modules")
+    if orchestrator_module is None:
+        missing_components.append("the orchestrator module")
+    if ui_component is None:
+        missing_components.append("the UI component")
+    if missing_components:
+        raise MaterializedCodeError(
+            "The generated build is incomplete and cannot be connected end to end. "
+            "Missing: " + ", ".join(missing_components) + "."
+        )
+
+    _validate_orchestrator_delegations(orchestrator_module, set(agent_modules))
 
     if ui_component is not None and _EXACT_FILE_NAME_COMPARISON_PATTERN.search(ui_component):
         raise MaterializedCodeError(
@@ -479,15 +491,11 @@ def materialize_build(output_text: str) -> MaterializedBuild:
             "and genie-btn classes so every prototype remains visually coherent."
         )
 
-    if (
-        ui_component is not None
-        and _INTERACTIVE_INPUT_PATTERN.search(ui_component)
-        and not _ON_SUBMIT_CALL_PATTERN.search(ui_component)
-    ):
+    if not _ON_SUBMIT_CALL_PATTERN.search(ui_component):
         raise MaterializedCodeError(
-            "The generated mission UI renders user inputs but never calls its "
-            "onSubmit prop. Interactive prototypes must hand one flat JSON message "
-            "to the deterministic shell so the provisioned backend actually runs."
+            "The generated mission UI never calls its onSubmit prop. Every prototype "
+            "must hand one flat JSON message to the deterministic shell so the "
+            "provisioned backend and orchestrator actively run."
         )
 
     if has_file_input and ui_component is not None:
