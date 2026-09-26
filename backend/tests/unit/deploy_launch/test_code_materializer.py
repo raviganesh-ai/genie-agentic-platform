@@ -125,6 +125,60 @@ def test_materialize_build_rejects_orchestrator_that_omits_specialist_execution(
         materialize_build(output)
 
 
+def test_materialize_build_accepts_configured_agent_name_local_alias():
+    output = _SAMPLE_OUTPUT.replace(
+        "specialist = MissionFoundryAgent(\n"
+        '            agent_name=AGENT_FOUNDRY_NAMES["Requirements Specialist"]\n'
+        "        )",
+        'agent_name = AGENT_FOUNDRY_NAMES["Requirements Specialist"]\n'
+        "        specialist = MissionFoundryAgent(agent_name=agent_name)",
+    )
+
+    build = materialize_build(output)
+
+    assert build.orchestrator_module is not None
+
+
+def test_materialize_build_accepts_reused_local_alias_for_multiple_specialists():
+    second_specialist = '''
+```python
+# agent: Review Specialist
+async def run() -> None:
+    pass
+```
+
+'''
+    output = _SAMPLE_OUTPUT.replace(
+        "```python\n# agent: orchestrator",
+        second_specialist + "```python\n# agent: orchestrator",
+    ).replace(
+        "specialist = MissionFoundryAgent(\n"
+        '            agent_name=AGENT_FOUNDRY_NAMES["Requirements Specialist"]\n'
+        "        )\n"
+        '        tool = FunctionTool(name="requirements", func=specialist.run)',
+        'agent_name = AGENT_FOUNDRY_NAMES["Requirements Specialist"]\n'
+        "        specialist = MissionFoundryAgent(agent_name=agent_name)\n"
+        '        tool = FunctionTool(name="requirements", func=specialist.run)\n'
+        '        agent_name = AGENT_FOUNDRY_NAMES["Review Specialist"]\n'
+        "        reviewer = MissionFoundryAgent(agent_name=agent_name)\n"
+        '        review_tool = FunctionTool(name="review", func=reviewer.run)',
+    ).replace(
+        '            await on_progress("Requirements Specialist completed.")',
+        '            await on_progress("Requirements Specialist completed.")\n'
+        '            await on_progress("Handing off to Review Specialist...")\n'
+        "            review = await reviewer.run(ui_message)\n"
+        '            await on_progress("Review Specialist completed.")',
+    ).replace(
+        'return {"result": result, "tool": str(tool)}',
+        'return {"result": result, "review": review, "tool": str(tool), '
+        '"review_tool": str(review_tool)}',
+    )
+
+    build = materialize_build(output)
+
+    assert set(build.agent_modules) == {"Requirements Specialist", "Review Specialist"}
+
+
 def test_materialize_build_rejects_unawaited_progress_mentions():
     output = _SAMPLE_OUTPUT.replace(
         'await on_progress("Requirements Specialist completed.")',

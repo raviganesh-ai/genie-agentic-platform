@@ -702,9 +702,9 @@ Every deployment to the shared Azure evaluation environment (backend Container A
 
 ### 2026-09-26 — Generated-build repair resumes incrementally before Foundry provisioning
 
-- **Incident**: DerekPoC deployment `27be51c5` appeared stuck on “Deploy Agents to Foundry,” but no mission agent creation had started. Deterministic materialization rejected one orchestrator that omitted the full mapping and progress narration for `Primary Judge Agent (Strong-model judge)`; automatic repair then discarded the otherwise valid 298 KB build and regenerated every component.
-- **Fix**: bounded repair now supplies the rejected build as `previous_build_output`, reuses all valid specialist blocks, and forcibly regenerates the orchestrator and UI that own backend delegation and shell integration. Validation remains fail-closed and Foundry resources are still created only after the complete repaired build passes.
-- **Verification**: focused and affected pipeline/orchestration suites pass with 52 tests; Ruff and editor diagnostics are clean.
+- **Incident**: DerekPoC deployment `27be51c5` appeared stuck on “Deploy Agents to Foundry,” but no mission agent creation had started. The initial deterministic rejection concerned one orchestrator delegation; automatic repair then discarded the otherwise valid 298 KB build and regenerated every component. Its next orchestrator used functionally valid local aliases such as `agent_name = AGENT_FOUNDRY_NAMES[...]`, but the AST validator only recognized that mapping when written directly inside `MissionFoundryAgent(...)`, causing another false rejection before provisioning.
+- **Fix**: bounded repair now supplies the rejected build as `previous_build_output`, reuses all valid specialist blocks, and forcibly regenerates the orchestrator and UI that own backend delegation and shell integration. The validator follows simple configured-name aliases while continuing to reject hardcoded names. Validation remains fail-closed and Foundry resources are still created only after the complete repaired build passes.
+- **Verification**: focused tests cover incremental component repair, direct configured-name mappings, reused local aliases, and continued rejection of hardcoded delegation. The exact production repair artifact advances past the former mapping error to its next genuine UI policy check.
 
 ### 2026-09-25 — Generated missions visibly execute every specialist
 

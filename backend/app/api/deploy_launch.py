@@ -1,6 +1,6 @@
 """Deploy & Launch pipeline API routes.
 
-Exposes the real, nine-step Deploy & Launch pipeline
+Exposes the real, eight-step Deploy & Launch pipeline
 (``app.deploy_launch.pipeline_service.DeploymentPipelineService``):
 ``POST .../start`` (executes every step as soon as the human clicks
 Start - the one gate this stage has), ``GET .../{pipeline_run_id}`` (poll

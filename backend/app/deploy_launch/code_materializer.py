@@ -108,6 +108,30 @@ def _validate_orchestrator_delegations(
             f"The generated orchestrator module is not valid Python: {exc}."
         ) from exc
 
+    def configured_agent_name(value: ast.expr) -> str | None:
+        if (
+            isinstance(value, ast.Subscript)
+            and isinstance(value.value, ast.Name)
+            and value.value.id == "AGENT_FOUNDRY_NAMES"
+            and isinstance(value.slice, ast.Constant)
+            and isinstance(value.slice.value, str)
+        ):
+            return value.slice.value
+        return None
+
+    configured_name_aliases: dict[str, set[str]] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            mapped_name = configured_agent_name(node.value)
+            if mapped_name is not None:
+                for target in node.targets:
+                    if isinstance(target, ast.Name):
+                        configured_name_aliases.setdefault(target.id, set()).add(mapped_name)
+        elif isinstance(node, ast.AnnAssign) and node.value is not None:
+            mapped_name = configured_agent_name(node.value)
+            if mapped_name is not None and isinstance(node.target, ast.Name):
+                configured_name_aliases.setdefault(node.target.id, set()).add(mapped_name)
+
     mapped_agents: set[str] = set()
     narration_counts = {name: 0 for name in agent_names}
     function_tool_count = 0
@@ -126,15 +150,13 @@ def _validate_orchestrator_delegations(
             if called_name == "MissionFoundryAgent":
                 for keyword in node.keywords:
                     value = keyword.value
-                    if (
-                        keyword.arg == "agent_name"
-                        and isinstance(value, ast.Subscript)
-                        and isinstance(value.value, ast.Name)
-                        and value.value.id == "AGENT_FOUNDRY_NAMES"
-                        and isinstance(value.slice, ast.Constant)
-                        and isinstance(value.slice.value, str)
-                    ):
-                        mapped_agents.add(value.slice.value)
+                    if keyword.arg != "agent_name":
+                        continue
+                    mapped_name = configured_agent_name(value)
+                    if mapped_name is not None:
+                        mapped_agents.add(mapped_name)
+                    elif isinstance(value, ast.Name):
+                        mapped_agents.update(configured_name_aliases.get(value.id, set()))
         if not isinstance(node, ast.Await) or not isinstance(node.value, ast.Call):
             continue
         awaited_call = node.value
