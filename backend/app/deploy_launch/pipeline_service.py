@@ -2442,6 +2442,11 @@ class DeploymentPipelineService:
             f"Approved requirements:\n{approved_requirements}\n\n"
             f"Observed failure evidence:\n{evidence[-12_000:]}"
         )
+        previous_build = await self._get_step_output(
+            run,
+            self._build_step_id,
+            trace_id=trace_id,
+        )
         await self._restore_repair_memory_references(run, trace_id=trace_id)
         repaired = await self._orchestrator.resume_workflow(
             workflow_run_id=run.workflow_run_id,
@@ -2452,7 +2457,8 @@ class DeploymentPipelineService:
                     step_id=self._build_step_id,
                     variables={
                         "user_message": instruction,
-                        "previous_build_output": "",
+                        "previous_build_output": previous_build,
+                        "regenerate_components": "orchestrator, ui",
                     },
                 )
             },

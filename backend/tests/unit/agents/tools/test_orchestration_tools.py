@@ -660,6 +660,62 @@ async def test_call_build_agent_reuses_previously_succeeded_components_on_retry(
     assert "GENERATION FAILED" not in output_text
 
 
+async def test_call_build_agent_regenerates_requested_reusable_components():
+    previous_output = (
+        "```python\n# agent: Ticket Classifier Agent\nclassifier code\n```"
+        "\n\n"
+        "```python\n# agent: Resolution Drafter Agent\ndrafter code\n```"
+        "\n\n"
+        "```python\n# agent: orchestrator\nstale orchestrator code\n```"
+        "\n\n"
+        "```tsx\n// agent: ui\nstale ui code\n```"
+    )
+    registry = AgentToolRegistry()
+    gateway = _StreamingAgentGateway(
+        texts_by_component={
+            "Support Triage Orchestrator Agent": (
+                "```python\n# agent: orchestrator\nrepaired orchestrator code\n```"
+            ),
+            "ui": "```tsx\n// agent: ui\nrepaired ui code\n```",
+        }
+    )
+    register_orchestrator_delegation_tools(
+        registry,
+        agent_gateway=gateway,
+        governance_service=_RecordingGovernanceService(),
+    )
+
+    result = await registry.execute(
+        agent_id="genie-orchestrator",
+        tool_name="call_build_agent",
+        arguments={
+            "requirements": "Approved requirements text.",
+            "architecture": _ARCHITECTURE_WITH_TWO_SPECIALISTS,
+            "policies": "",
+            "user_message": "",
+            "previous_build_output": previous_output,
+            "regenerate_components": "orchestrator, ui",
+        },
+        context=ToolCallContext(
+            agent=_orchestrator_agent(),
+            session_id="session-1",
+            trace_id="run-1:build-solution",
+        ),
+    )
+
+    assert [request.variables["component_kind"] for request in gateway.requests] == [
+        "orchestrator",
+        "ui",
+    ]
+    output_text = result["output_text"]
+    assert "classifier code" in output_text
+    assert "drafter code" in output_text
+    assert "repaired orchestrator code" in output_text
+    assert "repaired ui code" in output_text
+    assert "stale orchestrator code" not in output_text
+    assert "stale ui code" not in output_text
+
+
 _ARCHITECTURE_WITH_REQUIREMENT_ASSIGNMENTS = """
 ## Single-Page UI Design
 

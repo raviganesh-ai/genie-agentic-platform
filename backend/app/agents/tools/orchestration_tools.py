@@ -172,6 +172,10 @@ _DELEGATIONS: tuple[_Delegation, ...] = (
             # attempt. Never surfaced to the model as a tool-call argument
             # it needs to supply - see _delegate's caller_value precedence.
             "previous_build_output",
+            # Internal repair hint supplied by Deploy & Launch. Components
+            # named here are regenerated even when their prior fenced block
+            # is otherwise reusable.
+            "regenerate_components",
         ),
         shared_memory_classification="roadmap_artifact",
     ),
@@ -467,6 +471,9 @@ async def _generate_build_by_component(
         base_variables.get("architecture", "")
     )
     reusable_components = _extract_reusable_components(base_variables.get("previous_build_output", ""))
+    regenerate_components = _parse_excluded_agent_names(
+        base_variables.get("regenerate_components", "")
+    )
 
     async def _publish_delta(delta: str) -> None:
         if event_bus is not None and workflow_run_id is not None and step_id is not None:
@@ -497,7 +504,12 @@ async def _generate_build_by_component(
         # placeholder (_component_failure_piece) must use the same literal
         # label, not component_name, for those two kinds.
         label_name = component_name if component_kind == "agent" else component_kind
-        reused_piece = reusable_components.get(label_name.strip().lower())
+        normalized_label = label_name.strip().lower()
+        reused_piece = (
+            None
+            if normalized_label in regenerate_components
+            else reusable_components.get(normalized_label)
+        )
         if reused_piece is not None:
             # Already succeeded on a prior attempt at this same step - reuse
             # its real code verbatim (see _extract_reusable_components)

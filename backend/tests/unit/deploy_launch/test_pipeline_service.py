@@ -1050,6 +1050,10 @@ async def test_pipeline_repairs_invalid_generated_ui_before_provisioning(
     assert len(orchestrator.resume_calls) == 1
     repair_input = orchestrator.resume_calls[0]["build-solution"]
     assert "end-user-controlled filename" in repair_input.variables["user_message"]
+    assert 'const invalid = file.name !== "fixed.json";' in repair_input.variables[
+        "previous_build_output"
+    ]
+    assert repair_input.variables["regenerate_components"] == "orchestrator, ui"
     assert run.steps[1].status == "completed"
 
 

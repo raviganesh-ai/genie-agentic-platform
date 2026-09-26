@@ -226,7 +226,7 @@ Deploy & Launch is deliberately **not** an LLM-narrative workflow step — it is
 | # | Step id | Customer-facing name | What actually happens |
 |---|---|---|---|
 | 1 | `generate-access-policy` | Generate Access Policy & Least Access | Derives a least-privilege access policy for the mission's generated agents |
-| 2 | `provision-foundry-agents` | Deploy Agents to Foundry | Provisions each generated specialist + orchestrator agent as a real Azure AI Foundry resource |
+| 2 | `provision-foundry-agents` | Deploy Agents to Foundry | Deterministically materializes and validates the complete generated build, performs bounded repair before creating any cloud resources when validation fails, then provisions each generated specialist + orchestrator agent as a real Azure AI Foundry resource |
 | 3 | `deploy-backend-service` | Deploy Backend Service | Provisions a prototype-owned VNet, private DNS zone, internal Container Apps environment, and dedicated Standard v2 API Management service; builds FastAPI; and enables app-boundary ingress inside the internal environment. APIM is the only public API endpoint and reaches FastAPI only over the prototype private network |
 | 4 | `sync-frontend-integration` | Update Frontend Integrations | Wires the generated anonymous UI to the dedicated APIM endpoint; no Entra, MSAL, bearer-token, or acceptance-key runtime configuration is generated |
 | 5 | `deploy-frontend-app` | Deploy Frontend | Builds the mission UI under Node 22, runs the pinned Apache-2.0 Impeccable `3.6.0` detector over generated TSX/CSS, fails closed on deterministic design anti-patterns, provisions a prototype-owned public Consumption Container Apps environment, then deploys a mission-specific frontend Container App. APIM's deny-by-default bootstrap CORS origin is replaced with the returned exact HTTPS origin |
@@ -237,6 +237,8 @@ Deploy & Launch is deliberately **not** an LLM-narrative workflow step — it is
 Each step's real status (`pending` → `running` → `completed`/`failed`/`skipped`) streams live to the Deploy & Launch page so the human watches actual provisioning happen — never a simulated progress bar. Steps 6 and 7 (Defender & Security Copilot scan, FinOps cost report) are deliberately informational-only — unlike every other step, neither can ever fail the pipeline or block Launch; they surface real evidence for the human to review without gating the mission on it.
 
 Backend deployment persists every ACR, private-network, Container Apps environment, APIM, Container App, and readiness sub-stage while it runs. Synchronous Azure management and blob SDK operations execute outside the FastAPI event loop, so lengthy control-plane provisioning does not freeze status polling or other API traffic. Genuine build, identity, network, gateway, runtime-readiness, quota, or Azure service failures remain fail-closed and are reported on the owning deployment step.
+
+The `provision-foundry-agents` step can temporarily report generated-build repair before any Foundry agent exists. Repair keeps valid specialist components from the rejected build and regenerates the integration-owning orchestrator and UI, then reruns deterministic validation. Foundry provisioning starts only after that validation succeeds; exhausting the configured repair budget fails the run closed.
 
 ---
 
@@ -697,6 +699,12 @@ The script uses Microsoft Entra authentication, creates only missing model deplo
 ## Deploy log
 
 Every deployment to the shared Azure evaluation environment (backend Container App and/or frontend Static Web App) is recorded here: commit, what changed, and why. Update this section as part of the same commit that ships the fix/feature, before pushing to `master` triggers [Continuous deployment](#continuous-deployment-github-actions).
+
+### 2026-09-26 — Generated-build repair resumes incrementally before Foundry provisioning
+
+- **Incident**: DerekPoC deployment `27be51c5` appeared stuck on “Deploy Agents to Foundry,” but no mission agent creation had started. Deterministic materialization rejected one orchestrator that omitted the full mapping and progress narration for `Primary Judge Agent (Strong-model judge)`; automatic repair then discarded the otherwise valid 298 KB build and regenerated every component.
+- **Fix**: bounded repair now supplies the rejected build as `previous_build_output`, reuses all valid specialist blocks, and forcibly regenerates the orchestrator and UI that own backend delegation and shell integration. Validation remains fail-closed and Foundry resources are still created only after the complete repaired build passes.
+- **Verification**: focused and affected pipeline/orchestration suites pass with 52 tests; Ruff and editor diagnostics are clean.
 
 ### 2026-09-25 — Generated missions visibly execute every specialist
 
