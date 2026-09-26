@@ -12,6 +12,7 @@ returned.
 """
 from __future__ import annotations
 
+import ast
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -93,6 +94,91 @@ _ON_SUBMIT_IDENTIFIER_PATTERN: Final = re.compile(
 
 class MaterializedCodeError(RuntimeError):
     """Raised when the Build Agent's output does not contain a materializable build."""
+
+
+def _validate_orchestrator_delegations(
+    orchestrator_module: str, agent_names: set[str]
+) -> None:
+    """Require every generated specialist to be invoked and visibly narrated."""
+
+    try:
+        tree = ast.parse(orchestrator_module)
+    except SyntaxError as exc:
+        raise MaterializedCodeError(
+            f"The generated orchestrator module is not valid Python: {exc}."
+        ) from exc
+
+    mapped_agents: set[str] = set()
+    narration_counts = {name: 0 for name in agent_names}
+    function_tool_count = 0
+    specialist_run_count = 0
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            called_name = (
+                node.func.id
+                if isinstance(node.func, ast.Name)
+                else node.func.attr
+                if isinstance(node.func, ast.Attribute)
+                else None
+            )
+            if called_name == "FunctionTool":
+                function_tool_count += 1
+            if called_name == "MissionFoundryAgent":
+                for keyword in node.keywords:
+                    value = keyword.value
+                    if (
+                        keyword.arg == "agent_name"
+                        and isinstance(value, ast.Subscript)
+                        and isinstance(value.value, ast.Name)
+                        and value.value.id == "AGENT_FOUNDRY_NAMES"
+                        and isinstance(value.slice, ast.Constant)
+                        and isinstance(value.slice.value, str)
+                    ):
+                        mapped_agents.add(value.slice.value)
+        if not isinstance(node, ast.Await) or not isinstance(node.value, ast.Call):
+            continue
+        awaited_call = node.value
+        if isinstance(awaited_call.func, ast.Attribute) and awaited_call.func.attr == "run":
+            specialist_run_count += 1
+        if not (
+            isinstance(awaited_call.func, ast.Name)
+            and awaited_call.func.id == "on_progress"
+            and awaited_call.args
+            and isinstance(awaited_call.args[0], ast.Constant)
+            and isinstance(awaited_call.args[0].value, str)
+        ):
+            continue
+        narration = awaited_call.args[0].value
+        for agent_name in agent_names:
+            if agent_name in narration:
+                narration_counts[agent_name] += 1
+
+    missing_mappings = sorted(agent_names - mapped_agents)
+    missing_narration = sorted(
+        name for name, count in narration_counts.items() if count < 2
+    )
+    failures: list[str] = []
+    if function_tool_count < len(agent_names):
+        failures.append(
+            f"FunctionTool delegations ({function_tool_count}/{len(agent_names)})"
+        )
+    if specialist_run_count < len(agent_names):
+        failures.append(
+            f"awaited specialist runs ({specialist_run_count}/{len(agent_names)})"
+        )
+    if missing_mappings:
+        failures.append(
+            "AGENT_FOUNDRY_NAMES mappings for " + ", ".join(missing_mappings)
+        )
+    if missing_narration:
+        failures.append(
+            "start/completion progress narration for " + ", ".join(missing_narration)
+        )
+    if failures:
+        raise MaterializedCodeError(
+            "The generated orchestrator does not execute and visibly report every "
+            "specialist. Missing: " + "; ".join(failures) + "."
+        )
 
 
 def _slugify(name: str) -> str:
@@ -342,6 +428,9 @@ def materialize_build(output_text: str) -> MaterializedBuild:
             "class name would silently fall back to a generic conversational "
             "reply instead of running this mission's real pipeline."
         )
+
+    if orchestrator_module is not None and agent_modules and ui_component is not None:
+        _validate_orchestrator_delegations(orchestrator_module, set(agent_modules))
 
     if ui_component is not None and _EXACT_FILE_NAME_COMPARISON_PATTERN.search(ui_component):
         raise MaterializedCodeError(
@@ -687,8 +776,9 @@ async def invoke(request: InvokeRequest) -> InvokeResponse:
 async def _stream_agent_response(request: InvokeRequest) -> AsyncIterator[str]:
     """Yields Server-Sent Events as the mission's response streams in.
 
-    Each event line is a JSON object: ``{{"delta": "<incremental text>"}}``
-    while the response is still being generated, then exactly one final
+    Each event line is a JSON object: ``{{"progress": "<agent hand-off>"}}``
+    for orchestrator progress, ``{{"delta": "<incremental text>"}}`` for
+    conversational output, then exactly one final
     ``{{"done": true, "output_text": "<full response>"}}`` once finished -
     lets the mission UI show the Orchestrator genuinely working in real
     time instead of waiting on one long blocking call. When this mission's
@@ -724,7 +814,7 @@ async def _stream_agent_response(request: InvokeRequest) -> AsyncIterator[str]:
         narration = await progress_queue.get()
         if narration is None:
             break
-        yield "data: " + json.dumps(dict(delta=narration)) + "\\n\\n"
+        yield "data: " + json.dumps(dict(progress=narration)) + "\\n\\n"
     await pipeline_task
 
     pipeline_output = pipeline_result["output"]

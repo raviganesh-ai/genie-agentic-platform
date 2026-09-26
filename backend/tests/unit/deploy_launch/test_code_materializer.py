@@ -27,9 +27,20 @@ async def run() -> None:
 
 ```python
 # agent: orchestrator
+from agent_config import AGENT_FOUNDRY_NAMES
+from agent_framework import FunctionTool
+from mission_foundry_runtime import MissionFoundryAgent
 class OrchestratorAgent:
-    async def run(self, ui_message: str) -> None:
-        pass
+    async def run(self, ui_message: str, on_progress=None):
+        specialist = MissionFoundryAgent(
+            agent_name=AGENT_FOUNDRY_NAMES["Requirements Specialist"]
+        )
+        tool = FunctionTool(name="requirements", func=specialist.run)
+        if on_progress:
+            await on_progress("Handing off to Requirements Specialist...")
+            result = await specialist.run(ui_message)
+            await on_progress("Requirements Specialist completed.")
+        return {"result": result, "tool": str(tool)}
 ```
 
 ```tsx
@@ -71,6 +82,29 @@ class FactoryOrchestratorAgent:
 '''
     with pytest.raises(MaterializedCodeError, match="OrchestratorAgent"):
         materialize_build(misnamed_output)
+
+
+def test_materialize_build_rejects_orchestrator_that_omits_specialist_execution():
+    output = _SAMPLE_OUTPUT.replace(
+        'agent_name=AGENT_FOUNDRY_NAMES["Requirements Specialist"]',
+        'agent_name="not-a-real-delegation"',
+    )
+
+    with pytest.raises(
+        MaterializedCodeError,
+        match="does not execute and visibly report every specialist",
+    ):
+        materialize_build(output)
+
+
+def test_materialize_build_rejects_unawaited_progress_mentions():
+    output = _SAMPLE_OUTPUT.replace(
+        'await on_progress("Requirements Specialist completed.")',
+        'completion_note = "Requirements Specialist completed."',
+    )
+
+    with pytest.raises(MaterializedCodeError, match="start/completion progress"):
+        materialize_build(output)
 
 
 def test_materialize_build_rejects_exact_uploaded_filename_gate():
@@ -644,7 +678,7 @@ def test_stream_agent_response_relays_on_progress_narration_as_it_happens(monkey
     done), so the mission UI's live pipeline visualization never had a
     chance to light up node-by-node while specialist agents were actually
     working. The generated backend proxy must relay each ``on_progress``
-    narration call as its OWN SSE delta event in real time, with the
+    narration call as its OWN SSE progress event in real time, with the
     pipeline's final structured result arriving only in the closing
     "done" event.
     """
@@ -689,7 +723,7 @@ def test_stream_agent_response_relays_on_progress_narration_as_it_happens(monkey
 
     events = asyncio.run(_collect_events())
 
-    assert events[0] == {"delta": "Handing off to Requirements Specialist..."}
-    assert events[1] == {"delta": "Requirements Specialist completed."}
+    assert events[0] == {"progress": "Handing off to Requirements Specialist..."}
+    assert events[1] == {"progress": "Requirements Specialist completed."}
     assert events[-1]["done"] is True
     assert json.loads(events[-1]["output_text"]) == {"summary": "done", "requirement_count": 3}

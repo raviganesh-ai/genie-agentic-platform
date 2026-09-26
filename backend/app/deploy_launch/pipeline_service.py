@@ -1113,6 +1113,7 @@ type QueueItem = {
     message: string;
     attachments: Attachment[];
     status: QueueItemStatus;
+    agentProgress: string;
     output: string;
     error: string;
 };
@@ -1163,7 +1164,7 @@ function MissionConsole() {
     // status, its own streamed output, and its own download button, instead
     // of forcing everything through a single shared request/response.
     async function runItem(item: QueueItem) {
-        setQueue((prior) => prior.map((entry) => (entry.id === item.id ? { ...entry, status: "running", output: "", error: "" } : entry)));
+        setQueue((prior) => prior.map((entry) => (entry.id === item.id ? { ...entry, status: "running", agentProgress: "", output: "", error: "" } : entry)));
         try {
             const backendUrl = window.__MISSION_BACKEND_URL__;
             if (!backendUrl) throw new Error("Mission backend URL is not configured.");
@@ -1189,7 +1190,9 @@ function MissionConsole() {
                     const payload = frame.replace(/^data:\\s*/, "");
                     if (!payload) continue;
                     const parsed = JSON.parse(payload);
-                    if (parsed.delta) {
+                    if (parsed.progress) {
+                        setQueue((prior) => prior.map((entry) => (entry.id === item.id ? { ...entry, agentProgress: entry.agentProgress + parsed.progress + "\n" } : entry)));
+                    } else if (parsed.delta) {
                         sawOutput = true;
                         setQueue((prior) => prior.map((entry) => (entry.id === item.id ? { ...entry, output: entry.output + parsed.delta } : entry)));
                     } else if (parsed.done) {
@@ -1230,6 +1233,7 @@ function MissionConsole() {
             message: trimmed,
             attachments: attachments ?? [],
             status: "queued",
+            agentProgress: "",
             output: "",
             error: "",
         });
@@ -1245,6 +1249,7 @@ function MissionConsole() {
             message: trimmed,
             attachments: [],
             status: "queued",
+            agentProgress: "",
             output: "",
             error: "",
         });
@@ -1267,6 +1272,7 @@ function MissionConsole() {
                     message: `Process the attached file "${file.name}" and report the outcome.`,
                     attachments: [{ name: file.name, content }],
                     status: "queued",
+                    agentProgress: "",
                     output: "",
                     error: "",
                 });
@@ -1319,7 +1325,7 @@ function MissionConsole() {
                     {missionAgents.map((name, index) => {
                         const perItemStatuses = queue
                             .filter((entry) => entry.status === "running" || entry.status === "complete")
-                            .map((entry) => computeAgentStatuses(missionAgents, entry.output, entry.status === "running")[name]);
+                            .map((entry) => computeAgentStatuses(missionAgents, entry.agentProgress, entry.status === "running")[name]);
                         const status: AgentStatus = perItemStatuses.includes("active")
                             ? "active"
                             : perItemStatuses.includes("complete")
@@ -1455,7 +1461,7 @@ function MissionConsole() {
             ) : (
                 <div className="genie-queue-grid">
                     {queue.map((item) => {
-                        const itemAgentStatuses = computeAgentStatuses(missionAgents, item.output, item.status === "running");
+                        const itemAgentStatuses = computeAgentStatuses(missionAgents, item.agentProgress, item.status === "running");
                         return (
                             <article key={item.id} className={item.status === "running" ? "genie-queue-item genie-agent-activity" : "genie-queue-item"}>
                                 <div className="genie-queue-item-header">
@@ -1465,14 +1471,14 @@ function MissionConsole() {
                                 </div>
                                 <p className="genie-step-label">
                                     {item.status === "queued" ? "Waiting in queue…" : null}
-                                    {item.status === "running" ? (item.output ? "Agents collaborating…" : "Contacting mission backend…") : null}
+                                    {item.status === "running" ? (item.agentProgress ? "Agents collaborating…" : "Contacting mission backend…") : null}
                                     {item.status === "complete" ? "Complete" : null}
                                     {item.status === "error" ? "Failed" : null}
                                 </p>
-                                {item.status === "running" && !item.output ? (
+                                {item.status === "running" && !item.agentProgress && !item.output ? (
                                     <span className="genie-bounce-dots"><span className="genie-bounce-dot" /><span className="genie-bounce-dot" /><span className="genie-bounce-dot" /></span>
                                 ) : null}
-                                {item.status === "running" && missionAgents.length > 0 ? (
+                                {(item.status === "running" || item.status === "complete") && missionAgents.length > 0 ? (
                                     <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
                                         {missionAgents.map((name) => (
                                             <span key={name} className={`genie-badge genie-badge-${itemAgentStatuses[name] ?? "pending"}`} style={{ fontSize: 11 }}>

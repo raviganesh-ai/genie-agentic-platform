@@ -60,9 +60,20 @@ async def run() -> None:
 
 ```python
 # agent: orchestrator
+from agent_config import AGENT_FOUNDRY_NAMES
+from agent_framework import FunctionTool
+from mission_foundry_runtime import MissionFoundryAgent
 class OrchestratorAgent:
-    async def run(self, ui_message: str) -> None:
-        pass
+    async def run(self, ui_message: str, on_progress=None):
+        specialist = MissionFoundryAgent(
+            agent_name=AGENT_FOUNDRY_NAMES["Requirements Specialist"]
+        )
+        tool = FunctionTool(name="requirements", func=specialist.run)
+        if on_progress:
+            await on_progress("Handing off to Requirements Specialist...")
+            result = await specialist.run(ui_message)
+            await on_progress("Requirements Specialist completed.")
+        return {"result": result, "tool": str(tool)}
 ```
 
 ```tsx

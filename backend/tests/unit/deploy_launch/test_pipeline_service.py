@@ -65,9 +65,20 @@ async def run() -> None:
 
 ```python
 # agent: orchestrator
+from agent_config import AGENT_FOUNDRY_NAMES
+from agent_framework import FunctionTool
+from mission_foundry_runtime import MissionFoundryAgent
 class OrchestratorAgent:
-    async def run(self, ui_message: str) -> None:
-        pass
+    async def run(self, ui_message: str, on_progress=None):
+        specialist = MissionFoundryAgent(
+            agent_name=AGENT_FOUNDRY_NAMES["Requirements Specialist"]
+        )
+        tool = FunctionTool(name="requirements", func=specialist.run)
+        if on_progress:
+            await on_progress("Handing off to Requirements Specialist...")
+            result = await specialist.run(ui_message)
+            await on_progress("Requirements Specialist completed.")
+        return {"result": result, "tool": str(tool)}
 ```
 
 ```tsx
@@ -1563,7 +1574,11 @@ def test_frontend_main_tsx_renders_a_gamified_multi_input_mission_queue():
 
     assert "type QueueItem = {" in _FRONTEND_MAIN_TSX
     assert 'type QueueItemStatus = "queued" | "running" | "complete" | "error"' in _FRONTEND_MAIN_TSX
+    assert "agentProgress: string;" in _FRONTEND_MAIN_TSX
     assert "async function runItem(item: QueueItem)" in _FRONTEND_MAIN_TSX
+    assert "if (parsed.progress)" in _FRONTEND_MAIN_TSX
+    assert "entry.agentProgress + parsed.progress" in _FRONTEND_MAIN_TSX
+    assert "computeAgentStatuses(missionAgents, item.agentProgress" in _FRONTEND_MAIN_TSX
     assert "body: JSON.stringify({ message: item.message, attachments: item.attachments })" in _FRONTEND_MAIN_TSX
     assert "function addMessageToQueue()" in _FRONTEND_MAIN_TSX
     assert "async function addFilesToQueue(files: FileList | File[])" in _FRONTEND_MAIN_TSX
