@@ -638,7 +638,7 @@ The workflow runs application builds on Node.js 24 and consumes actions only fro
 
 - **`prepare-gateway`** — logs into Azure via OIDC federated credential (no client secret), idempotently provisions Standard v2 APIM and its delegated subnet/NSG, proves the gateway reaches the current backend, and emits the verified URL without changing Container Apps public access.
 - **`deploy-frontend`** — builds the frontend against that exact gateway job output and deploys it with `@azure/static-web-apps-cli` using a stored deployment token. It no longer trusts a separately maintained production API URL variable.
-- **`deploy-backend`** — waits for the frontend cutover, builds the commit-pinned FastAPI image, prepares private DNS, disables Container Apps public access, creates/verifies the private endpoint, proves APIM still works and direct ingress is denied, then runs `deploy_backend.ps1` so the image, retired-sidecar removal, CORS, probes, and ingress are updated atomically and verified through APIM.
+- **`deploy-backend`** — waits for the frontend cutover, builds the commit-pinned FastAPI image, prepares private DNS, disables Container Apps public access, creates/verifies the private endpoint, proves APIM still works and direct ingress is denied, then runs `deploy_backend.ps1` so the image, retired-sidecar removal, CORS, probes, and ingress are updated atomically and verified through APIM. `prepare-gateway` and `deploy-backend` share one non-canceling cross-run concurrency lock because both write the fixed `genie-platform-private-gateway` ARM deployment; consecutive pushes therefore queue instead of colliding with `DeploymentActive`.
 
 **One-time setup** (already performed for this environment — documented here so it can be reproduced on a new subscription/repo):
 
@@ -705,6 +705,11 @@ Every deployment to the shared Azure evaluation environment (backend Container A
 - **Incident**: DerekPoC deployment `27be51c5` appeared stuck on “Deploy Agents to Foundry,” but no mission agent creation had started. The initial deterministic rejection concerned one orchestrator delegation; automatic repair then discarded the otherwise valid 298 KB build and regenerated every component. Its next orchestrator used functionally valid local aliases such as `agent_name = AGENT_FOUNDRY_NAMES[...]`, but the AST validator only recognized that mapping when written directly inside `MissionFoundryAgent(...)`, causing another false rejection before provisioning.
 - **Fix**: bounded repair now supplies the rejected build as `previous_build_output`, reuses all valid specialist blocks, and forcibly regenerates the orchestrator and UI that own backend delegation and shell integration. The validator follows simple configured-name aliases while continuing to reject hardcoded names. Validation remains fail-closed and Foundry resources are still created only after the complete repaired build passes.
 - **Verification**: focused tests cover incremental component repair, direct configured-name mappings, reused local aliases, and continued rejection of hardcoded delegation. The exact production repair artifact advances past the former mapping error to its next genuine UI policy check.
+
+### 2026-09-26 — Backend deployments serialize shared gateway updates
+
+- **Incident**: CI run `36220200882` built and pushed its backend image successfully, then failed while finalizing the platform gateway because the next push's `prepare-gateway` job started the same fixed ARM deployment name concurrently. Separate GitHub concurrency groups protected backend jobs from each other but did not protect gateway preparation from backend finalization.
+- **Fix**: `prepare-gateway` and `deploy-backend` now share the `platform-gateway-and-backend-deploy` concurrency group with cancellation disabled. Overlapping pushes queue every writer to the shared ARM deployment while frontend validation and other independent work can still proceed.
 
 ### 2026-09-25 — Generated missions visibly execute every specialist
 

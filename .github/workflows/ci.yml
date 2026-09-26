@@ -76,7 +76,10 @@ jobs:
       gateway-url: ${{ steps.prepare.outputs.gateway-url }}
     timeout-minutes: 75
     concurrency:
-      group: prepare-platform-gateway
+      # This job and deploy-backend both write the fixed ARM deployment
+      # genie-platform-private-gateway. One shared cross-run lock prevents a
+      # newer push from racing an older run's backend finalization.
+      group: platform-gateway-and-backend-deploy
       cancel-in-progress: false
     permissions:
       id-token: write
@@ -136,7 +139,7 @@ jobs:
     # running until the default 6h job timeout.
     timeout-minutes: 75
     concurrency:
-      group: deploy-backend
+      group: platform-gateway-and-backend-deploy
       cancel-in-progress: false
     permissions:
       id-token: write
