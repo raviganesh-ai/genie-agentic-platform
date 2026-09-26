@@ -709,6 +709,12 @@ prompts:
       name as a string literal, the helper uses that parameter for the
       `AGENT_FOUNDRY_NAMES` lookup and `FunctionTool` name, awaits both the
       configured agent and tool, and narrates start/completion with that name.
+      Alternatively, tools may be declared once as exact-name instance fields
+      and passed to one shared `run_with_progress(tool, agent_name, payload)`
+      helper only when every awaited call supplies the matching tool field and
+      exact architecture specialist-name string literal; that helper must await
+      the supplied tool and await start/completion narration containing the
+      supplied name, directly or through an awaited progress-forwarding helper.
 
       LIVE HAND-OFF NARRATION - `on_progress` is how the mission UI's
       Agent Pipeline panel actually lights up node by node WHILE the
@@ -770,8 +776,9 @@ prompts:
       - orchestration logic: clear comments explaining how the Orchestrator
         sequences agents to address must-have requirements in order
       - no random variable names, no placeholder code
-      - no extra utilities or helper methods except the single shared
-        `_invoke_specialist` delegation helper defined above
+      - no extra utilities or helper methods except the proven shared
+        `_invoke_specialist` and optional `run_with_progress`/progress-forwarding
+        helpers defined above
 
       Include a comment: "Once deployed to Azure AI Foundry, this
       Orchestrator Agent is reachable only through this mission's own
@@ -1004,7 +1011,7 @@ prompts:
       - excluded_agents
       - available_models
       - user_message
-    version: "5.24.0"
+    version: "5.25.0"
 
   - id: build-generation-component-v1
     name: Build Generation - Single Component
@@ -1121,7 +1128,13 @@ prompts:
       allowed only when every call site supplies an exact architecture
       specialist name string literal and the helper uses that parameter for
       the configured-name lookup, tool name, awaited agent/tool execution, and
-      start/completion narration.
+      start/completion narration. Alternatively, exact-name `FunctionTool`
+      instance fields may be passed to one shared
+      `run_with_progress(tool, agent_name, payload)` helper only when every
+      awaited call supplies the matching tool and exact specialist-name string
+      literal; the helper must await the supplied tool and await start/completion
+      narration containing that name, directly or through an awaited
+      progress-forwarding helper.
       LIVE HAND-OFF NARRATION - `on_progress` is how the mission UI's
       Agent Pipeline panel actually lights up node by node WHILE the
       pipeline runs, instead of jumping straight from all-pending to
@@ -1370,7 +1383,7 @@ prompts:
       - component_name
       - user_message
       - assigned_requirements
-    version: "1.27.0"
+    version: "1.28.0"
 
   - id: build-component-regeneration-v1
     name: Build Generation - Regenerate Single Component

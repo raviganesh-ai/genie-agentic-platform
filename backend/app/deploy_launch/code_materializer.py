@@ -442,6 +442,71 @@ def _validate_orchestrator_delegations(
             if parameter_narration_count >= 2:
                 dynamic_helper_narration.add(function_name)
 
+    tool_runner_helpers: dict[str, tuple[str, int, str, int]] = {}
+    for function_name, function in function_definitions.items():
+        argument_names = [argument.arg for argument in function.args.args]
+        method_offset = int(bool(argument_names and argument_names[0] in {"self", "cls"}))
+        call_positions = {
+            name: index - method_offset
+            for index, name in enumerate(argument_names)
+            if index >= method_offset
+        }
+        for tool_parameter, tool_position in call_positions.items():
+            tool_is_awaited = any(
+                isinstance(node, ast.Await)
+                and isinstance(node.value, ast.Call)
+                and isinstance(node.value.func, ast.Name)
+                and node.value.func.id == tool_parameter
+                for node in ast.walk(function)
+            )
+            if not tool_is_awaited:
+                continue
+            for name_parameter, name_position in call_positions.items():
+                if name_parameter == tool_parameter:
+                    continue
+                narration_count = 0
+                for node in ast.walk(function):
+                    if not (
+                        isinstance(node, ast.Await)
+                        and isinstance(node.value, ast.Call)
+                    ):
+                        continue
+                    awaited_name = called_name(node.value)
+                    narration_arguments: list[ast.expr] = []
+                    if awaited_name == "on_progress":
+                        narration_arguments = node.value.args
+                    elif awaited_name in narration_helpers:
+                        for parameter, position in narration_helpers[awaited_name].items():
+                            if position < len(node.value.args):
+                                narration_arguments.append(node.value.args[position])
+                            else:
+                                narration_arguments.extend(
+                                    keyword.value
+                                    for keyword in node.value.keywords
+                                    if keyword.arg == parameter
+                                )
+                    if any(
+                        isinstance(argument, ast.JoinedStr)
+                        and any(
+                            isinstance(part, ast.FormattedValue)
+                            and isinstance(part.value, ast.Name)
+                            and part.value.id == name_parameter
+                            for part in argument.values
+                        )
+                        for argument in narration_arguments
+                    ):
+                        narration_count += 1
+                if narration_count >= 2:
+                    tool_runner_helpers[function_name] = (
+                        tool_parameter,
+                        tool_position,
+                        name_parameter,
+                        name_position,
+                    )
+                    break
+            if function_name in tool_runner_helpers:
+                break
+
     configured_name_aliases: dict[str, set[str]] = {}
     for node in ast.walk(tree):
         if isinstance(node, ast.Assign):
@@ -574,6 +639,56 @@ def _validate_orchestrator_delegations(
         mapped_agents.update(helper_agents)
     function_tool_count += len(dynamically_delegated_agents)
 
+    helper_awaited_tool_agents: set[str] = set()
+    for node in ast.walk(tree):
+        if not (
+            isinstance(node, ast.Call)
+            and isinstance(parents.get(node), ast.Await)
+        ):
+            continue
+        helper_contract = tool_runner_helpers.get(called_name(node) or "")
+        if helper_contract is None:
+            continue
+        tool_parameter, tool_position, name_parameter, name_position = helper_contract
+        tool_argument: ast.expr | None = (
+            node.args[tool_position] if tool_position < len(node.args) else None
+        )
+        name_argument: ast.expr | None = (
+            node.args[name_position] if name_position < len(node.args) else None
+        )
+        if tool_argument is None:
+            tool_argument = next(
+                (
+                    keyword.value
+                    for keyword in node.keywords
+                    if keyword.arg == tool_parameter
+                ),
+                None,
+            )
+        if name_argument is None:
+            name_argument = next(
+                (
+                    keyword.value
+                    for keyword in node.keywords
+                    if keyword.arg == name_parameter
+                ),
+                None,
+            )
+        tool_reference = (
+            expression_reference(tool_argument) if tool_argument is not None else None
+        )
+        tool_agent = (
+            indirect_tool_agents.get(tool_reference.removeprefix("self."))
+            if tool_reference is not None
+            else None
+        )
+        if (
+            tool_agent is not None
+            and isinstance(name_argument, ast.Constant)
+            and name_argument.value == tool_agent
+        ):
+            helper_awaited_tool_agents.add(tool_agent)
+
     narration_counts = {name: 0 for name in agent_names}
     awaited_tool_agents: set[str] = set()
     for node in ast.walk(tree):
@@ -631,6 +746,8 @@ def _validate_orchestrator_delegations(
     for helper_name in dynamic_helper_narration:
         for agent_name in resolver_call_agents.get(helper_name, set()):
             narration_counts[agent_name] = max(narration_counts[agent_name], 2)
+    for agent_name in helper_awaited_tool_agents:
+        narration_counts[agent_name] = max(narration_counts[agent_name], 2)
 
     missing_mappings = sorted(agent_names - mapped_agents)
     missing_narration = sorted(
@@ -642,7 +759,10 @@ def _validate_orchestrator_delegations(
             f"FunctionTool delegations ({function_tool_count}/{len(agent_names)})"
         )
     executed_specialist_count = len(
-        directly_awaited_agents | awaited_tool_agents | dynamically_delegated_agents
+        directly_awaited_agents
+        | awaited_tool_agents
+        | dynamically_delegated_agents
+        | helper_awaited_tool_agents
     )
     if executed_specialist_count < len(agent_names):
         failures.append(

@@ -361,6 +361,103 @@ def test_materialize_build_rejects_unproven_dynamic_delegation_helper(
         materialize_build(output.replace(original, replacement))
 
 
+def _tool_runner_helper_output() -> str:
+    orchestrator = '''```python
+# agent: orchestrator
+from agent_config import AGENT_FOUNDRY_NAMES
+from agent_framework import FunctionTool
+from mission_foundry_runtime import MissionFoundryAgent
+
+class OrchestratorAgent:
+    def __init__(self):
+        self.requirements_tool = FunctionTool(
+            name="Requirements Specialist",
+            func=self._call_requirements,
+        )
+
+    async def _invoke_specialist(self, agent_display_name, payload):
+        agent = MissionFoundryAgent(
+            agent_name=AGENT_FOUNDRY_NAMES[agent_display_name]
+        )
+        return await agent.run(payload)
+
+    async def _call_requirements(self, payload):
+        return await self._invoke_specialist("Requirements Specialist", payload)
+
+    async def _emit_progress(self, on_progress, message):
+        if on_progress is not None:
+            await on_progress(message)
+
+    async def run(self, ui_message: str, on_progress=None):
+        async def run_with_progress(tool, agent_name, payload):
+            await self._emit_progress(
+                on_progress, f"Handing off to {agent_name}..."
+            )
+            result = await tool(payload)
+            await self._emit_progress(
+                on_progress, f"{agent_name} completed."
+            )
+            return result
+
+        result = await run_with_progress(
+            self.requirements_tool,
+            "Requirements Specialist",
+            {"message": ui_message},
+        )
+        return {"result": result}
+```
+'''
+    return re.sub(
+        r"```python\n# agent: orchestrator.*?```\n",
+        orchestrator,
+        _SAMPLE_OUTPUT,
+        flags=re.DOTALL,
+    )
+
+
+def test_materialize_build_accepts_exact_tool_through_narrated_runner_helper():
+    build = materialize_build(_tool_runner_helper_output())
+
+    assert build.orchestrator_module is not None
+
+
+@pytest.mark.parametrize(
+    ("original", "replacement", "failure_match"),
+    [
+        (
+            '"Requirements Specialist",\n            {"message": ui_message}',
+            '"Unknown Specialist",\n            {"message": ui_message}',
+            "awaited specialist runs",
+        ),
+        (
+            "result = await run_with_progress(",
+            "result = run_with_progress(",
+            "awaited specialist runs",
+        ),
+        (
+            "result = await tool(payload)",
+            "result = tool(payload)",
+            "awaited specialist runs",
+        ),
+        (
+            'f"{agent_name} completed."',
+            '"Specialist completed."',
+            "start/completion progress narration",
+        ),
+    ],
+)
+def test_materialize_build_rejects_unproven_tool_runner_helper(
+    original: str,
+    replacement: str,
+    failure_match: str,
+):
+    output = _tool_runner_helper_output()
+    assert original in output
+
+    with pytest.raises(MaterializedCodeError, match=failure_match):
+        materialize_build(output.replace(original, replacement))
+
+
 def test_materialize_build_rejects_nonexistent_function_tool_factory():
     output = _SAMPLE_OUTPUT.replace(
         'FunctionTool(name="requirements", func=specialist.run)',

@@ -700,6 +700,12 @@ The script uses Microsoft Entra authentication, creates only missing model deplo
 
 Every deployment to the shared Azure evaluation environment (backend Container App and/or frontend Static Web App) is recorded here: commit, what changed, and why. Update this section as part of the same commit that ships the fix/feature, before pushing to `master` triggers [Continuous deployment](#continuous-deployment-github-actions).
 
+### 2026-09-26 — Narrated FunctionTool runner helpers are statically verified
+
+- **Incident**: after the direct `FunctionTool` API fix reached production, regeneration produced a valid nine-specialist orchestrator with exact-name tool fields, mapped and awaited `MissionFoundryAgent.run(...)` wrappers, and an awaited local `run_with_progress(tool, agent_name, payload)` helper. Validation proved every mapping and tool definition but lost tool identity at that helper boundary, incorrectly reporting zero awaited specialist runs and no progress narration after all three repairs.
+- **Fix**: deterministic validation now follows that helper only when each awaited call passes a previously proven `self.*_tool` field together with its matching exact specialist-name literal, the helper awaits its tool parameter, and two awaited progress calls carry the same name parameter directly or through a proven forwarding helper. Both generation prompts now describe this contract explicitly.
+- **Verification**: the exact 32,556-character production orchestrator passes for all nine specialists. Focused regressions reject mismatched names, unawaited runner calls, unawaited tool calls, and incomplete narration; no Foundry resource is created until the complete proof succeeds.
+
 ### 2026-09-26 — Shared generated delegation helpers use the real Agent Framework API
 
 - **Incident**: deployment `d4d71944-5373-48f1-a0ad-4474cb91f8c8` repeatedly regenerated a nine-specialist build before Foundry provisioning. Its orchestrator routed exact constant specialist names through a shared helper, but hallucinated the nonexistent `FunctionTool.from_function` factory; generic validation evidence reported only zero recognized delegations, so bounded repair reproduced the same invalid API shape.
