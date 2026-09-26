@@ -273,6 +273,104 @@ class OrchestratorAgent:
         materialize_build(unawaited_resolver)
 
 
+def _dynamic_delegation_helper_output() -> str:
+    dynamic_helper_orchestrator = '''```python
+# agent: orchestrator
+from agent_config import AGENT_FOUNDRY_NAMES
+from agent_framework import FunctionTool
+from mission_foundry_runtime import MissionFoundryAgent
+
+class OrchestratorAgent:
+    async def _invoke_specialist(self, agent_display_name, payload, on_progress):
+        async def _delegate(**tool_input):
+            agent = MissionFoundryAgent(
+                agent_name=AGENT_FOUNDRY_NAMES[agent_display_name]
+            )
+            return await agent.run(tool_input)
+
+        tool = FunctionTool(name=agent_display_name, func=_delegate)
+        if on_progress is not None:
+            await on_progress(f"Handing off to {agent_display_name}...")
+        result = await tool(payload=payload)
+        if on_progress is not None:
+            await on_progress(f"{agent_display_name} completed.")
+        return result
+
+    async def run(self, ui_message: str, on_progress=None):
+        result = await self._invoke_specialist(
+            agent_display_name="Requirements Specialist",
+            payload={"message": ui_message},
+            on_progress=on_progress,
+        )
+        return {"result": result}
+```
+'''
+    return re.sub(
+        r"```python\n# agent: orchestrator.*?```\n",
+        dynamic_helper_orchestrator,
+        _SAMPLE_OUTPUT,
+        flags=re.DOTALL,
+    )
+
+
+def test_materialize_build_accepts_constant_calls_to_dynamic_delegation_helper():
+    build = materialize_build(_dynamic_delegation_helper_output())
+
+    assert build.orchestrator_module is not None
+
+
+@pytest.mark.parametrize(
+    ("original", "replacement", "failure_match"),
+    [
+        (
+            'agent_display_name="Requirements Specialist"',
+            "agent_display_name=ui_message",
+            "awaited specialist runs",
+        ),
+        (
+            "result = await self._invoke_specialist(",
+            "result = self._invoke_specialist(",
+            "awaited specialist runs",
+        ),
+        (
+            "AGENT_FOUNDRY_NAMES[agent_display_name]",
+            "agent_display_name",
+            "AGENT_FOUNDRY_NAMES mappings",
+        ),
+        (
+            "result = await tool(payload=payload)",
+            "result = tool(payload=payload)",
+            "awaited specialist runs",
+        ),
+        (
+            'await on_progress(f"{agent_display_name} completed.")',
+            'await on_progress("Specialist completed.")',
+            "start/completion progress narration",
+        ),
+    ],
+)
+def test_materialize_build_rejects_unproven_dynamic_delegation_helper(
+    original: str,
+    replacement: str,
+    failure_match: str,
+):
+    output = _dynamic_delegation_helper_output()
+    assert original in output
+
+    with pytest.raises(MaterializedCodeError, match=failure_match):
+        materialize_build(output.replace(original, replacement))
+
+
+def test_materialize_build_rejects_nonexistent_function_tool_factory():
+    output = _SAMPLE_OUTPUT.replace(
+        'FunctionTool(name="requirements", func=specialist.run)',
+        'FunctionTool.from_function(specialist.run, name="requirements")',
+    )
+
+    with pytest.raises(MaterializedCodeError, match="no from_function factory"):
+        materialize_build(output)
+
+
 def test_materialize_build_rejects_unawaited_progress_mentions():
     output = _SAMPLE_OUTPUT.replace(
         'await on_progress("Requirements Specialist completed.")',

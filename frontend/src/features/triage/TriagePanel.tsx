@@ -65,14 +65,16 @@ interface PhaseTrace {
  * (survive a page reload - only ever recorded on SUCCESS) and this
  * session's live SSE workflow-events stream (real-time `step_started`/
  * `step_completed`/`step_failed`, including genuine failures governance
- * never records). The SSE stream always wins once it has seen ANY event
- * for a phase this session, since it is strictly more current/detailed.
+ * never records). When both sources have a phase event, its timestamp
+ * decides which state is current so replayed SSE cannot regress a durable
+ * successful completion.
  */
 function computePhaseTraces(
   phases: MissionPhase[],
   sseEvents: WorkflowStreamEvent[],
   stepDeltaText: Record<string, string>,
   governanceCompletedStepIds: Set<string>,
+  governanceCompletedAtByStep: Map<string, string>,
   governanceOutputByStep: Map<string, string>,
   governanceAgentByStep: Map<string, string>,
   proceededStepIds: Set<string>,
@@ -85,6 +87,15 @@ function computePhaseTraces(
     const latest = stepEvents.length > 0 ? stepEvents[stepEvents.length - 1] : null;
     const attempt = stepEvents.filter((event) => event.event_type === "step_started").length;
     const governanceCompleted = governanceCompletedStepIds.has(phase.stepId);
+    const governanceCompletedAt = governanceCompletedAtByStep.get(phase.stepId) ?? null;
+    const governanceCompletedAtMs = governanceCompletedAt ? Date.parse(governanceCompletedAt) : Number.NaN;
+    const latestEventAtMs = latest ? Date.parse(latest.emitted_at) : Number.NaN;
+    const governanceCompletionIsCurrent =
+      governanceCompleted &&
+      (!latest ||
+        Number.isNaN(governanceCompletedAtMs) ||
+        Number.isNaN(latestEventAtMs) ||
+        governanceCompletedAtMs >= latestEventAtMs);
 
     let status: PhaseStatus;
     let outputSummary: string | null = null;
@@ -92,26 +103,31 @@ function computePhaseTraces(
     let specialistId = governanceAgentByStep.get(phase.stepId) ?? phase.specialistAgentId;
     let timestamp: string | null = null;
 
-    const fullText = latest ? stepDeltaText[workflowStepDeltaKey(latest.step_id, latest.agent_id)] : undefined;
-
-    if (latest?.event_type === "step_failed") {
+    if (latest?.event_type === "step_completed" || governanceCompletionIsCurrent) {
+      status = "completed";
+      const latestCompletion =
+        latest?.event_type === "step_completed" && !governanceCompletionIsCurrent ? latest : null;
+      const previewText = latestCompletion?.output_preview ?? governanceOutputByStep.get(phase.stepId) ?? null;
+      const completedText = latestCompletion
+        ? stepDeltaText[workflowStepDeltaKey(latestCompletion.step_id, latestCompletion.agent_id)]
+        : undefined;
+      outputSummary =
+        completedText && completedText.trim().length > 0
+          ? summarizeAgentOutput(completedText)
+          : previewText
+            ? sanitizePreview(previewText, 260)
+            : null;
+      if (latestCompletion) {
+        specialistId = latestCompletion.agent_id;
+        timestamp = latestCompletion.emitted_at;
+      } else {
+        timestamp = governanceCompletedAt;
+      }
+    } else if (latest?.event_type === "step_failed") {
       status = "failed";
       errorText = latest.error ?? "This step failed for an unknown reason.";
       specialistId = latest.agent_id;
       timestamp = latest.emitted_at;
-    } else if (latest?.event_type === "step_completed" || (governanceCompleted && !latest)) {
-      status = "completed";
-      const previewText = latest?.output_preview ?? governanceOutputByStep.get(phase.stepId) ?? null;
-      outputSummary =
-        fullText && fullText.trim().length > 0
-          ? summarizeAgentOutput(fullText)
-          : previewText
-            ? sanitizePreview(previewText, 260)
-            : null;
-      if (latest) {
-        specialistId = latest.agent_id;
-        timestamp = latest.emitted_at;
-      }
     } else if (latest?.event_type === "step_started" || latest?.event_type === "step_delta") {
       status = "running";
       specialistId = latest.agent_id;
@@ -370,33 +386,48 @@ export function TriagePanel({ enabled }: { enabled: boolean }): JSX.Element | nu
     [events],
   );
 
-  const governanceCompletedStepIds = useMemo(() => {
-    const ids = new Set<string>();
+  const governanceCompletionByStep = useMemo(() => {
+    const map = new Map<string, GovernanceEvent>();
     for (const event of specialistCalls) {
       const id = stepId(event.detail);
-      if (id) ids.add(id);
+      if (!id) continue;
+      const current = map.get(id);
+      if (!current || Date.parse(event.timestamp) >= Date.parse(current.timestamp)) {
+        map.set(id, event);
+      }
     }
-    return ids;
+    return map;
   }, [specialistCalls]);
+
+  const governanceCompletedStepIds = useMemo(
+    () => new Set(governanceCompletionByStep.keys()),
+    [governanceCompletionByStep],
+  );
+
+  const governanceCompletedAtByStep = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const [id, event] of governanceCompletionByStep) {
+      map.set(id, event.timestamp);
+    }
+    return map;
+  }, [governanceCompletionByStep]);
 
   const governanceOutputByStep = useMemo(() => {
     const map = new Map<string, string>();
-    for (const event of specialistCalls) {
-      const id = stepId(event.detail);
+    for (const [id, event] of governanceCompletionByStep) {
       const preview = governanceOutputPreview(event.detail);
-      if (id && preview) map.set(id, preview);
+      if (preview) map.set(id, preview);
     }
     return map;
-  }, [specialistCalls]);
+  }, [governanceCompletionByStep]);
 
   const governanceAgentByStep = useMemo(() => {
     const map = new Map<string, string>();
-    for (const event of specialistCalls) {
-      const id = stepId(event.detail);
-      if (id && event.agent_id) map.set(id, event.agent_id);
+    for (const [id, event] of governanceCompletionByStep) {
+      if (event.agent_id) map.set(id, event.agent_id);
     }
     return map;
-  }, [specialistCalls]);
+  }, [governanceCompletionByStep]);
 
   const traces = useMemo(
     () =>
@@ -405,11 +436,12 @@ export function TriagePanel({ enabled }: { enabled: boolean }): JSX.Element | nu
         sseEvents,
         stepDeltaText,
         governanceCompletedStepIds,
+        governanceCompletedAtByStep,
         governanceOutputByStep,
         governanceAgentByStep,
         proceededStepIds,
       ),
-    [sseEvents, stepDeltaText, governanceCompletedStepIds, governanceOutputByStep, governanceAgentByStep, proceededStepIds],
+    [sseEvents, stepDeltaText, governanceCompletedStepIds, governanceCompletedAtByStep, governanceOutputByStep, governanceAgentByStep, proceededStepIds],
   );
 
   const missionComplete = traces.length > 0 && traces.every((trace) => trace.status === "completed");

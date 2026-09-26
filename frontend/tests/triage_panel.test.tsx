@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import { renderWithProviders, mockFetchSequence } from "./testUtils";
 import { FIXTURE_SESSION_ID, FIXTURE_WORKFLOW_RUN_ID } from "./fixtures";
 import { TriagePanel } from "@/features/triage/TriagePanel";
@@ -111,6 +111,97 @@ describe("TriagePanel", () => {
 
     await waitFor(() => expect(screen.getByText(/Running/i)).toBeInTheDocument());
     expect(screen.getByText(/delegating to build-agent/i)).toBeInTheDocument();
+  });
+
+  it("does not regress a durable completion to Running for an older replayed SSE start", async () => {
+    const completedAt = new Date();
+    const staleStartedAt = new Date(completedAt.getTime() - 60_000);
+    mockFetchSequence([
+      {
+        match: "/peer-review/events",
+        response: [
+          buildAgentExecutionEvent({
+            agent_id: "build-agent",
+            timestamp: completedAt.toISOString(),
+            detail: {
+              step_id: "build-solution",
+              workflow_step: false,
+              output_preview: "Generated the mission UI and agent workflow.",
+            },
+          }),
+        ],
+      },
+      {
+        match: "/workflow-events/stream",
+        sseChunks: [
+          sseFrame(
+            buildStreamEvent({
+              step_id: "build-solution",
+              agent_id: "build-agent",
+              emitted_at: staleStartedAt.toISOString(),
+            }),
+          ),
+        ],
+      },
+    ]);
+
+    renderWithProviders(<TriagePanel enabled />, {
+      sessionId: FIXTURE_SESSION_ID,
+      workflowRunId: FIXTURE_WORKFLOW_RUN_ID,
+      missionStartedAt: Date.now() - 5000,
+    });
+
+    const buildHeading = await screen.findByText(/Build \(UI & Agent Workflow\)/i);
+    const buildCard = buildHeading.closest(".genie-fade-in");
+    expect(buildCard).not.toBeNull();
+    expect(within(buildCard as HTMLElement).getByText(/Completed/i)).toBeInTheDocument();
+    expect(within(buildCard as HTMLElement).queryByText(/^Running$/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/Generated the mission UI and agent workflow\./i)).toBeInTheDocument();
+  });
+
+  it("shows Running when an SSE retry starts after the durable completion", async () => {
+    const completedAt = new Date();
+    const retryStartedAt = new Date(completedAt.getTime() + 60_000);
+    mockFetchSequence([
+      {
+        match: "/peer-review/events",
+        response: [
+          buildAgentExecutionEvent({
+            agent_id: "build-agent",
+            timestamp: completedAt.toISOString(),
+            detail: {
+              step_id: "build-solution",
+              workflow_step: false,
+              output_preview: "Generated the prior mission build.",
+            },
+          }),
+        ],
+      },
+      {
+        match: "/workflow-events/stream",
+        sseChunks: [
+          sseFrame(
+            buildStreamEvent({
+              step_id: "build-solution",
+              agent_id: "build-agent",
+              emitted_at: retryStartedAt.toISOString(),
+            }),
+          ),
+        ],
+      },
+    ]);
+
+    renderWithProviders(<TriagePanel enabled />, {
+      sessionId: FIXTURE_SESSION_ID,
+      workflowRunId: FIXTURE_WORKFLOW_RUN_ID,
+      missionStartedAt: Date.now() - 5000,
+    });
+
+    const buildHeading = await screen.findByText(/Build \(UI & Agent Workflow\)/i);
+    const buildCard = buildHeading.closest(".genie-fade-in");
+    expect(buildCard).not.toBeNull();
+    expect(within(buildCard as HTMLElement).getByText(/^Running$/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Generated the prior mission build\./i)).not.toBeInTheDocument();
   });
 
   it("shows Build as proceeded immediately after architecture approval navigates to Workshop", async () => {

@@ -165,6 +165,23 @@ def _validate_orchestrator_delegations(
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
     }
 
+    unsupported_tool_factories = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "FunctionTool"
+        and node.func.attr == "from_function"
+    ]
+    if unsupported_tool_factories:
+        raise MaterializedCodeError(
+            "The generated orchestrator calls unsupported "
+            "FunctionTool.from_function(...). The installed Agent Framework exposes no "
+            "from_function factory; construct FunctionTool(name=<specialist name>, "
+            "func=<async delegate>) and await that tool instead."
+        )
+
     dynamic_resolvers: dict[str, dict[str, int]] = {}
     narration_helpers: dict[str, dict[str, int]] = {}
     for function_name, function in function_definitions.items():
@@ -261,11 +278,13 @@ def _validate_orchestrator_delegations(
             }
 
     wrapper_agents: dict[str, set[str]] = {}
+    resolver_call_agents: dict[str, set[str]] = {}
     for function_name, function in function_definitions.items():
         for node in ast.walk(function):
             if not isinstance(node, ast.Call):
                 continue
-            resolver_parameters = dynamic_resolvers.get(called_name(node) or "")
+            resolver_name = called_name(node) or ""
+            resolver_parameters = dynamic_resolvers.get(resolver_name)
             if resolver_parameters is None or not isinstance(
                 parents.get(node), ast.Await
             ):
@@ -289,6 +308,139 @@ def _validate_orchestrator_delegations(
                     and argument.value in agent_names
                 ):
                     wrapper_agents.setdefault(function_name, set()).add(argument.value)
+                    resolver_call_agents.setdefault(resolver_name, set()).add(argument.value)
+
+    def nested_delegate_maps_and_runs(
+        function: ast.FunctionDef | ast.AsyncFunctionDef,
+        delegate_name: str,
+        mapped_parameter: str,
+    ) -> bool:
+        delegate = next(
+            (
+                node
+                for node in ast.walk(function)
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+                and node.name == delegate_name
+                and parents.get(node) is function
+            ),
+            None,
+        )
+        if delegate is None:
+            return False
+
+        agent_references: set[str] = set()
+        for node in ast.walk(delegate):
+            if not isinstance(node, ast.Call) or called_name(node) != "MissionFoundryAgent":
+                continue
+            mapped = any(
+                keyword.arg == "agent_name"
+                and isinstance(keyword.value, ast.Subscript)
+                and isinstance(keyword.value.value, ast.Name)
+                and keyword.value.value.id == "AGENT_FOUNDRY_NAMES"
+                and isinstance(keyword.value.slice, ast.Name)
+                and keyword.value.slice.id == mapped_parameter
+                for keyword in node.keywords
+            )
+            if not mapped:
+                continue
+            parent = parents.get(node)
+            targets: list[ast.expr] = []
+            if isinstance(parent, ast.Assign):
+                targets = parent.targets
+            elif isinstance(parent, ast.AnnAssign):
+                targets = [parent.target]
+            agent_references.update(
+                reference
+                for target in targets
+                if (reference := expression_reference(target)) is not None
+            )
+
+        return any(
+            isinstance(node, ast.Await)
+            and isinstance(node.value, ast.Call)
+            and isinstance(node.value.func, ast.Attribute)
+            and node.value.func.attr == "run"
+            and expression_reference(node.value.func.value) in agent_references
+            for node in ast.walk(delegate)
+        )
+
+    dynamic_tool_helpers: dict[str, str] = {}
+    dynamic_helper_narration: set[str] = set()
+    for function_name, resolver_parameters in dynamic_resolvers.items():
+        function = function_definitions[function_name]
+        for mapped_parameter in resolver_parameters:
+            tool_references: set[str] = set()
+            for node in ast.walk(function):
+                if not isinstance(node, ast.Call) or called_name(node) != "FunctionTool":
+                    continue
+                name_parameter = next(
+                    (
+                        keyword.value.id
+                        for keyword in node.keywords
+                        if keyword.arg == "name" and isinstance(keyword.value, ast.Name)
+                    ),
+                    None,
+                )
+                delegate_name = next(
+                    (
+                        keyword.value.id
+                        for keyword in node.keywords
+                        if keyword.arg in {"coroutine", "func"}
+                        and isinstance(keyword.value, ast.Name)
+                    ),
+                    None,
+                )
+                if (
+                    name_parameter != mapped_parameter
+                    or delegate_name is None
+                    or not nested_delegate_maps_and_runs(
+                        function, delegate_name, mapped_parameter
+                    )
+                ):
+                    continue
+                parent = parents.get(node)
+                targets: list[ast.expr] = []
+                if isinstance(parent, ast.Assign):
+                    targets = parent.targets
+                elif isinstance(parent, ast.AnnAssign):
+                    targets = [parent.target]
+                tool_references.update(
+                    reference
+                    for target in targets
+                    if (reference := expression_reference(target)) is not None
+                )
+
+            tool_is_awaited = any(
+                isinstance(node, ast.Await)
+                and isinstance(node.value, ast.Call)
+                and expression_reference(node.value.func) in tool_references
+                for node in ast.walk(function)
+            )
+            if not tool_references or not tool_is_awaited:
+                continue
+            dynamic_tool_helpers[function_name] = mapped_parameter
+
+            parameter_narration_count = 0
+            for node in ast.walk(function):
+                if not (
+                    isinstance(node, ast.Await)
+                    and isinstance(node.value, ast.Call)
+                    and called_name(node.value) == "on_progress"
+                ):
+                    continue
+                if any(
+                    isinstance(argument, ast.JoinedStr)
+                    and any(
+                        isinstance(part, ast.FormattedValue)
+                        and isinstance(part.value, ast.Name)
+                        and part.value.id == mapped_parameter
+                        for part in argument.values
+                    )
+                    for argument in node.value.args
+                ):
+                    parameter_narration_count += 1
+            if parameter_narration_count >= 2:
+                dynamic_helper_narration.add(function_name)
 
     configured_name_aliases: dict[str, set[str]] = {}
     for node in ast.walk(tree):
@@ -415,6 +567,13 @@ def _validate_orchestrator_delegations(
                 indirect_tool_agents[target.attr] = tool_agent_name
                 mapped_agents.add(tool_agent_name)
 
+    dynamically_delegated_agents: set[str] = set()
+    for helper_name in dynamic_tool_helpers:
+        helper_agents = resolver_call_agents.get(helper_name, set())
+        dynamically_delegated_agents.update(helper_agents)
+        mapped_agents.update(helper_agents)
+    function_tool_count += len(dynamically_delegated_agents)
+
     narration_counts = {name: 0 for name in agent_names}
     awaited_tool_agents: set[str] = set()
     for node in ast.walk(tree):
@@ -469,6 +628,10 @@ def _validate_orchestrator_delegations(
             if agent_name in narration:
                 narration_counts[agent_name] += 1
 
+    for helper_name in dynamic_helper_narration:
+        for agent_name in resolver_call_agents.get(helper_name, set()):
+            narration_counts[agent_name] = max(narration_counts[agent_name], 2)
+
     missing_mappings = sorted(agent_names - mapped_agents)
     missing_narration = sorted(
         name for name, count in narration_counts.items() if count < 2
@@ -478,7 +641,9 @@ def _validate_orchestrator_delegations(
         failures.append(
             f"FunctionTool delegations ({function_tool_count}/{len(agent_names)})"
         )
-    executed_specialist_count = len(directly_awaited_agents | awaited_tool_agents)
+    executed_specialist_count = len(
+        directly_awaited_agents | awaited_tool_agents | dynamically_delegated_agents
+    )
     if executed_specialist_count < len(agent_names):
         failures.append(
             f"awaited specialist runs ({executed_specialist_count}/{len(agent_names)})"

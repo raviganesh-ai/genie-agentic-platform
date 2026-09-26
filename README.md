@@ -700,6 +700,13 @@ The script uses Microsoft Entra authentication, creates only missing model deplo
 
 Every deployment to the shared Azure evaluation environment (backend Container App and/or frontend Static Web App) is recorded here: commit, what changed, and why. Update this section as part of the same commit that ships the fix/feature, before pushing to `master` triggers [Continuous deployment](#continuous-deployment-github-actions).
 
+### 2026-09-26 — Shared generated delegation helpers use the real Agent Framework API
+
+- **Incident**: deployment `d4d71944-5373-48f1-a0ad-4474cb91f8c8` repeatedly regenerated a nine-specialist build before Foundry provisioning. Its orchestrator routed exact constant specialist names through a shared helper, but hallucinated the nonexistent `FunctionTool.from_function` factory; generic validation evidence reported only zero recognized delegations, so bounded repair reproduced the same invalid API shape.
+- **Fix**: both build prompts now state the installed SDK's direct `FunctionTool(name=..., func=...)` contract and prohibit `from_function`. Deterministic validation reports that invalid API explicitly and accepts a shared helper only when it can prove exact literal call sites for every specialist, configured Foundry-name resolution, awaited agent and tool execution, and awaited start/completion narration derived from the same name.
+- **Mission Trace**: governance completion and live workflow events are now ordered by their event timestamps. A replayed older `step_started`/`step_delta` can no longer regress a durably completed Build phase to Running or replace its completed output, while a genuinely newer retry or failure still wins.
+- **Safety and verification**: dynamic names, missing specialists, unawaited helper/agent/tool calls, unconfigured Foundry names, or incomplete narration remain fail-closed before any Foundry resource is created. The focused materializer suite covers all five boundaries, and the Triage regression reproduces the stale-SSE completion conflict.
+
 ### 2026-09-26 — Generated Foundry fleets are exact and read-back verified
 
 - **Fail-closed provisioning**: every generated specialist and orchestrator must return its exact requested, non-empty Foundry resource name and be immediately readable through the Foundry API. Empty expected fleets, duplicate logical names, empty model references, unexpected or missing resources, partial returned fleets, and duplicate resource names now fail the provisioning step; every resource created by the failed attempt is deleted before backend deployment can begin.
