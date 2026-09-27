@@ -35,6 +35,7 @@ export function WorkshopPage(): JSX.Element {
   const [rerunningBuild, setRerunningBuild] = useState(false);
   const [rerunBuildError, setRerunBuildError] = useState<string | null>(null);
   const [validatingBuild, setValidatingBuild] = useState(false);
+  const [repairingBuild, setRepairingBuild] = useState(false);
   const [buildValidationError, setBuildValidationError] = useState<string | null>(null);
   const [fixingUiComponent, setFixingUiComponent] = useState(false);
   const [fixUiComponentError, setFixUiComponentError] = useState<string | null>(null);
@@ -235,6 +236,38 @@ export function WorkshopPage(): JSX.Element {
     }
   }, [sessionId, workflowRunId, governancePolicies, refreshRun, setMissionError]);
 
+  // Force-regenerates exactly the generated piece a build-solution
+  // validation failure was actually about (see MaterializedCodeError's
+  // `component` in code_materializer.py / error_mapping.py) instead of
+  // always guessing "ui" - an orchestrator-only failure previously could
+  // never converge because the actually-broken orchestrator kept getting
+  // reused verbatim (see _extract_reusable_components in
+  // orchestration_tools.py) while only the (already-fine) UI was
+  // regenerated. `validationError.component` is undefined for a failure
+  // that spans/predates having distinct pieces (e.g. no code at all was
+  // produced) - in that case no override is forced, so a plain resume
+  // regenerates whatever wasn't already recorded reusable.
+  const repairFailedComponent = useCallback(
+    async (validationError: ApiError): Promise<void> => {
+      if (!sessionId || !workflowRunId) return;
+      const traceId = getTraceId(workflowRunId) ?? undefined;
+      const repairPolicies = [
+        governancePolicies.trim(),
+        "Fix this exact validation failure and do not repeat it: " +
+          (validationError.message ?? ""),
+      ]
+        .filter((entry) => entry.length > 0)
+        .join("\n\n");
+      const variables: Record<string, string> = { policies: repairPolicies };
+      if (validationError.component) variables.regenerate_components = validationError.component;
+      await workflowApi.resumeRun(sessionId, workflowRunId, traceId, {
+        "build-solution": { step_id: "build-solution", variables },
+      });
+      await refreshRun();
+    },
+    [sessionId, workflowRunId, governancePolicies, refreshRun],
+  );
+
   const handleProceedToDeployLaunch = useCallback(async () => {
     if (!sessionId || !workflowRunId) return;
     setValidatingBuild(true);
@@ -242,60 +275,51 @@ export function WorkshopPage(): JSX.Element {
     setFixUiComponentError(null);
     try {
       await workshopApi.validateBuild(sessionId, workflowRunId);
-      navigate("/outputs");
     } catch (err) {
-      setBuildValidationError(
-        (err as ApiError).message ?? "The generated build is not ready to deploy.",
-      );
-    } finally {
-      setValidatingBuild(false);
+      const validationError = err as ApiError;
+      // Self-heal automatically, once, before ever bothering the user with an
+      // error banner: a build-solution validation failure is an LLM output
+      // defect the Build Agent can usually correct given its own exact
+      // failure back as guidance (see repairFailedComponent) - the user
+      // should only ever see an error if that one automatic attempt also
+      // doesn't fix it.
+      try {
+        setRepairingBuild(true);
+        await repairFailedComponent(validationError);
+        await workshopApi.validateBuild(sessionId, workflowRunId);
+      } catch (repairErr) {
+        setValidatingBuild(false);
+        setRepairingBuild(false);
+        setBuildValidationError(
+          (repairErr as ApiError).message ??
+            validationError.message ??
+            "The generated build is not ready to deploy.",
+        );
+        return;
+      }
+      setRepairingBuild(false);
     }
-  }, [navigate, sessionId, workflowRunId]);
+    setValidatingBuild(false);
+    navigate("/outputs");
+  }, [navigate, sessionId, workflowRunId, repairFailedComponent]);
 
   const handleFixUiValidationFailure = useCallback(async () => {
     if (!sessionId || !workflowRunId || !buildValidationError) return;
     setFixingUiComponent(true);
     setFixUiComponentError(null);
     try {
-      // Every current build-solution validation failure (see
-      // MaterializedCodeError's raise sites in code_materializer.py) is
-      // raised against the generated UI component specifically - never the
-      // orchestrator or a specialist agent module - so "ui" is always the
-      // right (and only) component to force-regenerate here.
-      //
-      // Without "regenerate_components: ui", resuming build-solution
-      // reuses every previously-"succeeded" component verbatim (see
-      // _extract_reusable_components/reusable_components in
-      // orchestration_tools.py) - including the exact same contractually
-      // invalid UI code that just failed validation, since that component
-      // itself never raised a *generation* failure. Without this forced
-      // override, clicking a plain "Re-run UI & Agent Design" reproduces
-      // this same validation error every single time.
-      const traceId = getTraceId(workflowRunId) ?? undefined;
-      const repairPolicies = [
-        governancePolicies.trim(),
-        "Fix this exact validation failure in the generated UI component's submit " +
-          "payload and do not repeat it: " +
-          buildValidationError,
-      ]
-        .filter((entry) => entry.length > 0)
-        .join("\n\n");
-      await workflowApi.resumeRun(sessionId, workflowRunId, traceId, {
-        "build-solution": {
-          step_id: "build-solution",
-          variables: { policies: repairPolicies, regenerate_components: "ui" },
-        },
-      });
+      await repairFailedComponent(new ApiError(buildValidationError));
+      await workshopApi.validateBuild(sessionId, workflowRunId);
       setBuildValidationError(null);
-      await refreshRun();
+      navigate("/outputs");
     } catch (err) {
       setFixUiComponentError(
-        (err as ApiError).message ?? "Failed to regenerate the UI component.",
+        (err as ApiError).message ?? "Failed to regenerate the generated build.",
       );
     } finally {
       setFixingUiComponent(false);
     }
-  }, [buildValidationError, governancePolicies, refreshRun, sessionId, workflowRunId]);
+  }, [buildValidationError, navigate, repairFailedComponent, sessionId, workflowRunId]);
 
   if (!workflowRunId || !sessionId) {
     return (
@@ -394,20 +418,28 @@ export function WorkshopPage(): JSX.Element {
                 disabled={validatingBuild}
                 onClick={() => void handleProceedToDeployLaunch()}
               >
-                {validatingBuild ? "Validating build..." : "Proceed to Deploy & Launch"}
+                {repairingBuild
+                  ? "Validation failed - automatically repairing..."
+                  : validatingBuild
+                    ? "Validating build..."
+                    : "Proceed to Deploy & Launch"}
               </Button>
               {buildValidationError ? (
                 <div style={{ marginTop: 12 }}>
-                  <ErrorState error={{ message: buildValidationError }} />
+                  <ErrorState
+                    error={{
+                      message:
+                        "Automatic repair did not resolve this validation failure: " +
+                        buildValidationError,
+                    }}
+                  />
                   <Button
                     appearance="secondary"
                     style={{ marginTop: 8 }}
                     disabled={fixingUiComponent}
                     onClick={() => void handleFixUiValidationFailure()}
                   >
-                    {fixingUiComponent
-                      ? "Regenerating UI component..."
-                      : "Fix UI component and re-validate"}
+                    {fixingUiComponent ? "Repairing again..." : "Try automatic repair again"}
                   </Button>
                   {fixUiComponentError ? (
                     <div style={{ marginTop: 8 }}>

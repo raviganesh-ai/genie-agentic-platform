@@ -106,4 +106,11 @@ async def domain_error_handler(request: Request, exc: Exception) -> JSONResponse
         type(exc).__name__,
         exc,
     )
-    return JSONResponse(status_code=status_code, content={"detail": str(exc)})
+    content: dict[str, str] = {"detail": str(exc)}
+    # Surfaces exactly which generated piece failed (see MaterializedCodeError's
+    # own doc comment) so a caller can force-regenerate that piece specifically
+    # instead of always guessing "ui" - which previously could never converge
+    # on an orchestrator-only failure.
+    if isinstance(exc, MaterializedCodeError) and exc.component:
+        content["component"] = exc.component
+    return JSONResponse(status_code=status_code, content=content)

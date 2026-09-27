@@ -108,7 +108,21 @@ _ON_SUBMIT_IDENTIFIER_PATTERN: Final = re.compile(
 
 
 class MaterializedCodeError(RuntimeError):
-    """Raised when the Build Agent's output does not contain a materializable build."""
+    """Raised when the Build Agent's output does not contain a materializable build.
+
+    ``component`` names the exact generated piece this failure is actually
+    about ("ui", "orchestrator", or ``None`` when the failure spans/predates
+    having distinct pieces at all - e.g. no code blocks found, or an entire
+    piece missing) - callers (see ``workshop_service.py``'s
+    ``validate_build_output`` and its HTTP surface in ``error_mapping.py``)
+    use this to force-regenerate only the piece that is actually broken
+    instead of guessing, which previously always force-regenerated the UI
+    even for orchestrator-only failures and could never converge on those.
+    """
+
+    def __init__(self, message: str, *, component: str | None = None) -> None:
+        super().__init__(message)
+        self.component = component
 
 
 def _validate_orchestrator_delegations(
@@ -120,7 +134,8 @@ def _validate_orchestrator_delegations(
         tree = ast.parse(orchestrator_module)
     except SyntaxError as exc:
         raise MaterializedCodeError(
-            f"The generated orchestrator module is not valid Python: {exc}."
+            f"The generated orchestrator module is not valid Python: {exc}.",
+            component="orchestrator",
         ) from exc
 
     parents = {
@@ -204,7 +219,8 @@ def _validate_orchestrator_delegations(
             "The generated orchestrator calls unsupported "
             "FunctionTool.from_function(...). The installed Agent Framework exposes no "
             "from_function factory; construct FunctionTool(name=<specialist name>, "
-            "func=<async delegate>) and await that tool instead."
+            "func=<async delegate>) and await that tool instead.",
+            component="orchestrator",
         )
 
     dynamic_resolvers: dict[str, dict[str, int]] = {}
@@ -900,7 +916,8 @@ def _validate_orchestrator_delegations(
     if failures:
         raise MaterializedCodeError(
             "The generated orchestrator does not execute and visibly report every "
-            "specialist. Missing: " + "; ".join(failures) + "."
+            "specialist. Missing: " + "; ".join(failures) + ".",
+            component="orchestrator",
         )
 
 
@@ -1149,7 +1166,8 @@ def materialize_build(output_text: str) -> MaterializedBuild:
             "'class OrchestratorAgent' - this mission's backend proxy always "
             "does 'from orchestrator import OrchestratorAgent', so any other "
             "class name would silently fall back to a generic conversational "
-            "reply instead of running this mission's real pipeline."
+            "reply instead of running this mission's real pipeline.",
+            component="orchestrator",
         )
 
     missing_components: list[str] = []
@@ -1171,7 +1189,8 @@ def materialize_build(output_text: str) -> MaterializedBuild:
         raise MaterializedCodeError(
             "The generated mission UI compares an uploaded file's name to an exact "
             "literal. Generated prototypes must validate uploaded content and file "
-            "type, never an end-user-controlled filename or example filename."
+            "type, never an end-user-controlled filename or example filename.",
+            component="ui",
         )
 
     has_file_input = bool(
@@ -1184,7 +1203,8 @@ def materialize_build(output_text: str) -> MaterializedBuild:
             "Mission UIs may validate only that an upload exists, is readable and "
             "non-empty, and has the required general file type. The provisioned "
             "backend/orchestrator must own schema and business-rule validation so "
-            "every upload reaches the real mission process."
+            "every upload reaches the real mission process.",
+            component="ui",
         )
 
     if (
@@ -1199,14 +1219,16 @@ def materialize_build(output_text: str) -> MaterializedBuild:
             "The generated mission UI uses a broad '*key*' substring scan. That can "
             "reject legitimate uploaded content or filenames before the provisioned "
             "backend runs. Explicit key-artifact and blindness policy checks belong "
-            "in the mission's backend/orchestrator."
+            "in the mission's backend/orchestrator.",
+            component="ui",
         )
 
     if ui_component is not None and _DIRECT_INVOKE_PATTERN.search(ui_component):
         raise MaterializedCodeError(
             "The generated mission UI calls the backend invoke endpoint directly. "
             "Every generated component must hand off through its onSubmit prop so "
-            "the deterministic Mission Queue owns backend transport and streaming."
+            "the deterministic Mission Queue owns backend transport and streaming.",
+            component="ui",
         )
 
     if ui_component is not None and _has_disallowed_inline_style(ui_component):
@@ -1214,27 +1236,31 @@ def materialize_build(output_text: str) -> MaterializedBuild:
             "The generated mission UI contains an inline style prop. Mission Input must "
             "use semantic HTML and the deterministic shell's genie-form, genie-form-section, "
             "genie-form-grid, genie-field, genie-field-help, genie-actions, genie-dropzone, "
-            "and genie-btn classes so every prototype remains visually coherent."
+            "and genie-btn classes so every prototype remains visually coherent.",
+            component="ui",
         )
 
     if not _ON_SUBMIT_CALL_PATTERN.search(ui_component):
         raise MaterializedCodeError(
             "The generated mission UI never calls its onSubmit prop. Every prototype "
             "must hand one flat JSON message to the deterministic shell so the "
-            "provisioned backend and orchestrator actively run."
+            "provisioned backend and orchestrator actively run.",
+            component="ui",
         )
 
     if has_file_input and ui_component is not None:
         if not _FILE_TEXT_READ_PATTERN.search(ui_component):
             raise MaterializedCodeError(
                 "The generated mission UI renders a file input but never reads the "
-                "selected File with File.text() before submission."
+                "selected File with File.text() before submission.",
+                component="ui",
             )
         if not _ON_SUBMIT_ATTACHMENTS_PATTERN.search(ui_component):
             raise MaterializedCodeError(
                 "The generated mission UI renders a file input but does not pass an "
                 "attachments array to onSubmit. Uploaded content must reach the "
-                "provisioned backend unchanged."
+                "provisioned backend unchanged.",
+                component="ui",
             )
 
     if ui_component is not None:
@@ -1263,7 +1289,8 @@ def materialize_build(output_text: str) -> MaterializedBuild:
                 "The generated mission UI does not use the deterministic shell's "
                 "semantic visual system. Add these required classes: "
                 + ", ".join(missing_semantic_classes)
-                + "."
+                + ".",
+                component="ui",
             )
 
     if ui_component is not None and any(
@@ -1274,7 +1301,8 @@ def materialize_build(output_text: str) -> MaterializedBuild:
             "objects (for example {\"evaluation_config\": {\"primary_model_id\": ...}}). "
             "The UI/orchestrator contract requires one flat JSON object with exactly "
             "one key per rendered field - a nested payload silently breaks every "
-            "'config.get(...)' read in the orchestrator's json.loads(ui_message)."
+            "'config.get(...)' read in the orchestrator's json.loads(ui_message).",
+            component="ui",
         )
 
     return MaterializedBuild(

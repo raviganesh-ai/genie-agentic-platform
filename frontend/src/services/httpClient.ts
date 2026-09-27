@@ -20,12 +20,16 @@ export function getApiBaseUrl(): string {
 export class ApiError extends Error implements SafeError {
   status?: number;
   correlationId?: string;
+  /** Which generated build piece ("ui" | "orchestrator") a MaterializedCodeError
+   * is actually about, when the backend can tell - see error_mapping.py. */
+  component?: string;
 
-  constructor(message: string, status?: number, correlationId?: string) {
+  constructor(message: string, status?: number, correlationId?: string, component?: string) {
     super(message);
     this.name = "ApiError";
     this.status = status;
     this.correlationId = correlationId;
+    this.component = component;
   }
 }
 
@@ -95,10 +99,15 @@ export async function apiFetch<TResponse>(
       parsed && typeof parsed === "object" && parsed !== null && "detail" in parsed
         ? String((parsed as { detail: unknown }).detail)
         : undefined;
+    const component =
+      parsed && typeof parsed === "object" && parsed !== null && "component" in parsed
+        ? String((parsed as { component: unknown }).component)
+        : undefined;
     throw new ApiError(
       mapStatusToMessage(response.status, detail),
       response.status,
       response.headers.get("X-Correlation-Id") ?? correlationId,
+      component,
     );
   }
 

@@ -1,0 +1,7 @@
+[
+  {
+    "Log_s": "2026-09-27 14:50:15,963 ERROR app.api.error_mapping Domain error handled for POST /sessions/d24bf23d-088f-4b86-9a81-b46845212d06/workshop/build-components/362aaa29-eb93-4cc9-8230-7baafd6efcee/validate (status=422, correlation_id=4a8113b8-127b-49cf-8f17-361958dd60c4): MaterializedCodeError: The generated orchestrator does not execute and visibly report every specialist. Missing: FunctionTool delegations (7/8); awaited specialist runs (6/8); AGENT_FOUNDRY_NAMES mappings for Deterministic QA Agent, Judge Panel Agent; start/completion progress narration for Deterministic QA Agent, Judge Panel Agent.",
+    "TableName": "PrimaryResult",
+    "TimeGenerated": "2026-09-27T14:50:16.9570306Z"
+  }
+]
