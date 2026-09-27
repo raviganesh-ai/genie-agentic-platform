@@ -701,6 +701,12 @@ The script uses Microsoft Entra authentication, creates only missing model deplo
 
 Every deployment to the shared Azure evaluation environment (backend Container App and/or frontend Static Web App) is recorded here: commit, what changed, and why. Update this section as part of the same commit that ships the fix/feature, before pushing to `master` triggers [Continuous deployment](#continuous-deployment-github-actions).
 
+### 2026-09-27 — Added an offline generated-mission wiring test (backend template ↔ frontend template contract)
+
+- **Context**: Genie is a rapid-prototyping platform, so per-template unit tests validate the backend and frontend mission templates in isolation, but nothing previously exercised the real contract between them - exactly the class of gap that let both the `runtime-config.js` path bug and (in principle) an SSE frame-shape drift ship without a failing test.
+- **Added**: `backend/tests/integration/test_generated_mission_wiring.py` materializes a real mission build via `materialize_build`/`generate_backend_service_scaffold`, writes it to a temp directory, imports the generated `main.py` live (no Docker, no Azure - `MissionFoundryAgent.run` is monkeypatched to stay offline), and drives it through FastAPI's `TestClient`. Asserts `/health`/`/health/ready` respond, and that `/invoke/stream` emits the exact `data: {...}\n\n` SSE frame shapes (`progress`, then a final `done`/`output_text`) the generated frontend's Mission Console template parses - catching a backend/frontend template contract drift in milliseconds, with zero Azure cost.
+- **Verification**: Full backend suite: 690 passed. Ruff clean.
+
 ### 2026-09-27 — Broadened the UI '*key*'-scan gate to recognize backend enforcement wherever it actually lives
 
 - **Incident**: The `_OVERBROAD_KEY_MATERIAL_PATTERN` gate (fixed earlier the same day to be orchestrator-aware) rejected a real mission again - a blind MQM N-30 translation-evaluation build with a dedicated "Blind Run Manager Agent" specialist. The gate only searched `orchestrator.py`'s own source text for a single exact idiom (`"key" in name_lower`), so it missed policy enforcement that lived in a specialist agent module instead, and missed equally valid phrasings (a compiled regex, `.find`/`.count` substring checks, `re.search`/`re.match`).
