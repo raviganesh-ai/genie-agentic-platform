@@ -69,6 +69,37 @@ def test_materialize_build_parses_all_three_pieces():
     assert "MissionApp" in build.ui_component
 
 
+def test_materialize_build_accepts_awaited_nested_progress_forwarder():
+    output = _SAMPLE_OUTPUT.replace(
+        "await on_progress(", "await _notify_progress(", 2
+    ).replace(
+        "        specialist = MissionFoundryAgent(",
+        "        async def _notify_progress(message: str) -> None:\n"
+        "            if on_progress is not None:\n"
+        "                await on_progress(message)\n\n"
+        "        specialist = MissionFoundryAgent(",
+    )
+
+    build = materialize_build(output)
+
+    assert build.orchestrator_module is not None
+
+
+def test_materialize_build_rejects_unawaited_nested_progress_forwarder():
+    output = _SAMPLE_OUTPUT.replace(
+        "await on_progress(", "await _notify_progress(", 2
+    ).replace(
+        "        specialist = MissionFoundryAgent(",
+        "        async def _notify_progress(message: str) -> None:\n"
+        "            if on_progress is not None:\n"
+        "                on_progress(message)\n\n"
+        "        specialist = MissionFoundryAgent(",
+    )
+
+    with pytest.raises(MaterializedCodeError, match="start/completion progress narration"):
+        materialize_build(output)
+
+
 def test_materialize_build_raises_when_no_code_blocks_found():
     with pytest.raises(MaterializedCodeError):
         materialize_build("no code here at all")

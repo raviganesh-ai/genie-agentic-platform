@@ -1569,7 +1569,6 @@ class DeploymentPipelineService:
         architecture_step_id: str = "design-architecture",
         build_step_id: str = "build-solution",
         requirements_step_id: str = "analyze-requirements",
-        max_repair_attempts: int = 3,
         upstream_grace_check_attempts: int = 5,
         upstream_grace_check_interval_seconds: float = 2.0,
     ) -> None:
@@ -1591,7 +1590,6 @@ class DeploymentPipelineService:
         self._architecture_step_id = architecture_step_id
         self._build_step_id = build_step_id
         self._requirements_step_id = requirements_step_id
-        self._max_repair_attempts = max_repair_attempts
         self._upstream_grace_check_attempts = upstream_grace_check_attempts
         self._upstream_grace_check_interval_seconds = upstream_grace_check_interval_seconds
         self._runs: dict[str, DeploymentPipelineRun] = {}
@@ -1961,75 +1959,37 @@ class DeploymentPipelineService:
                 await self._persist_run(pipeline_run)
                 return
 
-        next_step = resume_from_step
-        generated_build_repair_attempts = 0
-        while True:
-            try:
-                await self._execute_steps(
-                    pipeline_run=pipeline_run,
-                    run=run,
-                    mission_slug=mission_slug,
-                    mission_title=session.title,
-                    backend_root=backend_root,
-                    frontend_root=frontend_root,
-                    trace_id=trace_id,
-                    resume_from_step=next_step,
-                )
-                break
-            except _GeneratedBuildRepairNeeded as exc:
-                if generated_build_repair_attempts >= self._max_repair_attempts:
-                    step = self._step_result(pipeline_run, "provision-foundry-agents")
-                    step.error = (
-                        "Generated build validation failed after "
-                        f"{generated_build_repair_attempts} automatic repair attempt(s): "
-                        f"{exc.evidence}"
-                    )
-                    pipeline_run.status = "failed"
-                    pipeline_run.updated_at = datetime.now(UTC)
-                    await self._persist_run(pipeline_run)
-                    return
-                generated_build_repair_attempts += 1
-                step = self._step_result(pipeline_run, "provision-foundry-agents")
-                step.status = "running"
-                step.detail = (
-                    "Regenerating the generated build to satisfy deterministic validation "
-                    f"(attempt {generated_build_repair_attempts} of "
-                    f"{self._max_repair_attempts})..."
-                )
-                step.error = None
-                step.completed_at = None
-                pipeline_run.updated_at = datetime.now(UTC)
-                await self._persist_run(pipeline_run)
-                await self._publish(
-                    pipeline_run,
-                    step_id="provision-foundry-agents",
-                    event_type="step_started",
-                    output_preview=step.detail,
-                )
-                try:
-                    run = await self._repair_prototype(
-                        run=run,
-                        pipeline_run=pipeline_run,
-                        trace_id=trace_id,
-                        evidence=exc.evidence,
-                    )
-                except Exception as repair_exc:  # noqa: BLE001 - fail-closed repair boundary.
-                    step = self._step_result(pipeline_run, "provision-foundry-agents")
-                    step.status = "failed"
-                    step.error = f"Automatic generated-build repair failed: {repair_exc}"
-                    step.completed_at = datetime.now(UTC)
-                    pipeline_run.status = "failed"
-                    pipeline_run.updated_at = datetime.now(UTC)
-                    await self._persist_run(pipeline_run)
-                    return
-                next_step = "provision-foundry-agents"
-            except Exception:  # noqa: BLE001 - top-level background-task boundary; every
-                # failure must resolve the run's status here since there is no
-                # synchronous caller left to catch/report it (see the docstring above).
-                pipeline_run.status = "failed"
-                pipeline_run.updated_at = datetime.now(UTC)
-                await self._persist_run(pipeline_run)
-                return
+        try:
+            await self._execute_steps(
+                pipeline_run=pipeline_run,
+                run=run,
+                mission_slug=mission_slug,
+                mission_title=session.title,
+                backend_root=backend_root,
+                frontend_root=frontend_root,
+                trace_id=trace_id,
+                resume_from_step=resume_from_step,
+            )
+        except _GeneratedBuildRepairNeeded as exc:
+            step = self._step_result(pipeline_run, "provision-foundry-agents")
+            step.status = "failed"
+            step.error = (
+                "Approved build validation failed before Foundry provisioning. "
+                "Deploy & Launch does not regenerate an approved build: "
+                f"{exc.evidence}"
+            )
+            step.completed_at = datetime.now(UTC)
+            pipeline_run.status = "failed"
+            pipeline_run.updated_at = datetime.now(UTC)
+            await self._persist_run(pipeline_run)
+            return
+        except Exception:  # noqa: BLE001 - top-level background-task boundary; every
+            # failure must resolve the run's status here since there is no
+            # synchronous caller left to catch/report it (see the docstring above).
+            pipeline_run.status = "failed"
+            pipeline_run.updated_at = datetime.now(UTC)
+            await self._persist_run(pipeline_run)
+            return
 
         pipeline_run.status = "completed"
         pipeline_run.updated_at = datetime.now(UTC)
@@ -2364,118 +2324,6 @@ class DeploymentPipelineService:
             if discovery_architecture:
                 return discovery_architecture
         return await self._get_step_output(run, self._architecture_step_id, trace_id=trace_id)
-
-    async def _restore_repair_memory_references(
-        self, run: WorkflowRunResult, *, trace_id: str
-    ) -> None:
-        """Restore missing workflow memory keys from durable completed steps."""
-
-        agent_registry = getattr(self._orchestrator, "agent_registry", None)
-        memory_service = getattr(self._orchestrator, "memory_service", None)
-        if agent_registry is None or memory_service is None:
-            return
-
-        orchestrator_agent = get_enabled_agent(agent_registry, "genie-orchestrator")
-        classifications = {
-            self._requirements_step_id: "requirement",
-            self._architecture_step_id: "architecture_finding",
-        }
-        for step_id, classification in classifications.items():
-            existing = await memory_service.shared.read(
-                requesting_agent=orchestrator_agent,
-                session_id=run.session_id,
-                trace_id=trace_id,
-                key=step_id,
-            )
-            if existing:
-                continue
-            step = next(
-                (
-                    result
-                    for result in run.step_results
-                    if result.step_id == step_id and result.status == "completed"
-                ),
-                None,
-            )
-            build_step = next(
-                (result for result in run.step_results if result.step_id == self._build_step_id),
-                None,
-            )
-            resolved_name = (
-                "requirements" if step_id == self._requirements_step_id else "architecture"
-            )
-            if (
-                step is None
-                and build_step is not None
-                and build_step.resolved_variables.get(resolved_name)
-            ):
-                continue
-            if step is None or not step.output_text:
-                raise UnknownWorkflowRunError(
-                    f"Automatic build repair cannot restore required workflow output '{step_id}'."
-                )
-            await memory_service.shared.write(
-                agent=orchestrator_agent,
-                session_id=run.session_id,
-                trace_id=trace_id,
-                key=step_id,
-                classification=classification,
-                content={"output_text": step.output_text},
-                approval_status="approved",
-                evidence_references=[f"workflow-run:{run.workflow_run_id}:{step_id}"],
-            )
-
-    async def _repair_prototype(
-        self,
-        *,
-        run: WorkflowRunResult,
-        pipeline_run: DeploymentPipelineRun,
-        trace_id: str,
-        evidence: str,
-    ) -> WorkflowRunResult:
-        approved_requirements = await self._get_approved_requirements(run, trace_id=trace_id)
-        instruction = (
-            "Regenerate the prototype to resolve every deterministic validation or deployed "
-            "acceptance failure below. "
-            "Keep every approved requirement in scope, preserve its REQ id, and fix the actual "
-            "implementation rather than weakening or removing tests.\n\n"
-            f"Approved requirements:\n{approved_requirements}\n\n"
-            f"Observed failure evidence:\n{evidence[-12_000:]}"
-        )
-        previous_build = await self._get_step_output(
-            run,
-            self._build_step_id,
-            trace_id=trace_id,
-        )
-        await self._restore_repair_memory_references(run, trace_id=trace_id)
-        repaired = await self._orchestrator.resume_workflow(
-            workflow_run_id=run.workflow_run_id,
-            session_id=run.session_id,
-            trace_id=trace_id,
-            step_inputs={
-                self._build_step_id: WorkflowStepInput(
-                    step_id=self._build_step_id,
-                    variables={
-                        "user_message": instruction,
-                        "previous_build_output": previous_build,
-                        "regenerate_components": "orchestrator, ui",
-                    },
-                )
-            },
-        )
-        build_step = next(
-            (
-                result
-                for result in repaired.step_results
-                if result.step_id == self._build_step_id and result.status == "completed"
-            ),
-            None,
-        )
-        if build_step is None:
-            raise UnknownWorkflowRunError(
-                "Automatic build repair did not produce a completed build-solution step."
-            )
-        return repaired
 
     async def _execute_steps(
         self,
@@ -2886,6 +2734,5 @@ def create_deployment_pipeline_service(
         prototype_default_ttl_days=settings.prototype_default_ttl_days,
         prototype_max_active_per_owner=settings.prototype_max_active_per_owner,
         build_workspace_root=settings.deployment_build_workspace_root,
-        max_repair_attempts=settings.deployment_max_repair_attempts,
     )
 

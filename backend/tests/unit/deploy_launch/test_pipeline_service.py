@@ -1101,7 +1101,7 @@ def test_generated_mission_shell_uses_one_visual_system_without_nested_cards() -
     )
 
 
-async def test_pipeline_repairs_invalid_generated_ui_before_provisioning(
+async def test_pipeline_does_not_regenerate_approved_build_before_provisioning(
     tmp_path: Path,
 ) -> None:
     orchestrator = _BuildValidationRepairingFakeOrchestrator()
@@ -1118,7 +1118,6 @@ async def test_pipeline_repairs_invalid_generated_ui_before_provisioning(
         defender_for_cloud_gateway=NullDefenderForCloudGateway(),
         finops_cost_service=NullFinOpsCostService(),
         build_workspace_root=tmp_path,
-        max_repair_attempts=3,
     )
 
     run = await service.start(
@@ -1128,18 +1127,16 @@ async def test_pipeline_repairs_invalid_generated_ui_before_provisioning(
     )
     run = await service.wait_for_run(run.id)
 
-    assert run.status == "completed"
-    assert len(orchestrator.resume_calls) == 1
-    repair_input = orchestrator.resume_calls[0]["build-solution"]
-    assert "end-user-controlled filename" in repair_input.variables["user_message"]
-    assert 'const invalid = file.name !== "fixed.json";' in repair_input.variables[
-        "previous_build_output"
-    ]
-    assert repair_input.variables["regenerate_components"] == "orchestrator, ui"
-    assert run.steps[1].status == "completed"
+    assert run.status == "failed"
+    assert orchestrator.resume_calls == []
+    failed_step = next(step for step in run.steps if step.step_id == "provision-foundry-agents")
+    assert failed_step.status == "failed"
+    assert failed_step.error is not None
+    assert "Deploy & Launch does not regenerate an approved build" in failed_step.error
+    assert "end-user-controlled filename" in failed_step.error
 
 
-async def test_pipeline_exposes_validation_evidence_after_build_repair_is_exhausted(
+async def test_pipeline_exposes_validation_evidence_without_build_repair(
     tmp_path: Path,
 ) -> None:
     orchestrator = _NonFixingResumeOrchestrator()
@@ -1163,7 +1160,6 @@ async def test_pipeline_exposes_validation_evidence_after_build_repair_is_exhaus
         defender_for_cloud_gateway=NullDefenderForCloudGateway(),
         finops_cost_service=NullFinOpsCostService(),
         build_workspace_root=tmp_path,
-        max_repair_attempts=1,
     )
 
     run = await service.start(
@@ -1175,7 +1171,8 @@ async def test_pipeline_exposes_validation_evidence_after_build_repair_is_exhaus
     failed_step = next(step for step in run.steps if step.step_id == "provision-foundry-agents")
     assert failed_step.status == "failed"
     assert failed_step.error is not None
-    assert "after 1 automatic repair attempt(s)" in failed_step.error
+    assert orchestrator.resume_calls == []
+    assert "Deploy & Launch does not regenerate an approved build" in failed_step.error
     assert "end-user-controlled filename" in failed_step.error
 
 

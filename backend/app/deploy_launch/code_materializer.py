@@ -165,6 +165,16 @@ def _validate_orchestrator_delegations(
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
     }
 
+    def is_lexically_available_parameter(function: ast.AST, parameter_name: str) -> bool:
+        current = parents.get(function)
+        while current is not None and not isinstance(current, ast.ClassDef):
+            if isinstance(current, (ast.FunctionDef, ast.AsyncFunctionDef)) and any(
+                argument.arg == parameter_name for argument in current.args.args
+            ):
+                return True
+            current = parents.get(current)
+        return False
+
     unsupported_tool_factories = [
         node
         for node in ast.walk(tree)
@@ -257,9 +267,9 @@ def _validate_orchestrator_delegations(
                 in resolver_agent_references
             ):
                 has_awaited_run = True
-            if (
-                isinstance(awaited_call.func, ast.Name)
-                and awaited_call.func.id in call_positions
+            if isinstance(awaited_call.func, ast.Name) and (
+                awaited_call.func.id in call_positions
+                or is_lexically_available_parameter(function, awaited_call.func.id)
             ):
                 forwarded_parameters = {
                     argument.id: call_positions[argument.id]

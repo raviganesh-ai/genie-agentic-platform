@@ -381,7 +381,6 @@ All backend configuration is via environment variables prefixed `GENIE_` (pydant
 | `GENIE_DEFAULT_LLM` | `gpt-5.1` | Default model deployment name for agents that omit `model_deployment_ref` |
 | `GENIE_DEBUGGING_WORKFLOW_ID` | `debugging-workflow` | Workflow id run on `FailureDetected` |
 | `GENIE_REQUIREMENTS_QUALIFICATION_STEP_ID` | `analyze-requirements` | Workflow step id whose output is checked for an agentic-workflow qualification verdict |
-| `GENIE_DEPLOYMENT_MAX_REPAIR_ATTEMPTS` | `3` | Max automatic regenerate-and-redeploy attempts the generated-build validation repair loop makes before failing closed |
 | `GENIE_DEFENDER_FOR_CLOUD_ENABLED` | `false` | Enables the `security-copilot-scan` step's real Microsoft Defender for Cloud assessments query (primary/deterministic security source); reports `available=false` when off or `GENIE_AZURE_SUBSCRIPTION_ID` is unset |
 | `GENIE_DEFENDER_FOR_CLOUD_TIMEOUT_SECONDS` | `60` | Max seconds to wait for the Defender for Cloud assessments REST API call |
 | `GENIE_SECURITY_COPILOT_LOGIC_APP_URL` | *(none)* | SAS-signed Logic Apps HTTP-trigger URL for the optional Microsoft Security Copilot Automated Action (narrative overlay on top of Defender for Cloud); that source reports `available=false` when unset |
@@ -699,6 +698,13 @@ The script uses Microsoft Entra authentication, creates only missing model deplo
 ## Deploy log
 
 Every deployment to the shared Azure evaluation environment (backend Container App and/or frontend Static Web App) is recorded here: commit, what changed, and why. Update this section as part of the same commit that ships the fix/feature, before pushing to `master` triggers [Continuous deployment](#continuous-deployment-github-actions).
+
+### 2026-09-26 — Deploy & Launch no longer regenerates approved builds
+
+- **Regression**: deployment-time deterministic validation could resume the completed `build-solution` workflow up to three times, making Mission Trace return to Build after the user had approved it and repeatedly showing `Regenerating the generated build to satisfy deterministic validation`.
+- **Approval boundary**: Deploy & Launch now consumes the approved build as an immutable artifact. It validates that artifact exactly once and either proceeds to Foundry provisioning or fails closed with the original validation evidence; it never resumes the workflow, regenerates UI/orchestrator code, or changes what the user approved.
+- **Narration validation**: deployment `1f1d93bb-05e9-4ee3-981c-502712004b4a` used an awaited nested `_notify_progress(message)` helper that safely closed over `on_progress`, with exact start/completion messages around every specialist call. Deterministic validation now proves this lexical callback-forwarding pattern instead of falsely reporting all 12 specialists as missing narration; an unawaited callback remains rejected.
+- **Cleanup and verification**: removed the repair loop, repair-only memory restoration, repair prompt, constructor option, and `GENIE_DEPLOYMENT_MAX_REPAIR_ATTEMPTS` setting. The exact 28,283-character rejected production orchestrator now validates for all 12 specialists, deployment regressions prove an invalid approved build produces zero orchestrator resume calls, and the complete backend suite remains green.
 
 ### 2026-09-26 — Narrated FunctionTool runner helpers are statically verified
 
