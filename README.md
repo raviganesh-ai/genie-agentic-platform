@@ -701,6 +701,12 @@ The script uses Microsoft Entra authentication, creates only missing model deplo
 
 Every deployment to the shared Azure evaluation environment (backend Container App and/or frontend Static Web App) is recorded here: commit, what changed, and why. Update this section as part of the same commit that ships the fix/feature, before pushing to `master` triggers [Continuous deployment](#continuous-deployment-github-actions).
 
+### 2026-09-27 — Try-wrapped Build delegation validation
+
+- **Incident**: approval validation rejected workflow run `4bc3bff8-2ef9-4f3e-b44a-0e2086e058e5` with `FunctionTool delegations (1/11)` even though its shared helper safely mapped, constructed, awaited, and narrated all eleven specialists. The generated helper placed its nested delegate inside a `try` block, while static proof incorrectly required that delegate to be a direct AST child of the helper.
+- **Fix**: nested delegates are now matched by lexical function scope, allowing control-flow wrappers such as `try` while continuing to reject delegates from sibling nested functions. The exact persisted eleven-agent artifact passes the corrected materializer without regeneration.
+- **Feedback**: genuine validation failures now render beside the **Proceed to Deploy & Launch** button in an announced live region instead of appearing above the long generated-artifact view.
+
 ### 2026-09-27 — Build validation moves to the approval boundary
 
 - **Incident**: a valid ten-specialist orchestrator created its mapped `MissionFoundryAgent` in a shared `_invoke_specialist` helper and captured that agent in the helper's nested `FunctionTool` delegate. Every exact-name call site, agent run, tool call, and progress message was awaited, but deterministic validation recognized only one generic tool and rejected the already-approved Build during Deploy & Launch.

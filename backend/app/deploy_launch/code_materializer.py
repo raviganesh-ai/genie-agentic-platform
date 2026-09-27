@@ -331,7 +331,7 @@ def _validate_orchestrator_delegations(
                 for node in ast.walk(function)
                 if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
                 and node.name == delegate_name
-                and parents.get(node) is function
+                and enclosing_scope(node) is function
             ),
             None,
         )

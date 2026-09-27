@@ -372,6 +372,26 @@ def test_materialize_build_accepts_dynamic_helper_with_captured_mapped_agent():
     assert build.orchestrator_module is not None
 
 
+def test_materialize_build_accepts_captured_mapped_delegate_inside_try():
+    output = _captured_mapped_agent_helper_output().replace(
+        "        foundry_name = AGENT_FOUNDRY_NAMES[agent_display_name]\n"
+        "        specialist_agent = MissionFoundryAgent(agent_name=foundry_name)\n\n"
+        "        async def _delegate(**tool_input):\n"
+        "            return await specialist_agent.run(tool_input)\n",
+        "        try:\n"
+        "            foundry_name = AGENT_FOUNDRY_NAMES[agent_display_name]\n"
+        "            specialist_agent = MissionFoundryAgent(agent_name=foundry_name)\n\n"
+        "            async def _delegate(**tool_input):\n"
+        "                return await specialist_agent.run(tool_input)\n"
+        "        except Exception:\n"
+        "            raise\n",
+    )
+
+    build = materialize_build(output)
+
+    assert build.orchestrator_module is not None
+
+
 @pytest.mark.parametrize(
     ("original", "replacement", "failure_match"),
     [

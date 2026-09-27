@@ -148,10 +148,11 @@ describe("WorkshopPage", () => {
     );
     await user.click(screen.getByRole("button", { name: /Proceed to Deploy & Launch/i }));
 
-    expect(
-      await screen.findByText("The generated orchestrator does not execute every specialist."),
-    ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Proceed to Deploy & Launch/i })).toBeInTheDocument();
+    const validationError = await screen.findByText(
+      "The generated orchestrator does not execute every specialist.",
+    );
+    const proceedButton = screen.getByRole("button", { name: /Proceed to Deploy & Launch/i });
+    expect(proceedButton.parentElement).toContainElement(validationError);
   });
 
   it("shows the review checkbox once the Build Agent's live streamed UI code block closes, even before build-solution is marked completed server-side", async () => {

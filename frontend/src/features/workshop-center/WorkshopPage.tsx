@@ -282,7 +282,6 @@ export function WorkshopPage(): JSX.Element {
       />
       {workshop.error ? <ErrorState error={workshop.error} /> : null}
       {rerunBuildError ? <ErrorState error={{ message: rerunBuildError }} /> : null}
-      {buildValidationError ? <ErrorState error={{ message: buildValidationError }} /> : null}
       {missionError && !buildStepResult && !currentBuildText ? (
         // Set by ArchitectureStudioPage's approval handler if its own
         // fire-and-forget kickoff of build-solution failed after already
@@ -340,14 +339,21 @@ export function WorkshopPage(): JSX.Element {
             onChange={(_, data) => setReviewAcknowledged(Boolean(data.checked))}
           />
           {reviewAcknowledged ? (
-            <Button
-              appearance="primary"
-              style={{ marginTop: 8 }}
-              disabled={validatingBuild}
-              onClick={() => void handleProceedToDeployLaunch()}
-            >
-              {validatingBuild ? "Validating build..." : "Proceed to Deploy & Launch"}
-            </Button>
+            <div aria-live="polite">
+              <Button
+                appearance="primary"
+                style={{ marginTop: 8 }}
+                disabled={validatingBuild}
+                onClick={() => void handleProceedToDeployLaunch()}
+              >
+                {validatingBuild ? "Validating build..." : "Proceed to Deploy & Launch"}
+              </Button>
+              {buildValidationError ? (
+                <div style={{ marginTop: 12 }}>
+                  <ErrorState error={{ message: buildValidationError }} />
+                </div>
+              ) : null}
+            </div>
           ) : null}
         </SectionCard>
       ) : null}
