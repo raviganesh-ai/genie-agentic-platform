@@ -472,6 +472,15 @@ async def test_full_pipeline_runs_every_step(tmp_path: Path):
     assert 'window.__MISSION_BACKEND_URL__ = null' not in runtime_config_source
     assert '__MISSION_AGENTS__ = ["Requirements Specialist"]' in runtime_config_source
 
+    # index.html must reference runtime-config.js (a public/ asset) with a
+    # root-absolute path. A bare relative "runtime-config.js" src makes Vite
+    # try to bundle it as a module graph entry instead of treating it as a
+    # public asset, and Vite refuses to bundle any non-"type=module" script -
+    # failing the real ACR frontend build with "can't be bundled without
+    # type='module' attribute" before any prototype is ever reachable.
+    index_html_source = (build_root.parent / "frontend" / "index.html").read_text(encoding="utf-8")
+    assert '<script src="/runtime-config.js"></script>' in index_html_source
+
 
 class _PartialMissionAgentProvisioningService(NullMissionAgentProvisioningService):
     def __init__(self) -> None:

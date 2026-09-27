@@ -179,7 +179,7 @@ _FRONTEND_INDEX_HTML_TEMPLATE = """<!doctype html>
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>{mission_title}</title>
     <link rel="icon" href="data:,">
-  <script src="runtime-config.js"></script>
+  <script src="/runtime-config.js"></script>
 </head>
 <body>
   <div id="root"></div>
