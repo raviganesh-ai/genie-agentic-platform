@@ -41,7 +41,7 @@ from app.agents.tools.architecture_parsing import (
 from app.governance.governance_service import GovernanceService
 from app.memory.memory_models import SharedMemoryClassification
 from app.memory.memory_service import MemoryService
-from app.models.workflow_stream_models import WorkflowStreamEvent
+from app.models.workflow_stream_models import WorkflowStreamEvent, WorkflowStreamEventType
 from app.orchestration.workflow_event_bus import WorkflowEventBus
 from app.services.requirement_fidelity_service import missing_requirement_ids
 
@@ -488,6 +488,25 @@ async def _generate_build_by_component(
                 )
             )
 
+    async def _publish_component_event(
+        event_type: WorkflowStreamEventType,
+        component_name: str,
+        *,
+        error: str | None = None,
+    ) -> None:
+        if event_bus is not None and workflow_run_id is not None and step_id is not None:
+            await event_bus.publish(
+                WorkflowStreamEvent(
+                    event_type=event_type,
+                    session_id=context.session_id,
+                    workflow_run_id=workflow_run_id,
+                    step_id=step_id,
+                    agent_id=delegation.target_agent_id,
+                    component_name=component_name,
+                    error=error,
+                )
+            )
+
     pieces: list[str] = []
     for index, (component_kind, component_name) in enumerate(components):
         if index > 0:
@@ -504,6 +523,8 @@ async def _generate_build_by_component(
         # placeholder (_component_failure_piece) must use the same literal
         # label, not component_name, for those two kinds.
         label_name = component_name if component_kind == "agent" else component_kind
+        display_name = "Customer UI" if component_kind == "ui" else component_name
+        await _publish_component_event("component_started", display_name)
         normalized_label = label_name.strip().lower()
         reused_piece = (
             None
@@ -518,6 +539,7 @@ async def _generate_build_by_component(
             # output.
             await _publish_delta(reused_piece)
             pieces.append(reused_piece)
+            await _publish_component_event("component_completed", display_name)
             continue
 
         assigned_ids = requirement_assignments.get(label_name.strip().lower(), ())
@@ -563,8 +585,10 @@ async def _generate_build_by_component(
             )
             await _publish_delta(failure_piece)
             pieces.append(failure_piece)
+            await _publish_component_event("component_failed", display_name, error=str(exc))
             continue
         pieces.append(component_result.output_text)
+        await _publish_component_event("component_completed", display_name)
 
     return AgentExecutionResult(
         agent_id=delegation.target_agent_id,

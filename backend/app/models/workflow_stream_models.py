@@ -17,7 +17,15 @@ from pydantic import BaseModel, ConfigDict, Field
 
 __all__ = ["WorkflowStreamEvent", "WorkflowStreamEventType"]
 
-WorkflowStreamEventType = Literal["step_started", "step_delta", "step_completed", "step_failed"]
+WorkflowStreamEventType = Literal[
+    "step_started",
+    "step_delta",
+    "step_completed",
+    "step_failed",
+    "component_started",
+    "component_completed",
+    "component_failed",
+]
 
 
 class WorkflowStreamEvent(BaseModel):
@@ -30,6 +38,7 @@ class WorkflowStreamEvent(BaseModel):
     workflow_run_id: str = Field(min_length=1)
     step_id: str = Field(min_length=1)
     agent_id: str = Field(min_length=1)
+    component_name: str | None = None
     delta: str | None = None
     output_preview: str | None = None
     error: str | None = None

@@ -66,6 +66,23 @@ async def test_new_subscriber_receives_accumulated_delta_snapshot() -> None:
     assert replayed.delta == "code"
 
 
+async def test_new_subscriber_receives_latest_component_lifecycle_event() -> None:
+    bus = WorkflowEventBus()
+    await bus.publish(
+        _event(
+            event_type="component_started",
+            agent_id="build-agent",
+            component_name="Ticket Classifier Agent",
+        )
+    )
+
+    async with bus.subscribe("session-1") as queue:
+        replayed = await asyncio.wait_for(queue.get(), timeout=1.0)
+
+    assert replayed.event_type == "component_started"
+    assert replayed.component_name == "Ticket Classifier Agent"
+
+
 async def test_subscriber_receives_published_event_for_its_session() -> None:
     bus = WorkflowEventBus()
     async with bus.subscribe("session-1") as queue:
@@ -107,7 +124,18 @@ async def test_full_queue_drops_oldest_event_instead_of_blocking_publisher() -> 
         assert first_remaining.step_id != "step-0"
 
 
-@pytest.mark.parametrize("event_type", ["step_started", "step_delta", "step_completed", "step_failed"])
+@pytest.mark.parametrize(
+    "event_type",
+    [
+        "step_started",
+        "step_delta",
+        "step_completed",
+        "step_failed",
+        "component_started",
+        "component_completed",
+        "component_failed",
+    ],
+)
 async def test_all_event_types_round_trip_through_the_bus(event_type: str) -> None:
     bus = WorkflowEventBus()
     async with bus.subscribe("session-1") as queue:

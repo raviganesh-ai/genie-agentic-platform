@@ -517,6 +517,30 @@ async def test_call_build_agent_streams_each_components_own_deltas_via_the_event
         "\n\n",
         "ui-code",
     ]
+    component_events = [
+        (event.event_type, event.component_name)
+        for event in event_bus.events
+        if event.event_type.startswith("component_")
+    ]
+    assert component_events == [
+        ("component_started", "Ticket Classifier Agent"),
+        ("component_completed", "Ticket Classifier Agent"),
+        ("component_started", "Resolution Drafter Agent"),
+        ("component_completed", "Resolution Drafter Agent"),
+        ("component_started", "Support Triage Orchestrator Agent"),
+        ("component_completed", "Support Triage Orchestrator Agent"),
+        ("component_started", "Customer UI"),
+        ("component_completed", "Customer UI"),
+    ]
+    first_start_index = next(
+        index
+        for index, event in enumerate(event_bus.events)
+        if event.event_type == "component_started"
+    )
+    first_delta_index = next(
+        index for index, event in enumerate(event_bus.events) if event.event_type == "step_delta"
+    )
+    assert first_start_index < first_delta_index
     assert all(event.agent_id == "build-agent" for event in event_bus.events)
     assert all(event.step_id == "build-solution" for event in event_bus.events)
 

@@ -30,6 +30,7 @@ function buildStreamEvent(overrides: Partial<WorkflowStreamEvent> = {}): Workflo
     workflow_run_id: FIXTURE_WORKFLOW_RUN_ID,
     step_id: "build-solution",
     agent_id: "build-agent",
+    component_name: null,
     delta: null,
     output_preview: null,
     error: null,

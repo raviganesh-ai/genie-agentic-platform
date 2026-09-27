@@ -6,6 +6,41 @@ import { buildWorkflowRunResult, FIXTURE_SESSION_ID, FIXTURE_WORKFLOW_RUN_ID } f
 import { WorkshopPage } from "@/features/workshop-center/WorkshopPage";
 
 describe("WorkshopPage", () => {
+  it("immediately names the component being generated before its first code delta arrives", async () => {
+    const componentStarted = {
+      event_type: "component_started",
+      session_id: FIXTURE_SESSION_ID,
+      workflow_run_id: FIXTURE_WORKFLOW_RUN_ID,
+      step_id: "build-solution",
+      agent_id: "build-agent",
+      component_name: "Ticket Classifier Agent",
+      delta: null,
+      output_preview: null,
+      error: null,
+      emitted_at: "2026-07-23T10:00:00Z",
+    };
+
+    mockFetchSequence([
+      {
+        match: `/workflows/runs/${FIXTURE_WORKFLOW_RUN_ID}`,
+        response: buildWorkflowRunResult({ status: "running", step_results: [] }),
+      },
+      {
+        match: "/workflow-events/stream",
+        sseChunks: [`data: ${JSON.stringify(componentStarted)}\n\n`],
+      },
+    ]);
+
+    renderWithProviders(<WorkshopPage />, {
+      sessionId: FIXTURE_SESSION_ID,
+      workflowRunId: FIXTURE_WORKFLOW_RUN_ID,
+    });
+
+    await waitFor(() =>
+      expect(screen.getByText("Generating Ticket Classifier Agent...")).toBeInTheDocument(),
+    );
+  });
+
   it("shows only the generated code, and reveals Proceed to Deploy & Launch once the review checkbox is checked", async () => {
     const fetchMock = mockFetchSequence([
       {

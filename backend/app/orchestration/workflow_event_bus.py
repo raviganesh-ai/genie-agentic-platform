@@ -35,6 +35,7 @@ class WorkflowEventBus:
     def __init__(self) -> None:
         self._subscribers: dict[str, set[asyncio.Queue[WorkflowStreamEvent]]] = defaultdict(set)
         self._step_delta_text: OrderedDict[_StreamKey, str] = OrderedDict()
+        self._latest_component_event: OrderedDict[_StreamKey, WorkflowStreamEvent] = OrderedDict()
 
     async def publish(self, event: WorkflowStreamEvent) -> None:
         """Delivers ``event`` to every current subscriber of its session, if any.
@@ -52,12 +53,21 @@ class WorkflowEventBus:
             for key in list(self._step_delta_text):
                 if key[:3] == matching_prefix:
                     del self._step_delta_text[key]
+            for key in list(self._latest_component_event):
+                if key[:3] == matching_prefix:
+                    del self._latest_component_event[key]
         elif event.event_type == "step_delta" and event.delta:
             key = (event.session_id, event.workflow_run_id, event.step_id, event.agent_id)
             self._step_delta_text[key] = self._step_delta_text.get(key, "") + event.delta
             self._step_delta_text.move_to_end(key)
             while len(self._step_delta_text) > _MAX_ACCUMULATED_STREAMS:
                 self._step_delta_text.popitem(last=False)
+        elif event.event_type.startswith("component_"):
+            key = (event.session_id, event.workflow_run_id, event.step_id, event.agent_id)
+            self._latest_component_event[key] = event
+            self._latest_component_event.move_to_end(key)
+            while len(self._latest_component_event) > _MAX_ACCUMULATED_STREAMS:
+                self._latest_component_event.popitem(last=False)
 
         for queue in list(self._subscribers.get(event.session_id, ())):
             try:
@@ -103,6 +113,9 @@ class WorkflowEventBus:
                         delta=delta,
                     )
                 )
+        for event in self._latest_component_event.values():
+            if event.session_id == session_id:
+                queue.put_nowait(event)
         try:
             yield queue
         finally:
