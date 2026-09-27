@@ -64,6 +64,13 @@ _OVERBROAD_KEY_MATERIAL_PATTERN: Final = re.compile(
     r"/[^/\r\n]*key[^/\r\n]*/[a-z]*\.test\s*\()",
     re.IGNORECASE,
 )
+# A UI-side '*key*' scan is only a real problem when it is the ONLY place the
+# policy is enforced - if the orchestrator ALSO runs its own authoritative
+# membership check (e.g. ``"key" in name_lower``), the UI check is just an
+# early, non-authoritative UX hint on top of real backend enforcement.
+_BACKEND_KEY_POLICY_ENFORCEMENT_PATTERN: Final = re.compile(
+    r"['\"]key['\"]\s+(?:in|not\s+in)\s+\w", re.IGNORECASE
+)
 _INTERACTIVE_INPUT_PATTERN: Final = re.compile(r"<(?:input|select|textarea)\b", re.IGNORECASE)
 _FORM_PATTERN: Final = re.compile(r"<form\b", re.IGNORECASE)
 _BUTTON_PATTERN: Final = re.compile(r"<button\b", re.IGNORECASE)
@@ -1176,6 +1183,10 @@ def materialize_build(output_text: str) -> MaterializedBuild:
         has_file_input
         and ui_component is not None
         and _OVERBROAD_KEY_MATERIAL_PATTERN.search(ui_component)
+        and not (
+            orchestrator_module is not None
+            and _BACKEND_KEY_POLICY_ENFORCEMENT_PATTERN.search(orchestrator_module)
+        )
     ):
         raise MaterializedCodeError(
             "The generated mission UI uses a broad '*key*' substring scan. That can "

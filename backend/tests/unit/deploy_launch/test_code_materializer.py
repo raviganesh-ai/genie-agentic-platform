@@ -743,6 +743,38 @@ def test_materialize_build_rejects_browser_side_wildcard_key_scan():
         materialize_build(output)
 
 
+def test_materialize_build_allows_wildcard_key_scan_backed_by_orchestrator_policy():
+    output = _SAMPLE_OUTPUT.replace(
+        _SAMPLE_UI_COMPONENT,
+        """export function MissionApp({ onSubmit }) {
+    const containsKeyMaterial = (content: string) =>
+        content.toLowerCase().includes("key");
+    const handleFile = async (file: File) => {
+        const content = await file.text();
+        const attachments = [{ name: file.name, content }];
+        onSubmit(JSON.stringify({ filename: file.name }), attachments);
+    };
+    return <form className=\"genie-form\">
+        <div className=\"genie-field genie-dropzone\">
+            <input type=\"file\" style={{ display: \"none\" }} onChange={(event) => handleFile(event.target.files[0])} />
+        </div>
+    </form>;
+}""",
+    ).replace(
+        'return {"result": result, "tool": str(tool)}',
+        'name_lower = ui_message.lower()\n'
+        '        if "key" in name_lower:\n'
+        '            raise ValueError("blocked")\n'
+        '        return {"result": result, "tool": str(tool)}',
+    )
+
+    build = materialize_build(output)
+
+    assert build.ui_component is not None
+    assert "containsKeyMaterial" in build.ui_component
+
+
+
 def test_materialize_build_allows_non_upload_json_parsing():
     output = _SAMPLE_OUTPUT.replace(
         _SAMPLE_UI_SIGNATURE,
