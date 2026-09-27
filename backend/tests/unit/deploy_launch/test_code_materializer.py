@@ -350,6 +350,90 @@ def test_materialize_build_accepts_constant_calls_to_dynamic_delegation_helper()
     assert build.orchestrator_module is not None
 
 
+def _parallel_gathered_specialist_output() -> str:
+    """Regression fixture for the 2026-09-27 "Judge Panel Agent"/"Deterministic
+    QA Agent" incident: two specialists invoked through the same shared
+    ``_invoke_specialist`` helper, but one is scheduled via
+    ``asyncio.create_task`` and awaited through ``asyncio.gather`` (the
+    architecture-required "run in parallel" pattern) instead of being
+    awaited directly.
+    """
+    second_specialist = '''
+```python
+# agent: Review Specialist
+async def run() -> None:
+    pass
+```
+
+'''
+    parallel_orchestrator = '''```python
+# agent: orchestrator
+import asyncio
+from agent_config import AGENT_FOUNDRY_NAMES
+from agent_framework import FunctionTool
+from mission_foundry_runtime import MissionFoundryAgent
+
+class OrchestratorAgent:
+    async def _invoke_specialist(self, agent_display_name, payload, on_progress):
+        async def _delegate(**tool_input):
+            agent = MissionFoundryAgent(
+                agent_name=AGENT_FOUNDRY_NAMES[agent_display_name]
+            )
+            return await agent.run(tool_input)
+
+        tool = FunctionTool(name=agent_display_name, func=_delegate)
+        if on_progress is not None:
+            await on_progress(f"Handing off to {agent_display_name}...")
+        result = await tool(payload=payload)
+        if on_progress is not None:
+            await on_progress(f"{agent_display_name} completed.")
+        return result
+
+    async def run(self, ui_message: str, on_progress=None):
+        requirements = await self._invoke_specialist(
+            agent_display_name="Requirements Specialist",
+            payload={"message": ui_message},
+            on_progress=on_progress,
+        )
+        review_task = asyncio.create_task(
+            self._invoke_specialist(
+                agent_display_name="Review Specialist",
+                payload={"message": ui_message},
+                on_progress=on_progress,
+            )
+        )
+        (review,) = await asyncio.gather(review_task)
+        return {"result": requirements, "review": review}
+```
+'''
+    output = second_specialist + _SAMPLE_OUTPUT
+    return re.sub(
+        r"```python\n# agent: orchestrator.*?```\n",
+        parallel_orchestrator,
+        output,
+        flags=re.DOTALL,
+    )
+
+
+def test_materialize_build_accepts_specialist_scheduled_via_create_task_and_gathered():
+    build = materialize_build(_parallel_gathered_specialist_output())
+
+    assert set(build.agent_modules) == {"Requirements Specialist", "Review Specialist"}
+
+
+def test_materialize_build_rejects_specialist_scheduled_but_never_gathered():
+    output = _parallel_gathered_specialist_output().replace(
+        "        (review,) = await asyncio.gather(review_task)\n",
+        "        review = None\n",
+    )
+
+    with pytest.raises(
+        MaterializedCodeError,
+        match="does not execute and visibly report every specialist",
+    ):
+        materialize_build(output)
+
+
 def _captured_mapped_agent_helper_output() -> str:
     return _dynamic_delegation_helper_output().replace(
         "        async def _delegate(**tool_input):\n"

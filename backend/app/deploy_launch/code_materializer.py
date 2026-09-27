@@ -287,6 +287,51 @@ def _validate_orchestrator_delegations(
                 parameter: call_positions[parameter] for parameter in mapped_parameters
             }
 
+    def is_scheduled_and_awaited(call: ast.Call, enclosing: ast.AST) -> bool:
+        """True if ``call`` is awaited directly, or scheduled via
+        ``asyncio.create_task``/``ensure_future`` and that task is later
+        awaited - directly or gathered through ``asyncio.gather(...)``.
+
+        Running specialists concurrently (``asyncio.gather``) is a
+        legitimate, architecture-sanctioned pattern; without this, a
+        specialist invoked that way is indistinguishable from one that
+        is never awaited at all.
+        """
+        parent = parents.get(call)
+        if isinstance(parent, ast.Await):
+            return True
+        if not (
+            isinstance(parent, ast.Call)
+            and called_name(parent) in {"create_task", "ensure_future"}
+        ):
+            return False
+        grandparent = parents.get(parent)
+        if isinstance(grandparent, ast.Await):
+            return True
+        targets: list[ast.expr] = []
+        if isinstance(grandparent, ast.Assign):
+            targets = grandparent.targets
+        elif isinstance(grandparent, ast.AnnAssign) and grandparent.target is not None:
+            targets = [grandparent.target]
+        task_names = {target.id for target in targets if isinstance(target, ast.Name)}
+        if not task_names:
+            return False
+        for candidate in ast.walk(enclosing):
+            if not (
+                isinstance(candidate, ast.Await)
+                and isinstance(candidate.value, ast.Call)
+                and called_name(candidate.value) == "gather"
+            ):
+                continue
+            gathered_names = {
+                argument.id
+                for argument in candidate.value.args
+                if isinstance(argument, ast.Name)
+            }
+            if task_names & gathered_names:
+                return True
+        return False
+
     wrapper_agents: dict[str, set[str]] = {}
     resolver_call_agents: dict[str, set[str]] = {}
     for function_name, function in function_definitions.items():
@@ -295,8 +340,8 @@ def _validate_orchestrator_delegations(
                 continue
             resolver_name = called_name(node) or ""
             resolver_parameters = dynamic_resolvers.get(resolver_name)
-            if resolver_parameters is None or not isinstance(
-                parents.get(node), ast.Await
+            if resolver_parameters is None or not is_scheduled_and_awaited(
+                node, function
             ):
                 continue
             for parameter, position in resolver_parameters.items():
