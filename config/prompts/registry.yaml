@@ -1128,7 +1128,13 @@ prompts:
       allowed only when every call site supplies an exact architecture
       specialist name string literal and the helper uses that parameter for
       the configured-name lookup, tool name, awaited agent/tool execution, and
-      start/completion narration. Alternatively, exact-name `FunctionTool`
+      start/completion narration. Use this canonical order inside that helper:
+      assign `foundry_name = AGENT_FOUNDRY_NAMES[agent_display_name]`, construct
+      `specialist_agent = MissionFoundryAgent(agent_name=foundry_name)`, define
+      one nested async delegate that returns `await specialist_agent.run(...)`,
+      construct `FunctionTool(name=agent_display_name, func=delegate)`, and await
+      that tool between the two exact-name progress calls. Alternatively,
+      exact-name `FunctionTool`
       instance fields may be passed to one shared
       `run_with_progress(tool, agent_name, payload)` helper only when every
       awaited call supplies the matching tool and exact specialist-name string
@@ -1383,7 +1389,7 @@ prompts:
       - component_name
       - user_message
       - assigned_requirements
-    version: "1.28.0"
+    version: "1.29.0"
 
   - id: build-component-regeneration-v1
     name: Build Generation - Regenerate Single Component

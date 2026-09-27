@@ -87,4 +87,13 @@ export const workshopApi = {
       { method: "GET" },
     );
   },
+  validateBuild(
+    sessionId: string,
+    workflowRunId: string,
+  ): Promise<{ valid: boolean }> {
+    return apiFetch<{ valid: boolean }>(
+      `/sessions/${sessionId}/workshop/build-components/${workflowRunId}/validate`,
+      { method: "POST" },
+    );
+  },
 };

@@ -14,6 +14,7 @@ resumed run - never synthesized here.
 """
 from __future__ import annotations
 
+from app.deploy_launch.code_materializer import MaterializedCodeError, materialize_build
 from app.models.reanalysis_models import ReanalysisRequestType, ReanalysisResult
 from app.models.workflow_models import WorkflowRunResult, WorkflowStepInput
 from app.orchestration.agent_orchestrator import AgentOrchestrator
@@ -234,6 +235,26 @@ class WorkshopService:
         if build_step is not None and build_step.output_text:
             return build_step.output_text
         return live_output
+
+    async def validate_build_output(
+        self,
+        *,
+        session_id: str,
+        requesting_user_id: str,
+        workflow_run_id: str,
+    ) -> None:
+        """Validate the exact reviewed Build before Deploy & Launch navigation."""
+
+        output = await self.get_build_output(
+            session_id=session_id,
+            requesting_user_id=requesting_user_id,
+            workflow_run_id=workflow_run_id,
+        )
+        if not output.strip():
+            raise MaterializedCodeError(
+                "UI & Agent Design has not produced a complete build to validate yet."
+            )
+        materialize_build(output)
 
     async def _authorize(self, session_id: str, requesting_user_id: str) -> None:
         await self._session_service.get_session(

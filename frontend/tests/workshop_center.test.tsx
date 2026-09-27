@@ -60,6 +60,10 @@ describe("WorkshopPage", () => {
         }),
       },
       { match: "/approvals", response: [] },
+      {
+        match: `/workshop/build-components/${FIXTURE_WORKFLOW_RUN_ID}/validate`,
+        response: { valid: true },
+      },
     ]);
 
     renderWithProviders(<WorkshopPage />, {
@@ -91,12 +95,63 @@ describe("WorkshopPage", () => {
     const callsBeforeProceed = fetchMock.mock.calls.length;
     await user.click(screen.getByRole("button", { name: /Proceed to Deploy & Launch/i }));
 
-    // Proceeding is a plain client-side navigation to Deploy & Launch - the
-    // review checkbox/click above is the human checkpoint, so clicking
-    // Proceed doesn't need to call any approval/resume endpoint.
-    expect(fetchMock.mock.calls.length).toBe(callsBeforeProceed);
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.length).toBeGreaterThan(callsBeforeProceed),
+    );
+    expect(
+      fetchMock.mock.calls.some((call) =>
+        String(call[0]).endsWith(
+          `/workshop/build-components/${FIXTURE_WORKFLOW_RUN_ID}/validate`,
+        ),
+      ),
+    ).toBe(true);
     expect(fetchMock.mock.calls.some((call) => String(call[0]).endsWith("/decide"))).toBe(false);
     expect(fetchMock.mock.calls.some((call) => String(call[0]).endsWith("/resume"))).toBe(false);
+  });
+
+  it("keeps an invalid reviewed build out of Deploy & Launch", async () => {
+    mockFetchSequence([
+      {
+        match: `/workflows/runs/${FIXTURE_WORKFLOW_RUN_ID}`,
+        response: buildWorkflowRunResult({
+          step_results: [
+            {
+              step_id: "build-solution",
+              agent_id: "orchestrator",
+              status: "completed",
+              output_text: "```tsx\n// agent: ui\nexport function App() { return null; }\n```",
+              error: null,
+              started_at: "2026-07-23T10:00:00Z",
+              completed_at: "2026-07-23T10:01:00Z",
+            },
+          ],
+        }),
+      },
+      { match: "/approvals", response: [] },
+      {
+        match: `/workshop/build-components/${FIXTURE_WORKFLOW_RUN_ID}/validate`,
+        status: 422,
+        response: {
+          detail: "The generated orchestrator does not execute every specialist.",
+        },
+      },
+    ]);
+
+    renderWithProviders(<WorkshopPage />, {
+      sessionId: FIXTURE_SESSION_ID,
+      workflowRunId: FIXTURE_WORKFLOW_RUN_ID,
+    });
+
+    const user = userEvent.setup();
+    await user.click(
+      await screen.findByRole("checkbox", { name: /AI can perform mistake/i }),
+    );
+    await user.click(screen.getByRole("button", { name: /Proceed to Deploy & Launch/i }));
+
+    expect(
+      await screen.findByText("The generated orchestrator does not execute every specialist."),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Proceed to Deploy & Launch/i })).toBeInTheDocument();
   });
 
   it("shows the review checkbox once the Build Agent's live streamed UI code block closes, even before build-solution is marked completed server-side", async () => {

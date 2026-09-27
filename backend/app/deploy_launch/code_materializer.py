@@ -338,17 +338,58 @@ def _validate_orchestrator_delegations(
         if delegate is None:
             return False
 
-        agent_references: set[str] = set()
-        for node in ast.walk(delegate):
+        mapped_aliases: set[tuple[ast.AST, str]] = set()
+        for node in ast.walk(function):
+            assigned_value: ast.expr | None = None
+            assigned_targets: list[ast.expr] = []
+            if isinstance(node, ast.Assign):
+                assigned_value = node.value
+                assigned_targets = node.targets
+            elif isinstance(node, ast.AnnAssign) and node.value is not None:
+                assigned_value = node.value
+                assigned_targets = [node.target]
+            if (
+                isinstance(assigned_value, ast.Subscript)
+                and isinstance(assigned_value.value, ast.Name)
+                and assigned_value.value.id == "AGENT_FOUNDRY_NAMES"
+                and isinstance(assigned_value.slice, ast.Name)
+                and assigned_value.slice.id == mapped_parameter
+                and enclosing_scope(node) in {function, delegate}
+            ):
+                mapped_aliases.update(
+                    reference
+                    for target in assigned_targets
+                    if (reference := scoped_reference(target, node)) is not None
+                )
+
+        agent_references: set[tuple[ast.AST, str]] = set()
+        for node in ast.walk(function):
             if not isinstance(node, ast.Call) or called_name(node) != "MissionFoundryAgent":
+                continue
+            call_scope = enclosing_scope(node)
+            if call_scope not in {function, delegate}:
                 continue
             mapped = any(
                 keyword.arg == "agent_name"
-                and isinstance(keyword.value, ast.Subscript)
-                and isinstance(keyword.value.value, ast.Name)
-                and keyword.value.value.id == "AGENT_FOUNDRY_NAMES"
-                and isinstance(keyword.value.slice, ast.Name)
-                and keyword.value.slice.id == mapped_parameter
+                and (
+                    (
+                        isinstance(keyword.value, ast.Subscript)
+                        and isinstance(keyword.value.value, ast.Name)
+                        and keyword.value.value.id == "AGENT_FOUNDRY_NAMES"
+                        and isinstance(keyword.value.slice, ast.Name)
+                        and keyword.value.slice.id == mapped_parameter
+                    )
+                    or (
+                        isinstance(keyword.value, ast.Name)
+                        and (
+                            (call_scope, keyword.value.id) in mapped_aliases
+                            or (
+                                call_scope is delegate
+                                and (function, keyword.value.id) in mapped_aliases
+                            )
+                        )
+                    )
+                )
                 for keyword in node.keywords
             )
             if not mapped:
@@ -362,17 +403,27 @@ def _validate_orchestrator_delegations(
             agent_references.update(
                 reference
                 for target in targets
-                if (reference := expression_reference(target)) is not None
+                if (reference := scoped_reference(target, node)) is not None
             )
 
-        return any(
-            isinstance(node, ast.Await)
-            and isinstance(node.value, ast.Call)
-            and isinstance(node.value.func, ast.Attribute)
-            and node.value.func.attr == "run"
-            and expression_reference(node.value.func.value) in agent_references
-            for node in ast.walk(delegate)
-        )
+        for node in ast.walk(delegate):
+            if not (
+                isinstance(node, ast.Await)
+                and isinstance(node.value, ast.Call)
+                and isinstance(node.value.func, ast.Attribute)
+                and node.value.func.attr == "run"
+            ):
+                continue
+            reference = scoped_reference(node.value.func.value, node)
+            if reference in agent_references:
+                return True
+            if (
+                reference is not None
+                and reference[0] is delegate
+                and (function, reference[1]) in agent_references
+            ):
+                return True
+        return False
 
     dynamic_tool_helpers: dict[str, str] = {}
     dynamic_helper_narration: set[str] = set()

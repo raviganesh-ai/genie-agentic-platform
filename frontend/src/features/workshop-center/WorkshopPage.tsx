@@ -34,6 +34,8 @@ export function WorkshopPage(): JSX.Element {
   const [retryError, setRetryError] = useState<string | null>(null);
   const [rerunningBuild, setRerunningBuild] = useState(false);
   const [rerunBuildError, setRerunBuildError] = useState<string | null>(null);
+  const [validatingBuild, setValidatingBuild] = useState(false);
+  const [buildValidationError, setBuildValidationError] = useState<string | null>(null);
   const [reviewAcknowledged, setReviewAcknowledged] = useState(false);
   // Architecture Studio's approval handler kicks off build-solution with a
   // fire-and-forget resume call (it navigates here immediately rather than
@@ -209,6 +211,7 @@ export function WorkshopPage(): JSX.Element {
     if (!sessionId || !workflowRunId) return;
     setRerunningBuild(true);
     setRerunBuildError(null);
+    setBuildValidationError(null);
     // Retrying always supersedes whatever earlier silent failure (see
     // ArchitectureStudioPage's handleApproveArchitecture) may have set this -
     // otherwise the stale banner would keep showing even after this retry
@@ -230,14 +233,21 @@ export function WorkshopPage(): JSX.Element {
     }
   }, [sessionId, workflowRunId, governancePolicies, refreshRun, setMissionError]);
 
-  // Once the user has ticked the risk-acknowledgment checkbox and clicks
-  // Proceed, THIS is the human review this app's single gate represents -
-  // the reviewed-generated-code gesture the Workshop page's checkbox copy
-  // already describes. Deploy & Launch has no separate approval screen of
-  // its own; it just starts running the moment the user gets there.
-  const handleProceedToDeployLaunch = useCallback(() => {
-    navigate("/outputs");
-  }, [navigate]);
+  const handleProceedToDeployLaunch = useCallback(async () => {
+    if (!sessionId || !workflowRunId) return;
+    setValidatingBuild(true);
+    setBuildValidationError(null);
+    try {
+      await workshopApi.validateBuild(sessionId, workflowRunId);
+      navigate("/outputs");
+    } catch (err) {
+      setBuildValidationError(
+        (err as ApiError).message ?? "The generated build is not ready to deploy.",
+      );
+    } finally {
+      setValidatingBuild(false);
+    }
+  }, [navigate, sessionId, workflowRunId]);
 
   if (!workflowRunId || !sessionId) {
     return (
@@ -272,6 +282,7 @@ export function WorkshopPage(): JSX.Element {
       />
       {workshop.error ? <ErrorState error={workshop.error} /> : null}
       {rerunBuildError ? <ErrorState error={{ message: rerunBuildError }} /> : null}
+      {buildValidationError ? <ErrorState error={{ message: buildValidationError }} /> : null}
       {missionError && !buildStepResult && !currentBuildText ? (
         // Set by ArchitectureStudioPage's approval handler if its own
         // fire-and-forget kickoff of build-solution failed after already
@@ -332,9 +343,10 @@ export function WorkshopPage(): JSX.Element {
             <Button
               appearance="primary"
               style={{ marginTop: 8 }}
-              onClick={handleProceedToDeployLaunch}
+              disabled={validatingBuild}
+              onClick={() => void handleProceedToDeployLaunch()}
             >
-              Proceed to Deploy & Launch
+              {validatingBuild ? "Validating build..." : "Proceed to Deploy & Launch"}
             </Button>
           ) : null}
         </SectionCard>

@@ -41,6 +41,12 @@ class SubmitReanalysisRequest(ReanalysisActionRequest):
     request_type: ReanalysisRequestType
 
 
+class BuildValidationResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    valid: bool = True
+
+
 class RegenerateComponentRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -178,6 +184,23 @@ async def get_build_components(
         workflow_run_id=workflow_run_id,
     )
     return {"build_output": output}
+
+
+@router.post("/build-components/{workflow_run_id}/validate")
+async def validate_build_components(
+    session_id: str,
+    workflow_run_id: str,
+    user: AuthenticatedUser = Depends(get_current_user),
+    workshop_service: WorkshopService = Depends(get_workshop_service),
+) -> BuildValidationResponse:
+    """Fail closed unless the exact reviewed Build is deployable as generated."""
+
+    await workshop_service.validate_build_output(
+        session_id=session_id,
+        requesting_user_id=user.user_id,
+        workflow_run_id=workflow_run_id,
+    )
+    return BuildValidationResponse()
 
 
 @router.post("/regenerate-component")

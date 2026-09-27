@@ -5,12 +5,45 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from app.deploy_launch.code_materializer import MaterializedCodeError
 from app.models.workflow_models import WorkflowRunResult, WorkflowStepResult
 from app.models.workflow_stream_models import WorkflowStreamEvent
 from app.orchestration.workflow_event_bus import WorkflowEventBus
 from app.services.workshop_service import WorkshopService
 
 pytestmark = pytest.mark.asyncio
+
+_VALID_BUILD = '''
+```python
+# agent: Requirements Specialist
+async def run() -> None:
+    pass
+```
+```python
+# agent: orchestrator
+from agent_config import AGENT_FOUNDRY_NAMES
+from agent_framework import FunctionTool
+from mission_foundry_runtime import MissionFoundryAgent
+class OrchestratorAgent:
+    async def run(self, ui_message: str, on_progress=None):
+        specialist = MissionFoundryAgent(
+            agent_name=AGENT_FOUNDRY_NAMES["Requirements Specialist"]
+        )
+        tool = FunctionTool(name="Requirements Specialist", func=specialist.run)
+        if on_progress is not None:
+            await on_progress("Handing off to Requirements Specialist...")
+        result = await specialist.run(ui_message)
+        if on_progress is not None:
+            await on_progress("Requirements Specialist completed.")
+        return {"result": result, "tool": str(tool)}
+```
+```tsx
+// agent: ui
+export function MissionApp({ onSubmit }) {
+    return <button className="genie-btn" onClick={() => onSubmit(JSON.stringify({ request: "run" }))}>Run</button>;
+}
+```
+'''
 
 
 class _Orchestrator:
@@ -88,3 +121,30 @@ async def test_get_build_output_prefers_completed_persisted_output() -> None:
     )
 
     assert output == "completed build"
+
+
+async def test_validate_build_output_accepts_exact_completed_build() -> None:
+    service = WorkshopService(
+        orchestrator=_Orchestrator(_run(output_text=_VALID_BUILD)),  # type: ignore[arg-type]
+        session_service=AsyncMock(),
+    )
+
+    await service.validate_build_output(
+        session_id="session-1",
+        requesting_user_id="user-1",
+        workflow_run_id="run-1",
+    )
+
+
+async def test_validate_build_output_rejects_invalid_build_before_deploy() -> None:
+    service = WorkshopService(
+        orchestrator=_Orchestrator(_run(output_text="incomplete build")),  # type: ignore[arg-type]
+        session_service=AsyncMock(),
+    )
+
+    with pytest.raises(MaterializedCodeError, match="No materializable"):
+        await service.validate_build_output(
+            session_id="session-1",
+            requesting_user_id="user-1",
+            workflow_run_id="run-1",
+        )

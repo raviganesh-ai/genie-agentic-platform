@@ -350,6 +350,80 @@ def test_materialize_build_accepts_constant_calls_to_dynamic_delegation_helper()
     assert build.orchestrator_module is not None
 
 
+def _captured_mapped_agent_helper_output() -> str:
+    return _dynamic_delegation_helper_output().replace(
+        "        async def _delegate(**tool_input):\n"
+        "            agent = MissionFoundryAgent(\n"
+        "                agent_name=AGENT_FOUNDRY_NAMES[agent_display_name]\n"
+        "            )\n"
+        "            return await agent.run(tool_input)\n",
+        "        foundry_name = AGENT_FOUNDRY_NAMES[agent_display_name]\n"
+        "        specialist_agent = MissionFoundryAgent(agent_name=foundry_name)\n\n"
+        "        async def _delegate(**tool_input):\n"
+        "            return await specialist_agent.run(tool_input)\n",
+    )
+
+
+def test_materialize_build_accepts_dynamic_helper_with_captured_mapped_agent():
+    output = _captured_mapped_agent_helper_output()
+
+    build = materialize_build(output)
+
+    assert build.orchestrator_module is not None
+
+
+@pytest.mark.parametrize(
+    ("original", "replacement", "failure_match"),
+    [
+        (
+            "foundry_name = AGENT_FOUNDRY_NAMES[agent_display_name]",
+            'foundry_name = "hardcoded-agent"',
+            "AGENT_FOUNDRY_NAMES mappings",
+        ),
+        (
+            "return await specialist_agent.run(tool_input)",
+            "return await unrelated_agent.run(tool_input)",
+            "awaited specialist runs",
+        ),
+        (
+            "result = await tool(payload=payload)",
+            "result = tool(payload=payload)",
+            "awaited specialist runs",
+        ),
+        (
+            'await on_progress(f"{agent_display_name} completed.")',
+            'await on_progress("Specialist completed.")',
+            "start/completion progress narration",
+        ),
+    ],
+)
+def test_materialize_build_rejects_unproven_captured_mapped_agent_helper(
+    original: str,
+    replacement: str,
+    failure_match: str,
+):
+    output = _captured_mapped_agent_helper_output()
+    assert original in output
+
+    with pytest.raises(MaterializedCodeError, match=failure_match):
+        materialize_build(output.replace(original, replacement))
+
+
+def test_materialize_build_rejects_agent_from_sibling_nested_scope():
+    output = _captured_mapped_agent_helper_output().replace(
+        "        async def _delegate(**tool_input):\n"
+        "            return await specialist_agent.run(tool_input)\n",
+        "        async def _sibling():\n"
+        "            unrelated_agent = MissionFoundryAgent(agent_name=foundry_name)\n"
+        "            return unrelated_agent\n\n"
+        "        async def _delegate(**tool_input):\n"
+        "            return await unrelated_agent.run(tool_input)\n",
+    )
+
+    with pytest.raises(MaterializedCodeError, match="awaited specialist runs"):
+        materialize_build(output)
+
+
 @pytest.mark.parametrize(
     ("original", "replacement", "failure_match"),
     [
