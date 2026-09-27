@@ -256,6 +256,7 @@ jobs:
         run: npm run build
         env:
           VITE_GENIE_API_BASE_URL: ${{ needs.prepare-gateway.outputs.gateway-url }}
+          VITE_BUILD_COMPONENT_POLL_MS: ${{ vars.VITE_BUILD_COMPONENT_POLL_MS }}
 
       - name: Deploy to Azure Static Web Apps
         timeout-minutes: 5

@@ -123,4 +123,35 @@ describe("useWorkflowEventStream", () => {
 
     await waitFor(() => expect(result.current.stepDeltaText[key]).toBe(""));
   });
+
+  it("clears delegated agent text when the orchestrator restarts the same step", async () => {
+    const buildKey = workflowStepDeltaKey("build-solution", "build-agent");
+    const buildDelta: WorkflowStreamEvent = {
+      ...SAMPLE_EVENT,
+      event_type: "step_delta",
+      step_id: "build-solution",
+      agent_id: "build-agent",
+      delta: "stale build",
+    };
+    const restarted: WorkflowStreamEvent = {
+      ...SAMPLE_EVENT,
+      event_type: "step_started",
+      step_id: "build-solution",
+      agent_id: "genie-orchestrator",
+    };
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        sseResponse([
+          `data: ${JSON.stringify(buildDelta)}\n\n`,
+          `data: ${JSON.stringify(restarted)}\n\n`,
+        ]),
+      ),
+    );
+
+    const { result } = renderHook(() => useWorkflowEventStream("session-1"));
+
+    await waitFor(() => expect(result.current.stepDeltaText[buildKey]).toBeUndefined());
+  });
 });

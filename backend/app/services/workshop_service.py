@@ -223,12 +223,17 @@ class WorkshopService:
             (r for r in run.step_results if r.step_id == "build-solution"),
             None,
         )
-        
-        # Return output whether the step is still running or has completed
-        # (frontend just gets whatever is available right now)
-        if build_step is not None:
-            return build_step.output_text or ""
-        return ""
+        live_output = self._orchestrator.workflow_event_bus.get_step_delta_text(
+            session_id=session_id,
+            workflow_run_id=workflow_run_id,
+            step_id="build-solution",
+            agent_id="build-agent",
+        )
+        if run.status == "running":
+            return live_output
+        if build_step is not None and build_step.output_text:
+            return build_step.output_text
+        return live_output
 
     async def _authorize(self, session_id: str, requesting_user_id: str) -> None:
         await self._session_service.get_session(

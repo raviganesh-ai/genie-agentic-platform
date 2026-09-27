@@ -5,6 +5,7 @@ import { useSessionContext } from "@/state/SessionContext";
 import { useWorkshop } from "@/hooks/useWorkshop";
 import { useAsyncResource } from "@/hooks/useAsyncResource";
 import { workflowApi } from "@/services/workflowApi";
+import { workshopApi } from "@/services/workshopApi";
 import { getTraceId } from "@/state/traceRegistry";
 import { ApiError } from "@/services/httpClient";
 import { PageHeader } from "@/layouts/AppShell";
@@ -22,6 +23,7 @@ import { GeneratedArtifacts } from "./GeneratedArtifacts";
  * rendered live while the Build Agent is still generating. */
 const BUILD_STEP_ID = "build-solution";
 const BUILD_AGENT_ID = "build-agent";
+const BUILD_COMPONENT_POLL_MS = Number(import.meta.env.VITE_BUILD_COMPONENT_POLL_MS ?? 0);
 
 export function WorkshopPage(): JSX.Element {
   const navigate = useNavigate();
@@ -72,6 +74,22 @@ export function WorkshopPage(): JSX.Element {
   );
   const buildOutputText = buildStepResult?.output_text ?? "";
   const buildError = buildStepResult?.error ?? null;
+  const buildInProgress = run?.status === "running";
+  const partialBuildFetcher = useCallback(
+    () =>
+      sessionId && workflowRunId
+        ? workshopApi.getBuildComponents(sessionId, workflowRunId)
+        : Promise.reject(new Error("No active workflow run")),
+    [sessionId, workflowRunId],
+  );
+  const { data: partialBuild } = useAsyncResource(
+    partialBuildFetcher,
+    [sessionId, workflowRunId],
+    {
+      enabled: Boolean(sessionId && workflowRunId && (buildInProgress || !buildOutputText)),
+      pollIntervalMs: BUILD_COMPONENT_POLL_MS,
+    },
+  );
   // The Build Agent's own real streamed content so far, tagged with its own
   // agent_id (never genie-orchestrator's later verbatim echo of the same
   // text - see _stream_and_publish_deltas in orchestration_tools.py) - shown
@@ -79,6 +97,9 @@ export function WorkshopPage(): JSX.Element {
   // next poll confirms `buildOutputText` above is the final, authoritative
   // text.
   const liveBuildText = stepDeltaText[workflowStepDeltaKey(BUILD_STEP_ID, BUILD_AGENT_ID)] ?? "";
+  const polledBuildText = partialBuild?.build_output ?? "";
+  const currentBuildText =
+    liveBuildText.length >= polledBuildText.length ? liveBuildText : polledBuildText;
   // While a "Re-run UI & Agent Design" retry is in flight, prefer the live
   // streaming buffer over the OLD stored `buildOutputText` - otherwise the
   // prior (partially-failed) result would just sit frozen on screen for the
@@ -95,9 +116,9 @@ export function WorkshopPage(): JSX.Element {
   // (`liveBuildText`/`stepDeltaText`) - `buildOutputText` (the official
   // stored step result) only exists once build-solution has fully
   // completed, since `step_results` never has a partial/in-progress entry.
-  const displayedBuildText = rerunningBuild
-    ? liveBuildText || buildOutputText
-    : buildOutputText || liveBuildText;
+  const displayedBuildText = buildInProgress
+    ? currentBuildText || buildOutputText
+    : buildOutputText || currentBuildText;
   // True as soon as the Build Agent's own real generation (every
   // specialist agent, the Orchestrator Agent, then the UI) has actually
   // finished streaming - well before `buildOutputText` above is populated,
@@ -107,7 +128,9 @@ export function WorkshopPage(): JSX.Element {
   // proceed button below on this instead means the user is not stuck
   // staring at fully-generated code with no way to proceed while that
   // redundant echo is still being generated.
-  const buildGenerationComplete = Boolean(buildOutputText) || isBuildOutputComplete(displayedBuildText);
+  const buildGenerationComplete = buildInProgress
+    ? isBuildOutputComplete(currentBuildText)
+    : Boolean(buildOutputText) || isBuildOutputComplete(currentBuildText);
 
   // Any live event at all for build-solution (not just its own delta text)
   // is direct proof the step has already started server-side - a
@@ -117,8 +140,11 @@ export function WorkshopPage(): JSX.Element {
   // `liveBuildText` alone would forget that proof and could false-positive
   // "hasn't started" on a run that is genuinely still generating.
   const hasBuildStepLiveEvent = useMemo(
-    () => liveEvents.some((event) => event.step_id === BUILD_STEP_ID),
-    [liveEvents],
+    () =>
+      liveEvents.some(
+        (event) => event.workflow_run_id === workflowRunId && event.step_id === BUILD_STEP_ID,
+      ),
+    [liveEvents, workflowRunId],
   );
 
   // Arms a one-shot timer whenever this run has neither a recorded
@@ -131,7 +157,7 @@ export function WorkshopPage(): JSX.Element {
   // legitimately take a while between visible chunks, especially right
   // after switching tabs away and back.
   useEffect(() => {
-    if (buildStepResult || liveBuildText || hasBuildStepLiveEvent) {
+    if (buildStepResult || currentBuildText || hasBuildStepLiveEvent) {
       setBuildStartStuck(false);
       return;
     }
@@ -142,7 +168,7 @@ export function WorkshopPage(): JSX.Element {
     // the step started server-side at all, not while it's still generating.
     const timer = window.setTimeout(() => setBuildStartStuck(true), 300_000);
     return () => window.clearTimeout(timer);
-  }, [workflowRunId, buildStepResult, liveBuildText, hasBuildStepLiveEvent]);
+  }, [workflowRunId, buildStepResult, currentBuildText, hasBuildStepLiveEvent]);
 
   // missionError only ever means "the fire-and-forget request that was
   // supposed to KICK OFF build-solution failed to confirm that" (see
@@ -154,10 +180,10 @@ export function WorkshopPage(): JSX.Element {
   // either arrives - otherwise the user sees an alarming error over a run
   // that is actually succeeding.
   useEffect(() => {
-    if (missionError && (buildStepResult || liveBuildText)) {
+    if (missionError && (buildStepResult || currentBuildText)) {
       setMissionError(null);
     }
-  }, [missionError, buildStepResult, liveBuildText, setMissionError]);
+  }, [missionError, buildStepResult, currentBuildText, setMissionError]);
 
   // The build-solution step can fail (e.g. a transient Foundry/agent
   // execution error) - the backend now stores that as a retryable "failed"
@@ -246,7 +272,7 @@ export function WorkshopPage(): JSX.Element {
       />
       {workshop.error ? <ErrorState error={workshop.error} /> : null}
       {rerunBuildError ? <ErrorState error={{ message: rerunBuildError }} /> : null}
-      {missionError && !buildStepResult && !liveBuildText ? (
+      {missionError && !buildStepResult && !currentBuildText ? (
         // Set by ArchitectureStudioPage's approval handler if its own
         // fire-and-forget kickoff of build-solution failed after already
         // navigating here - must not be left as a console-only log the user
@@ -270,7 +296,7 @@ export function WorkshopPage(): JSX.Element {
             // - in both cases the staggered from-scratch reveal animation
             // must be skipped so already-shown artifacts don't flicker away
             // and re-reveal on every delta.
-            revealImmediately={!buildOutputText || rerunningBuild}
+            revealImmediately={buildInProgress || !buildOutputText || rerunningBuild}
           />
         ) : buildError ? (
           <ErrorState

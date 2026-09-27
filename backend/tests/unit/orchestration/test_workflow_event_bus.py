@@ -26,6 +26,46 @@ async def test_publish_with_no_subscribers_is_a_safe_noop() -> None:
     await bus.publish(_event())  # must not raise
 
 
+async def test_accumulates_step_deltas_without_a_live_subscriber() -> None:
+    bus = WorkflowEventBus()
+    await bus.publish(_event(event_type="step_delta", agent_id="build-agent", delta="first"))
+    await bus.publish(_event(event_type="step_delta", agent_id="build-agent", delta=" second"))
+
+    assert bus.get_step_delta_text(
+        session_id="session-1",
+        workflow_run_id="run-1",
+        step_id="step-a",
+        agent_id="build-agent",
+    ) == "first second"
+
+
+async def test_step_started_clears_prior_agent_deltas_for_the_step() -> None:
+    bus = WorkflowEventBus()
+    await bus.publish(_event(event_type="step_delta", agent_id="build-agent", delta="old build"))
+
+    await bus.publish(_event(event_type="step_started", agent_id="genie-orchestrator"))
+
+    assert bus.get_step_delta_text(
+        session_id="session-1",
+        workflow_run_id="run-1",
+        step_id="step-a",
+        agent_id="build-agent",
+    ) == ""
+
+
+async def test_new_subscriber_receives_accumulated_delta_snapshot() -> None:
+    bus = WorkflowEventBus()
+    await bus.publish(_event(event_type="step_delta", agent_id="build-agent", delta="code"))
+
+    async with bus.subscribe("session-1") as queue:
+        replayed = await asyncio.wait_for(queue.get(), timeout=1.0)
+
+    assert replayed.event_type == "step_delta"
+    assert replayed.workflow_run_id == "run-1"
+    assert replayed.agent_id == "build-agent"
+    assert replayed.delta == "code"
+
+
 async def test_subscriber_receives_published_event_for_its_session() -> None:
     bus = WorkflowEventBus()
     async with bus.subscribe("session-1") as queue:

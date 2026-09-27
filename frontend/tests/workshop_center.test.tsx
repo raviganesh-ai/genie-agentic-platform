@@ -147,6 +147,31 @@ describe("WorkshopPage", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("renders accumulated component code from polling when the SSE stream was missed", async () => {
+    mockFetchSequence([
+      {
+        match: `/workflows/runs/${FIXTURE_WORKFLOW_RUN_ID}`,
+        response: buildWorkflowRunResult({ status: "running", step_results: [] }),
+      },
+      {
+        match: `/workshop/build-components/${FIXTURE_WORKFLOW_RUN_ID}`,
+        response: {
+          build_output:
+            "```python\n# agent: Ticket Classifier Agent\nclass TicketClassifierAgent:\n    pass\n```",
+        },
+      },
+    ]);
+
+    renderWithProviders(<WorkshopPage />, {
+      sessionId: FIXTURE_SESSION_ID,
+      workflowRunId: FIXTURE_WORKFLOW_RUN_ID,
+    });
+
+    await waitFor(() =>
+      expect(screen.getByText(/Generated Agent Code - Ticket Classifier Agent/i)).toBeInTheDocument(),
+    );
+  });
+
   it("regenerates only the UI component's code after the user types an instruction and clicks Regenerate", async () => {
     mockFetchSequence([
       {

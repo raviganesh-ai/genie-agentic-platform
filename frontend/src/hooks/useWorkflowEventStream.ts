@@ -69,7 +69,13 @@ export function useWorkflowEventStream(sessionId: string | null): WorkflowEventS
 
         const key = workflowStepDeltaKey(event.step_id, event.agent_id);
         if (event.event_type === "step_started") {
-          setStepDeltaText((prev) => ({ ...prev, [key]: "" }));
+          const stepPrefix = `${event.step_id}::`;
+          setStepDeltaText((prev) => ({
+            ...Object.fromEntries(
+              Object.entries(prev).filter(([existingKey]) => !existingKey.startsWith(stepPrefix)),
+            ),
+            [key]: "",
+          }));
         } else if (event.event_type === "step_delta" && event.delta) {
           setStepDeltaText((prev) => ({ ...prev, [key]: (prev[key] ?? "") + event.delta }));
         }
