@@ -774,6 +774,42 @@ def test_materialize_build_allows_wildcard_key_scan_backed_by_orchestrator_polic
     assert "containsKeyMaterial" in build.ui_component
 
 
+def test_materialize_build_allows_wildcard_key_scan_backed_by_specialist_agent_policy():
+    # The blindness/key-artifact policy is often owned by a dedicated
+    # specialist agent (e.g. a "Blind Run Manager Agent"), not inline in
+    # orchestrator.py itself - the gate must scan every generated backend
+    # module, not just the orchestrator's own source.
+    output = _SAMPLE_OUTPUT.replace(
+        _SAMPLE_UI_COMPONENT,
+        """export function MissionApp({ onSubmit }) {
+    const containsKeyMaterial = (content: string) =>
+        content.toLowerCase().includes("key");
+    const handleFile = async (file: File) => {
+        const content = await file.text();
+        const attachments = [{ name: file.name, content }];
+        onSubmit(JSON.stringify({ filename: file.name }), attachments);
+    };
+    return <form className=\"genie-form\">
+        <div className=\"genie-field genie-dropzone\">
+            <input type=\"file\" style={{ display: \"none\" }} onChange={(event) => handleFile(event.target.files[0])} />
+        </div>
+    </form>;
+}""",
+    ).replace(
+        "# agent: Requirements Specialist\nasync def run() -> None:\n    pass",
+        "# agent: Requirements Specialist\n"
+        "_KEY_PATTERN = re.compile(r\"key\", re.IGNORECASE)\n\n"
+        "async def run(filename: str = \"\") -> None:\n"
+        "    if _KEY_PATTERN.search(filename):\n"
+        "        raise ValueError(\"blocked\")",
+    )
+
+    build = materialize_build(output)
+
+    assert build.ui_component is not None
+    assert "containsKeyMaterial" in build.ui_component
+
+
 
 def test_materialize_build_allows_non_upload_json_parsing():
     output = _SAMPLE_OUTPUT.replace(
