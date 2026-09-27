@@ -36,6 +36,8 @@ export function WorkshopPage(): JSX.Element {
   const [rerunBuildError, setRerunBuildError] = useState<string | null>(null);
   const [validatingBuild, setValidatingBuild] = useState(false);
   const [buildValidationError, setBuildValidationError] = useState<string | null>(null);
+  const [fixingUiComponent, setFixingUiComponent] = useState(false);
+  const [fixUiComponentError, setFixUiComponentError] = useState<string | null>(null);
   const [reviewAcknowledged, setReviewAcknowledged] = useState(false);
   // Architecture Studio's approval handler kicks off build-solution with a
   // fire-and-forget resume call (it navigates here immediately rather than
@@ -237,6 +239,7 @@ export function WorkshopPage(): JSX.Element {
     if (!sessionId || !workflowRunId) return;
     setValidatingBuild(true);
     setBuildValidationError(null);
+    setFixUiComponentError(null);
     try {
       await workshopApi.validateBuild(sessionId, workflowRunId);
       navigate("/outputs");
@@ -248,6 +251,51 @@ export function WorkshopPage(): JSX.Element {
       setValidatingBuild(false);
     }
   }, [navigate, sessionId, workflowRunId]);
+
+  const handleFixUiValidationFailure = useCallback(async () => {
+    if (!sessionId || !workflowRunId || !buildValidationError) return;
+    setFixingUiComponent(true);
+    setFixUiComponentError(null);
+    try {
+      // Every current build-solution validation failure (see
+      // MaterializedCodeError's raise sites in code_materializer.py) is
+      // raised against the generated UI component specifically - never the
+      // orchestrator or a specialist agent module - so "ui" is always the
+      // right (and only) component to force-regenerate here.
+      //
+      // Without "regenerate_components: ui", resuming build-solution
+      // reuses every previously-"succeeded" component verbatim (see
+      // _extract_reusable_components/reusable_components in
+      // orchestration_tools.py) - including the exact same contractually
+      // invalid UI code that just failed validation, since that component
+      // itself never raised a *generation* failure. Without this forced
+      // override, clicking a plain "Re-run UI & Agent Design" reproduces
+      // this same validation error every single time.
+      const traceId = getTraceId(workflowRunId) ?? undefined;
+      const repairPolicies = [
+        governancePolicies.trim(),
+        "Fix this exact validation failure in the generated UI component's submit " +
+          "payload and do not repeat it: " +
+          buildValidationError,
+      ]
+        .filter((entry) => entry.length > 0)
+        .join("\n\n");
+      await workflowApi.resumeRun(sessionId, workflowRunId, traceId, {
+        "build-solution": {
+          step_id: "build-solution",
+          variables: { policies: repairPolicies, regenerate_components: "ui" },
+        },
+      });
+      setBuildValidationError(null);
+      await refreshRun();
+    } catch (err) {
+      setFixUiComponentError(
+        (err as ApiError).message ?? "Failed to regenerate the UI component.",
+      );
+    } finally {
+      setFixingUiComponent(false);
+    }
+  }, [buildValidationError, governancePolicies, refreshRun, sessionId, workflowRunId]);
 
   if (!workflowRunId || !sessionId) {
     return (
@@ -351,6 +399,21 @@ export function WorkshopPage(): JSX.Element {
               {buildValidationError ? (
                 <div style={{ marginTop: 12 }}>
                   <ErrorState error={{ message: buildValidationError }} />
+                  <Button
+                    appearance="secondary"
+                    style={{ marginTop: 8 }}
+                    disabled={fixingUiComponent}
+                    onClick={() => void handleFixUiValidationFailure()}
+                  >
+                    {fixingUiComponent
+                      ? "Regenerating UI component..."
+                      : "Fix UI component and re-validate"}
+                  </Button>
+                  {fixUiComponentError ? (
+                    <div style={{ marginTop: 8 }}>
+                      <ErrorState error={{ message: fixUiComponentError }} />
+                    </div>
+                  ) : null}
                 </div>
               ) : null}
             </div>

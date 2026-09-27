@@ -155,6 +155,79 @@ describe("WorkshopPage", () => {
     expect(proceedButton.parentElement).toContainElement(validationError);
   });
 
+  it("regenerates only the UI component (forcing past reuse) with the exact validation error as guidance when the user clicks Fix UI component and re-validate", async () => {
+    const fetchMock = mockFetchSequence([
+      {
+        match: `/workflows/runs/${FIXTURE_WORKFLOW_RUN_ID}`,
+        response: buildWorkflowRunResult({
+          step_results: [
+            {
+              step_id: "build-solution",
+              agent_id: "orchestrator",
+              status: "completed",
+              output_text: "```tsx\n// agent: ui\nexport function App() { return null; }\n```",
+              error: null,
+              started_at: "2026-07-23T10:00:00Z",
+              completed_at: "2026-07-23T10:01:00Z",
+            },
+          ],
+        }),
+      },
+      { match: "/approvals", response: [] },
+      {
+        match: `/workshop/build-components/${FIXTURE_WORKFLOW_RUN_ID}/validate`,
+        status: 422,
+        response: {
+          detail:
+            "The generated mission UI's submit payload groups fields inside nested objects.",
+        },
+      },
+      {
+        match: "/resume",
+        response: buildWorkflowRunResult({ status: "completed", step_results: [] }),
+      },
+    ]);
+
+    renderWithProviders(<WorkshopPage />, {
+      sessionId: FIXTURE_SESSION_ID,
+      workflowRunId: FIXTURE_WORKFLOW_RUN_ID,
+      governancePolicies: "Never expose PII.",
+    });
+
+    const user = userEvent.setup();
+    await user.click(
+      await screen.findByRole("checkbox", { name: /AI can perform mistake/i }),
+    );
+    await user.click(screen.getByRole("button", { name: /Proceed to Deploy & Launch/i }));
+
+    await screen.findByText(
+      "The generated mission UI's submit payload groups fields inside nested objects.",
+    );
+
+    await user.click(screen.getByRole("button", { name: "Fix UI component and re-validate" }));
+
+    await waitFor(() => {
+      const resumeCall = fetchMock.mock.calls.find((call) => String(call[0]).endsWith("/resume"));
+      expect(resumeCall).toBeDefined();
+      const [, resumeInit] = resumeCall as unknown as [string, RequestInit];
+      const body = JSON.parse(resumeInit.body as string);
+      const stepInput = body.step_inputs["build-solution"];
+      expect(stepInput.variables.regenerate_components).toBe("ui");
+      expect(stepInput.variables.policies).toContain("Never expose PII.");
+      expect(stepInput.variables.policies).toContain(
+        "The generated mission UI's submit payload groups fields inside nested objects.",
+      );
+    });
+
+    await waitFor(() =>
+      expect(
+        screen.queryByText(
+          "The generated mission UI's submit payload groups fields inside nested objects.",
+        ),
+      ).not.toBeInTheDocument(),
+    );
+  });
+
   it("shows the review checkbox once the Build Agent's live streamed UI code block closes, even before build-solution is marked completed server-side", async () => {
     const deltaEvent = (delta: string) => ({
       event_type: "step_delta",
