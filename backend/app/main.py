@@ -34,6 +34,7 @@ from app.api import (
     outputs,
     peer_review,
     prototype_admin,
+    prototypes,
     replay,
     requirements,
     sessions,
@@ -389,6 +390,7 @@ def create_app(
     app.include_router(memory.router)
     app.include_router(peer_review.router)
     app.include_router(prototype_admin.router)
+    app.include_router(prototypes.router)
     app.include_router(approvals.router)
     app.include_router(architecture.router)
     app.include_router(workshop.router)

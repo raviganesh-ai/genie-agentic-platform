@@ -1714,6 +1714,17 @@ class DeploymentPipelineService:
     def list_all_runs(self) -> list[DeploymentPipelineRun]:
         return sorted(self._runs.values(), key=lambda run: run.created_at, reverse=True)
 
+    def list_runs_for_owner(self, owner_user_id: str) -> list[DeploymentPipelineRun]:
+        """Every prototype run owned by one user, across ALL of their sessions -
+        the self-service inventory a user needs to find and delete a stale
+        prototype themselves after hitting ``prototype_max_active_per_owner``
+        (see ``start()``'s active-count check), without requiring admin access."""
+        return sorted(
+            (run for run in self._runs.values() if run.owner_user_id == owner_user_id),
+            key=lambda run: run.created_at,
+            reverse=True,
+        )
+
     def get_build_root(self, pipeline_run_id: str) -> Path | None:
         workspace = self._workspaces.get(pipeline_run_id)
         return workspace.backend_root if workspace else None

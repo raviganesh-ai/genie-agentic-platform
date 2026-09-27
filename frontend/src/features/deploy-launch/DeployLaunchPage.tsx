@@ -3,6 +3,7 @@ import { Badge, Button, MessageBar, MessageBarBody, MessageBarTitle, Text } from
 import { useSessionContext } from "@/state/SessionContext";
 import { useAsyncResource } from "@/hooks/useAsyncResource";
 import { deployLaunchApi } from "@/services/deployLaunchApi";
+import { prototypesApi } from "@/services/prototypesApi";
 import { getTraceId } from "@/state/traceRegistry";
 import { ApiError } from "@/services/httpClient";
 import { PageHeader } from "@/layouts/AppShell";
@@ -13,10 +14,12 @@ import { AgentActivityAnimation } from "@/components/AgentActivityAnimation";
 import { useWorkflowEventStream } from "@/hooks/useWorkflowEventStream";
 import { DEPLOYMENT_STEP_ORDER, DEPLOYMENT_STEP_NAMES } from "@/types/deployLaunch";
 import type {
+  DeploymentPipelineRun,
   DeploymentStepId,
   DeploymentStepResult,
   ProvisionedAgentStatus,
 } from "@/types/deployLaunch";
+
 
 const POLL_MS = 4000;
 
@@ -328,6 +331,112 @@ function StepRow({
 }
 
 /**
+ * Self-service recovery shown only after `start()` fails with "Active
+ * prototype limit reached" - lists every prototype the current user owns
+ * (across ALL of their sessions, see `prototypesApi.listMine`) so they can
+ * delete a stale one themselves and retry, instead of the error message's
+ * "delete ... an existing prototype" instruction being a dead end with no
+ * actual way to do it anywhere in the product.
+ */
+function PrototypeQuotaManager({ onChanged }: { onChanged: () => void }): JSX.Element {
+  const [prototypes, setPrototypes] = useState<DeploymentPipelineRun[] | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setLoadError(null);
+    try {
+      setPrototypes(await prototypesApi.listMine());
+    } catch (err) {
+      setLoadError((err as ApiError).message ?? "Failed to load your prototypes.");
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const handleDelete = useCallback(
+    async (pipelineRunId: string) => {
+      setDeletingId(pipelineRunId);
+      setDeleteError(null);
+      try {
+        await prototypesApi.deleteMine(pipelineRunId);
+        await load();
+        onChanged();
+      } catch (err) {
+        setDeleteError((err as ApiError).message ?? "Failed to delete that prototype.");
+      } finally {
+        setDeletingId(null);
+      }
+    },
+    [load, onChanged],
+  );
+
+  if (loadError) {
+    return (
+      <Text size={200} style={{ color: "#d1495b" }}>
+        {loadError}
+      </Text>
+    );
+  }
+  if (prototypes === null) {
+    return (
+      <Text size={200} style={{ opacity: 0.7 }}>
+        Loading your prototypes...
+      </Text>
+    );
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      <Text size={200} weight="semibold">
+        Your prototypes
+      </Text>
+      {deleteError ? (
+        <Text size={200} style={{ color: "#d1495b" }}>
+          {deleteError}
+        </Text>
+      ) : null}
+      {prototypes.length === 0 ? (
+        <Text size={200} style={{ opacity: 0.7 }}>
+          None found - the blocking prototype may belong to a different owner or already be deleting.
+        </Text>
+      ) : (
+        prototypes.map((prototype) => (
+          <div
+            key={prototype.id}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 12,
+              padding: "6px 10px",
+              background: "rgba(255,255,255,0.03)",
+              borderRadius: 4,
+            }}
+          >
+            <Text size={200}>
+              {prototype.mission_title ?? prototype.id} — {prototype.status}
+              {prototype.cleanup_status !== "active" ? ` (${prototype.cleanup_status})` : ""}
+            </Text>
+            <Button
+              size="small"
+              appearance="subtle"
+              disabled={deletingId === prototype.id || prototype.cleanup_status !== "active"}
+              onClick={() => void handleDelete(prototype.id)}
+            >
+              {deletingId === prototype.id ? "Deleting..." : "Delete"}
+            </Button>
+          </div>
+        ))
+      )}
+    </div>
+  );
+}
+
+/**
  * The real Deploy & Launch pipeline: nine named, code-driven steps
  * (`DEPLOYMENT_STEP_ORDER`) executed by the backend's
  * `DeploymentPipelineService` against real Azure SDKs (or their Null/local
@@ -633,6 +742,11 @@ export function DeployLaunchPage(): JSX.Element {
                 {starting ? "Starting..." : "Retry Deploy & Launch"}
               </Button>
             </div>
+            {startError?.toLowerCase().includes("prototype limit") ? (
+              <div style={{ marginTop: 12 }}>
+                <PrototypeQuotaManager onChanged={() => void handleStart()} />
+              </div>
+            ) : null}
           </SectionCard>
         ) : null}
 

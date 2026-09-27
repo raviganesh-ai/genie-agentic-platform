@@ -1645,6 +1645,27 @@ async def test_owner_cannot_exceed_active_prototype_limit(tmp_path: Path):
         )
 
 
+async def test_list_runs_for_owner_returns_only_that_owners_runs(tmp_path: Path):
+    service = _build_service(tmp_path=tmp_path)
+    mine = await service.start(
+        session_id="session-1",
+        requesting_user_id="user-a",
+        workflow_run_id="run-1",
+    )
+    await service.wait_for_run(mine.id)
+    other = await service.start(
+        session_id="session-2",
+        requesting_user_id="user-b",
+        workflow_run_id="run-1",
+    )
+    await service.wait_for_run(other.id)
+
+    owned = service.list_runs_for_owner("user-a")
+
+    assert [run.id for run in owned] == [mine.id]
+    assert all(run.owner_user_id == "user-a" for run in owned)
+
+
 async def test_cleanup_expired_deletes_terminal_prototype(tmp_path: Path):
     repository = InMemoryDeploymentRunRepository()
     service = _build_service(
