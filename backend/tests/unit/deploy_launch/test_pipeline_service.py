@@ -481,6 +481,16 @@ async def test_full_pipeline_runs_every_step(tmp_path: Path):
     index_html_source = (build_root.parent / "frontend" / "index.html").read_text(encoding="utf-8")
     assert '<script src="/runtime-config.js"></script>' in index_html_source
 
+    # main.tsx is a Python triple-quoted template - any single-backslash "\n"
+    # meant to appear literally inside a generated JS string is instead
+    # interpreted by Python as a real newline, splitting the JS string
+    # literal across two lines and failing Vite's build with "Unterminated
+    # string literal" (confirmed via a real ACR build failure). The
+    # generated source must contain the literal two-character sequence.
+    main_tsx_source = (build_root.parent / "frontend" / "src" / "main.tsx").read_text(encoding="utf-8")
+    assert 'parsed.progress + "\\n" }' in main_tsx_source
+    assert '\n" }' not in main_tsx_source
+
 
 class _PartialMissionAgentProvisioningService(NullMissionAgentProvisioningService):
     def __init__(self) -> None:

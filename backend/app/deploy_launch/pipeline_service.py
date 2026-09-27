@@ -1192,7 +1192,7 @@ function MissionConsole() {
                     if (!payload) continue;
                     const parsed = JSON.parse(payload);
                     if (parsed.progress) {
-                        setQueue((prior) => prior.map((entry) => (entry.id === item.id ? { ...entry, agentProgress: entry.agentProgress + parsed.progress + "\n" } : entry)));
+                        setQueue((prior) => prior.map((entry) => (entry.id === item.id ? { ...entry, agentProgress: entry.agentProgress + parsed.progress + "\\n" } : entry)));
                     } else if (parsed.delta) {
                         sawOutput = true;
                         setQueue((prior) => prior.map((entry) => (entry.id === item.id ? { ...entry, output: entry.output + parsed.delta } : entry)));
