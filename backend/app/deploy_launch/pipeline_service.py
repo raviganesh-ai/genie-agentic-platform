@@ -423,6 +423,24 @@ input:focus, textarea:focus, select:focus {
 .genie-input-surface input[type="file"] {
     width: 100%;
     overflow: hidden;
+    padding: 6px;
+}
+
+.genie-input-surface input[type="file"]::file-selector-button {
+    margin-right: 12px;
+    padding: 8px 16px;
+    color: #ffffff;
+    font: inherit;
+    font-weight: 650;
+    background-color: var(--genie-accent);
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background-color 120ms ease;
+}
+
+.genie-input-surface input[type="file"]::file-selector-button:hover {
+    background-color: var(--genie-accent-strong);
 }
 
 .genie-input-surface :where(input[type="range"]) {
@@ -443,10 +461,81 @@ input:focus, textarea:focus, select:focus {
 
 .genie-input-surface input[type="checkbox"],
 .genie-input-surface input[type="radio"] {
-    width: 17px;
-    height: 17px;
-    flex: 0 0 17px;
-    accent-color: var(--genie-accent);
+    appearance: none;
+    -webkit-appearance: none;
+    display: inline-grid;
+    place-content: center;
+    flex: 0 0 20px;
+    width: 20px;
+    height: 20px;
+    margin: 0;
+    background-color: var(--genie-surface);
+    border: 1.5px solid var(--genie-border-strong);
+    cursor: pointer;
+    transition: background-color 120ms ease, border-color 120ms ease;
+}
+
+.genie-input-surface input[type="checkbox"] {
+    border-radius: 4px;
+}
+
+.genie-input-surface input[type="radio"] {
+    border-radius: 50%;
+}
+
+.genie-input-surface input[type="checkbox"]::before {
+    content: "";
+    width: 11px;
+    height: 11px;
+    transform: scale(0);
+    transition: transform 120ms ease;
+    background-color: #ffffff;
+    clip-path: polygon(14% 44%, 0 65%, 50% 100%, 100% 16%, 80% 0%, 43% 62%);
+}
+
+.genie-input-surface input[type="radio"]::before {
+    content: "";
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    transform: scale(0);
+    transition: transform 120ms ease;
+    background-color: #ffffff;
+}
+
+.genie-input-surface input[type="checkbox"]:checked,
+.genie-input-surface input[type="radio"]:checked {
+    background-color: var(--genie-accent);
+    border-color: var(--genie-accent);
+}
+
+.genie-input-surface input[type="checkbox"]:checked::before,
+.genie-input-surface input[type="radio"]:checked::before {
+    transform: scale(1);
+}
+
+.genie-input-surface input[type="checkbox"]:hover:not(:disabled),
+.genie-input-surface input[type="radio"]:hover:not(:disabled) {
+    border-color: var(--genie-accent);
+}
+
+.genie-input-surface input[type="checkbox"]:focus-visible,
+.genie-input-surface input[type="radio"]:focus-visible {
+    outline: 3px solid rgba(24, 90, 189, 0.28);
+    outline-offset: 2px;
+}
+
+.genie-input-surface input[type="checkbox"]:disabled,
+.genie-input-surface input[type="radio"]:disabled {
+    background-color: var(--genie-surface-subtle);
+    border-color: var(--genie-border);
+    cursor: not-allowed;
+}
+
+.genie-input-surface input[type="checkbox"]:disabled:checked,
+.genie-input-surface input[type="radio"]:disabled:checked {
+    background-color: #9fb3c8;
+    border-color: #9fb3c8;
 }
 
 .genie-input-surface .genie-card {

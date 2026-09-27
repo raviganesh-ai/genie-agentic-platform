@@ -1120,6 +1120,20 @@ def test_generated_mission_shell_uses_one_visual_system_without_nested_cards() -
     )
 
 
+def test_generated_mission_shell_replaces_native_widget_chrome_with_custom_styling() -> None:
+    """Checkboxes/radios/file inputs keep native OS chrome unless explicitly restyled -
+    a real live mission was reported looking unpolished because of exactly this gap."""
+    from app.deploy_launch.pipeline_service import _FRONTEND_STYLES_CSS
+
+    assert 'input[type="checkbox"] {\n    border-radius: 4px;' in _FRONTEND_STYLES_CSS
+    assert 'input[type="radio"] {\n    border-radius: 50%;' in _FRONTEND_STYLES_CSS
+    assert 'input[type="checkbox"]:checked,' in _FRONTEND_STYLES_CSS
+    assert 'input[type="checkbox"]:disabled,' in _FRONTEND_STYLES_CSS
+    assert 'input[type="checkbox"]:focus-visible,' in _FRONTEND_STYLES_CSS
+    assert '::file-selector-button {' in _FRONTEND_STYLES_CSS
+    assert '::file-selector-button:hover {' in _FRONTEND_STYLES_CSS
+
+
 async def test_pipeline_does_not_regenerate_approved_build_before_provisioning(
     tmp_path: Path,
 ) -> None:
