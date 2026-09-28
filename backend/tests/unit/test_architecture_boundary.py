@@ -43,16 +43,6 @@ directly, each isolating that SDK behind its own interface:
   that happens to mention ``azure.ai.projects``/``azure.identity`` import
   lines as plain text. Allow-listed here to avoid a false positive rather
   than obfuscating the generated template's own real import lines.
-- ``app/deploy_launch/finops_cost_service.py`` owns the
-  ``DefaultAzureCredential`` lifecycle used to call the Azure Cost
-  Management REST API directly (no ``azure-mgmt-costmanagement``
-  dependency) for the Deploy & Launch pipeline's informational-only
-  FinOps cost report step (and, when configured, an operator's own FinOps
-  toolkit hub via the Kusto REST API).
-- ``app/deploy_launch/defender_for_cloud_gateway.py`` owns the
-  ``DefaultAzureCredential`` lifecycle used to call the Microsoft Defender
-  for Cloud assessments REST API directly for the Deploy & Launch
-  pipeline's informational-only security scan step.
 
 Every other module must depend only on those protocols, never on the SDK
 directly. This test fails closed if that boundary is ever violated.
@@ -80,8 +70,6 @@ _ALLOWED_RELATIVE_PATHS = {
     Path("deploy_launch/container_app_frontend_deployment_service.py"),
     Path("deploy_launch/code_materializer.py"),
     Path("deploy_launch/mission_identity_service.py"),
-    Path("deploy_launch/finops_cost_service.py"),
-    Path("deploy_launch/defender_for_cloud_gateway.py"),
 }
 
 

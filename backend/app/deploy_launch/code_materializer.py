@@ -57,32 +57,6 @@ _EXACT_FILE_NAME_COMPARISON_PATTERN: Final = re.compile(
     r"\b[A-Za-z_$][\w$]*\.name\s*(?:===|!==|==|!=)\s*"
     r"(?P<quote>['\"`])[^'\"`\r\n]*\.[A-Za-z0-9]{1,10}(?P=quote)",
 )
-_UI_JSON_PARSE_PATTERN: Final = re.compile(r"\bJSON\.parse\s*\(")
-_OVERBROAD_KEY_MATERIAL_PATTERN: Final = re.compile(
-    r"(?:\.includes\s*\(\s*['\"]key['\"]\s*\)|"
-    r"/[^/\r\n]*key[^/\r\n]*/[a-z]*\.test\s*\()",
-    re.IGNORECASE,
-)
-_INTERACTIVE_INPUT_PATTERN: Final = re.compile(r"<(?:input|select|textarea)\b", re.IGNORECASE)
-_FORM_PATTERN: Final = re.compile(r"<form\b", re.IGNORECASE)
-_BUTTON_PATTERN: Final = re.compile(r"<button\b", re.IGNORECASE)
-_FILE_INPUT_PATTERN: Final = re.compile(
-    r"<input\b[^>]*\btype\s*=\s*['\"]file['\"]", re.IGNORECASE
-)
-_FILE_TEXT_READ_PATTERN: Final = re.compile(r"\b[A-Za-z_$][\w$]*\.text\s*\(")
-_ON_SUBMIT_CALL_PATTERN: Final = re.compile(r"\bonSubmit\s*\(")
-_ON_SUBMIT_ATTACHMENTS_PATTERN: Final = re.compile(
-    r"\bonSubmit\s*\([^,]+,\s*[A-Za-z_$][\w$]*\s*\)", re.DOTALL
-)
-_DIRECT_INVOKE_PATTERN: Final = re.compile(
-    r"\bfetch\s*\([^)]*['\"`]/invoke(?:/stream)?['\"`]", re.DOTALL
-)
-_INLINE_STYLE_PATTERN: Final = re.compile(r"\bstyle\s*=", re.IGNORECASE)
-_INPUT_TAG_PATTERN: Final = re.compile(r"<input\b[^>]*>", re.IGNORECASE | re.DOTALL)
-_HIDDEN_FILE_INPUT_STYLE_PATTERN: Final = re.compile(
-    r"\bstyle\s*=\s*\{\{\s*display\s*:\s*(?P<quote>['\"])none(?P=quote)\s*\}\}",
-    re.IGNORECASE,
-)
 _ON_SUBMIT_INLINE_STRINGIFY_PATTERN: Final = re.compile(
     r"\bonSubmit\s*\(\s*JSON\.stringify\(\s*(\{)"
 )
@@ -238,19 +212,6 @@ def _has_nested_object_value(object_literal: str) -> bool:
     return False
 
 
-def _has_disallowed_inline_style(ui_component: str) -> bool:
-    """Allows only the non-visual hidden native control behind a file dropzone."""
-
-    def remove_allowed_hidden_style(match: re.Match[str]) -> str:
-        input_tag = match.group(0)
-        if not _FILE_INPUT_PATTERN.search(input_tag):
-            return input_tag
-        return _HIDDEN_FILE_INPUT_STYLE_PATTERN.sub("", input_tag)
-
-    normalized = _INPUT_TAG_PATTERN.sub(remove_allowed_hidden_style, ui_component)
-    return _INLINE_STYLE_PATTERN.search(normalized) is not None
-
-
 @dataclass(frozen=True)
 class MaterializedBuild:
     """The Build Agent's generated code, parsed into real, named files."""
@@ -349,91 +310,6 @@ def materialize_build(output_text: str) -> MaterializedBuild:
             "literal. Generated prototypes must validate uploaded content and file "
             "type, never an end-user-controlled filename or example filename."
         )
-
-    has_file_input = bool(
-        ui_component is not None and _FILE_INPUT_PATTERN.search(ui_component)
-    )
-
-    if has_file_input and ui_component is not None and _UI_JSON_PARSE_PATTERN.search(ui_component):
-        raise MaterializedCodeError(
-            "The generated mission UI parses uploaded JSON content before submission. "
-            "Mission UIs may validate only that an upload exists, is readable and "
-            "non-empty, and has the required general file type. The provisioned "
-            "backend/orchestrator must own schema and business-rule validation so "
-            "every upload reaches the real mission process."
-        )
-
-    if (
-        has_file_input
-        and ui_component is not None
-        and _OVERBROAD_KEY_MATERIAL_PATTERN.search(ui_component)
-    ):
-        raise MaterializedCodeError(
-            "The generated mission UI uses a broad '*key*' substring scan. That can "
-            "reject legitimate uploaded content or filenames before the provisioned "
-            "backend runs. Explicit key-artifact and blindness policy checks belong "
-            "in the mission's backend/orchestrator."
-        )
-
-    if ui_component is not None and _DIRECT_INVOKE_PATTERN.search(ui_component):
-        raise MaterializedCodeError(
-            "The generated mission UI calls the backend invoke endpoint directly. "
-            "Every generated component must hand off through its onSubmit prop so "
-            "the deterministic Mission Queue owns backend transport and streaming."
-        )
-
-    if ui_component is not None and _has_disallowed_inline_style(ui_component):
-        raise MaterializedCodeError(
-            "The generated mission UI contains an inline style prop. Mission Input must "
-            "use semantic HTML and the deterministic shell's genie-form, genie-form-section, "
-            "genie-form-grid, genie-field, genie-field-help, genie-actions, genie-dropzone, "
-            "and genie-btn classes so every prototype remains visually coherent."
-        )
-
-    if (
-        ui_component is not None
-        and _INTERACTIVE_INPUT_PATTERN.search(ui_component)
-        and not _ON_SUBMIT_CALL_PATTERN.search(ui_component)
-    ):
-        raise MaterializedCodeError(
-            "The generated mission UI renders user inputs but never calls its "
-            "onSubmit prop. Interactive prototypes must hand one flat JSON message "
-            "to the deterministic shell so the provisioned backend actually runs."
-        )
-
-    if has_file_input and ui_component is not None:
-        if not _FILE_TEXT_READ_PATTERN.search(ui_component):
-            raise MaterializedCodeError(
-                "The generated mission UI renders a file input but never reads the "
-                "selected File with File.text() before submission."
-            )
-        if not _ON_SUBMIT_ATTACHMENTS_PATTERN.search(ui_component):
-            raise MaterializedCodeError(
-                "The generated mission UI renders a file input but does not pass an "
-                "attachments array to onSubmit. Uploaded content must reach the "
-                "provisioned backend unchanged."
-            )
-
-    if ui_component is not None:
-        missing_semantic_classes: list[str] = []
-        if _FORM_PATTERN.search(ui_component) and "genie-form" not in ui_component:
-            missing_semantic_classes.append("genie-form")
-        if (
-            _INTERACTIVE_INPUT_PATTERN.search(ui_component)
-            and "genie-field" not in ui_component
-        ):
-            missing_semantic_classes.append("genie-field")
-        if has_file_input and "genie-dropzone" not in ui_component:
-            missing_semantic_classes.append("genie-dropzone")
-        if _BUTTON_PATTERN.search(ui_component) and "genie-btn" not in ui_component:
-            missing_semantic_classes.append("genie-btn")
-        if missing_semantic_classes:
-            raise MaterializedCodeError(
-                "The generated mission UI does not use the deterministic shell's "
-                "semantic visual system. Add these required classes: "
-                + ", ".join(missing_semantic_classes)
-                + "."
-            )
 
     if ui_component is not None and any(
         _has_nested_object_value(literal) for literal in _submit_payload_literals(ui_component)

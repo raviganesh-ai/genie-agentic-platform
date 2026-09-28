@@ -50,83 +50,6 @@ class AgentToolDefinition(BaseModel):
     parameters: list[AgentToolParameter] = Field(default_factory=list)
 
 
-McpApprovalMode = Literal["never_require", "always_require"]
-
-
-class AgentMcpToolDefinition(BaseModel):
-    """An externally configured Model Context Protocol (MCP) tool an agent may call.
-
-    Distinct from ``AgentToolDefinition`` (a Python function dispatched
-    through ``AgentToolRegistry``/``app.agents.tool_execution``): each
-    entry here points at a remote, HTTP-based MCP server that
-    ``agent_framework`` (``MCPStreamableHTTPTool``) connects to directly at
-    run time, discovering and calling that server's own tools - Genie's
-    backend never implements a handler for these itself.
-
-    ``server_url_setting`` names a ``Settings`` attribute (never a literal
-    URL) that Genie resolves the real server endpoint from at runtime, per
-    the "never hardcode Azure endpoints" Configuration Rule in
-    ``.github/copilot-instructions.md``. The Foundry agent resource must
-    still be provisioned (``scripts/provision_foundry_agents.py``) with the
-    MCP server's *discovered* tool schemas persisted as ordinary function
-    tools - see that script's module docstring for why: Azure AI Foundry
-    strips all tool declarations from requests that reference an existing
-    agent by name, so the model only ever learns a tool exists from what
-    is already persisted on the Foundry resource.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    name: str = Field(min_length=1)
-    description: str = Field(min_length=1)
-    server_url_setting: str = Field(min_length=1)
-    client_id_setting: str | None = Field(
-        default=None,
-        description=(
-            "Optional Settings attribute naming the Microsoft Entra ID "
-            "application (client) ID that the remote MCP server's incoming "
-            "HTTP requests are secured with (its Entra App Registration's "
-            "App ID, used as the OAuth2 audience 'api://<client-id>'). When "
-            "set, FoundryAgentProvider and provision_foundry_agents.py "
-            "acquire a Microsoft Entra ID access token for that audience "
-            "via the caller's own managed identity/DefaultAzureCredential "
-            "and attach it as an 'Authorization: Bearer' header on every "
-            "MCP request - never a client secret or static token. Verified "
-            "against Microsoft's own reference deployment for Azure MCP "
-            "Server on Container Apps (Azure-Samples/azmcp-foundry-aca-mi): "
-            "the server enforces Microsoft Entra ID authentication on all "
-            "incoming HTTP requests by default (`azmcp server start "
-            "--transport http` without the dangerous "
-            "`--dangerously-disable-http-incoming-auth` escape hatch, which "
-            "must never be used - see infra/modules/finops-mcp-server.bicep). "
-            "Left unset only for MCP servers that are not Genie-managed "
-            "self-hosted Azure MCP Server deployments (e.g. a local dev "
-            "server with auth intentionally disabled)."
-        ),
-    )
-    allowed_tools: list[str] | None = Field(
-        default=None,
-        description=(
-            "Optional allow-list restricting which of the MCP server's own "
-            "tools are exposed to this agent (e.g. ['azmcp_kusto_query'] out "
-            "of a general-purpose Azure MCP Server exposing many "
-            "namespaces - tool names follow azure-mcp's 'azmcp_<namespace>_"
-            "<command>' convention in '--mode all', not the bare CLI "
-            "subcommand name). None exposes every tool the server "
-            "advertises."
-        ),
-    )
-    approval_mode: McpApprovalMode = Field(
-        default="never_require",
-        description=(
-            "Whether a human must approve each MCP tool call before it "
-            "executes. 'always_require' is intended for MCP tools that can "
-            "mutate state; read-only query tools (e.g. Kusto query) may use "
-            "'never_require'."
-        ),
-    )
-
-
 class AgentDefinition(BaseModel):
     """A single agent's externally configured identity and capabilities."""
 
@@ -234,15 +157,6 @@ class AgentDefinition(BaseModel):
             "AgentToolRegistry (app.agents.tool_execution) for the agent's "
             "id, or a run reaching 'requires_action' for this tool fails "
             "closed."
-        ),
-    )
-    mcp_tools: list[AgentMcpToolDefinition] = Field(
-        default_factory=list,
-        description=(
-            "Externally configured Model Context Protocol tools this agent "
-            "may call at runtime (see AgentMcpToolDefinition) - remote "
-            "servers agent_framework connects to directly, distinct from "
-            "tool_definitions' locally dispatched function tools."
         ),
     )
 

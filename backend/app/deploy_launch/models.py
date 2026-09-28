@@ -9,17 +9,6 @@ the required settings are not configured, mirroring ``AzureAgentGateway`` /
 ``LocalAgentGateway``), never fabricating a result for a step it did not
 actually perform.
 
-EXPLICIT, SCOPED EXCEPTION: the informational-only ``finops-cost-report``
-step's FinOps-hub path is a deliberate, narrow deviation from the rule
-above. Per an explicit product decision, it invokes a real Foundry LLM
-agent (``finops-hub-agent``, via ``AzureAgentGateway``) that itself calls a
-self-hosted Azure MCP Server's Kusto query tool against the operator's
-FinOps hub, rather than a deterministic direct Kusto REST call. This
-step's own non-blocking, honest-``available=False``-on-failure design
-(see ``FinOpsCostReport``) already tolerates this: an LLM-authored KQL
-query or malformed response degrades to "unavailable", not a fabricated
-number or a pipeline failure. No other Deploy & Launch step is LLM-driven.
-
 Not to be confused with ``app.deployment`` (an unrelated, pre-existing
 package that checks whether an Azure *subscription* has the resource
 providers Genie's own infrastructure needs registered - a Phase 10
@@ -44,14 +33,10 @@ __all__ = [
     "DeploymentStepId",
     "DeploymentStepResult",
     "DeploymentStepStatus",
-    "FinOpsCostLineItem",
-    "FinOpsCostReport",
-    "FinOpsDataSource",
     "MissionIdentityInfo",
     "ProvisionedAgentStatus",
-    "SecurityCopilotFinding",
-    "SecurityCopilotScanReport",
-    "SecurityFindingSource",
+    "RequirementFidelityItem",
+    "RequirementFidelityReport",
 ]
 
 DeploymentStepId = Literal[
@@ -60,25 +45,23 @@ DeploymentStepId = Literal[
     "deploy-backend-service",
     "sync-frontend-integration",
     "deploy-frontend-app",
-    "security-copilot-scan",
-    "finops-cost-report",
+    "generate-test-suite",
+    "execute-test-suite",
+    "run-security-scan",
     "launch-mission",
 ]
 
-# The fixed, ordered pipeline for new runs. ``security-copilot-scan`` and
-# ``finops-cost-report`` are informational-only: neither can block Launch,
-# they only enrich the run with a real Microsoft Defender for Cloud
-# assessment scan (plus an optional Security Copilot narrative overlay) and
-# a real Azure cost report (Cost Management, or a FinOps toolkit hub when
-# configured) for the mission's own resource group.
+# The fixed, ordered pipeline for new runs. ``run-security-scan`` remains a
+# valid legacy step id so persisted historical runs still deserialize, but a
+# passing Requirement Fidelity Gate now proceeds directly to Launch.
 DEPLOYMENT_STEP_ORDER: tuple[DeploymentStepId, ...] = (
     "generate-access-policy",
     "provision-foundry-agents",
     "deploy-backend-service",
     "sync-frontend-integration",
     "deploy-frontend-app",
-    "security-copilot-scan",
-    "finops-cost-report",
+    "generate-test-suite",
+    "execute-test-suite",
     "launch-mission",
 )
 
@@ -88,90 +71,47 @@ DEPLOYMENT_STEP_NAMES: dict[DeploymentStepId, str] = {
     "deploy-backend-service": "Deploy Backend Service",
     "sync-frontend-integration": "Update Frontend Integrations",
     "deploy-frontend-app": "Deploy Frontend",
-    "security-copilot-scan": "Microsoft Defender & Security Copilot Scan",
-    "finops-cost-report": "Azure FinOps Cost Report",
+    "generate-test-suite": "Generate Requirement Acceptance Tests",
+    "execute-test-suite": "Requirement Fidelity Gate",
+    "run-security-scan": "Security Scan (Backend & Frontend)",
     "launch-mission": "Launch",
 }
 
 DeploymentStepStatus = Literal["pending", "running", "completed", "failed", "skipped"]
 DeploymentPipelineStatus = Literal["pending", "running", "completed", "failed"]
 PrototypeCleanupStatus = Literal["active", "deletion_pending", "deletion_failed"]
-SecurityFindingSeverity = Literal["informational", "low", "medium", "high", "critical"]
+RequirementFidelityStatus = Literal["pending", "testing", "repairing", "passed", "failed"]
+RequirementEvidenceStatus = Literal["pending", "covered", "passed", "failed", "missing"]
 
 
-SecurityFindingSource = Literal["defender-for-cloud", "security-copilot"]
-
-
-class SecurityCopilotFinding(BaseModel):
-    """One real finding from Defender for Cloud or a Security Copilot promptbook run."""
+class RequirementFidelityItem(BaseModel):
+    """Observed coverage and execution evidence for one approved requirement."""
 
     model_config = ConfigDict(extra="forbid")
 
-    source: SecurityFindingSource = "defender-for-cloud"
-    severity: SecurityFindingSeverity = "informational"
-    title: str = Field(min_length=1)
-    description: str = ""
-    resource: str | None = None
+    requirement_id: str = Field(pattern=r"^REQ-\d{3,}$")
+    statement: str = Field(min_length=1)
+    status: RequirementEvidenceStatus = "pending"
+    test_names: list[str] = Field(default_factory=list)
+    evidence: str = ""
 
 
-class SecurityCopilotScanReport(BaseModel):
-    """Informational-only security scan outcome for one mission's prototype.
-
-    Aggregates two independent, real Microsoft sources - Defender for
-    Cloud's deterministic per-resource assessments (the primary source;
-    see ``app.deploy_launch.defender_for_cloud_gateway``) and an optional
-    Security Copilot Automated Action narrative overlay (see
-    ``app.deploy_launch.security_copilot_gateway``) - into one report.
-    Never gates Launch - ``available=False`` (neither source configured, or
-    both queries failed) is a normal, honestly reported outcome, not a
-    pipeline failure.
-    """
+class RequirementFidelityReport(BaseModel):
+    """Deterministic launch gate calculated from approved IDs and real test results."""
 
     model_config = ConfigDict(extra="forbid")
 
-    available: bool = False
-    summary: str = ""
-    findings: list[SecurityCopilotFinding] = Field(default_factory=list)
-    reference_url: str | None = None
-    scanned_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
-
-
-class FinOpsCostLineItem(BaseModel):
-    """One resource type's real, observed Azure Cost Management spend."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    resource_type: str = Field(min_length=1)
-    cost: float = Field(ge=0)
-
-
-FinOpsDataSource = Literal["azure-cost-management", "finops-hub-agent"]
-
-
-class FinOpsCostReport(BaseModel):
-    """Informational-only Azure cost report for one mission's resource group.
-
-    Sourced from the ``finops-hub-agent`` Foundry agent (queries an
-    operator's FinOps toolkit hub via a self-hosted Azure MCP Server's
-    Kusto tool - see ``app.deploy_launch.finops_cost_service`` and
-    ``config/agents/registry.yaml``) when a hub is configured, falling back
-    to a direct Azure Cost Management query otherwise - see
-    ``data_source``. Never gates Launch - ``available=False`` (neither
-    source configured/enabled, or the query itself failed) is a normal,
-    honestly reported outcome, not a pipeline failure.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    available: bool = False
-    summary: str = ""
-    data_source: FinOpsDataSource = "azure-cost-management"
-    total_cost: float | None = None
-    currency: str | None = None
-    line_items: list[FinOpsCostLineItem] = Field(default_factory=list)
-    period_start: datetime | None = None
-    period_end: datetime | None = None
-    reported_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    status: RequirementFidelityStatus = "pending"
+    requirements: list[RequirementFidelityItem] = Field(default_factory=list)
+    total_requirements: int = Field(ge=0)
+    covered_requirements: int = Field(default=0, ge=0)
+    passed_requirements: int = Field(default=0, ge=0)
+    coverage_percent: float = Field(default=0, ge=0, le=100)
+    pass_percent: float = Field(default=0, ge=0, le=100)
+    repair_attempts: int = Field(default=0, ge=0)
+    max_repair_attempts: int = Field(default=0, ge=0)
+    gaps: list[str] = Field(default_factory=list)
+    execution_summary: str = ""
 
 
 class AgentAccessPolicy(BaseModel):
@@ -301,7 +241,8 @@ class DeploymentPipelineRun(BaseModel):
     backend_url: str | None = None
     frontend_url: str | None = None
     launch_url: str | None = None
-    security_scan_report: SecurityCopilotScanReport | None = None
-    cost_report: FinOpsCostReport | None = None
+    test_summary: str | None = None
+    fidelity_report: RequirementFidelityReport | None = None
+    security_findings_count: int | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))

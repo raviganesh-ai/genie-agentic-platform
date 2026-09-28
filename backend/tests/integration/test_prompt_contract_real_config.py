@@ -144,20 +144,6 @@ def test_control_selection_rules_are_explicit_and_consistent_across_ui_prompts()
     assert 'type="checkbox">` (multi-select' in build_component_v1
 
 
-def test_ui_generation_prompts_require_a_literal_inline_style_preflight():
-    registry = PromptRegistry.load(_REPO_CONFIG_ROOT / "prompts")
-
-    for prompt_id in (
-        "build-generation-v1",
-        "build-generation-component-v1",
-        "build-component-regeneration-v1",
-    ):
-        template = " ".join(registry.get(prompt_id).template.split())
-        assert "search" in template.lower()
-        assert "literal token `style=`" in template
-        assert "any remaining `style=` token makes the build invalid" in template
-
-
 def test_ui_prompts_forbid_binding_file_uploads_to_one_exact_literal_name():
     """Regression guard for a live "blind MQM n30" mission whose generated
     Mission Input form required a file uploaded exactly named
@@ -177,40 +163,6 @@ def test_ui_prompts_forbid_binding_file_uploads_to_one_exact_literal_name():
         assert "never one exact literal file, name, or path" in template
         assert "never a strict filename contract" in template
         assert "accept` attribute to that type's extension/MIME list" in template
-
-
-def test_ui_prompts_send_uploaded_content_to_the_provisioned_backend_for_validation():
-    registry = PromptRegistry.load(_REPO_CONFIG_ROOT / "prompts")
-
-    for prompt_id in ("build-generation-v1", "build-generation-component-v1"):
-        template = " ".join(registry.get(prompt_id).template.split())
-        assert "browser UI is a transport surface" in template
-        assert "never call `JSON.parse` on uploaded content" in template
-        assert "Pass the complete read content unchanged" in template
-        assert "generated backend/Orchestrator owns every" in template
-        assert "reaches the real provisioned backend process" in template
-
-
-def test_ui_prompts_use_one_shell_visual_system_and_semantic_errors():
-    registry = PromptRegistry.load(_REPO_CONFIG_ROOT / "prompts")
-
-    for prompt_id in (
-        "build-generation-v1",
-        "build-generation-component-v1",
-        "build-component-regeneration-v1",
-    ):
-        template = " ".join(registry.get(prompt_id).template.split())
-        assert "deterministic shell owns the complete" in template
-        assert "Never use a React `style` prop" in template
-        assert "arbitrary presentation classes" in template
-        assert "nested cards" in template
-        assert "`genie-form-section`" in template
-        assert "`genie-form-grid`" in template
-        assert "`genie-field-help`" in template
-        assert "`genie-actions`" in template
-        assert '`role="alert"`' in template
-        assert "`genie-error` class" in template
-        assert "must not encode meaning by color alone" in template
 
 
 def test_orchestrator_prompts_require_live_on_progress_hand_off_narration():
@@ -303,8 +255,6 @@ def test_generation_prompts_fail_closed_on_ui_orchestrator_schema_drift():
         registry.get("test-generation-v1").template.split()
     )
     assert "exact JSON object assembled by the generated UI" in test_generation
-    assert "execute a real `httpx.post` to `/invoke`" in test_generation
-    assert "at least one non-empty `attachments` item" in test_generation
     assert "mission-specific result fields" in test_generation
     assert "HTTP 200 alone" in test_generation
 

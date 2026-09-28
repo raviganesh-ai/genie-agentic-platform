@@ -1,25 +1,22 @@
 """Unit tests for DeploymentPipelineService (full pipeline run + self-heal).
 
 Uses Null Azure-calling collaborators (mission agent provisioning, backend
-deployment, frontend deployment, Security Copilot scan, FinOps cost report)
-so no real Azure credentials are needed, but a REAL ``AccessPolicyService``
-so the step-execution logic itself is exercised for real, never mocked
-away. Deploy & Launch has exactly one gate (the human clicking Start) -
-there is no separate approval-checkpoint request/decide dance to exercise
-here. The Security Copilot scan and FinOps cost report steps are
-informational-only and must never block Launch - see the dedicated tests
-near the bottom of this file.
+deployment, frontend deployment) so no real Azure credentials are needed,
+but a REAL ``AccessPolicyService``, ``TestExecutionService`` (real
+sandboxed pytest run) and ``SecurityScanService`` (real bandit run) - so
+the step-execution logic itself is exercised for real, never mocked away.
+Deploy & Launch has exactly one gate (the human clicking Start) - there is
+no separate approval-checkpoint request/decide dance to exercise here.
 """
 from __future__ import annotations
 
-import shutil
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
-from app.agents.models import AgentDefinition
+from app.agents.models import AgentDefinition, AgentExecutionResult
 from app.agents.registry import AgentRegistry
 from app.deploy_launch.access_policy_service import AccessPolicyService
 from app.deploy_launch.backend_deployment_service import (
@@ -27,30 +24,22 @@ from app.deploy_launch.backend_deployment_service import (
     BackendDeploymentResult,
     NullBackendDeploymentService,
 )
-from app.deploy_launch.defender_for_cloud_gateway import NullDefenderForCloudGateway
-from app.deploy_launch.finops_cost_service import NullFinOpsCostService
-from app.deploy_launch.frontend_deployment_service import (
-    FrontendDeploymentError,
-    FrontendDeploymentResult,
-    NullFrontendDeploymentService,
-)
+from app.deploy_launch.frontend_deployment_service import NullFrontendDeploymentService
 from app.deploy_launch.mission_agent_provisioning_service import (
     NullMissionAgentProvisioningService,
 )
 from app.deploy_launch.mission_identity_service import NullMissionIdentityService
-from app.deploy_launch.models import (
-    DeploymentPipelineRun,
-    DeploymentStepResult,
-    FinOpsCostLineItem,
-    FinOpsCostReport,
-    SecurityCopilotFinding,
-    SecurityCopilotScanReport,
-)
+from app.deploy_launch.models import DeploymentPipelineRun, DeploymentStepResult
 from app.deploy_launch.pipeline_service import (
     DeploymentPipelineService,
     DeploymentPipelineStepFailedError,
 )
-from app.deploy_launch.security_copilot_gateway import NullSecurityCopilotGateway
+from app.deploy_launch.security_scan_service import (
+    SecurityFinding,
+    SecurityScanResult,
+    SecurityScanService,
+)
+from app.deploy_launch.test_execution_service import TestExecutionService
 from app.models.workflow_models import WorkflowRunResult, WorkflowStepInput, WorkflowStepResult
 from app.orchestration.workflow_event_bus import WorkflowEventBus
 from app.repositories.deployment_run_repository import InMemoryDeploymentRunRepository
@@ -86,31 +75,38 @@ The orchestrator agent sequences every specialist.
 
 _REQUIREMENTS_OUTPUT = "[REQ-001] The mission requires a search feature and an orchestrator agent."
 
+_PASSING_TEST_OUTPUT = """
+```python
+# REQ-001
+def test_req_001_always_passes():
+    assert 1 + 1 == 2
+```
+"""
+
+_FAILING_TEST_OUTPUT = """
+```python
+# REQ-001
+def test_req_001_always_fails():
+    assert 1 == 2
+```
+"""
+
 
 class _FakeSessionService:
     async def get_session(self, *, session_id: str, requesting_user_id: str) -> SimpleNamespace:
         return SimpleNamespace(title="Acme Mission")
 
 
-def _completed_step(step_id: str, agent_id: str, output_text: str) -> WorkflowStepResult:
-    now = datetime.now(UTC)
-    return WorkflowStepResult(
-        step_id=step_id,
-        agent_id=agent_id,
-        status="completed",
-        output_text=output_text,
-        started_at=now,
-        completed_at=now,
-    )
-
-
 class _FakeOrchestrator:
     def __init__(
         self,
         *,
+        test_output_text: str,
         requirements_output: str = _REQUIREMENTS_OUTPUT,
         agent_scope_id: str | None = None,
     ) -> None:
+        self._test_output_text = test_output_text
+        self.execute_agent_calls: list[dict] = []
         self._run = WorkflowRunResult(
             workflow_run_id="run-1",
             workflow_id="solution-discovery-workflow",
@@ -127,17 +123,71 @@ class _FakeOrchestrator:
     async def get_workflow_run(self, workflow_run_id: str) -> WorkflowRunResult | None:
         return self._run if workflow_run_id == "run-1" else None
 
+    async def execute_agent(
+        self,
+        *,
+        agent_id: str,
+        prompt_id: str,
+        variables: dict[str, str],
+        session_id: str | None = None,
+        trace_id: str | None = None,
+    ) -> AgentExecutionResult:
+        # Simulates Deploy & Launch's real, pre-deploy call to the Test
+        # Generation Agent (see pipeline_service.py's generate-test-suite
+        # step) - never reads a pre-existing workflow step's output, since
+        # test-generation no longer exists as a discovery-workflow step.
+        self.execute_agent_calls.append({"agent_id": agent_id, "prompt_id": prompt_id, "variables": variables})
+        return AgentExecutionResult(
+            agent_id=agent_id, output_text=self._test_output_text, correlation_id="test-correlation-id"
+        )
 
-class _BuildValidationRepairingFakeOrchestrator(_FakeOrchestrator):
-    """Simulates a build-solution output that fails deterministic frontend
-    validation once, then succeeds after ``resume_workflow`` - exercising
-    the pipeline's ``_GeneratedBuildRepairNeeded`` regenerate-and-retry
-    loop (unrelated to any test-generation/fidelity concept - both were
-    removed)."""
 
-    def __init__(self) -> None:
-        super().__init__()
+class _RepairingFakeOrchestrator(_FakeOrchestrator):
+    def __init__(self, *, test_outputs: list[str], requirements_output: str) -> None:
+        super().__init__(
+            test_output_text=test_outputs[-1],
+            requirements_output=requirements_output,
+        )
+        self._test_outputs = list(test_outputs)
         self.resume_calls: list[dict[str, WorkflowStepInput]] = []
+
+    async def execute_agent(
+        self,
+        *,
+        agent_id: str,
+        prompt_id: str,
+        variables: dict[str, str],
+        session_id: str | None = None,
+        trace_id: str | None = None,
+    ) -> AgentExecutionResult:
+        self.execute_agent_calls.append(
+            {"agent_id": agent_id, "prompt_id": prompt_id, "variables": variables}
+        )
+        output = self._test_outputs.pop(0) if self._test_outputs else self._test_output_text
+        return AgentExecutionResult(
+            agent_id=agent_id,
+            output_text=output,
+            correlation_id="test-correlation-id",
+        )
+
+    async def resume_workflow(
+        self,
+        *,
+        workflow_run_id: str,
+        session_id: str,
+        trace_id: str,
+        step_inputs: dict[str, WorkflowStepInput],
+    ) -> WorkflowRunResult:
+        self.resume_calls.append(step_inputs)
+        return self._run
+
+
+class _BuildValidationRepairingFakeOrchestrator(_RepairingFakeOrchestrator):
+    def __init__(self) -> None:
+        super().__init__(
+            test_outputs=[_PASSING_TEST_OUTPUT],
+            requirements_output=_REQUIREMENTS_OUTPUT,
+        )
         invalid_build = _BUILD_OUTPUT.replace(
             "export function MissionApp() {",
             'export function MissionApp() {\n    const invalid = file.name !== "fixed.json";',
@@ -161,25 +211,16 @@ class _BuildValidationRepairingFakeOrchestrator(_FakeOrchestrator):
         return self._run
 
 
-class _NonFixingResumeOrchestrator(_FakeOrchestrator):
-    """A ``resume_workflow`` that records the call but never actually fixes
-    the build - used to test that the generated-build repair budget is
-    enforced and the pipeline fails closed once it is exhausted."""
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.resume_calls: list[dict[str, WorkflowStepInput]] = []
-
-    async def resume_workflow(
-        self,
-        *,
-        workflow_run_id: str,
-        session_id: str,
-        trace_id: str,
-        step_inputs: dict[str, WorkflowStepInput],
-    ) -> WorkflowRunResult:
-        self.resume_calls.append(step_inputs)
-        return self._run
+def _completed_step(step_id: str, agent_id: str, output_text: str) -> WorkflowStepResult:
+    now = datetime.now(UTC)
+    return WorkflowStepResult(
+        step_id=step_id,
+        agent_id=agent_id,
+        status="completed",
+        output_text=output_text,
+        started_at=now,
+        completed_at=now,
+    )
 
 
 class _FakeSharedMemory:
@@ -218,8 +259,10 @@ class _FakeOrchestratorPendingBuild:
     missing required variable(s): [...]``.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, test_output_text: str) -> None:
         self.resume_calls: list[dict | None] = []
+        self.execute_agent_calls: list[dict] = []
+        self._test_output_text = test_output_text
         self._run = WorkflowRunResult(
             workflow_run_id="run-1",
             workflow_id="solution-discovery-workflow",
@@ -255,6 +298,20 @@ class _FakeOrchestratorPendingBuild:
             ],
         )
         return self._run
+
+    async def execute_agent(
+        self,
+        *,
+        agent_id: str,
+        prompt_id: str,
+        variables: dict[str, str],
+        session_id: str | None = None,
+        trace_id: str | None = None,
+    ) -> AgentExecutionResult:
+        self.execute_agent_calls.append({"agent_id": agent_id, "prompt_id": prompt_id, "variables": variables})
+        return AgentExecutionResult(
+            agent_id=agent_id, output_text=self._test_output_text, correlation_id="test-correlation-id"
+        )
 
 
 class _FakeOrchestratorStuckOnEarlierGate:
@@ -314,32 +371,27 @@ def _access_policy_service() -> AccessPolicyService:
 
 def _build_service(
     *,
+    test_output_text: str,
     tmp_path: Path,
     backend_deployment_service=None,
-    mission_agent_provisioning_service=None,
     requirements_output: str = _REQUIREMENTS_OUTPUT,
     run_repository=None,
     prototype_max_active_per_owner: int = 0,
-    security_copilot_gateway=None,
-    defender_for_cloud_gateway=None,
-    finops_cost_service=None,
 ) -> DeploymentPipelineService:
     return DeploymentPipelineService(
         orchestrator=_FakeOrchestrator(
+            test_output_text=test_output_text,
             requirements_output=requirements_output,
         ),  # type: ignore[arg-type]
         session_service=_FakeSessionService(),  # type: ignore[arg-type]
         event_bus=WorkflowEventBus(),
         access_policy_service=_access_policy_service(),
         mission_identity_service=NullMissionIdentityService(),
-        mission_agent_provisioning_service=(
-            mission_agent_provisioning_service or NullMissionAgentProvisioningService()
-        ),
+        mission_agent_provisioning_service=NullMissionAgentProvisioningService(),
         backend_deployment_service=backend_deployment_service or NullBackendDeploymentService(),
         frontend_deployment_service=NullFrontendDeploymentService(),
-        security_copilot_gateway=security_copilot_gateway or NullSecurityCopilotGateway(),
-        defender_for_cloud_gateway=defender_for_cloud_gateway or NullDefenderForCloudGateway(),
-        finops_cost_service=finops_cost_service or NullFinOpsCostService(),
+        test_execution_service=TestExecutionService(timeout_seconds=60),
+        security_scan_service=SecurityScanService(timeout_seconds=60),
         build_workspace_root=tmp_path,
         run_repository=run_repository,
         prototype_max_active_per_owner=prototype_max_active_per_owner,
@@ -349,7 +401,7 @@ def _build_service(
 async def test_discovery_build_run_supplies_deploy_requirements_and_architecture(
     tmp_path: Path,
 ) -> None:
-    service = _build_service(tmp_path=tmp_path)
+    service = _build_service(test_output_text=_PASSING_TEST_OUTPUT, tmp_path=tmp_path)
     run = WorkflowRunResult(
         workflow_run_id="discovery-run-1",
         workflow_id="discovery-build-workflow",
@@ -379,10 +431,10 @@ async def test_discovery_build_run_supplies_deploy_requirements_and_architecture
 
 
 async def test_full_pipeline_runs_every_step(tmp_path: Path):
-    service = _build_service(tmp_path=tmp_path)
+    service = _build_service(test_output_text=_PASSING_TEST_OUTPUT, tmp_path=tmp_path)
 
     # start() returns as soon as the run is created (status "running") - the
-    # eight steps execute in a background task, exactly like Architecture
+    # Eight steps execute in a background task, exactly like Architecture
     # Studio's build-solution kickoff - so tests must await that background
     # work to finish rather than expecting the steps to have already run by
     # the time start() itself returns.
@@ -395,14 +447,8 @@ async def test_full_pipeline_runs_every_step(tmp_path: Path):
     assert run.backend_url is not None
     assert run.frontend_url is not None
     assert run.launch_url == run.frontend_url
-
-    # Security Copilot scan / FinOps cost report are informational-only:
-    # with the default Null collaborators they honestly report
-    # unavailable, but they must never block Launch.
-    assert run.security_scan_report is not None
-    assert run.security_scan_report.available is False
-    assert run.cost_report is not None
-    assert run.cost_report.available is False
+    assert run.test_summary is not None
+    assert run.security_findings_count is None
 
     # Per-agent Foundry provisioning progress must be reported on the run
     # itself (not just an aggregate step status), each landing "completed"
@@ -435,148 +481,6 @@ async def test_full_pipeline_runs_every_step(tmp_path: Path):
         encoding="utf-8"
     )
     assert '__MISSION_AGENTS__ = ["Requirements Specialist"]' in runtime_config_source
-
-
-class _FakeSecurityCopilotGateway:
-    def __init__(self, *, report: SecurityCopilotScanReport | None = None) -> None:
-        self.calls: list[dict[str, str | None]] = []
-        self._report = report or SecurityCopilotScanReport(
-            available=True,
-            summary="1 finding across the deployed prototype.",
-            findings=[
-                SecurityCopilotFinding(
-                    source="security-copilot",
-                    severity="medium",
-                    title="Outdated dependency detected",
-                    description="A generated dependency has a known advisory.",
-                )
-            ],
-        )
-
-    async def scan(
-        self, *, mission_slug: str, mission_title: str, resource_group_name: str | None
-    ) -> SecurityCopilotScanReport:
-        self.calls.append(
-            {
-                "mission_slug": mission_slug,
-                "mission_title": mission_title,
-                "resource_group_name": resource_group_name,
-            }
-        )
-        return self._report
-
-
-class _FakeDefenderForCloudGateway:
-    def __init__(self, *, report: SecurityCopilotScanReport | None = None) -> None:
-        self.calls: list[str | None] = []
-        self._report = report or SecurityCopilotScanReport(
-            available=True,
-            summary="1 unhealthy assessment for the deployed prototype.",
-            findings=[
-                SecurityCopilotFinding(
-                    source="defender-for-cloud",
-                    severity="high",
-                    title="Storage account allows public network access",
-                    description="A generated resource is not restricted to private access.",
-                )
-            ],
-        )
-
-    async def scan(self, *, resource_group_name: str | None) -> SecurityCopilotScanReport:
-        self.calls.append(resource_group_name)
-        return self._report
-
-
-class _FakeFinOpsCostService:
-    def __init__(self, *, report: FinOpsCostReport | None = None) -> None:
-        self.calls: list[str | None] = []
-        self._report = report or FinOpsCostReport(
-            available=True,
-            summary="Mission spend to date is 12.50 USD.",
-            total_cost=12.5,
-            currency="USD",
-            line_items=[FinOpsCostLineItem(resource_type="Microsoft.App/containerApps", cost=12.5)],
-        )
-
-    async def get_cost_report(self, *, resource_group_name: str) -> FinOpsCostReport:
-        self.calls.append(resource_group_name)
-        return self._report
-
-
-async def test_security_copilot_scan_reports_findings_without_blocking_launch(tmp_path: Path):
-    gateway = _FakeSecurityCopilotGateway()
-    service = _build_service(tmp_path=tmp_path, security_copilot_gateway=gateway)
-
-    run = await service.start(session_id="session-1", requesting_user_id="user-1", workflow_run_id="run-1")
-    run = await service.wait_for_run(run.id)
-
-    assert run.status == "completed"
-    assert run.launch_url is not None
-    scan_step = next(step for step in run.steps if step.step_id == "security-copilot-scan")
-    assert scan_step.status == "completed"
-    assert run.security_scan_report is not None
-    assert run.security_scan_report.available is True
-    assert len(run.security_scan_report.findings) == 1
-    assert gateway.calls[0]["mission_slug"] == run.mission_slug
-
-
-async def test_security_scan_merges_defender_for_cloud_and_security_copilot_findings(
-    tmp_path: Path,
-):
-    """Both real Microsoft sources - Defender for Cloud (deterministic,
-    primary) and Security Copilot (optional narrative overlay) - must
-    contribute to the same report, never overwrite one another."""
-    copilot_gateway = _FakeSecurityCopilotGateway()
-    defender_gateway = _FakeDefenderForCloudGateway()
-    service = _build_service(
-        tmp_path=tmp_path,
-        security_copilot_gateway=copilot_gateway,
-        defender_for_cloud_gateway=defender_gateway,
-    )
-
-    run = await service.start(session_id="session-1", requesting_user_id="user-1", workflow_run_id="run-1")
-    run = await service.wait_for_run(run.id)
-
-    assert run.status == "completed"
-    assert run.security_scan_report is not None
-    assert run.security_scan_report.available is True
-    sources = {finding.source for finding in run.security_scan_report.findings}
-    assert sources == {"defender-for-cloud", "security-copilot"}
-    assert len(run.security_scan_report.findings) == 2
-    assert defender_gateway.calls == [run.resource_group_name]
-
-
-async def test_security_scan_is_available_from_defender_for_cloud_alone(tmp_path: Path):
-    """Defender for Cloud requires no pre-wired Logic App, so it must still
-    produce an available report even when Security Copilot is unconfigured
-    (the Null gateway's default in _build_service)."""
-    defender_gateway = _FakeDefenderForCloudGateway()
-    service = _build_service(tmp_path=tmp_path, defender_for_cloud_gateway=defender_gateway)
-
-    run = await service.start(session_id="session-1", requesting_user_id="user-1", workflow_run_id="run-1")
-    run = await service.wait_for_run(run.id)
-
-    assert run.status == "completed"
-    assert run.security_scan_report is not None
-    assert run.security_scan_report.available is True
-    assert [finding.source for finding in run.security_scan_report.findings] == ["defender-for-cloud"]
-
-
-async def test_finops_cost_report_reports_spend_without_blocking_launch(tmp_path: Path):
-    finops_service = _FakeFinOpsCostService()
-    service = _build_service(tmp_path=tmp_path, finops_cost_service=finops_service)
-
-    run = await service.start(session_id="session-1", requesting_user_id="user-1", workflow_run_id="run-1")
-    run = await service.wait_for_run(run.id)
-
-    assert run.status == "completed"
-    assert run.launch_url is not None
-    cost_step = next(step for step in run.steps if step.step_id == "finops-cost-report")
-    assert cost_step.status == "completed"
-    assert run.cost_report is not None
-    assert run.cost_report.available is True
-    assert run.cost_report.total_cost == 12.5
-    assert finops_service.calls == [run.resource_group_name]
 
 
 class _FakeProtectedBackendDeploymentService:
@@ -621,10 +525,21 @@ class _FakeProtectedFrontendDeploymentService:
 
 
 async def test_prototype_pipeline_uses_anonymous_apim_without_entra(tmp_path: Path):
+    test_output = """
+```python
+# REQ-001
+import os
+
+def test_req_001_uses_public_gateway():
+    assert os.environ["MISSION_BACKEND_URL"].startswith("https://")
+    assert "MISSION_ACCESS_TOKEN" not in os.environ
+    assert "MISSION_ACCEPTANCE_TEST_KEY" not in os.environ
+```
+"""
     backend_service = _FakeProtectedBackendDeploymentService()
     frontend_service = _FakeProtectedFrontendDeploymentService()
     service = DeploymentPipelineService(
-        orchestrator=_FakeOrchestrator(),  # type: ignore[arg-type]
+        orchestrator=_FakeOrchestrator(test_output_text=test_output),  # type: ignore[arg-type]
         session_service=_FakeSessionService(),  # type: ignore[arg-type]
         event_bus=WorkflowEventBus(),
         access_policy_service=_access_policy_service(),
@@ -632,9 +547,8 @@ async def test_prototype_pipeline_uses_anonymous_apim_without_entra(tmp_path: Pa
         mission_agent_provisioning_service=NullMissionAgentProvisioningService(),
         backend_deployment_service=backend_service,  # type: ignore[arg-type]
         frontend_deployment_service=frontend_service,  # type: ignore[arg-type]
-        security_copilot_gateway=NullSecurityCopilotGateway(),
-        defender_for_cloud_gateway=NullDefenderForCloudGateway(),
-        finops_cost_service=NullFinOpsCostService(),
+        test_execution_service=TestExecutionService(timeout_seconds=60),
+        security_scan_service=SecurityScanService(timeout_seconds=60),
         build_workspace_root=tmp_path,
     )
 
@@ -655,6 +569,65 @@ async def test_prototype_pipeline_uses_anonymous_apim_without_entra(tmp_path: Pa
         encoding="utf-8"
     )
     assert "authenticate_request" not in generated_main
+
+
+class _BlockingSecurityScanService:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def scan(self, *, build_root: Path) -> SecurityScanResult:
+        del build_root
+        self.calls += 1
+        return SecurityScanResult(
+            ran=True,
+            findings=[
+                SecurityFinding(
+                    file="generated.py",
+                    severity="high",
+                    description="simulated blocking finding",
+                )
+            ],
+            summary="simulated blocking finding",
+        )
+
+
+async def test_passing_fidelity_launches_without_running_security_scan(tmp_path: Path):
+    test_output = '''
+```python
+# REQ-001
+import os
+
+def test_req_001_uses_live_prototype():
+    assert os.environ["MISSION_BACKEND_URL"].startswith("https://")
+```
+'''
+    security_scan_service = _BlockingSecurityScanService()
+    service = DeploymentPipelineService(
+        orchestrator=_FakeOrchestrator(test_output_text=test_output),  # type: ignore[arg-type]
+        session_service=_FakeSessionService(),  # type: ignore[arg-type]
+        event_bus=WorkflowEventBus(),
+        access_policy_service=_access_policy_service(),
+        mission_identity_service=NullMissionIdentityService(),
+        mission_agent_provisioning_service=NullMissionAgentProvisioningService(),
+        backend_deployment_service=_FakeProtectedBackendDeploymentService(),  # type: ignore[arg-type]
+        frontend_deployment_service=_FakeProtectedFrontendDeploymentService(),  # type: ignore[arg-type]
+        test_execution_service=TestExecutionService(timeout_seconds=60),
+        security_scan_service=security_scan_service,  # type: ignore[arg-type]
+        build_workspace_root=tmp_path,
+    )
+
+    run = await service.start(
+        session_id="session-1", requesting_user_id="user-1", workflow_run_id="run-1"
+    )
+    run = await service.wait_for_run(run.id)
+
+    assert run.status == "completed"
+    assert run.launch_url == run.frontend_url
+    assert security_scan_service.calls == 0
+    assert [step.step_id for step in run.steps][-2:] == [
+        "execute-test-suite",
+        "launch-mission",
+    ]
 
 
 class _ModelRecordingMissionAgentService(NullMissionAgentProvisioningService):
@@ -687,7 +660,10 @@ async def test_provisioning_uses_the_landing_page_approved_model(tmp_path: Path)
     # falling back to the platform default.
     provisioning_service = _ModelRecordingMissionAgentService()
     service = DeploymentPipelineService(
-        orchestrator=_FakeOrchestrator(agent_scope_id="model:claude-opus-4"),  # type: ignore[arg-type]
+        orchestrator=_FakeOrchestrator(
+            test_output_text=_PASSING_TEST_OUTPUT,
+            agent_scope_id="model:claude-opus-4",
+        ),  # type: ignore[arg-type]
         session_service=_FakeSessionService(),  # type: ignore[arg-type]
         event_bus=WorkflowEventBus(),
         access_policy_service=_access_policy_service(),
@@ -695,9 +671,8 @@ async def test_provisioning_uses_the_landing_page_approved_model(tmp_path: Path)
         mission_agent_provisioning_service=provisioning_service,
         backend_deployment_service=NullBackendDeploymentService(),
         frontend_deployment_service=NullFrontendDeploymentService(),
-        security_copilot_gateway=NullSecurityCopilotGateway(),
-        defender_for_cloud_gateway=NullDefenderForCloudGateway(),
-        finops_cost_service=NullFinOpsCostService(),
+        test_execution_service=TestExecutionService(timeout_seconds=60),
+        security_scan_service=SecurityScanService(timeout_seconds=60),
         build_workspace_root=tmp_path,
     )
 
@@ -715,7 +690,7 @@ async def test_provisioning_falls_back_to_default_model_when_no_scope_was_select
 ):
     provisioning_service = _ModelRecordingMissionAgentService()
     service = DeploymentPipelineService(
-        orchestrator=_FakeOrchestrator(),  # type: ignore[arg-type]
+        orchestrator=_FakeOrchestrator(test_output_text=_PASSING_TEST_OUTPUT),  # type: ignore[arg-type]
         session_service=_FakeSessionService(),  # type: ignore[arg-type]
         event_bus=WorkflowEventBus(),
         access_policy_service=_access_policy_service(),
@@ -723,9 +698,8 @@ async def test_provisioning_falls_back_to_default_model_when_no_scope_was_select
         mission_agent_provisioning_service=provisioning_service,
         backend_deployment_service=NullBackendDeploymentService(),
         frontend_deployment_service=NullFrontendDeploymentService(),
-        security_copilot_gateway=NullSecurityCopilotGateway(),
-        defender_for_cloud_gateway=NullDefenderForCloudGateway(),
-        finops_cost_service=NullFinOpsCostService(),
+        test_execution_service=TestExecutionService(timeout_seconds=60),
+        security_scan_service=SecurityScanService(timeout_seconds=60),
         build_workspace_root=tmp_path,
     )
 
@@ -765,9 +739,18 @@ class _RecordingMissionAgentService(NullMissionAgentProvisioningService):
 async def test_abandon_deletes_complete_prototype_boundary_in_dependency_order(
     tmp_path: Path,
 ):
+    authenticated_test_output = '''
+```python
+# REQ-001
+import os
+
+def test_req_001_uses_live_prototype():
+    assert os.environ["MISSION_BACKEND_URL"].startswith("https://")
+```
+'''
     delete_events: list[str] = []
     service = DeploymentPipelineService(
-        orchestrator=_FakeOrchestrator(),  # type: ignore[arg-type]
+        orchestrator=_FakeOrchestrator(test_output_text=authenticated_test_output),  # type: ignore[arg-type]
         session_service=_FakeSessionService(),  # type: ignore[arg-type]
         event_bus=WorkflowEventBus(),
         access_policy_service=_access_policy_service(),
@@ -775,9 +758,8 @@ async def test_abandon_deletes_complete_prototype_boundary_in_dependency_order(
         mission_agent_provisioning_service=_RecordingMissionAgentService(delete_events),
         backend_deployment_service=_FakeProtectedBackendDeploymentService(delete_events),  # type: ignore[arg-type]
         frontend_deployment_service=_FakeProtectedFrontendDeploymentService(delete_events),  # type: ignore[arg-type]
-        security_copilot_gateway=NullSecurityCopilotGateway(),
-        defender_for_cloud_gateway=NullDefenderForCloudGateway(),
-        finops_cost_service=NullFinOpsCostService(),
+        test_execution_service=TestExecutionService(timeout_seconds=60),
+        security_scan_service=SecurityScanService(timeout_seconds=60),
         build_workspace_root=tmp_path,
     )
     run = await service.start(
@@ -810,7 +792,7 @@ async def test_start_self_heals_incomplete_build_solution_with_safe_policy_defau
     Deploy & Launch" click, forever) and never re-trigger an
     already-completed step.
     """
-    orchestrator = _FakeOrchestratorPendingBuild()
+    orchestrator = _FakeOrchestratorPendingBuild(test_output_text=_PASSING_TEST_OUTPUT)
     service = DeploymentPipelineService(
         orchestrator=orchestrator,  # type: ignore[arg-type]
         session_service=_FakeSessionService(),  # type: ignore[arg-type]
@@ -820,9 +802,8 @@ async def test_start_self_heals_incomplete_build_solution_with_safe_policy_defau
         mission_agent_provisioning_service=NullMissionAgentProvisioningService(),
         backend_deployment_service=NullBackendDeploymentService(),
         frontend_deployment_service=NullFrontendDeploymentService(),
-        security_copilot_gateway=NullSecurityCopilotGateway(),
-        defender_for_cloud_gateway=NullDefenderForCloudGateway(),
-        finops_cost_service=NullFinOpsCostService(),
+        test_execution_service=TestExecutionService(timeout_seconds=60),
+        security_scan_service=SecurityScanService(timeout_seconds=60),
         build_workspace_root=tmp_path,
     )
 
@@ -861,9 +842,11 @@ async def test_start_uses_shared_memory_output_without_waiting_for_official_step
     (and has approved) that real generated code on Workshop, Deploy &
     Launch must not impose any additional backend wait of its own for the
     same content to be echoed back a second time - so no ``resume_workflow``
-    self-heal call should happen at all here.
+    self-heal call should happen at all here, and the real memory-sourced
+    text must be what downstream steps (provision-foundry-agents,
+    generate-test-suite) actually use.
     """
-    orchestrator = _FakeOrchestratorPendingBuild()
+    orchestrator = _FakeOrchestratorPendingBuild(test_output_text=_PASSING_TEST_OUTPUT)
     orchestrator.agent_registry = AgentRegistry(
         {
             "genie-orchestrator": AgentDefinition(
@@ -890,9 +873,8 @@ async def test_start_uses_shared_memory_output_without_waiting_for_official_step
         mission_agent_provisioning_service=NullMissionAgentProvisioningService(),
         backend_deployment_service=NullBackendDeploymentService(),
         frontend_deployment_service=NullFrontendDeploymentService(),
-        security_copilot_gateway=NullSecurityCopilotGateway(),
-        defender_for_cloud_gateway=NullDefenderForCloudGateway(),
-        finops_cost_service=NullFinOpsCostService(),
+        test_execution_service=TestExecutionService(timeout_seconds=60),
+        security_scan_service=SecurityScanService(timeout_seconds=60),
         build_workspace_root=tmp_path,
     )
 
@@ -901,6 +883,9 @@ async def test_start_uses_shared_memory_output_without_waiting_for_official_step
 
     assert orchestrator.resume_calls == []
     assert run.status == "completed"
+    test_generation_call = orchestrator.execute_agent_calls[-1]
+    assert test_generation_call["agent_id"] == "test-generation-agent"
+    assert test_generation_call["variables"]["artifact"] == _BUILD_OUTPUT
 
 
 async def test_start_fails_closed_with_actionable_error_when_stuck_on_earlier_gate(tmp_path: Path):
@@ -921,9 +906,8 @@ async def test_start_fails_closed_with_actionable_error_when_stuck_on_earlier_ga
         mission_agent_provisioning_service=NullMissionAgentProvisioningService(),
         backend_deployment_service=NullBackendDeploymentService(),
         frontend_deployment_service=NullFrontendDeploymentService(),
-        security_copilot_gateway=NullSecurityCopilotGateway(),
-        defender_for_cloud_gateway=NullDefenderForCloudGateway(),
-        finops_cost_service=NullFinOpsCostService(),
+        test_execution_service=TestExecutionService(timeout_seconds=60),
+        security_scan_service=SecurityScanService(timeout_seconds=60),
         build_workspace_root=tmp_path,
     )
 
@@ -942,6 +926,104 @@ async def test_start_fails_closed_with_actionable_error_when_stuck_on_earlier_ga
     assert all(step.status == "pending" for step in run.steps[1:])
 
 
+async def test_pipeline_fails_closed_when_generated_tests_fail(tmp_path: Path):
+    service = _build_service(test_output_text=_FAILING_TEST_OUTPUT, tmp_path=tmp_path)
+
+    # The step failure happens in the background task, so it surfaces as a
+    # "failed" run/step status once awaited - never as an exception raised
+    # out of start() itself (there is no synchronous caller left to catch
+    # it once the pipeline is running in the background).
+    run = await service.start(session_id="session-1", requesting_user_id="user-1", workflow_run_id="run-1")
+    run = await service.wait_for_run(run.id)
+
+    assert run.status == "failed"
+    failed_step = next(step for step in run.steps if step.step_id == "execute-test-suite")
+    assert failed_step.status == "failed"
+    assert failed_step.error is not None
+
+
+async def test_pipeline_blocks_passing_tests_that_omit_an_approved_requirement(
+    tmp_path: Path,
+) -> None:
+    service = _build_service(
+        requirements_output="[REQ-001] Search documents.\n[REQ-002] Export results.",
+        test_output_text="""
+```python
+# covers REQ-001
+def test_search_documents():
+    assert 1 + 1 == 2
+```
+""",
+        tmp_path=tmp_path,
+    )
+
+    run = await service.start(
+        session_id="session-1",
+        requesting_user_id="user-1",
+        workflow_run_id="run-1",
+    )
+    run = await service.wait_for_run(run.id)
+
+    assert run.status == "failed", [
+        (step.step_id, step.status, step.error) for step in run.steps
+    ]
+    failed_step = next(step for step in run.steps if step.step_id == "generate-test-suite")
+    assert failed_step.status == "failed"
+    assert failed_step.error is not None
+    assert "REQ-002" in failed_step.error
+
+
+async def test_pipeline_launches_at_ninety_percent_and_preserves_requirement_gaps(
+    tmp_path: Path,
+) -> None:
+    requirements = "\n".join(
+        f"[REQ-{number:03d}] Requirement {number}." for number in range(1, 11)
+    )
+    covered_suite = "\n".join(
+        "```python\n"
+        f"# REQ-{number:03d}\n"
+        f"def test_req_{number:03d}():\n"
+        "    assert True\n"
+        "```"
+        for number in range(1, 10)
+    )
+    orchestrator = _RepairingFakeOrchestrator(
+        test_outputs=[covered_suite],
+        requirements_output=requirements,
+    )
+    service = DeploymentPipelineService(
+        orchestrator=orchestrator,  # type: ignore[arg-type]
+        session_service=_FakeSessionService(),  # type: ignore[arg-type]
+        event_bus=WorkflowEventBus(),
+        access_policy_service=_access_policy_service(),
+        mission_identity_service=NullMissionIdentityService(),
+        mission_agent_provisioning_service=NullMissionAgentProvisioningService(),
+        backend_deployment_service=NullBackendDeploymentService(),
+        frontend_deployment_service=NullFrontendDeploymentService(),
+        test_execution_service=TestExecutionService(timeout_seconds=60),
+        security_scan_service=SecurityScanService(timeout_seconds=60),
+        build_workspace_root=tmp_path,
+        fidelity_max_repair_attempts=1,
+        fidelity_min_coverage_percent=90,
+    )
+
+    run = await service.start(
+        session_id="session-1", requesting_user_id="user-1", workflow_run_id="run-1"
+    )
+    run = await service.wait_for_run(run.id)
+
+    assert run.status == "completed", [
+        (step.step_id, step.status, step.error) for step in run.steps
+    ]
+    assert run.launch_url is not None
+    assert run.fidelity_report is not None
+    assert run.fidelity_report.status == "passed"
+    assert run.fidelity_report.coverage_percent == 90
+    assert run.fidelity_report.pass_percent == 100
+    assert run.fidelity_report.gaps == ["REQ-010: no executable acceptance test"]
+    assert len(orchestrator.execute_agent_calls) == 1
+
+
 def test_generated_frontend_runs_pinned_impeccable_detector_before_build() -> None:
     from app.deploy_launch.pipeline_service import _FRONTEND_PACKAGE_JSON
 
@@ -951,32 +1033,144 @@ def test_generated_frontend_runs_pinned_impeccable_detector_before_build() -> No
     assert '"build": "npm run design:check && vite build"' in _FRONTEND_PACKAGE_JSON
 
 
-def test_generated_mission_shell_uses_one_visual_system_without_nested_cards() -> None:
+def test_generated_mission_input_does_not_nest_custom_zones_inside_a_shell_card() -> None:
     from app.deploy_launch.pipeline_service import _FRONTEND_MAIN_TSX, _FRONTEND_STYLES_CSS
 
     assert '<section className="genie-input-surface genie-fade-in">' in _FRONTEND_MAIN_TSX
     assert '<section className="genie-card genie-fade-in">' not in _FRONTEND_MAIN_TSX
-    assert "--genie-surface: #ffffff;" in _FRONTEND_STYLES_CSS
-    assert "--genie-text: #172033;" in _FRONTEND_STYLES_CSS
-    assert "--genie-accent: #185abd;" in _FRONTEND_STYLES_CSS
-    assert "color-scheme: light;" in _FRONTEND_STYLES_CSS
     assert ".genie-input-surface {" in _FRONTEND_STYLES_CSS
-    assert "background-color: var(--genie-surface);" in _FRONTEND_STYLES_CSS
-    assert "box-shadow: var(--genie-shadow);" in _FRONTEND_STYLES_CSS
-    assert ".genie-input-surface form > section {" in _FRONTEND_STYLES_CSS
-    assert "background: transparent !important;" in _FRONTEND_STYLES_CSS
-    assert ".genie-input-surface fieldset label {" in _FRONTEND_STYLES_CSS
-    assert '.genie-input-surface [role="alert"] {' in _FRONTEND_STYLES_CSS
-    assert "background-color: var(--genie-danger-soft);" in _FRONTEND_STYLES_CSS
-    assert '.genie-input-surface :where(input, textarea, select) {' in _FRONTEND_STYLES_CSS
-    assert "grid-template-columns: minmax(0, 1fr);" in _FRONTEND_STYLES_CSS
-    assert "overflow-wrap: anywhere;" in _FRONTEND_STYLES_CSS
-    assert "background-image:" not in _FRONTEND_STYLES_CSS
-    assert "border-left: 4px" not in _FRONTEND_STYLES_CSS
-    assert "inset 4px" not in _FRONTEND_STYLES_CSS
-    assert _FRONTEND_STYLES_CSS.index("@media (max-width: 640px)") > (
-        _FRONTEND_STYLES_CSS.index(".genie-pipeline {")
+
+
+async def test_pipeline_accumulates_test_coverage_across_repair_retries(
+    tmp_path: Path,
+) -> None:
+    """Each coverage-repair retry only asks for the still-missing IDs; their
+    modules must be ACCUMULATED alongside earlier completions, never
+    replace them - otherwise large requirement sets can never converge
+    (a live 39-requirement mission stayed 26 IDs short even after every
+    repair attempt, because each retry discarded already-covered tests)."""
+    requirements = "[REQ-001] Process every document.\n[REQ-002] Export a report."
+    first_suite = """
+```python
+# REQ-001
+def test_req_001_processes_every_document():
+    assert 1 == 1
+```
+"""
+    second_suite = """
+```python
+# REQ-002
+def test_req_002_exports_a_report():
+    assert 1 == 1
+```
+"""
+    orchestrator = _RepairingFakeOrchestrator(
+        test_outputs=[first_suite, second_suite],
+        requirements_output=requirements,
     )
+    service = DeploymentPipelineService(
+        orchestrator=orchestrator,  # type: ignore[arg-type]
+        session_service=_FakeSessionService(),  # type: ignore[arg-type]
+        event_bus=WorkflowEventBus(),
+        access_policy_service=_access_policy_service(),
+        mission_identity_service=NullMissionIdentityService(),
+        mission_agent_provisioning_service=NullMissionAgentProvisioningService(),
+        backend_deployment_service=NullBackendDeploymentService(),
+        frontend_deployment_service=NullFrontendDeploymentService(),
+        test_execution_service=TestExecutionService(timeout_seconds=60),
+        security_scan_service=SecurityScanService(timeout_seconds=60),
+        build_workspace_root=tmp_path,
+        fidelity_max_repair_attempts=3,
+    )
+
+    run = await service.start(
+        session_id="session-1", requesting_user_id="user-1", workflow_run_id="run-1"
+    )
+    run = await service.wait_for_run(run.id)
+
+    assert run.status == "completed", [
+        (step.step_id, step.status, step.error) for step in run.steps
+    ]
+    assert run.fidelity_report is not None
+    assert run.fidelity_report.coverage_percent == 100
+
+
+
+async def test_pipeline_automatically_repairs_redeploys_and_retests_before_launch(
+    tmp_path: Path,
+) -> None:
+    requirements = "[REQ-001] Process every document."
+    failing_suite = """
+```python
+# REQ-001
+def test_req_001_processes_every_document():
+    assert 1 == 2
+```
+"""
+    passing_suite = """
+```python
+# REQ-001
+def test_req_001_processes_every_document():
+    assert 1 == 1
+```
+"""
+    orchestrator = _RepairingFakeOrchestrator(
+        test_outputs=[failing_suite, passing_suite],
+        requirements_output=requirements,
+    )
+    orchestrator.agent_registry = AgentRegistry(
+        {
+            "genie-orchestrator": AgentDefinition(
+                id="genie-orchestrator",
+                name="Genie Orchestrator",
+                role="mission_orchestration",
+                description="Drives each mission phase.",
+                allowed_tools=[],
+                memory_access=["shared"],
+                enabled=True,
+            )
+        }
+    )
+    shared_memory = _FakeSharedMemory({})
+    orchestrator.memory_service = SimpleNamespace(shared=shared_memory)
+    service = DeploymentPipelineService(
+        orchestrator=orchestrator,  # type: ignore[arg-type]
+        session_service=_FakeSessionService(),  # type: ignore[arg-type]
+        event_bus=WorkflowEventBus(),
+        access_policy_service=_access_policy_service(),
+        mission_identity_service=NullMissionIdentityService(),
+        mission_agent_provisioning_service=NullMissionAgentProvisioningService(),
+        backend_deployment_service=NullBackendDeploymentService(),
+        frontend_deployment_service=NullFrontendDeploymentService(),
+        test_execution_service=TestExecutionService(timeout_seconds=60),
+        security_scan_service=SecurityScanService(timeout_seconds=60),
+        build_workspace_root=tmp_path,
+        fidelity_max_repair_attempts=3,
+    )
+
+    run = await service.start(
+        session_id="session-1",
+        requesting_user_id="user-1",
+        workflow_run_id="run-1",
+    )
+    run = await service.wait_for_run(run.id)
+
+    assert run.status == "completed"
+    assert run.launch_url is not None
+    assert run.fidelity_report is not None
+    assert run.fidelity_report.status == "passed"
+    assert run.fidelity_report.coverage_percent == 100
+    assert run.fidelity_report.pass_percent == 100
+    assert run.fidelity_report.repair_attempts == 1
+    assert len(orchestrator.resume_calls) == 1
+    assert [write["key"] for write in shared_memory.writes] == [
+        "analyze-requirements",
+        "design-architecture",
+    ]
+    assert all(write["approval_status"] == "approved" for write in shared_memory.writes)
+    repair_input = orchestrator.resume_calls[0]["build-solution"]
+    assert repair_input.variables["previous_build_output"] == ""
+    assert "1 failed" in repair_input.variables["user_message"]
 
 
 async def test_pipeline_repairs_invalid_generated_ui_before_provisioning(
@@ -992,11 +1186,10 @@ async def test_pipeline_repairs_invalid_generated_ui_before_provisioning(
         mission_agent_provisioning_service=NullMissionAgentProvisioningService(),
         backend_deployment_service=NullBackendDeploymentService(),
         frontend_deployment_service=NullFrontendDeploymentService(),
-        security_copilot_gateway=NullSecurityCopilotGateway(),
-        defender_for_cloud_gateway=NullDefenderForCloudGateway(),
-        finops_cost_service=NullFinOpsCostService(),
+        test_execution_service=TestExecutionService(timeout_seconds=60),
+        security_scan_service=SecurityScanService(timeout_seconds=60),
         build_workspace_root=tmp_path,
-        max_repair_attempts=3,
+        fidelity_max_repair_attempts=3,
     )
 
     run = await service.start(
@@ -1013,16 +1206,20 @@ async def test_pipeline_repairs_invalid_generated_ui_before_provisioning(
     assert run.steps[1].status == "completed"
 
 
-async def test_pipeline_exposes_validation_evidence_after_build_repair_is_exhausted(
+async def test_pipeline_fails_closed_after_fidelity_repair_budget_is_exhausted(
     tmp_path: Path,
 ) -> None:
-    orchestrator = _NonFixingResumeOrchestrator()
-    invalid_build = _BUILD_OUTPUT.replace(
-        "export function MissionApp() {",
-        'export function MissionApp() {\n    const invalid = file.name !== "fixed.json";',
-    )
-    orchestrator._run.step_results[-1] = _completed_step(
-        "build-solution", "genie-orchestrator", invalid_build
+    requirements = "[REQ-001] Process every document."
+    failing_suite = """
+```python
+# REQ-001
+def test_req_001_processes_every_document():
+    assert 1 == 2
+```
+"""
+    orchestrator = _RepairingFakeOrchestrator(
+        test_outputs=[failing_suite, failing_suite],
+        requirements_output=requirements,
     )
     service = DeploymentPipelineService(
         orchestrator=orchestrator,  # type: ignore[arg-type]
@@ -1033,11 +1230,143 @@ async def test_pipeline_exposes_validation_evidence_after_build_repair_is_exhaus
         mission_agent_provisioning_service=NullMissionAgentProvisioningService(),
         backend_deployment_service=NullBackendDeploymentService(),
         frontend_deployment_service=NullFrontendDeploymentService(),
-        security_copilot_gateway=NullSecurityCopilotGateway(),
-        defender_for_cloud_gateway=NullDefenderForCloudGateway(),
-        finops_cost_service=NullFinOpsCostService(),
+        test_execution_service=TestExecutionService(timeout_seconds=60),
+        security_scan_service=SecurityScanService(timeout_seconds=60),
         build_workspace_root=tmp_path,
-        max_repair_attempts=1,
+        fidelity_max_repair_attempts=1,
+    )
+
+    run = await service.start(
+        session_id="session-1",
+        requesting_user_id="user-1",
+        workflow_run_id="run-1",
+    )
+    run = await service.wait_for_run(run.id)
+
+    assert run.status == "failed"
+    assert run.launch_url is None
+    assert run.fidelity_report is not None
+    assert run.fidelity_report.status == "failed"
+    assert run.fidelity_report.repair_attempts == 1
+    assert run.fidelity_report.pass_percent == 0
+    assert len(orchestrator.resume_calls) == 1
+    launch_step = next(step for step in run.steps if step.step_id == "launch-mission")
+    assert launch_step.status == "pending"
+
+
+class _FakeHttpsBackendDeploymentService:
+    """Returns a real https:// backend_url so the generate-test-suite step's
+    real-action check (never active for the http://localhost Null service)
+    actually runs."""
+
+    async def deploy(
+        self,
+        *,
+        mission_slug: str,
+        build_root: Path,
+        mission_identity_resource_id: str | None = None,
+        on_progress=None,
+    ) -> BackendDeploymentResult:
+        return BackendDeploymentResult(
+            image_tag=f"acr/{mission_slug}:dev",
+            backend_url=f"https://{mission_slug}-backend.example.com",
+        )
+
+    async def configure_gateway_frontend_origin(
+        self, *, mission_slug: str, frontend_origin: str
+    ) -> None:
+        del mission_slug, frontend_origin
+
+
+async def test_pipeline_retries_test_generation_when_it_uses_mocks_then_succeeds(
+    tmp_path: Path,
+) -> None:
+    requirements = "[REQ-001] Process every document."
+    mock_based_suite = """
+```python
+# REQ-001
+from unittest.mock import MagicMock
+
+def test_req_001_processes_every_document():
+    client = MagicMock()
+    assert client is not None
+```
+"""
+    real_action_suite = """
+```python
+# REQ-001
+import os
+
+def test_req_001_processes_every_document():
+    backend_url = os.environ.get("MISSION_BACKEND_URL", "")
+    assert backend_url != ""
+```
+"""
+    orchestrator = _RepairingFakeOrchestrator(
+        test_outputs=[mock_based_suite, real_action_suite],
+        requirements_output=requirements,
+    )
+    service = DeploymentPipelineService(
+        orchestrator=orchestrator,  # type: ignore[arg-type]
+        session_service=_FakeSessionService(),  # type: ignore[arg-type]
+        event_bus=WorkflowEventBus(),
+        access_policy_service=_access_policy_service(),
+        mission_identity_service=NullMissionIdentityService(),
+        mission_agent_provisioning_service=NullMissionAgentProvisioningService(),
+        backend_deployment_service=_FakeHttpsBackendDeploymentService(),
+        frontend_deployment_service=NullFrontendDeploymentService(),
+        test_execution_service=TestExecutionService(timeout_seconds=60),
+        security_scan_service=SecurityScanService(timeout_seconds=60),
+        build_workspace_root=tmp_path,
+        fidelity_max_repair_attempts=3,
+    )
+
+    run = await service.start(
+        session_id="session-1", requesting_user_id="user-1", workflow_run_id="run-1"
+    )
+    run = await service.wait_for_run(run.id)
+
+    assert run.status == "completed", [
+        (step.step_id, step.status, step.error) for step in run.steps
+    ]
+    test_generation_calls = [
+        call for call in orchestrator.execute_agent_calls if call["agent_id"] == "test-generation-agent"
+    ]
+    assert len(test_generation_calls) == 2
+    assert "mock" in test_generation_calls[1]["variables"]["user_message"].lower()
+
+
+async def test_pipeline_fails_closed_when_test_generation_keeps_using_mocks(
+    tmp_path: Path,
+) -> None:
+    requirements = "[REQ-001] Process every document."
+    mock_based_suite = """
+```python
+# REQ-001
+from unittest.mock import MagicMock
+
+def test_req_001_processes_every_document():
+    client = MagicMock()
+    assert client is not None
+```
+"""
+    orchestrator = _RepairingFakeOrchestrator(
+        test_outputs=[mock_based_suite, mock_based_suite],
+        requirements_output=requirements,
+    )
+    service = DeploymentPipelineService(
+        orchestrator=orchestrator,  # type: ignore[arg-type]
+        session_service=_FakeSessionService(),  # type: ignore[arg-type]
+        event_bus=WorkflowEventBus(),
+        access_policy_service=_access_policy_service(),
+        mission_identity_service=NullMissionIdentityService(),
+        mission_agent_provisioning_service=NullMissionAgentProvisioningService(),
+        backend_deployment_service=_FakeHttpsBackendDeploymentService(),
+        frontend_deployment_service=NullFrontendDeploymentService(),
+        test_execution_service=TestExecutionService(timeout_seconds=60),
+        security_scan_service=SecurityScanService(timeout_seconds=60),
+        build_workspace_root=tmp_path,
+        fidelity_max_repair_attempts=1,
     )
 
     run = await service.start(
@@ -1046,11 +1375,14 @@ async def test_pipeline_exposes_validation_evidence_after_build_repair_is_exhaus
     run = await service.wait_for_run(run.id)
 
     assert run.status == "failed"
-    failed_step = next(step for step in run.steps if step.step_id == "provision-foundry-agents")
+    failed_step = next(step for step in run.steps if step.step_id == "generate-test-suite")
     assert failed_step.status == "failed"
     assert failed_step.error is not None
-    assert "after 1 automatic repair attempt(s)" in failed_step.error
-    assert "end-user-controlled filename" in failed_step.error
+    assert "not real-action tests" in failed_step.error
+    test_generation_calls = [
+        call for call in orchestrator.execute_agent_calls if call["agent_id"] == "test-generation-agent"
+    ]
+    assert len(test_generation_calls) == 2
 
 
 async def test_start_returns_a_visible_running_run_before_any_slow_lookup_happens(tmp_path: Path):
@@ -1059,7 +1391,7 @@ async def test_start_returns_a_visible_running_run_before_any_slow_lookup_happen
     calling list_runs_for_session immediately after start() returns always
     sees a real run, never an empty list while slow prep work is still
     silently happening in the background."""
-    service = _build_service(tmp_path=tmp_path)
+    service = _build_service(test_output_text=_PASSING_TEST_OUTPUT, tmp_path=tmp_path)
 
     run = await service.start(session_id="session-1", requesting_user_id="user-1", workflow_run_id="run-1")
 
@@ -1070,29 +1402,13 @@ async def test_start_returns_a_visible_running_run_before_any_slow_lookup_happen
     await service.wait_for_run(run.id)
 
 
-async def test_start_reuses_an_active_run_for_the_same_workflow(tmp_path: Path):
-    service = _build_service(tmp_path=tmp_path)
-
-    first = await service.start(
-        session_id="session-1", requesting_user_id="user-1", workflow_run_id="run-1"
-    )
-    duplicate = await service.start(
-        session_id="session-1", requesting_user_id="user-1", workflow_run_id="run-1"
-    )
-
-    assert duplicate.id == first.id
-    assert service.list_runs_for_session("session-1") == [first]
-
-    await service.wait_for_run(first.id)
-
-
 async def test_start_fails_the_run_visibly_when_the_workflow_run_is_unknown(tmp_path: Path):
     """An unknown workflow_run_id must never raise synchronously out of
     start() (there would be no caller left to catch it once steps are
     running in the background) - it must resolve the already-visible run to
     "failed" with the error attributed to the first step, so the failure
     shows up in the same per-step list the user is already watching."""
-    service = _build_service(tmp_path=tmp_path)
+    service = _build_service(test_output_text=_PASSING_TEST_OUTPUT, tmp_path=tmp_path)
 
     run = await service.start(
         session_id="session-1", requesting_user_id="user-1", workflow_run_id="does-not-exist"
@@ -1136,15 +1452,6 @@ class _FailOnceThenSucceedBackendDeploymentService:
         del mission_slug, frontend_origin
 
 
-class _CountingMissionAgentProvisioningService(NullMissionAgentProvisioningService):
-    def __init__(self) -> None:
-        self.provision_count = 0
-
-    async def provision(self, **kwargs):
-        self.provision_count += 1
-        return await super().provision(**kwargs)
-
-
 async def test_retry_from_a_failed_step_reuses_the_same_run_and_its_prior_artifacts(tmp_path: Path):
     """Regression test: retrying (resume_from_step set) a run that already
     failed partway through must continue the SAME pipeline_run - not mint a
@@ -1156,6 +1463,7 @@ async def test_retry_from_a_failed_step_reuses_the_same_run_and_its_prior_artifa
     fail again."""
     backend_deployment_service = _FailOnceThenSucceedBackendDeploymentService()
     service = _build_service(
+        test_output_text=_PASSING_TEST_OUTPUT,
         tmp_path=tmp_path,
         backend_deployment_service=backend_deployment_service,
     )
@@ -1197,158 +1505,37 @@ async def test_retry_from_a_failed_step_reuses_the_same_run_and_its_prior_artifa
     assert [run.id for run in service.list_runs_for_session("session-1")] == [first_attempt.id]
 
 
-async def test_backend_retry_after_restart_restores_durable_run_artifacts(tmp_path: Path):
-    repository = InMemoryDeploymentRunRepository()
-    backend_deployment_service = _FailOnceThenSucceedBackendDeploymentService()
-    mission_agent_service = _CountingMissionAgentProvisioningService()
-    service = _build_service(
-        tmp_path=tmp_path,
-        backend_deployment_service=backend_deployment_service,
-        mission_agent_provisioning_service=mission_agent_service,
-        run_repository=repository,
-    )
-    first_attempt = await service.start(
-        session_id="session-1", requesting_user_id="user-1", workflow_run_id="run-1"
-    )
-    first_attempt = await service.wait_for_run(first_attempt.id)
-    provision_step = next(
-        step for step in first_attempt.steps if step.step_id == "provision-foundry-agents"
-    )
-    provision_completed_at = provision_step.completed_at
-
-    restarted = _build_service(
-        tmp_path=tmp_path,
-        backend_deployment_service=backend_deployment_service,
-        mission_agent_provisioning_service=mission_agent_service,
-        run_repository=repository,
-    )
-    await restarted.initialize()
-    retried = await restarted.start(
-        session_id="session-1",
-        requesting_user_id="user-1",
-        workflow_run_id="run-1",
-        resume_from_step="deploy-backend-service",
-    )
-
-    assert retried.id == first_attempt.id
-    retried = await restarted.wait_for_run(retried.id)
-
-    assert retried.status == "completed"
-    assert backend_deployment_service.call_count == 2
-    assert mission_agent_service.provision_count == 1
-    assert provision_step.completed_at == provision_completed_at
-    assert [run.id for run in restarted.list_runs_for_session("session-1")] == [first_attempt.id]
-    build_root = restarted.get_build_root(retried.id)
-    assert build_root is not None
-    agent_config_source = (build_root / "agent_config.py").read_text(encoding="utf-8")
-    orchestrator = next(
-        agent for agent in retried.provisioned_agents if agent.agent_name == "orchestrator"
-    )
-    assert orchestrator.foundry_agent_name in agent_config_source
-
-
-class _FailOnceThenValidatingFrontendDeploymentService:
-    """Fails the very first ``deploy()`` call, then validates ``ui_root`` is a
-    real, populated directory on every subsequent call - exactly like the real
-    ``ContainerAppFrontendDeploymentService`` - so a test can assert a retry
-    that resumes after a process restart (which wipes the local build
-    workspace, but never the durable run/workflow records) still produces a
-    genuinely materialized frontend directory rather than reusing stale
-    in-memory state that no longer exists on disk."""
-
-    def __init__(self) -> None:
-        self.call_count = 0
-
-    async def deploy(
-        self, *, mission_slug: str, ui_root: Path, mission_identity_resource_id=None, on_progress=None
-    ) -> FrontendDeploymentResult:
-        self.call_count += 1
-        if self.call_count == 1:
-            raise FrontendDeploymentError("Simulated ACR build failure.")
-        if not ui_root.exists() or not any(ui_root.iterdir()):
-            raise FrontendDeploymentError(f"No materialized UI build found at '{ui_root}'.")
-        return FrontendDeploymentResult(
-            frontend_url=f"http://localhost/missions/{mission_slug}/frontend"
-        )
-
-
-async def test_frontend_retry_after_restart_rematerializes_the_wiped_local_build(tmp_path: Path):
-    """Regression test: retrying a run that failed at deploy-frontend-app,
-    after the process (and its local ephemeral build workspace) restarted,
-    must rebuild the frontend directory from durable data instead of failing
-    closed with "No materialized UI build found" - sync-frontend-integration
-    (the step that normally writes it) is skipped on this retry since it
-    already completed before the restart."""
-    repository = InMemoryDeploymentRunRepository()
-    frontend_deployment_service = _FailOnceThenValidatingFrontendDeploymentService()
-    mission_agent_service = _CountingMissionAgentProvisioningService()
-    service = _build_service(
-        tmp_path=tmp_path,
-        mission_agent_provisioning_service=mission_agent_service,
-        run_repository=repository,
-    )
-    service._frontend_deployment_service = frontend_deployment_service
-    first_attempt = await service.start(
-        session_id="session-1", requesting_user_id="user-1", workflow_run_id="run-1"
-    )
-    first_attempt = await service.wait_for_run(first_attempt.id)
-    assert first_attempt.status == "failed"
-    failed_step = next(step for step in first_attempt.steps if step.status == "failed")
-    assert failed_step.step_id == "deploy-frontend-app"
-
-    # Simulate a real Container App restart: the local ephemeral build
-    # workspace (including the already-written frontend directory) is gone,
-    # but durable records (the pipeline run, provisioned agents, workflow
-    # step outputs) survive.
-    shutil.rmtree(tmp_path / first_attempt.id, ignore_errors=True)
-
-    restarted = _build_service(
-        tmp_path=tmp_path,
-        mission_agent_provisioning_service=mission_agent_service,
-        run_repository=repository,
-    )
-    restarted._frontend_deployment_service = frontend_deployment_service
-    await restarted.initialize()
-    retried = await restarted.start(
-        session_id="session-1",
-        requesting_user_id="user-1",
-        workflow_run_id="run-1",
-        resume_from_step="deploy-frontend-app",
-    )
-
-    assert retried.id == first_attempt.id
-    retried = await restarted.wait_for_run(retried.id)
-
-    assert retried.status == "completed"
-    assert frontend_deployment_service.call_count == 2
-
-
 async def test_retry_with_no_matching_failed_run_restarts_from_the_first_step(tmp_path: Path):
     """Regression test: if a caller asks to resume a specific step (e.g. a
-    "Retry" click) but no matching durable failed run exists for that
-    session/workflow, honoring that resume point against a brand-new
-    pipeline_run would silently skip every earlier step without them ever
-    having actually run on this new object (e.g. jumping straight to
-    "finops-cost-report" without a real resource group having been
-    provisioned yet). It must instead fail safe and restart the fresh run
-    from the very first step."""
-    service = _build_service(tmp_path=tmp_path)
+    "Retry" click) but no matching in-memory failed run exists for that
+    session/workflow - most realistically because this process restarted
+    and lost every in-memory run/workspace/generated-test-output - honoring
+    that resume point against a brand-new pipeline_run would silently skip
+    every earlier step without them ever having actually run on this new
+    object (e.g. jumping straight to "execute-test-suite" with no generated
+    tests, producing a false "Running 0 generated test module(s)" /
+    "fidelity report unavailable" failure). It must instead fail safe and
+    restart the fresh run from the very first step."""
+    service = _build_service(test_output_text=_PASSING_TEST_OUTPUT, tmp_path=tmp_path)
 
     run = await service.start(
         session_id="session-1",
         requesting_user_id="user-1",
         workflow_run_id="run-1",
-        resume_from_step="finops-cost-report",
+        resume_from_step="execute-test-suite",
     )
     run = await service.wait_for_run(run.id)
 
     assert run.status == "completed"
     assert all(step.status == "completed" for step in run.steps)
+    assert run.fidelity_report is not None
+    assert run.fidelity_report.status == "passed"
 
 
 async def test_completed_prototype_inventory_rehydrates_after_restart(tmp_path: Path):
     repository = InMemoryDeploymentRunRepository()
     service = _build_service(
+        test_output_text=_PASSING_TEST_OUTPUT,
         tmp_path=tmp_path,
         run_repository=repository,
     )
@@ -1362,6 +1549,7 @@ async def test_completed_prototype_inventory_rehydrates_after_restart(tmp_path: 
     run = await service.wait_for_run(run.id)
 
     restarted = _build_service(
+        test_output_text=_PASSING_TEST_OUTPUT,
         tmp_path=tmp_path,
         run_repository=repository,
     )
@@ -1399,6 +1587,7 @@ async def test_interrupted_prototype_fails_closed_when_inventory_rehydrates(tmp_
     )
     await repository.put(interrupted)
     restarted = _build_service(
+        test_output_text=_PASSING_TEST_OUTPUT,
         tmp_path=tmp_path,
         run_repository=repository,
     )
@@ -1414,6 +1603,7 @@ async def test_interrupted_prototype_fails_closed_when_inventory_rehydrates(tmp_
 
 async def test_owner_cannot_exceed_active_prototype_limit(tmp_path: Path):
     service = _build_service(
+        test_output_text=_PASSING_TEST_OUTPUT,
         tmp_path=tmp_path,
         prototype_max_active_per_owner=1,
     )
@@ -1435,7 +1625,7 @@ async def test_owner_cannot_exceed_active_prototype_limit(tmp_path: Path):
 async def test_owner_can_create_multiple_active_prototypes_when_limit_is_disabled(
     tmp_path: Path,
 ):
-    service = _build_service(tmp_path=tmp_path)
+    service = _build_service(test_output_text=_PASSING_TEST_OUTPUT, tmp_path=tmp_path)
     first = await service.start(
         session_id="session-1",
         requesting_user_id="tenant-1:object-1",
@@ -1457,6 +1647,7 @@ async def test_owner_can_create_multiple_active_prototypes_when_limit_is_disable
 async def test_cleanup_expired_deletes_terminal_prototype(tmp_path: Path):
     repository = InMemoryDeploymentRunRepository()
     service = _build_service(
+        test_output_text=_PASSING_TEST_OUTPUT,
         tmp_path=tmp_path,
         run_repository=repository,
     )
@@ -1485,6 +1676,7 @@ class _DeleteFailingBackendDeploymentService(NullBackendDeploymentService):
 async def test_cleanup_failure_remains_in_inventory_for_retry(tmp_path: Path):
     repository = InMemoryDeploymentRunRepository()
     service = _build_service(
+        test_output_text=_PASSING_TEST_OUTPUT,
         tmp_path=tmp_path,
         run_repository=repository,
         backend_deployment_service=_DeleteFailingBackendDeploymentService(),
@@ -1522,7 +1714,6 @@ def test_frontend_main_tsx_renders_a_gamified_multi_input_mission_queue():
     assert "type QueueItem = {" in _FRONTEND_MAIN_TSX
     assert 'type QueueItemStatus = "queued" | "running" | "complete" | "error"' in _FRONTEND_MAIN_TSX
     assert "async function runItem(item: QueueItem)" in _FRONTEND_MAIN_TSX
-    assert "body: JSON.stringify({ message: item.message, attachments: item.attachments })" in _FRONTEND_MAIN_TSX
     assert "function addMessageToQueue()" in _FRONTEND_MAIN_TSX
     assert "async function addFilesToQueue(files: FileList | File[])" in _FRONTEND_MAIN_TSX
     assert "onDrop={handleDrop}" in _FRONTEND_MAIN_TSX
@@ -1546,7 +1737,7 @@ def test_frontend_main_tsx_gives_custom_ui_an_onsubmit_contract_and_animated_pip
     Pipeline" must be an animated, explained visualization (not a static row
     of badges) so the live hand-offs actually read as alive.
     """
-    from app.deploy_launch.pipeline_service import _FRONTEND_MAIN_TSX
+    from app.deploy_launch.pipeline_service import _FRONTEND_MAIN_TSX, _FRONTEND_STYLES_CSS
 
     # The generated component receives a typed onSubmit contract, never its
     # own /invoke/stream wiring - it hands control straight to the shell's
@@ -1561,6 +1752,22 @@ def test_frontend_main_tsx_gives_custom_ui_an_onsubmit_contract_and_animated_pip
     # The Agent Pipeline is now an animated node/connector visualization with
     # an explanatory caption, not a static badge row.
     assert "genie-pipeline-caption" in _FRONTEND_MAIN_TSX
+    assert 'className="genie-pipeline"' in _FRONTEND_MAIN_TSX
+    assert "genie-pipeline-node genie-pipeline-node-" in _FRONTEND_MAIN_TSX
+    assert "genie-pipeline-connector" in _FRONTEND_MAIN_TSX
+
+    # The generic composer is de-emphasized into a collapsed disclosure once
+    # a real custom mission-input form exists, instead of competing with it.
+    assert '<details className="genie-card genie-quick-request">' in _FRONTEND_MAIN_TSX
+    assert "Quick request (send a message or file directly)" in _FRONTEND_MAIN_TSX
+
+    assert ".genie-pipeline {" in _FRONTEND_STYLES_CSS
+    assert ".genie-pipeline-node-active {" in _FRONTEND_STYLES_CSS
+    assert ".genie-pipeline-node-complete {" in _FRONTEND_STYLES_CSS
+    assert ".genie-pipeline-connector-active {" in _FRONTEND_STYLES_CSS
+    assert "@keyframes genie-pipeline-node-pulse {" in _FRONTEND_STYLES_CSS
+    assert "@keyframes genie-pipeline-particle-travel {" in _FRONTEND_STYLES_CSS
+    assert ".genie-quick-request-summary {" in _FRONTEND_STYLES_CSS
 
 
 def test_frontend_main_tsx_confines_a_generated_ui_crash_to_an_error_boundary():
@@ -1581,3 +1788,4 @@ def test_frontend_main_tsx_confines_a_generated_ui_crash_to_an_error_boundary():
         "missionAgents={missionAgents} />\n"
         "                </MissionInputBoundary>"
     ) in _FRONTEND_MAIN_TSX
+

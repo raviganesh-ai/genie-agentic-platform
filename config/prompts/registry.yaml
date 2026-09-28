@@ -423,16 +423,10 @@ prompts:
       - at least one deployed backend test must reproduce the exact JSON
         object assembled by the generated UI's `JSON.stringify` call,
         including the same field names, casing, nesting, and uploaded
-        attachments, execute a real `httpx.post` to `/invoke`, and assert
-        mission-specific result fields produced by the specialist
-        pipeline. Referencing the backend URL or testing only a health or
-        frontend endpoint does not count as an invocation. If the generated
-        UI renders any `<input type="file">`, this test must send at least
-        one non-empty `attachments` item containing the same full text the
-        UI reads with `File.text()` and prove the mission-specific result
-        was derived from that attachment. HTTP 200 alone, non-empty text
-        alone, and a generic conversational response never prove the
-        generated UI-to-orchestrator contract works.
+        attachments, POST it to `/invoke`, and assert mission-specific
+        result fields produced by the specialist pipeline. HTTP 200 alone,
+        non-empty text alone, and a generic conversational response never
+        prove the generated UI-to-orchestrator contract works.
       - backend requests through `MISSION_BACKEND_URL` are authenticated by
         Genie's trusted acceptance-test proxy. Never read, request, print,
         log, persist, or synthesize credentials or an Authorization header;
@@ -487,7 +481,7 @@ prompts:
       - artifact
       - requirements
       - user_message
-    version: "1.10.0"
+    version: "1.9.0"
 
   - id: failure-diagnosis-v1
     name: Failure Diagnosis
@@ -825,18 +819,6 @@ prompts:
       read its actual content via `File.text()`. Disable the submit
       button only when the upload is genuinely missing/empty, never
       because the chosen file's name differs from an example name.
-      The browser UI is a transport surface, not the authoritative
-      validator for uploaded business content: never call `JSON.parse` on
-      uploaded content, assume one package schema or collection property,
-      count business records, scan content/file names with broad substring
-      checks such as `includes("key")` or `/key/i`, or block submission on
-      any domain rule. Pass the complete read content unchanged in the
-      `attachments` array. The generated backend/Orchestrator owns every
-      schema, quantity, provenance, blindness, and business-policy check
-      against the persisted attachment and must return any actionable
-      validation failure through the normal streamed mission result. This
-      ensures every valid user upload reaches the real provisioned backend
-      process instead of being stranded in guessed browser logic.
 
       REQUIRED VS OPTIONAL - never leave the user guessing which fields
       they must fill in: append a literal " *" to the `<label>`/`<legend>`
@@ -904,20 +886,6 @@ prompts:
       states, and reduced-motion compatibility. Deploy & Launch runs the
       pinned Impeccable detector over the completed frontend and fails the
       build when deterministic anti-patterns remain.
-      VISUAL SYSTEM CONTRACT: the deterministic shell owns the complete
-      light operational palette, typography, spacing, borders, elevation,
-      responsive behavior, focus, and state styling for the entire prototype.
-      Never use a React `style` prop, CSS-in-JS, arbitrary presentation
-      classes, or nested cards. Build semantic form structure with
-      `genie-form`, `genie-form-section`, `genie-form-grid`, `genie-field`,
-      `genie-field-help`, `genie-actions`, `genie-dropzone`, `genie-btn`, and
-      `genie-btn-primary` as appropriate. Render every field-level or form-level validation
-      failure with both `role="alert"` and the `genie-error` class so it is
-      announced and receives the shell's readable error panel. Keep helper
-      text adjacent to its field and concise; must not encode meaning by color
-      alone. Before returning, search the complete TSX source for the literal
-      token `style=` and replace every occurrence with the appropriate shell
-      class; any remaining `style=` token makes the build invalid.
 
       COMPONENT CONTRACT - your default-exported component receives
       exactly one prop object: `{{ onSubmit: (message: string,
@@ -991,7 +959,7 @@ prompts:
       - excluded_agents
       - available_models
       - user_message
-    version: "5.23.0"
+    version: "5.19.0"
 
   - id: build-generation-component-v1
     name: Build Generation - Single Component
@@ -1196,18 +1164,6 @@ prompts:
       read its actual content via `File.text()`. Disable the submit
       button only when the upload is genuinely missing/empty, never
       because the chosen file's name differs from an example name.
-      The browser UI is a transport surface, not the authoritative
-      validator for uploaded business content: never call `JSON.parse` on
-      uploaded content, assume one package schema or collection property,
-      count business records, scan content/file names with broad substring
-      checks such as `includes("key")` or `/key/i`, or block submission on
-      any domain rule. Pass the complete read content unchanged in the
-      `attachments` array. The generated backend/Orchestrator owns every
-      schema, quantity, provenance, blindness, and business-policy check
-      against the persisted attachment and must return any actionable
-      validation failure through the normal streamed mission result. This
-      ensures every valid user upload reaches the real provisioned backend
-      process instead of being stranded in guessed browser logic.
 
       REQUIRED VS OPTIONAL - never leave the user guessing which fields
       they must fill in: append a literal " *" to the `<label>`/`<legend>`
@@ -1269,20 +1225,6 @@ prompts:
       text overflow, loading/disabled/error/empty states, and reduced
       motion. Deploy & Launch runs the pinned Impeccable detector and
       fails the frontend build when deterministic anti-patterns remain.
-      VISUAL SYSTEM CONTRACT: the deterministic shell owns the complete
-      light operational palette, typography, spacing, borders, elevation,
-      responsive behavior, focus, and state styling for the entire prototype.
-      Never use a React `style` prop, CSS-in-JS, arbitrary presentation
-      classes, or nested cards. Build semantic form structure with
-      `genie-form`, `genie-form-section`, `genie-form-grid`, `genie-field`,
-      `genie-field-help`, `genie-actions`, `genie-dropzone`, `genie-btn`, and
-      `genie-btn-primary` as appropriate. Render every field-level or form-level validation
-      failure with both `role="alert"` and the `genie-error` class so it is
-      announced and receives the shell's readable error panel. Keep helper
-      text adjacent to its field and concise; must not encode meaning by color
-      alone. Before returning, search the complete TSX source for the literal
-      token `style=` and replace every occurrence with the appropriate shell
-      class; any remaining `style=` token makes the build invalid.
       Return one fenced ```tsx code block, first line `// agent: ui`, then
       a "## Multi-Agent Workflow" section listing ONLY the agents actually
       generated - same count and names as above.
@@ -1345,7 +1287,7 @@ prompts:
       - component_name
       - user_message
       - assigned_requirements
-    version: "1.26.0"
+    version: "1.22.0"
 
   - id: build-component-regeneration-v1
     name: Build Generation - Regenerate Single Component
@@ -1383,18 +1325,6 @@ prompts:
       overflow, disabled/error/empty states, and reduced motion before
       returning the revised component; the deployed frontend build runs
       the pinned Impeccable detector and fails on deterministic findings.
-      The deterministic shell owns the complete prototype visual system.
-      Never use a React `style` prop, CSS-in-JS, arbitrary presentation
-      classes, or nested cards. Use semantic HTML with `genie-form`,
-      `genie-form-section`, `genie-form-grid`, `genie-field`,
-      `genie-field-help`, `genie-actions`, `genie-dropzone`, `genie-btn`, and
-      `genie-btn-primary` as appropriate. Every field-level or form-level validation failure must use both
-      `role="alert"` and the `genie-error` class; helper text must remain
-      concise, adjacent to its field, and must not encode meaning by color
-      alone. Before returning a revised UI component, search its complete TSX
-      source for the literal token `style=` and replace every occurrence with
-      the appropriate shell class; any remaining `style=` token makes the
-      build invalid.
 
       Security rules you MUST follow: never hardcode any URL, hostname,
       port, API key, token, secret, or credential anywhere - read every
@@ -1413,7 +1343,7 @@ prompts:
       - component_name
       - existing_code
       - instructions
-    version: "1.4.0"
+    version: "1.1.0"
 
   - id: orchestrator-mission-v1
     name: Orchestrator Mission
@@ -1734,44 +1664,5 @@ prompts:
       - retry_instruction
       - source_material
     version: "2.5.0"
-
-  - id: finops-hub-query-v1
-    name: FinOps Hub Query
-    description: >-
-      Queries an operator's FinOps toolkit hub (Azure Data Explorer/Kusto)
-      via the azure-mcp-kusto tool for one mission's resource-group spend
-      and returns a strict JSON cost summary for
-      app.deploy_launch.finops_cost_service to parse - never prose, never
-      fabricated figures.
-    template: >-
-      You are the FinOps Hub Agent for the Genie Agentic Experience
-      Center. Call the azure-mcp-kusto tool's azmcp_kusto_query function
-      exactly once against cluster URI {cluster_uri}, database
-      {database_name},
-      using a KQL query that projects the current month's total cost for
-      resource group '{resource_group_name}', broken down by
-      ResourceType, from the hub's Costs table (the FinOps toolkit's own
-      FOCUS-aligned schema - use ResourceGroupName, ResourceType,
-      EffectiveCost, and BillingCurrency columns; filter
-      ResourceGroupName == '{resource_group_name}' and ChargePeriodStart
-      in the current calendar month; summarize sum(EffectiveCost) by
-      ResourceType, and take any single BillingCurrency value present).
-
-      Never fabricate a result if the tool call fails or the hub has no
-      data for this resource group - in that case, respond with EXACTLY
-      {{"available": false, "reason": "<short real reason from the tool
-      error or empty result>"}} and nothing else.
-
-      On success, respond with ONLY this exact JSON shape and nothing
-      else (no prose, no markdown fences, no extra keys) - a single line
-      of valid JSON:
-      {{"available": true, "total_cost": <number>, "currency": "<ISO
-      currency code>", "line_items": [{{"resource_type": "<string>",
-      "cost": <number>}}, ...]}}
-    variables:
-      - cluster_uri
-      - database_name
-      - resource_group_name
-    version: "1.0.0"
 
 

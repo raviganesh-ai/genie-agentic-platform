@@ -21,32 +21,16 @@ built by ``_build_function_tools`` below, which dispatches through an
 injected ``AgentToolRegistry`` (never inventing a canned response). If no
 registry/context is available to fulfill a tool call, the tool raises
 ``FoundryUnavailableError`` so the run fails closed rather than guessing.
-
-An agent may also declare ``AgentDefinition.mcp_tools`` - remote MCP
-(Model Context Protocol) servers ``agent_framework.MCPStreamableHTTPTool``
-connects to directly (e.g. a self-hosted Azure MCP Server exposing Kusto
-query tools for a FinOps hub). These are built by ``_build_mcp_tools``
-below and, unlike function tools, are never dispatched through
-``AgentToolRegistry`` - agent_framework calls the remote server itself.
-CONFIRMED via introspecting the installed ``agent_framework_foundry``
-package: because every Genie agent references an existing Foundry
-resource by name, ALL tool declarations (function *and* MCP-derived) are
-stripped from the outbound request and used only for client-side dispatch
-matching by name - the model only learns a tool exists from what
-``scripts/provision_foundry_agents.py`` already persisted on the Foundry
-agent resource. See ``/memories/repo/mcp-tool-integration.md`` for the
-full verified rationale.
 """
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import time
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Any, Protocol
 
-from agent_framework import FunctionTool, MCPStreamableHTTPTool
+from agent_framework import FunctionTool
 from agent_framework.foundry import FoundryAgent
 
 from app.agents.foundry.errors import FoundryUnavailableError
@@ -137,20 +121,12 @@ class FoundryAgentProvider:
         *,
         tool_registry: AgentToolRegistry | None = None,
         agent_factory: Any = FoundryAgent,
-        settings: Any = None,
     ) -> None:
         self._project_service = project_service
         self._tool_registry = tool_registry
         # Injectable so unit tests can substitute a fake agent_framework
         # Agent-like object instead of making real network calls.
         self._agent_factory = agent_factory
-        # Used exclusively to resolve AgentMcpToolDefinition.server_url_setting
-        # (e.g. Settings.finops_hub_mcp_server_url) at run time - never to
-        # read any other configuration. Loosely typed (Any) rather than
-        # importing app.config.settings.Settings to avoid a layering
-        # dependency from the Foundry access layer onto app-level config;
-        # any object exposing the named attribute works (see tests).
-        self._settings = settings
 
     async def run(
         self,
@@ -164,9 +140,7 @@ class FoundryAgentProvider:
             agent, agent_version, tools = await self._build_runnable_agent(
                 foundry_agent_id=foundry_agent_id, tool_context=tool_context
             )
-            async with contextlib.AsyncExitStack() as stack:
-                await self._connect_mcp_tools(tools, stack)
-                response = await agent.run(input_text, tools=tools or None)
+            response = await agent.run(input_text, tools=tools or None)
             output_text = (getattr(response, "text", None) or "").strip()
             if not output_text:
                 raise FoundryUnavailableError(
@@ -208,15 +182,13 @@ class FoundryAgentProvider:
             agent, agent_version, tools = await self._build_runnable_agent(
                 foundry_agent_id=foundry_agent_id, tool_context=tool_context
             )
-            async with contextlib.AsyncExitStack() as stack:
-                await self._connect_mcp_tools(tools, stack)
-                stream = agent.run(input_text, tools=tools or None, stream=True)
-                async for update in stream:
-                    delta = getattr(update, "text", None) or ""
-                    if not delta:
-                        continue
-                    accumulated += delta
-                    yield FoundryStreamChunk(delta=delta)
+            stream = agent.run(input_text, tools=tools or None, stream=True)
+            async for update in stream:
+                delta = getattr(update, "text", None) or ""
+                if not delta:
+                    continue
+                accumulated += delta
+                yield FoundryStreamChunk(delta=delta)
 
             output_text = accumulated.strip()
             if not output_text:
@@ -237,29 +209,9 @@ class FoundryAgentProvider:
             final=FoundryRunResult(output_text=output_text, raw_status="completed", latency_ms=latency_ms)
         )
 
-    @staticmethod
-    async def _connect_mcp_tools(
-        tools: list[FunctionTool | MCPStreamableHTTPTool], stack: contextlib.AsyncExitStack
-    ) -> None:
-        """Opens each MCP tool's remote connection for the lifetime of one run.
-
-        Matches the documented ``agent_framework`` usage pattern (``async
-        with mcp_tool: ... agent.run(tools=[mcp_tool])``) explicitly, rather
-        than relying on agent_framework's own best-effort auto-connect
-        (which only closes when the *agent* object itself is exited as a
-        context manager - ``FoundryAgentProvider`` builds a fresh agent per
-        run and never does that, so relying on it would leak the
-        connection). ``stack`` closes every entered tool once the caller's
-        ``async with`` block exits, even if the run raises.
-        """
-
-        for tool in tools:
-            if isinstance(tool, MCPStreamableHTTPTool):
-                await stack.enter_async_context(tool)
-
     async def _build_runnable_agent(
         self, *, foundry_agent_id: str, tool_context: ToolCallContext | None
-    ) -> tuple[_RunnableAgent, str, list[FunctionTool | MCPStreamableHTTPTool]]:
+    ) -> tuple[_RunnableAgent, str, list[FunctionTool]]:
         pinned_version = tool_context.agent.foundry_agent_version if tool_context else None
         if pinned_version:
             agent_version = pinned_version
@@ -268,10 +220,7 @@ class FoundryAgentProvider:
             agent_version = await asyncio.to_thread(api_client.get_latest_version, foundry_agent_id)
 
         project_client = self._project_service.get_async_project_client()
-        tools: list[FunctionTool | MCPStreamableHTTPTool] = [
-            *self._build_function_tools(tool_context),
-            *self._build_mcp_tools(tool_context),
-        ]
+        tools = self._build_function_tools(tool_context)
 
         agent: _RunnableAgent = self._agent_factory(
             project_client=project_client,
@@ -305,77 +254,6 @@ class FoundryAgentProvider:
             for tool_definition in tool_context.agent.tool_definitions
             if allowed is None or tool_definition.name in allowed
         ]
-
-    def _build_mcp_tools(self, tool_context: ToolCallContext | None) -> list[MCPStreamableHTTPTool]:
-        if tool_context is None:
-            return []
-
-        allowed = tool_context.allowed_tool_names
-        tools: list[MCPStreamableHTTPTool] = []
-        for mcp_definition in tool_context.agent.mcp_tools:
-            if allowed is not None and mcp_definition.name not in allowed:
-                continue
-            server_url = getattr(self._settings, mcp_definition.server_url_setting, None)
-            if not server_url:
-                # Never fabricate a connection to an unconfigured server -
-                # fail this one tool closed (the model simply won't have it
-                # available) rather than the whole run.
-                continue
-            header_provider = self._build_mcp_header_provider(mcp_definition)
-            tools.append(
-                MCPStreamableHTTPTool(
-                    name=mcp_definition.name,
-                    url=server_url,
-                    description=mcp_definition.description,
-                    allowed_tools=mcp_definition.allowed_tools,
-                    approval_mode=mcp_definition.approval_mode,
-                    header_provider=header_provider,
-                )
-            )
-        return tools
-
-    def _build_mcp_header_provider(
-        self, mcp_definition: Any
-    ) -> Callable[[dict[str, Any]], dict[str, str]] | None:
-        """Builds the ``Authorization: Bearer`` header for a secured MCP server.
-
-        Self-hosted Azure MCP Server deployments enforce Microsoft Entra ID
-        authentication on every incoming HTTP request by default (verified
-        against Microsoft's own reference deployment,
-        Azure-Samples/azmcp-foundry-aca-mi - see
-        ``infra/modules/finops-mcp-server.bicep``); disabling that check
-        (``--dangerously-disable-http-incoming-auth``) is never done here.
-        Returns ``None`` (no header attached) when ``client_id_setting`` is
-        unset, for MCP servers that are not Genie-managed secured
-        deployments.
-
-        The returned callable matches ``agent_framework.MCPStreamableHTTPTool``'s
-        own documented ``header_provider`` contract (confirmed by reading
-        the installed package's source): it receives the in-flight tool
-        call's own function arguments (``FunctionInvocationContext.kwargs``)
-        - not any pre-existing headers - and its return value becomes the
-        *entire* headers dict attached to that one outbound MCP request, so
-        no merging with prior headers is needed or possible here. Token
-        acquisition itself is delegated to
-        ``FoundryProjectService.get_mcp_access_token`` rather than importing
-        ``azure.identity`` here, since only that module and ``api_client.py``
-        are permitted to import Azure SDK packages directly (see
-        ``tests/unit/test_architecture_boundary.py``).
-        """
-
-        client_id_setting = getattr(mcp_definition, "client_id_setting", None)
-        if not client_id_setting:
-            return None
-        client_id = getattr(self._settings, client_id_setting, None)
-        if not client_id:
-            return None
-
-        def _provide_headers(call_arguments: dict[str, Any]) -> dict[str, str]:
-            token = self._project_service.get_mcp_access_token(client_id)
-            return {"Authorization": f"Bearer {token}"}
-
-        return _provide_headers
-
 
     def _build_one_tool(
         self, tool_definition: AgentToolDefinition, tool_context: ToolCallContext

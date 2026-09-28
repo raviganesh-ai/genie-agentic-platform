@@ -5,10 +5,8 @@
  * Mirrors config/workflows/registry.yaml's `solution-discovery-workflow` id
  * (backend source of truth). The user then reviews results directly on
  * Requirements/Architecture/Workshop/Outputs. Deploy & Launch (a separate
- * real pipeline) runs after this workflow completes, deploying the
- * actually-built prototype and then running an informational-only
- * Microsoft Defender for Cloud + Security Copilot scan and Azure FinOps
- * cost report (Cost Management, with an optional FinOps hub) against it.
+ * real pipeline) runs after this workflow completes, and generates + runs
+ * the test suite for real there, against the actually-deployed build.
  */
 export const DISCOVERY_WORKFLOW_ID: string =
   (import.meta.env.VITE_DISCOVERY_WORKFLOW_ID as string | undefined) ??
@@ -85,8 +83,8 @@ const DEPLOYMENT_PIPELINE_PHASES: MissionPhase[] = [
   { stepId: "deploy-backend-service", label: "Deploy Backend Service" },
   { stepId: "sync-frontend-integration", label: "Update Frontend Integrations" },
   { stepId: "deploy-frontend-app", label: "Deploy Frontend" },
-  { stepId: "security-copilot-scan", label: "Microsoft Defender & Security Copilot Scan" },
-  { stepId: "finops-cost-report", label: "Azure FinOps Cost Report" },
+  { stepId: "generate-test-suite", label: "Generate Functional & Regression Tests" },
+  { stepId: "execute-test-suite", label: "Execute Full Fledge Testing" },
   { stepId: "launch-mission", label: "Launch" },
 ].map(({ stepId, label }) => ({
   stepId,

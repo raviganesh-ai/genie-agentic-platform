@@ -170,11 +170,18 @@ class Settings(BaseSettings):
     prototype_api_gateway_publisher_name: str | None = None
     prototype_api_gateway_sku_name: Literal["StandardV2", "PremiumV2"] = "StandardV2"
     prototype_api_gateway_capacity: int = Field(default=1, ge=1, le=10)
-    # Max automatic regenerate-and-redeploy attempts the pipeline makes when
-    # the generated build itself fails deterministic validation (see
-    # ``_GeneratedBuildRepairNeeded`` in ``app.deploy_launch.pipeline_service``)
-    # before failing closed.
-    deployment_max_repair_attempts: int = 3
+    deployment_fidelity_max_repair_attempts: int = 3
+    deployment_fidelity_min_coverage_percent: float = Field(default=90.0, gt=0, le=100)
+    # How long the Requirement Fidelity Gate's real pytest subprocess is
+    # allowed to run before being killed. This suite executes real black-box
+    # HTTP acceptance tests against a live deployed mission prototype (one
+    # test per approved requirement) - not fast in-process unit tests - so it
+    # scales with the number of approved requirements. A too-short timeout
+    # kills the whole pytest process before it can write any JUnit XML at
+    # all, which discards every real pass/fail outcome and misreports every
+    # single requirement as if its test didn't exist, rather than surfacing
+    # the real "the suite didn't finish in time" cause.
+    deployment_test_execution_timeout_seconds: int = 300
     prototype_default_ttl_days: int = Field(default=7, ge=1, le=90)
     prototype_max_active_per_owner: int = Field(default=0, ge=0, le=20)
     prototype_cleanup_interval_seconds: int = Field(default=3600, ge=60, le=86400)
@@ -182,72 +189,6 @@ class Settings(BaseSettings):
     # build under (one subdirectory per pipeline run id) before packaging it
     # for ACR/Storage upload - never a customer-specific path in source.
     deployment_build_workspace_root: Path = Path("var/deploy-launch-builds")
-
-    # --- Deploy & Launch: Microsoft Security Copilot scan (informational-only) --
-    # Full Logic Apps HTTP-trigger URL (including its SAS signature query
-    # string) for a pre-configured Security Copilot "Automated Action" that
-    # runs a promptbook against the mission's own resources and returns its
-    # findings. Never a hardcoded real endpoint (Configuration Rules). Unset
-    # by default - the step then honestly reports "not configured" instead
-    # of blocking Launch; see app.deploy_launch.security_copilot_gateway.
-    security_copilot_logic_app_url: str | None = None
-    security_copilot_timeout_seconds: float = Field(default=120, gt=0, le=600)
-
-    # --- Deploy & Launch: Microsoft Defender for Cloud scan (informational-only) -
-    # Explicit opt-in - real Defender for Cloud assessment queries are only
-    # issued when this is true (and azure_subscription_id is configured);
-    # otherwise the step honestly reports "not configured" instead of
-    # blocking Launch. This is the deterministic, primary source for the
-    # security-copilot-scan step; see app.deploy_launch.defender_for_cloud_gateway.
-    defender_for_cloud_enabled: bool = False
-    defender_for_cloud_timeout_seconds: float = Field(default=60, gt=0, le=300)
-
-    # --- Deploy & Launch: Azure FinOps cost report (informational-only) ---------
-    # Explicit opt-in - real Azure Cost Management queries are only issued
-    # when this is true (and azure_subscription_id is configured); otherwise
-    # the step honestly reports "not configured" instead of blocking Launch.
-    # See app.deploy_launch.finops_cost_service.
-    finops_cost_report_enabled: bool = False
-    finops_cost_report_timeout_seconds: float = Field(default=30, gt=0, le=300)
-
-    # --- Deploy & Launch: FinOps toolkit hub (optional, richer cost data) -------
-    # When a FinOps hub (a Data Explorer cluster ingesting an operator's own
-    # cost exports, per Microsoft's open-source FinOps toolkit) is already
-    # provisioned, and all three of these plus finops_hub_mcp_server_url are
-    # configured, the FinOps cost report step queries it via the
-    # finops-hub-agent Foundry agent (AzureAgentGateway) instead of Cost
-    # Management - see app.deploy_launch.finops_cost_service. Genie does not
-    # assume any particular FinOps toolkit table/schema version beyond what
-    # config/prompts/registry.yaml's finops-hub-query-v1 prompt documents,
-    # since the exact hub layout depends on the operator's own deployment.
-    # Falls back to the direct Cost Management query above when unset, when
-    # the agent/MCP server is unavailable, or when the hub query itself
-    # fails or returns no data.
-    finops_hub_kusto_cluster_uri: str | None = None
-    finops_hub_kusto_database: str | None = None
-    finops_hub_timeout_seconds: float = Field(default=30, gt=0, le=300)
-
-    # Endpoint of a self-hosted Azure MCP Server (mcr.microsoft.com/azure-sdk/
-    # azure-mcp) Container App exposing (at minimum) the Kusto query tool -
-    # never a hardcoded/shared value, always the operator's own deployment.
-    # Resolved at run time by AgentMcpToolDefinition.server_url_setting for
-    # the finops-hub-agent's azure-mcp-kusto tool (config/agents/registry.yaml)
-    # and used both by scripts/provision_foundry_agents.py (to discover and
-    # persist the server's real tool schemas) and by FoundryAgentProvider (to
-    # build the runtime agent_framework.MCPStreamableHTTPTool).
-    finops_hub_mcp_server_url: str | None = None
-
-    # Microsoft Entra ID application (client) ID of the self-hosted MCP
-    # server's own Entra App Registration (infra/modules/
-    # finops-mcp-server-entra-app.bicep), used as the OAuth2 audience
-    # ('api://<client-id>') when acquiring an access token to authenticate
-    # Genie's outgoing MCP requests - the server enforces Microsoft Entra ID
-    # auth on every incoming HTTP request by default (verified against
-    # Microsoft's own azmcp-foundry-aca-mi reference deployment; see
-    # AgentMcpToolDefinition.client_id_setting). Required for the
-    # finops-hub-agent's azure-mcp-kusto tool to authenticate successfully
-    # once deployed with the (never-disabled) default incoming-auth posture.
-    finops_hub_mcp_client_id: str | None = None
 
     @property
     def cors_allowed_origins_list(self) -> list[str]:
@@ -291,11 +232,6 @@ class Settings(BaseSettings):
         "deployment_location",
         "prototype_api_gateway_publisher_email",
         "prototype_api_gateway_publisher_name",
-        "security_copilot_logic_app_url",
-        "finops_hub_kusto_cluster_uri",
-        "finops_hub_kusto_database",
-        "finops_hub_mcp_server_url",
-        "finops_hub_mcp_client_id",
         mode="after",
     )
     @classmethod

@@ -31,29 +31,14 @@ declarations to the model when they are part of the agent's own persisted
 definition - declarations passed per-request are silently dropped whenever
 the run references an existing agent by name/version, so without this an
 orchestrator-style agent could never actually call any of its tools.
-
-Any agent with ``mcp_tools`` configured (e.g. ``finops-hub-agent``'s Azure
-MCP Server Kusto query tool) has its remote MCP server's *own* tools
-real-connected to and discovered here (via ``agent_framework.
-MCPStreamableHTTPTool``), then persisted as ordinary ``FunctionTool``
-schemas exactly like ``tool_definitions`` above - for the same reason:
-the model only ever learns a tool exists from what is already declared on
-the Foundry agent resource. At run time, ``FoundryAgentProvider`` builds a
-fresh ``MCPStreamableHTTPTool`` and routes matching tool calls to the real
-MCP server directly (never through Genie's own ``AgentToolRegistry``). See
-``/memories/repo/mcp-tool-integration.md`` for the full verified rationale
-(this dual persist-then-dispatch design was confirmed by introspecting the
-installed ``agent_framework_foundry`` package, not assumed from docs).
 """
 from __future__ import annotations
 
 import argparse
-import asyncio
 import sys
 
-from app.agents.models import AgentMcpToolDefinition
 from app.agents.registry import AgentRegistry
-from app.config.settings import Settings, get_settings
+from app.config.settings import get_settings
 
 
 def _build_instructions(name: str, description: str, capabilities: list[str]) -> str:
@@ -149,84 +134,6 @@ def main() -> None:
             for tool_definition in tool_definitions
         ]
 
-    async def _discover_mcp_function_tools(
-        mcp_definitions: list[AgentMcpToolDefinition], settings: Settings
-    ) -> list:
-        """Real-connects to each configured MCP server and returns its tools.
-
-        Each discovered ``agent_framework.FunctionTool``'s own JSON-schema
-        spec (``to_json_schema_spec()``) is translated into the same
-        ``azure.ai.projects.models.FunctionTool`` shape ``_build_tools``
-        produces for ordinary ``tool_definitions`` - the persisted
-        definition does not distinguish where a tool schema originated.
-        Skips (with a printed warning) any MCP tool whose
-        ``server_url_setting`` is not configured, rather than failing the
-        whole provisioning run for one unavailable server.
-
-        When ``client_id_setting`` is configured, acquires a Microsoft
-        Entra ID access token (via this script's own ``DefaultAzureCredential``,
-        i.e. the operator's own signed-in identity) for the MCP server's
-        Entra App Registration audience and attaches it as an
-        ``Authorization: Bearer`` header - self-hosted Azure MCP Server
-        deployments enforce Entra ID auth on every incoming HTTP request by
-        default (verified against Microsoft's own reference deployment,
-        Azure-Samples/azmcp-foundry-aca-mi), so discovery would otherwise
-        be rejected. Mirrors ``FoundryAgentProvider._build_mcp_header_provider``.
-        """
-
-        from agent_framework import MCPStreamableHTTPTool
-
-        discovered: list = []
-        for mcp_definition in mcp_definitions:
-            server_url = getattr(settings, mcp_definition.server_url_setting, None)
-            if not server_url:
-                print(
-                    f"[skip-mcp] '{mcp_definition.name}': setting "
-                    f"'{mcp_definition.server_url_setting}' is not configured; no tools "
-                    f"discovered/persisted for it."
-                )
-                continue
-
-            header_provider = None
-            client_id = getattr(settings, mcp_definition.client_id_setting or "", None)
-            if client_id:
-                credential = DefaultAzureCredential()
-
-                # Matches agent_framework.MCPStreamableHTTPTool's own
-                # documented header_provider contract (verified by reading
-                # the installed package's source): it receives the
-                # in-flight call's own function arguments, not any
-                # pre-existing headers, and the return value becomes the
-                # entire headers dict for that request - no merging needed.
-                def _provide_headers(
-                    call_arguments: dict, *, _credential=credential, _client_id=client_id
-                ) -> dict:
-                    token = _credential.get_token(f"api://{_client_id}/.default")
-                    return {"Authorization": f"Bearer {token.token}"}
-
-                header_provider = _provide_headers
-
-            mcp_tool = MCPStreamableHTTPTool(
-                name=mcp_definition.name,
-                url=server_url,
-                description=mcp_definition.description,
-                allowed_tools=mcp_definition.allowed_tools,
-                approval_mode=mcp_definition.approval_mode,
-                header_provider=header_provider,
-            )
-            async with mcp_tool:
-                for discovered_function in mcp_tool.functions:
-                    spec = discovered_function.to_json_schema_spec()["function"]
-                    discovered.append(
-                        FunctionTool(
-                            name=spec["name"],
-                            description=spec["description"],
-                            parameters=spec["parameters"],
-                            strict=False,
-                        )
-                    )
-        return discovered
-
     client = AIProjectClient(endpoint=args.endpoint, credential=DefaultAzureCredential())
 
     created: dict[str, str] = {}
@@ -269,17 +176,11 @@ def main() -> None:
             )
             continue
 
-        function_tools = list(_build_tools(agent.tool_definitions) or [])
-        if agent.mcp_tools:
-            function_tools.extend(
-                asyncio.run(_discover_mcp_function_tools(agent.mcp_tools, settings))
-            )
-
         definition = PromptAgentDefinition(
             kind="prompt",
             model=model,
             instructions=instructions,
-            tools=function_tools or None,
+            tools=_build_tools(agent.tool_definitions),
         )
         version_details = client.agents.create_version(
             agent.foundry_agent_id,

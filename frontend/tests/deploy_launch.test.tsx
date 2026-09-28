@@ -19,8 +19,9 @@ function buildPipelineRun(overrides: Partial<DeploymentPipelineRun> = {}): Deplo
     backend_url: null,
     frontend_url: null,
     launch_url: null,
-    security_scan_report: null,
-    cost_report: null,
+    test_summary: null,
+    fidelity_report: null,
+    security_findings_count: null,
     created_at: "2026-07-23T12:00:00Z",
     updated_at: "2026-07-23T12:00:00Z",
     ...overrides,
@@ -66,6 +67,7 @@ describe("DeployLaunchPage", () => {
         expect(screen.getByText(DEPLOYMENT_STEP_NAMES[stepId])).toBeInTheDocument();
       }
     });
+    expect(screen.queryByText("Security Scan (Backend & Frontend)")).not.toBeInTheDocument();
     expect(screen.getAllByText("Not Started").length).toBeGreaterThan(0);
     expect(screen.queryByText("Starting Deploy & Launch automatically...")).not.toBeInTheDocument();
   });
@@ -102,28 +104,40 @@ describe("DeployLaunchPage", () => {
     expect(screen.getByText(/^Launch$/i)).toBeInTheDocument();
   });
 
-  it("shows an informational Security Copilot scan summary that never blocks Launch", async () => {
+  it("shows a compact Requirement Fidelity Gate summary (details live on the dedicated tab)", async () => {
     mockFetchSequence([
       {
         match: "/deploy-launch/",
         response: [
           buildPipelineRun({
-            status: "completed",
-            launch_url: "https://genie-i4opvs55x5qu4-swa.azurestaticapps.net/",
-            security_scan_report: {
-              available: true,
-              summary: "2 findings reviewed - none blocking.",
-              findings: [
+            status: "failed",
+            fidelity_report: {
+              status: "failed",
+              requirements: [
                 {
-                  source: "security-copilot",
-                  severity: "medium",
-                  title: "Missing security header",
-                  description: "Content-Security-Policy header not set.",
-                  resource: "frontend",
+                  requirement_id: "REQ-001",
+                  statement: "Process every uploaded document.",
+                  status: "passed",
+                  test_names: ["test_req_001_processes_every_document"],
+                  evidence: "1 passed",
+                },
+                {
+                  requirement_id: "REQ-002",
+                  statement: "Export a signed result.",
+                  status: "missing",
+                  test_names: [],
+                  evidence: "No executable acceptance test references this requirement.",
                 },
               ],
-              reference_url: "https://portal.azure.com/securitycopilot/scan/1",
-              scanned_at: "2026-07-23T12:05:00Z",
+              total_requirements: 2,
+              covered_requirements: 1,
+              passed_requirements: 1,
+              coverage_percent: 50,
+              pass_percent: 50,
+              repair_attempts: 3,
+              max_repair_attempts: 3,
+              gaps: ["REQ-002: no executable acceptance test"],
+              execution_summary: "1 passed, 1 uncovered",
             },
           }),
         ],
@@ -135,45 +149,12 @@ describe("DeployLaunchPage", () => {
       workflowRunId: FIXTURE_WORKFLOW_RUN_ID,
     });
 
-    expect(await screen.findByText("🛡️ Microsoft Defender & Security Copilot Scan")).toBeInTheDocument();
-    expect(await screen.findByText("2 findings reviewed - none blocking.")).toBeInTheDocument();
-    expect(screen.getByText("1 finding(s)")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /^Launch$/i })).toBeInTheDocument();
-  });
-
-  it("shows an informational FinOps cost report summary that never blocks Launch", async () => {
-    mockFetchSequence([
-      {
-        match: "/deploy-launch/",
-        response: [
-          buildPipelineRun({
-            status: "completed",
-            launch_url: "https://genie-i4opvs55x5qu4-swa.azurestaticapps.net/",
-            cost_report: {
-              available: true,
-              summary: "Estimated spend for this mission so far.",
-              data_source: "azure-cost-management",
-              total_cost: 12.5,
-              currency: "USD",
-              line_items: [{ resource_type: "Container App", cost: 12.5 }],
-              period_start: "2026-07-01T00:00:00Z",
-              period_end: "2026-07-23T00:00:00Z",
-              reported_at: "2026-07-23T12:05:00Z",
-            },
-          }),
-        ],
-      },
-    ]);
-
-    renderWithProviders(<DeployLaunchPage />, {
-      sessionId: FIXTURE_SESSION_ID,
-      workflowRunId: FIXTURE_WORKFLOW_RUN_ID,
-    });
-
-    expect(await screen.findByText("💰 Azure FinOps Cost Report")).toBeInTheDocument();
-    expect(await screen.findByText("Estimated spend for this mission so far.")).toBeInTheDocument();
-    expect(screen.getByText("12.5 USD")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /^Launch$/i })).toBeInTheDocument();
+    expect(await screen.findByText("Requirement Fidelity Gate")).toBeInTheDocument();
+    expect(await screen.findByText("50% passed")).toBeInTheDocument();
+    expect(screen.getByText(/See the Requirement Fidelity Gate tab for full per-requirement evidence/i)).toBeInTheDocument();
+    expect(screen.queryByText("REQ-002")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Launch blocked by requirement gaps/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Launch$/i })).not.toBeInTheDocument();
   });
 
   it("shows a gamified 'Genie is working with...' activity banner for the currently running step", async () => {
@@ -251,48 +232,6 @@ describe("DeployLaunchPage", () => {
     expect(screen.getByText("local-acme-mission-requirements-specialist")).toBeInTheDocument();
     expect(screen.getByText("orchestrator")).toBeInTheDocument();
     expect(screen.getByText(/Deploying…/i)).toBeInTheDocument();
-  });
-
-  it("does not show backend deployment running while Foundry provisioning is running", async () => {
-    mockFetchSequence([
-      {
-        match: "/deploy-launch/",
-        response: [
-          buildPipelineRun({
-            status: "running",
-            steps: [
-              {
-                step_id: "generate-access-policy",
-                name: "Generate Access Policy & Least Access",
-                status: "completed",
-                detail: "Generated.",
-                error: null,
-                started_at: "2026-07-23T12:00:00Z",
-                completed_at: "2026-07-23T12:00:01Z",
-              },
-              {
-                step_id: "provision-foundry-agents",
-                name: "Deploy Agents to Foundry",
-                status: "running",
-                detail: "Regenerating the generated build to satisfy deterministic validation (attempt 1 of 3)...",
-                error: null,
-                started_at: "2026-07-23T12:00:01Z",
-                completed_at: null,
-              },
-            ],
-          }),
-        ],
-      },
-    ]);
-
-    renderWithProviders(<DeployLaunchPage />, {
-      sessionId: FIXTURE_SESSION_ID,
-      workflowRunId: FIXTURE_WORKFLOW_RUN_ID,
-    });
-
-    await waitFor(() => expect(screen.getByText(/attempt 1 of 3/i)).toBeInTheDocument());
-    expect(screen.getAllByText("In Progress…")).toHaveLength(1);
-    expect(screen.getAllByText("Not Started")).toHaveLength(6);
   });
 
   it("shows the launch link and download action once the pipeline completes", async () => {

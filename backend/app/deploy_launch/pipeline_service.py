@@ -8,18 +8,16 @@ equivalents when the required settings are not configured, mirroring
 result. This is explicitly NOT an LLM-driven workflow step: it is invoked
 only after the ``solution-discovery-workflow`` has already produced an
 approved architecture (``design-architecture``) and generated build
-(``build-solution``). Two of its steps are informational-only and can
-never block Launch: ``security-copilot-scan`` (Microsoft Defender for
-Cloud's real assessment API - the deterministic primary source, see
-``app.deploy_launch.defender_for_cloud_gateway`` - plus an optional
-Security Copilot Automated Action narrative overlay, see
-``app.deploy_launch.security_copilot_gateway``) and ``finops-cost-report``
-(a real Azure cost report from a FinOps toolkit hub when configured,
-otherwise a direct Azure Cost Management query, both scoped to the
-mission's own resource group - see
-``app.deploy_launch.finops_cost_service``); both honestly report
-``available=False`` when not configured or when the underlying request
-fails, rather than failing the pipeline.
+(``build-solution``). Test generation happens here too, as this
+pipeline's own ``generate-test-suite`` step: it calls the Test Generation
+Agent directly (``AgentOrchestrator.execute_agent`` - the same
+outside-any-workflow-step execution path Workshop's per-component
+"Regenerate" action already uses) against the approved requirements and
+real deployed mission URLs. ``execute-test-suite`` exercises that deployed
+prototype before Launch; failures trigger a bounded fresh build regeneration,
+redeployment, and retest, and the pipeline fails closed if 100% requirement
+coverage and passing evidence are not achieved before the repair budget is
+exhausted.
 
 Genie's Deploy & Launch stage has exactly one gate: the human clicking
 Start. There is no separate approval-checkpoint request/decide dance -
@@ -28,10 +26,10 @@ Start. There is no separate approval-checkpoint request/decide dance -
 pipeline.
 
 ``start()`` returns as soon as the run is created (status
-``running``) - the eight steps themselves execute in a background asyncio
-task, since real Azure agent/backend/frontend deployments can legitimately
-take far longer than any single HTTP request should block for. Callers
-(the API layer, the frontend) always
+``running``) - the nine steps themselves execute in a background asyncio
+task, since real Azure agent/backend/frontend deployments plus a real test
+run and security scan can legitimately take far longer than any single HTTP
+request should block for. Callers (the API layer, the frontend) always
 observe progress by polling ``get_run``/``list_runs_for_session`` (or the
 live ``WorkflowEventBus`` stream) - never by relying on ``start()`` itself
 to have finished the work.
@@ -68,16 +66,6 @@ from app.deploy_launch.container_app_frontend_deployment_service import (
     ContainerAppFrontendDeploymentService,
     NullContainerAppFrontendDeploymentService,
 )
-from app.deploy_launch.defender_for_cloud_gateway import (
-    DefenderForCloudGateway,
-    NullDefenderForCloudGateway,
-    create_defender_for_cloud_gateway,
-)
-from app.deploy_launch.finops_cost_service import (
-    FinOpsCostService,
-    NullFinOpsCostService,
-    create_finops_cost_service,
-)
 from app.deploy_launch.mission_agent_provisioning_service import (
     MissionAgentProvisioningService,
     NullMissionAgentProvisioningService,
@@ -94,13 +82,14 @@ from app.deploy_launch.models import (
     DeploymentStepId,
     DeploymentStepResult,
     ProvisionedAgentStatus,
-    SecurityCopilotScanReport,
 )
 from app.deploy_launch.resource_naming import prototype_resource_group_name
-from app.deploy_launch.security_copilot_gateway import (
-    NullSecurityCopilotGateway,
-    SecurityCopilotGateway,
-    create_security_copilot_gateway,
+from app.deploy_launch.security_scan_service import SecurityScanService
+from app.deploy_launch.test_execution_service import (
+    TestExecutionService,
+    extract_test_modules,
+    has_pytest_discoverable_tests,
+    validate_real_action_tests,
 )
 from app.models.workflow_models import WorkflowRunResult, WorkflowStepInput
 from app.models.workflow_stream_models import WorkflowStreamEvent, WorkflowStreamEventType
@@ -109,6 +98,11 @@ from app.orchestration.workflow_event_bus import WorkflowEventBus
 from app.repositories.deployment_run_repository import (
     DeploymentRunRepository,
     InMemoryDeploymentRunRepository,
+)
+from app.services.requirement_fidelity_service import (
+    create_fidelity_report,
+    record_fidelity_execution,
+    record_test_coverage,
 )
 from app.services.session_service import SessionService
 from app.services.workshop_service import UnknownWorkflowRunError
@@ -144,31 +138,6 @@ def _approved_model_deployment_ref(run: WorkflowRunResult) -> str | None:
         return None
     ref = scope_id[len(_APPROVED_MODEL_SCOPE_PREFIX) :].strip()
     return ref or None
-
-
-def _merge_security_scan_reports(
-    defender_report: SecurityCopilotScanReport, copilot_report: SecurityCopilotScanReport
-) -> SecurityCopilotScanReport:
-    """Combines Defender for Cloud's deterministic findings with Security
-    Copilot's optional narrative overlay into one report - see
-    ``app.deploy_launch.models.SecurityCopilotScanReport``. Available if
-    either source produced real data; each source's own summary is kept so
-    neither is silently dropped."""
-
-    findings = [*defender_report.findings, *copilot_report.findings]
-    summaries = [
-        report.summary
-        for report in (defender_report, copilot_report)
-        if report.available and report.summary
-    ]
-    if not summaries:
-        summaries = [defender_report.summary, copilot_report.summary]
-    return SecurityCopilotScanReport(
-        available=defender_report.available or copilot_report.available,
-        summary=" ".join(summary for summary in summaries if summary),
-        findings=findings,
-        reference_url=copilot_report.reference_url,
-    )
 
 
 _FRONTEND_INDEX_HTML_TEMPLATE = """<!doctype html>
@@ -224,28 +193,20 @@ import react from "@vitejs/plugin-react";
 export default defineConfig({ plugins: [react()] });
 """
 
-# Every generated mission ships one deterministic visual system. The Build
-# Agent supplies semantic markup and mission-specific controls; this shell
-# owns palette, typography, spacing, surfaces, states, and motion so generated
-# JSX cannot create a second visual language inside the prototype.
-_FRONTEND_STYLES_CSS = """/* Genie Mission Prototype design system. */
+# Mirrors the core visual language of Genie's own Mission Control app
+# (frontend/src/styles/global.css): the same dark gradient background,
+# accent colors, and "live agent working" animations (loading dots, glow,
+# indeterminate rail, pulsing live dot). Every generated mission prototype
+# ships this stylesheet so it reads as a genuine extension of Genie - not a
+# bare, unstyled document - regardless of how much/little styling the LLM-
+# generated UI component itself adds. Base element selectors (h1/h2/button/
+# textarea/etc.) carry sensible defaults; utility classes (`genie-card`,
+# `genie-badge`, `genie-btn`, `genie-live-dot`, `genie-bounce-dots`,
+# `genie-agent-activity`) are documented to the Build Agent's own UI-
+# generation prompts so its markup can opt into the same gamified look.
+_FRONTEND_STYLES_CSS = """/* Genie Mission Prototype shell - shares Genie's own visual language. */
 :root {
-    color-scheme: light;
-    --genie-canvas: #eef2f7;
-    --genie-surface: #ffffff;
-    --genie-surface-subtle: #f7f9fc;
-    --genie-text: #172033;
-    --genie-muted: #526176;
-    --genie-border: #d7dee8;
-    --genie-border-strong: #b8c4d4;
-    --genie-accent: #185abd;
-    --genie-accent-strong: #0f4c9d;
-    --genie-accent-soft: #edf5ff;
-    --genie-success: #18794e;
-    --genie-success-soft: #edf8f2;
-    --genie-danger: #a4262c;
-    --genie-danger-soft: #fdf3f4;
-    --genie-shadow: 0 8px 24px rgba(18, 35, 58, 0.08);
+  color-scheme: dark;
 }
 
 * {
@@ -260,20 +221,22 @@ body,
 }
 
 body {
-    font-family: "Segoe UI Variable Text", "Segoe UI", sans-serif;
-    background-color: var(--genie-canvas);
-    color: var(--genie-text);
+  font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, Helvetica, Arial, sans-serif;
+  background-color: #0b0f14;
+  background-image:
+    radial-gradient(circle at 12% -10%, rgba(47, 131, 224, 0.16), transparent 45%),
+    radial-gradient(circle at 100% 0%, rgba(78, 147, 229, 0.08), transparent 40%);
+  background-attachment: fixed;
+  color: #e6e9ee;
 }
 
 h1, h2, h3 {
-    font-family: "Segoe UI Variable Display", "Segoe UI", sans-serif;
   font-weight: 700;
-    letter-spacing: 0;
   margin: 0 0 8px;
 }
 
 p {
-    color: var(--genie-muted);
+  color: #aab3bf;
   line-height: 1.5;
 }
 
@@ -283,21 +246,20 @@ button {
 
 input, textarea, select {
   font: inherit;
-    color: var(--genie-text);
-    background-color: var(--genie-surface);
-    border: 1px solid var(--genie-border-strong);
-    border-radius: 4px;
+  color: #e6e9ee;
+  background-color: #10151c;
+  border: 1px solid #2a323d;
+  border-radius: 8px;
   padding: 10px 12px;
 }
 
 input:focus, textarea:focus, select:focus {
-    border-color: var(--genie-accent);
-    outline: 3px solid rgba(24, 90, 189, 0.2);
+  outline: 2px solid #2f83e0;
   outline-offset: 1px;
 }
 
 .genie-shell {
-    max-width: 1120px;
+  max-width: 1040px;
   margin: 0 auto;
   padding: 32px 24px 64px;
 }
@@ -317,7 +279,7 @@ input:focus, textarea:focus, select:focus {
 
 .genie-eyebrow {
   display: inline-block;
-    color: var(--genie-accent);
+  color: #6ba3ea;
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -326,12 +288,12 @@ input:focus, textarea:focus, select:focus {
 }
 
 .genie-card {
-    background-color: var(--genie-surface);
-    border: 1px solid var(--genie-border);
-    border-radius: 8px;
-    padding: 24px;
+  background-color: rgba(255, 255, 255, 0.03);
+  border: 1px solid #232b35;
+  border-radius: 12px;
+  padding: 20px;
   margin-bottom: 20px;
-    box-shadow: var(--genie-shadow);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.03) inset;
 }
 
 .genie-zone-title {
@@ -341,211 +303,38 @@ input:focus, textarea:focus, select:focus {
 
 .genie-input-surface {
     margin: 28px 0;
-    padding: 24px;
-    color: var(--genie-text);
-    background-color: var(--genie-surface);
-    border: 1px solid var(--genie-border);
-    border-radius: 8px;
-    box-shadow: var(--genie-shadow);
-}
-
-.genie-input-surface :where(h1, h2, h3, label, legend) {
-    color: var(--genie-text) !important;
-}
-
-.genie-input-surface :where(p, small) {
-    color: var(--genie-muted) !important;
-}
-
-.genie-input-surface > .genie-zone-title {
-    margin: 0;
-    padding: 0 0 14px;
-    border-bottom: 1px solid var(--genie-border);
-    font-size: 14px;
-    letter-spacing: 0;
-}
-
-.genie-input-surface form {
-    display: grid;
-    gap: 0;
-    width: 100%;
-    max-width: none !important;
-    margin: 0;
-    padding: 20px 0 0 !important;
-    color: var(--genie-text);
-    background: transparent !important;
-    border: 0 !important;
-    border-radius: 0;
-    box-shadow: none !important;
-}
-
-.genie-input-surface form > section {
-    margin: 0 !important;
-    padding: 22px 0;
-    border-top: 1px solid var(--genie-border);
-}
-
-.genie-input-surface form > div:first-child {
-    padding-bottom: 22px;
-}
-
-.genie-input-surface form > div:first-child h2 {
-    margin-bottom: 6px !important;
-    font-size: clamp(20px, 2.4vw, 26px) !important;
-    line-height: 1.2;
-}
-
-.genie-input-surface form > section > h3 {
-    margin-bottom: 6px !important;
-    font-size: 16px !important;
-    line-height: 1.3;
-}
-
-.genie-input-surface :where(label, legend) {
-    font-weight: 650;
-    line-height: 1.35;
-}
-
-.genie-input-surface :where(input, textarea, select) {
-    color: var(--genie-text);
-    background-color: var(--genie-surface);
-    border-color: var(--genie-border-strong);
-}
-
-.genie-input-surface :where(input[type="text"], input[type="number"], input[type="date"], input[type="datetime-local"], textarea, select) {
-    min-height: 42px;
-}
-
-.genie-input-surface :where(input[type="range"]) {
-    width: 100%;
-    padding-inline: 0;
-}
-
-.genie-input-surface :where(input, textarea, select)::placeholder {
-    color: #68778c;
-    opacity: 1;
-}
-
-.genie-input-surface :where(input, textarea, select):focus {
-    border-color: var(--genie-accent);
-    outline: 3px solid rgba(24, 90, 189, 0.22);
-    outline-offset: 1px;
-}
-
-.genie-input-surface input[type="checkbox"],
-.genie-input-surface input[type="radio"] {
-    width: 17px;
-    height: 17px;
-    flex: 0 0 17px;
-    accent-color: var(--genie-accent);
-}
-
-.genie-input-surface .genie-card {
-    color: var(--genie-text);
-    background-color: transparent;
-    border-color: transparent;
-    box-shadow: none !important;
-}
-
-.genie-input-surface fieldset {
-    min-width: 0;
-}
-
-.genie-input-surface fieldset label {
-    min-height: 36px;
-    padding: 7px 9px;
-    background-color: var(--genie-surface-subtle);
-    border: 1px solid var(--genie-border);
-    border-radius: 4px;
-    cursor: pointer;
-}
-
-.genie-input-surface fieldset label:hover {
-    background-color: var(--genie-accent-soft);
-    border-color: #91add2;
-}
-
-.genie-input-surface .genie-dropzone {
-    color: var(--genie-text);
-    background-color: var(--genie-surface-subtle) !important;
-    border: 1px dashed var(--genie-border-strong) !important;
-    border-radius: 6px !important;
-    padding: 22px !important;
-}
-
-.genie-input-surface .genie-dropzone:hover,
-.genie-input-surface .genie-dropzone-active {
-    background-color: var(--genie-accent-soft) !important;
-    border-color: var(--genie-accent) !important;
-}
-
-.genie-input-surface .genie-btn {
-    min-height: 42px;
-    padding: 10px 18px;
-    color: #ffffff;
-    background: var(--genie-accent);
-    border-color: var(--genie-accent);
-    border-radius: 4px;
-    box-shadow: 0 1px 2px rgba(18, 35, 58, 0.18);
-}
-
-.genie-input-surface .genie-btn:disabled {
-    color: #526176;
-    background: #d8e0ea;
-    border-color: #d8e0ea;
-    opacity: 1;
-    box-shadow: none;
-}
-
-.genie-input-surface .genie-error,
-.genie-input-surface [role="alert"] {
-    display: block;
-    padding: 10px 12px;
-    color: var(--genie-danger);
-    background-color: var(--genie-danger-soft);
-    border: 1px solid #d77a7f;
-    border-radius: 6px;
-    font-weight: 650;
-    line-height: 1.45;
 }
 
 .genie-btn {
   padding: 10px 18px;
-    border-radius: 4px;
-    border: 1px solid var(--genie-border-strong);
+  border-radius: 8px;
+  border: 1px solid transparent;
   font-weight: 700;
   cursor: pointer;
-    background-color: var(--genie-surface);
-    color: var(--genie-text);
-    transition: background-color 140ms ease, border-color 140ms ease, box-shadow 140ms ease;
+  background-color: #1a2028;
+  color: #e6e9ee;
 }
 
 .genie-btn:hover:not(:disabled) {
-    background-color: var(--genie-surface-subtle);
-    border-color: #91add2;
+  transform: translateY(-1px);
 }
+
 .genie-btn:disabled {
   cursor: not-allowed;
-    color: #68778c;
-    background-color: #e4e9f0;
-    border-color: #d1d9e4;
-    opacity: 1;
+  opacity: 0.55;
 }
 
 .genie-btn-primary {
-    background: var(--genie-accent);
-    border-color: var(--genie-accent);
-    color: #ffffff;
+  background: linear-gradient(120deg, #2f83e0, #6a4fc9);
+  color: white;
 }
 
 .genie-btn-primary:hover:not(:disabled) {
-    background: var(--genie-accent-strong);
-    border-color: var(--genie-accent-strong);
-    box-shadow: 0 2px 8px rgba(24, 90, 189, 0.24);
+  box-shadow: 0 0 16px rgba(47, 131, 224, 0.45);
 }
 
 .genie-error {
-    color: var(--genie-danger);
+  color: #ef7f74;
   font-weight: 600;
 }
 
@@ -553,10 +342,9 @@ input:focus, textarea:focus, select:focus {
   white-space: pre-wrap;
   margin-top: 16px;
   padding: 14px 16px;
-    color: var(--genie-text);
-    background-color: var(--genie-surface-subtle);
-    border: 1px solid var(--genie-border);
-    border-radius: 4px;
+  background-color: #0e1319;
+  border: 1px solid #232b35;
+  border-radius: 8px;
 }
 
 .genie-badge {
@@ -567,23 +355,23 @@ input:focus, textarea:focus, select:focus {
   border-radius: 999px;
   font-size: 12px;
   font-weight: 700;
-    background-color: var(--genie-surface-subtle);
-    color: var(--genie-muted);
+  background-color: #1a2028;
+  color: #aab3bf;
 }
 
 .genie-badge-active {
-    background-color: var(--genie-accent-soft);
-    color: var(--genie-accent-strong);
+  background-color: rgba(47, 131, 224, 0.18);
+  color: #6ba3ea;
 }
 
 .genie-badge-complete {
-    background-color: var(--genie-success-soft);
-    color: var(--genie-success);
+  background-color: rgba(63, 166, 106, 0.18);
+  color: #3fa66a;
 }
 
 .genie-badge-pending {
-    background-color: #edf0f4;
-    color: #68778c;
+  background-color: rgba(170, 179, 191, 0.12);
+  color: #7c8794;
 }
 
 @keyframes genie-live-pulse {
@@ -596,7 +384,7 @@ input:focus, textarea:focus, select:focus {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-    background-color: var(--genie-success);
+  background-color: #3fa66a;
   animation: genie-live-pulse 1.6s ease-in-out infinite;
 }
 
@@ -616,16 +404,28 @@ input:focus, textarea:focus, select:focus {
   width: 7px;
   height: 7px;
   border-radius: 50%;
-    background-color: var(--genie-accent);
+  background-color: #6ba3ea;
     animation: genie-loading-dot 1.1s cubic-bezier(0.22, 1, 0.36, 1) infinite;
 }
 
 .genie-bounce-dot:nth-child(2) { animation-delay: 0.15s; }
 .genie-bounce-dot:nth-child(3) { animation-delay: 0.3s; }
 
+@keyframes genie-agent-activity-glow {
+  0%, 100% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+}
+
 .genie-agent-activity {
-    border-color: #91add2;
-    box-shadow: 0 0 0 2px rgba(24, 90, 189, 0.14), var(--genie-shadow);
+  background-image: linear-gradient(
+    120deg,
+    rgba(47, 131, 224, 0.14) 0%,
+    rgba(138, 99, 210, 0.1) 50%,
+    rgba(47, 131, 224, 0.14) 100%
+  );
+  background-size: 200% 200%;
+  animation: genie-agent-activity-glow 3.2s ease-in-out infinite;
+  border-radius: 12px;
 }
 
 @keyframes genie-indeterminate-rail {
@@ -638,7 +438,7 @@ input:focus, textarea:focus, select:focus {
   margin-top: 12px;
   overflow: hidden;
   border-radius: 2px;
-    background: #dbe8f8;
+  background: rgba(47, 131, 224, 0.18);
 }
 
 .genie-progress-rail::after {
@@ -647,26 +447,29 @@ input:focus, textarea:focus, select:focus {
   width: 30%;
   height: 100%;
   border-radius: inherit;
-    background: var(--genie-accent);
+  background: #6ba3ea;
+  box-shadow: 0 0 10px rgba(107, 163, 234, 0.8);
   animation: genie-indeterminate-rail 1.3s ease-in-out infinite;
 }
 
 .genie-hero {
   position: relative;
   overflow: hidden;
-    padding: 32px;
-    border-radius: 8px;
+  padding: 32px 28px;
+  border-radius: 18px;
   margin-bottom: 24px;
-    background: var(--genie-surface);
-    border: 1px solid #91add2;
-    box-shadow: var(--genie-shadow);
+  background:
+    radial-gradient(circle at 15% 20%, rgba(107, 163, 234, 0.25), transparent 55%),
+    radial-gradient(circle at 85% 0%, rgba(138, 99, 210, 0.22), transparent 50%),
+    linear-gradient(135deg, #121826 0%, #0d1117 100%);
+  border: 1px solid #232b35;
 }
 
 .genie-hero-kicker {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-    color: var(--genie-accent);
+  color: #6ba3ea;
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -675,8 +478,7 @@ input:focus, textarea:focus, select:focus {
 }
 
 .genie-hero h1 {
-    color: var(--genie-text);
-    font-size: 32px;
+  font-size: 28px;
   margin-bottom: 6px;
 }
 
@@ -686,23 +488,22 @@ input:focus, textarea:focus, select:focus {
 }
 
 .genie-dropzone {
-    border: 1px dashed var(--genie-border-strong);
-    border-radius: 6px;
+  border: 2px dashed #2a323d;
+  border-radius: 12px;
   padding: 24px;
   text-align: center;
   cursor: pointer;
   transition: border-color 160ms ease, background-color 160ms ease, transform 160ms ease;
-    background-color: var(--genie-surface-subtle);
+  background-color: rgba(255, 255, 255, 0.015);
 }
 
 .genie-dropzone:hover {
-    border-color: #91add2;
-    background-color: var(--genie-accent-soft);
+  border-color: #3d4a5c;
 }
 
 .genie-dropzone-active {
-    border-color: var(--genie-accent);
-    background-color: var(--genie-accent-soft);
+  border-color: #6ba3ea;
+  background-color: rgba(47, 131, 224, 0.08);
   transform: scale(1.01);
 }
 
@@ -720,16 +521,16 @@ input:focus, textarea:focus, select:focus {
 }
 
 .genie-queue-item {
-    background-color: var(--genie-surface-subtle);
-    border: 1px solid var(--genie-border);
-    border-radius: 6px;
+  background-color: rgba(255, 255, 255, 0.03);
+  border: 1px solid #232b35;
+  border-radius: 12px;
   padding: 16px;
   transition: transform 160ms ease, border-color 160ms ease;
 }
 
 .genie-queue-item:hover {
   transform: translateY(-2px);
-    border-color: #91add2;
+  border-color: #333f4d;
 }
 
 .genie-queue-item-header {
@@ -751,7 +552,7 @@ input:focus, textarea:focus, select:focus {
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-    color: #68778c;
+  color: #7c8794;
   margin: 0 0 8px;
 }
 
@@ -761,18 +562,17 @@ input:focus, textarea:focus, select:focus {
   justify-content: center;
   width: 26px;
   height: 26px;
-    border-radius: 4px;
-    color: var(--genie-accent-strong);
-    background-color: var(--genie-accent-soft);
+  border-radius: 8px;
+  background-color: rgba(107, 163, 234, 0.14);
   flex-shrink: 0;
 }
 
 .genie-empty-state {
-    border: 1px dashed var(--genie-border-strong);
-    border-radius: 6px;
+  border: 1px dashed #2a323d;
+  border-radius: 12px;
   padding: 20px;
   text-align: center;
-    color: #68778c;
+  color: #7c8794;
 }
 
 .genie-icon-btn {
@@ -806,12 +606,12 @@ input:focus, textarea:focus, select:focus {
   align-items: center;
   gap: 8px;
   padding: 8px 14px;
-    border-radius: 4px;
-    border: 1px solid var(--genie-border);
-    background-color: var(--genie-surface-subtle);
+  border-radius: 999px;
+  border: 1px solid #232b35;
+  background-color: rgba(255, 255, 255, 0.03);
   font-size: 12px;
   font-weight: 700;
-    color: var(--genie-muted);
+  color: #7c8794;
   white-space: nowrap;
   transition: background-color 200ms ease, border-color 200ms ease, color 200ms ease, transform 200ms ease;
 }
@@ -820,7 +620,7 @@ input:focus, textarea:focus, select:focus {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-    background-color: #91a0b4;
+  background-color: #3d4a5c;
   flex-shrink: 0;
 }
 
@@ -830,26 +630,26 @@ input:focus, textarea:focus, select:focus {
 }
 
 .genie-pipeline-node-active {
-    border-color: var(--genie-accent);
-    background-color: var(--genie-accent-soft);
-    color: var(--genie-accent-strong);
+  border-color: #2f83e0;
+  background-color: rgba(47, 131, 224, 0.18);
+  color: #6ba3ea;
   transform: scale(1.08);
   animation: genie-pipeline-node-pulse 1.4s ease-in-out infinite;
 }
 
 .genie-pipeline-node-active .genie-pipeline-node-dot {
-    background-color: var(--genie-accent);
+  background-color: #6ba3ea;
   animation: genie-live-pulse 1.2s ease-in-out infinite;
 }
 
 .genie-pipeline-node-complete {
-    border-color: #8bc6aa;
-    background-color: var(--genie-success-soft);
-    color: var(--genie-success);
+  border-color: #3fa66a;
+  background-color: rgba(63, 166, 106, 0.14);
+  color: #3fa66a;
 }
 
 .genie-pipeline-node-complete .genie-pipeline-node-dot {
-    background-color: var(--genie-success);
+  background-color: #3fa66a;
 }
 
 .genie-pipeline-connector {
@@ -858,14 +658,15 @@ input:focus, textarea:focus, select:focus {
   height: 3px;
   margin: 0 4px;
   border-radius: 2px;
-    background-color: var(--genie-border-strong);
+  background-color: #232b35;
   flex-shrink: 0;
   overflow: visible;
   transition: background-color 200ms ease;
 }
 
 .genie-pipeline-connector-active {
-    background-color: var(--genie-accent);
+  background-color: #2f83e0;
+  box-shadow: 0 0 8px rgba(47, 131, 224, 0.45);
 }
 
 @keyframes genie-pipeline-particle-travel {
@@ -884,8 +685,8 @@ input:focus, textarea:focus, select:focus {
   height: 8px;
   margin-top: -4px;
   border-radius: 50%;
-    background-color: var(--genie-accent);
-    box-shadow: 0 0 0 3px rgba(24, 90, 189, 0.16);
+  background-color: #9cc4f2;
+  box-shadow: 0 0 8px 2px rgba(107, 163, 234, 0.85);
   animation: genie-pipeline-particle-travel 1.1s linear infinite;
 }
 
@@ -896,7 +697,7 @@ input:focus, textarea:focus, select:focus {
 .genie-quick-request-summary {
   cursor: pointer;
   font-weight: 700;
-    color: var(--genie-accent-strong);
+  color: #6ba3ea;
   list-style: none;
 }
 
@@ -906,112 +707,6 @@ input:focus, textarea:focus, select:focus {
 
 .genie-quick-request-body {
   margin-top: 14px;
-}
-
-.genie-form {
-    display: grid;
-    gap: 0;
-}
-
-.genie-form-section {
-    padding: 22px 0;
-    border-top: 1px solid var(--genie-border);
-}
-
-.genie-form-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr));
-    gap: 16px;
-}
-
-.genie-field {
-    display: grid;
-    align-content: start;
-    gap: 6px;
-    min-width: 0;
-}
-
-.genie-field-help {
-    margin: 0;
-    color: var(--genie-muted);
-    font-size: 12px;
-    line-height: 1.45;
-}
-
-.genie-actions {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 10px;
-    padding-top: 22px;
-    border-top: 1px solid var(--genie-border);
-}
-
-@media (max-width: 640px) {
-    .genie-shell {
-        padding: 20px 16px 40px;
-    }
-
-    .genie-hero,
-    .genie-card,
-    .genie-input-surface {
-        padding: 20px;
-    }
-
-    .genie-hero h1 {
-        font-size: 26px;
-    }
-
-    .genie-input-surface {
-        margin: 20px 0;
-    }
-
-    .genie-input-surface form > section,
-    .genie-form-section {
-        padding: 18px 0;
-    }
-
-    .genie-input-surface fieldset label {
-        min-height: 40px;
-    }
-
-    .genie-pipeline {
-        display: grid;
-        grid-template-columns: minmax(0, 1fr);
-        gap: 8px;
-        align-items: stretch;
-    }
-
-    .genie-pipeline-node {
-        width: 100%;
-        min-width: 0;
-        border-radius: 6px;
-        white-space: normal;
-        overflow-wrap: anywhere;
-    }
-
-    .genie-pipeline-node-active {
-        transform: none;
-    }
-
-    .genie-pipeline-connector {
-        width: 3px;
-        height: 12px;
-        margin: 0 0 0 18px;
-    }
-
-    .genie-actions .genie-btn {
-        width: 100%;
-    }
-}
-
-@media (prefers-reduced-motion: reduce) {
-    *, *::before, *::after {
-        scroll-behavior: auto !important;
-        animation-duration: 0.01ms !important;
-        animation-iteration-count: 1 !important;
-        transition-duration: 0.01ms !important;
-    }
 }
 """
 
@@ -1485,7 +1180,15 @@ _FRONTEND_ENV_D_TS = """interface Window {
 
 
 class DeploymentPipelineStepFailedError(RuntimeError):
-    """Raised when a pipeline step's own real result (deployment, provisioning) fails."""
+    """Raised when a pipeline step's own real result (test run, security scan) fails."""
+
+
+class _RequirementFidelityRepairNeeded(DeploymentPipelineStepFailedError):
+    """Carries observed acceptance-test evidence into one automatic rebuild."""
+
+    def __init__(self, *, summary: str, evidence: str) -> None:
+        super().__init__(summary)
+        self.evidence = evidence
 
 
 class _GeneratedBuildRepairNeeded(DeploymentPipelineStepFailedError):
@@ -1505,7 +1208,7 @@ class _RunWorkspace:
 
 
 class DeploymentPipelineService:
-    """Executes the fixed, eight-step Deploy & Launch pipeline for one mission."""
+    """Executes the fixed, nine-step Deploy & Launch pipeline for one mission."""
 
     def __init__(
         self,
@@ -1521,9 +1224,8 @@ class DeploymentPipelineService:
         frontend_deployment_service: (
             ContainerAppFrontendDeploymentService | NullContainerAppFrontendDeploymentService
         ),
-        security_copilot_gateway: SecurityCopilotGateway | NullSecurityCopilotGateway,
-        defender_for_cloud_gateway: DefenderForCloudGateway | NullDefenderForCloudGateway,
-        finops_cost_service: FinOpsCostService | NullFinOpsCostService,
+        test_execution_service: TestExecutionService,
+        security_scan_service: SecurityScanService,
         build_workspace_root: Path,
         run_repository: DeploymentRunRepository | None = None,
         prototype_default_ttl_days: int = 7,
@@ -1531,7 +1233,8 @@ class DeploymentPipelineService:
         architecture_step_id: str = "design-architecture",
         build_step_id: str = "build-solution",
         requirements_step_id: str = "analyze-requirements",
-        max_repair_attempts: int = 3,
+        fidelity_max_repair_attempts: int = 3,
+        fidelity_min_coverage_percent: float = 90.0,
         upstream_grace_check_attempts: int = 5,
         upstream_grace_check_interval_seconds: float = 2.0,
     ) -> None:
@@ -1543,9 +1246,8 @@ class DeploymentPipelineService:
         self._mission_agent_provisioning_service = mission_agent_provisioning_service
         self._backend_deployment_service = backend_deployment_service
         self._frontend_deployment_service = frontend_deployment_service
-        self._security_copilot_gateway = security_copilot_gateway
-        self._defender_for_cloud_gateway = defender_for_cloud_gateway
-        self._finops_cost_service = finops_cost_service
+        self._test_execution_service = test_execution_service
+        self._security_scan_service = security_scan_service
         self._run_repository = run_repository or InMemoryDeploymentRunRepository()
         self._prototype_default_ttl_days = prototype_default_ttl_days
         self._prototype_max_active_per_owner = prototype_max_active_per_owner
@@ -1553,13 +1255,15 @@ class DeploymentPipelineService:
         self._architecture_step_id = architecture_step_id
         self._build_step_id = build_step_id
         self._requirements_step_id = requirements_step_id
-        self._max_repair_attempts = max_repair_attempts
+        self._fidelity_max_repair_attempts = fidelity_max_repair_attempts
+        self._fidelity_min_coverage_percent = fidelity_min_coverage_percent
         self._upstream_grace_check_attempts = upstream_grace_check_attempts
         self._upstream_grace_check_interval_seconds = upstream_grace_check_interval_seconds
         self._runs: dict[str, DeploymentPipelineRun] = {}
         self._workspaces: dict[str, _RunWorkspace] = {}
         self._materialized_builds: dict[str, MaterializedBuild] = {}
         self._agent_foundry_names: dict[str, dict[str, str]] = {}
+        self._generated_test_outputs: dict[str, str] = {}
         self._background_tasks: dict[str, asyncio.Task[None]] = {}
 
     async def initialize(self) -> None:
@@ -1628,20 +1332,6 @@ class DeploymentPipelineService:
 
         resolved_trace_id = trace_id or str(uuid4())
 
-        active_run = next(
-            (
-                run
-                for run in self._runs.values()
-                if run.session_id == session_id
-                and run.workflow_run_id == workflow_run_id
-                and run.owner_user_id == requesting_user_id
-                and run.status == "running"
-            ),
-            None,
-        )
-        if active_run is not None:
-            return active_run
-
         if not resume_from_step:
             active_count = sum(
                 1
@@ -1660,9 +1350,17 @@ class DeploymentPipelineService:
                 )
 
         # A retry (resume_from_step set) MUST continue the SAME run - i.e. the
-        # same pipeline_run.id - not mint a fresh one. Durable step results retain
-        # the access policy and real provisioned-agent names; restart-volatile build
-        # artifacts are reconstructed in _restore_retry_artifacts before execution.
+        # same pipeline_run.id - not mint a fresh one. Every later step reads
+        # its prerequisite artifacts (materialized build, provisioned Foundry
+        # agent names) out of self._materialized_builds/self._agent_foundry_names,
+        # both keyed by pipeline_run.id, and the run's own already-completed
+        # step results (provisioned_agents, access_policy, backend_url) live on
+        # the DeploymentPipelineRun object itself. Previously this always built
+        # a brand-new DeploymentPipelineRun with a fresh uuid4 id here
+        # regardless of resume_from_step, which orphaned all of that prior
+        # work - so "retry from failed step" always failed again (a KeyError
+        # the moment execution reached any step depending on earlier output),
+        # even though the UI presented it as a normal retry action.
         existing_run: DeploymentPipelineRun | None = None
         if resume_from_step:
             candidates = [
@@ -1670,9 +1368,8 @@ class DeploymentPipelineService:
                 for run in self._runs.values()
                 if run.session_id == session_id
                 and run.workflow_run_id == workflow_run_id
-                and run.owner_user_id == requesting_user_id
                 and run.status == "failed"
-                and run.cleanup_status == "active"
+                and run.id in self._workspaces
             ]
             if candidates:
                 existing_run = max(candidates, key=lambda run: run.updated_at)
@@ -1681,23 +1378,21 @@ class DeploymentPipelineService:
             pipeline_run = existing_run
             pipeline_run.status = "running"
             pipeline_run.updated_at = datetime.now(UTC)
-            workspace = self._workspaces.get(pipeline_run.id)
-            if workspace is None:
-                workspace = _RunWorkspace(
-                    backend_root=self._build_workspace_root / pipeline_run.id / "backend",
-                    frontend_root=self._build_workspace_root / pipeline_run.id / "frontend",
-                )
-                self._workspaces[pipeline_run.id] = workspace
+            workspace = self._workspaces[pipeline_run.id]
             backend_root = workspace.backend_root
             frontend_root = workspace.frontend_root
         else:
             # A caller asked to resume a specific step (e.g. a "Retry" click
-            # against a previously failed run) but no matching durable failed
-            # run was found. Honoring
+            # against a previously failed run) but no matching in-memory
+            # failed run was found - most likely this process restarted and
+            # lost every in-memory run/workspace/generated-test-output since
+            # the original failure (see parked-stage-persistence memory:
+            # these are plain dicts, not durably persisted). Honoring
             # resume_from_step against a brand-new pipeline_run would skip
             # every earlier step without them ever having actually run on
-            # this object - e.g. jumping straight to "launch-mission" with no
-            # deployed frontend URL produces a false "Launch blocked" failure
+            # this object - e.g. jumping straight to "execute-test-suite"
+            # with no generated tests produces a false "Running 0 generated
+            # test module(s)" / "fidelity report unavailable" failure
             # instead of an honest restart. Fail safe: always start this
             # fresh run from the very first step instead.
             resume_from_step = None
@@ -1742,100 +1437,6 @@ class DeploymentPipelineService:
         )
 
         return pipeline_run
-
-    def _write_frontend_workspace(
-        self,
-        *,
-        frontend_root: Path,
-        materialized: MaterializedBuild,
-        mission_title: str,
-        backend_url: str | None,
-        agent_foundry_names: dict[str, str],
-    ) -> None:
-        """Materializes the mission frontend to the local build workspace - the
-        restart-volatile local-disk writes also needed by ``_restore_retry_artifacts``
-        when a retry resumes at/after ``deploy-frontend-app`` (that step reads this
-        directory but never writes it itself; ``sync-frontend-integration``, the step
-        that normally writes it, is skipped on such a retry)."""
-        frontend_root.mkdir(parents=True, exist_ok=True)
-        (frontend_root / "MissionApp.tsx").write_text(
-            materialized.ui_component or "", encoding="utf-8"
-        )
-        (frontend_root / "index.html").write_text(
-            _FRONTEND_INDEX_HTML_TEMPLATE.format(mission_title=html.escape(mission_title)),
-            encoding="utf-8",
-        )
-        (frontend_root / "package.json").write_text(_FRONTEND_PACKAGE_JSON, encoding="utf-8")
-        (frontend_root / "tsconfig.json").write_text(_FRONTEND_TSCONFIG_JSON, encoding="utf-8")
-        (frontend_root / "vite.config.ts").write_text(_FRONTEND_VITE_CONFIG, encoding="utf-8")
-        src_root = frontend_root / "src"
-        src_root.mkdir(parents=True, exist_ok=True)
-        (src_root / "main.tsx").write_text(_FRONTEND_MAIN_TSX, encoding="utf-8")
-        (src_root / "env.d.ts").write_text(_FRONTEND_ENV_D_TS, encoding="utf-8")
-        (src_root / "styles.css").write_text(_FRONTEND_STYLES_CSS, encoding="utf-8")
-        public_root = frontend_root / "public"
-        public_root.mkdir(parents=True, exist_ok=True)
-        # Specialist agent display names (never "orchestrator" - that's the
-        # internal coordinator, not shown as its own collaborator).
-        mission_agent_names = [name for name in agent_foundry_names if name != "orchestrator"]
-        (public_root / "runtime-config.js").write_text(
-            f'window.__MISSION_BACKEND_URL__ = "{backend_url}";\n'
-            f"window.__MISSION_TITLE__ = {json.dumps(mission_title)};\n"
-            f"window.__MISSION_AGENTS__ = {json.dumps(mission_agent_names)};\n",
-            encoding="utf-8",
-        )
-
-    async def _restore_retry_artifacts(
-        self,
-        *,
-        pipeline_run: DeploymentPipelineRun,
-        run: WorkflowRunResult,
-        trace_id: str,
-        frontend_root: Path,
-        mission_title: str,
-        resume_index: int,
-    ) -> None:
-        """Rebuilds restart-volatile artifacts from durable workflow and run data."""
-
-        build_output_text = await self._get_step_output(
-            run, self._build_step_id, trace_id=trace_id
-        )
-        materialized = materialize_build(build_output_text)
-        required_agent_names = list(materialized.agent_modules)
-        if materialized.orchestrator_module is not None:
-            required_agent_names.append("orchestrator")
-
-        foundry_names = {
-            agent.agent_name: agent.foundry_agent_name
-            for agent in pipeline_run.provisioned_agents
-            if agent.status == "completed" and agent.foundry_agent_name
-        }
-        missing_agent_names = [
-            agent_name for agent_name in required_agent_names if agent_name not in foundry_names
-        ]
-        if missing_agent_names:
-            raise DeploymentPipelineStepFailedError(
-                "Cannot resume after service restart because completed Foundry agent records "
-                f"are missing for: {', '.join(missing_agent_names)}."
-            )
-
-        self._materialized_builds[pipeline_run.id] = materialized
-        self._agent_foundry_names[pipeline_run.id] = {
-            agent_name: foundry_names[agent_name] for agent_name in required_agent_names
-        }
-
-        # sync-frontend-integration (the step that normally writes frontend_root) is
-        # skipped when resuming at/after deploy-frontend-app - reconstruct its local
-        # disk output here too, or that step fails closed with "No materialized UI
-        # build found" even though every durable record needed to rebuild it exists.
-        if resume_index >= DEPLOYMENT_STEP_ORDER.index("deploy-frontend-app"):
-            self._write_frontend_workspace(
-                frontend_root=frontend_root,
-                materialized=materialized,
-                mission_title=mission_title,
-                backend_url=pipeline_run.backend_url,
-                agent_foundry_names=self._agent_foundry_names[pipeline_run.id],
-            )
 
     def _fail_run(self, pipeline_run: DeploymentPipelineRun, *, error: str) -> None:
         """Resolves a run to ``failed`` for a failure that happened before any
@@ -1898,28 +1499,6 @@ class DeploymentPipelineService:
         pipeline_run.resource_group_name = prototype_resource_group_name(mission_slug)
         await self._persist_run(pipeline_run)
 
-        resume_index = (
-            DEPLOYMENT_STEP_ORDER.index(resume_from_step)
-            if resume_from_step in DEPLOYMENT_STEP_ORDER
-            else None
-        )
-        if resume_index is not None and resume_index >= DEPLOYMENT_STEP_ORDER.index(
-            "deploy-backend-service"
-        ):
-            try:
-                await self._restore_retry_artifacts(
-                    pipeline_run=pipeline_run,
-                    run=run,
-                    trace_id=trace_id,
-                    frontend_root=frontend_root,
-                    mission_title=session.title,
-                    resume_index=resume_index,
-                )
-            except Exception as exc:  # noqa: BLE001 - fail-closed retry reconstruction boundary.
-                self._fail_run(pipeline_run, error=str(exc))
-                await self._persist_run(pipeline_run)
-                return
-
         next_step = resume_from_step
         generated_build_repair_attempts = 0
         while True:
@@ -1936,35 +1515,12 @@ class DeploymentPipelineService:
                 )
                 break
             except _GeneratedBuildRepairNeeded as exc:
-                if generated_build_repair_attempts >= self._max_repair_attempts:
-                    step = self._step_result(pipeline_run, "provision-foundry-agents")
-                    step.error = (
-                        "Generated build validation failed after "
-                        f"{generated_build_repair_attempts} automatic repair attempt(s): "
-                        f"{exc.evidence}"
-                    )
+                if generated_build_repair_attempts >= self._fidelity_max_repair_attempts:
                     pipeline_run.status = "failed"
                     pipeline_run.updated_at = datetime.now(UTC)
                     await self._persist_run(pipeline_run)
                     return
                 generated_build_repair_attempts += 1
-                step = self._step_result(pipeline_run, "provision-foundry-agents")
-                step.status = "running"
-                step.detail = (
-                    "Regenerating the generated build to satisfy deterministic validation "
-                    f"(attempt {generated_build_repair_attempts} of "
-                    f"{self._max_repair_attempts})..."
-                )
-                step.error = None
-                step.completed_at = None
-                pipeline_run.updated_at = datetime.now(UTC)
-                await self._persist_run(pipeline_run)
-                await self._publish(
-                    pipeline_run,
-                    step_id="provision-foundry-agents",
-                    event_type="step_started",
-                    output_preview=step.detail,
-                )
                 try:
                     run = await self._repair_prototype(
                         run=run,
@@ -1974,13 +1530,44 @@ class DeploymentPipelineService:
                     )
                 except Exception as repair_exc:  # noqa: BLE001 - fail-closed repair boundary.
                     step = self._step_result(pipeline_run, "provision-foundry-agents")
-                    step.status = "failed"
                     step.error = f"Automatic generated-build repair failed: {repair_exc}"
-                    step.completed_at = datetime.now(UTC)
                     pipeline_run.status = "failed"
                     pipeline_run.updated_at = datetime.now(UTC)
                     await self._persist_run(pipeline_run)
                     return
+                next_step = "provision-foundry-agents"
+            except _RequirementFidelityRepairNeeded as exc:
+                report = pipeline_run.fidelity_report
+                if report is None:
+                    self._fail_run(
+                        pipeline_run, error="Requirement fidelity report is unavailable."
+                    )
+                    return
+                pipeline_run.fidelity_report = report.model_copy(
+                    update={
+                        "status": "repairing",
+                        "repair_attempts": report.repair_attempts + 1,
+                    }
+                )
+                try:
+                    run = await self._repair_prototype(
+                        run=run,
+                        pipeline_run=pipeline_run,
+                        trace_id=trace_id,
+                        evidence=exc.evidence,
+                    )
+                except Exception as repair_exc:  # noqa: BLE001 - fail-closed repair boundary.
+                    pipeline_run.fidelity_report = pipeline_run.fidelity_report.model_copy(
+                        update={
+                            "status": "failed",
+                            "gaps": [f"Automatic prototype repair failed: {repair_exc}"],
+                        }
+                    )
+                    pipeline_run.status = "failed"
+                    pipeline_run.updated_at = datetime.now(UTC)
+                    await self._persist_run(pipeline_run)
+                    return
+                pipeline_run.launch_url = None
                 next_step = "provision-foundry-agents"
             except Exception:  # noqa: BLE001 - top-level background-task boundary; every
                 # failure must resolve the run's status here since there is no
@@ -2059,6 +1646,7 @@ class DeploymentPipelineService:
             )
         self._materialized_builds.pop(pipeline_run.id, None)
         self._agent_foundry_names.pop(pipeline_run.id, None)
+        self._generated_test_outputs.pop(pipeline_run.id, None)
         self._workspaces.pop(pipeline_run.id, None)
         self._runs.pop(pipeline_run.id, None)
         await self._run_repository.delete(pipeline_run_id=pipeline_run.id)
@@ -2371,7 +1959,7 @@ class DeploymentPipelineService:
                 continue
             if step is None or not step.output_text:
                 raise UnknownWorkflowRunError(
-                    f"Automatic build repair cannot restore required workflow output '{step_id}'."
+                    f"Automatic fidelity repair cannot restore required workflow output '{step_id}'."
                 )
             await memory_service.shared.write(
                 agent=orchestrator_agent,
@@ -2426,7 +2014,7 @@ class DeploymentPipelineService:
         )
         if build_step is None:
             raise UnknownWorkflowRunError(
-                "Automatic build repair did not produce a completed build-solution step."
+                "Automatic fidelity repair did not produce a completed build-solution step."
             )
         return repaired
 
@@ -2448,9 +2036,8 @@ class DeploymentPipelineService:
         skipping already-completed prior steps. All steps after the resume point
         are reset to "not-started" status.
         """
-        orchestrator_foundry_name = self._agent_foundry_names.get(pipeline_run.id, {}).get(
-            "orchestrator", "orchestrator"
-        )
+        orchestrator_foundry_name = "orchestrator"
+        test_output_text = self._generated_test_outputs.get(pipeline_run.id, "")
 
         # Determine the starting index based on resume_from_step
         start_index = 0
@@ -2615,12 +2202,48 @@ class DeploymentPipelineService:
 
                 elif step_id == "sync-frontend-integration":
                     materialized = self._materialized_builds[pipeline_run.id]
-                    self._write_frontend_workspace(
-                        frontend_root=frontend_root,
-                        materialized=materialized,
-                        mission_title=mission_title,
-                        backend_url=pipeline_run.backend_url,
-                        agent_foundry_names=self._agent_foundry_names.get(pipeline_run.id, {}),
+                    frontend_root.mkdir(parents=True, exist_ok=True)
+                    (frontend_root / "MissionApp.tsx").write_text(
+                        materialized.ui_component or "", encoding="utf-8"
+                    )
+                    (frontend_root / "index.html").write_text(
+                        _FRONTEND_INDEX_HTML_TEMPLATE.format(
+                            mission_title=html.escape(mission_title)
+                        ),
+                        encoding="utf-8",
+                    )
+                    (frontend_root / "package.json").write_text(
+                        _FRONTEND_PACKAGE_JSON, encoding="utf-8"
+                    )
+                    (frontend_root / "tsconfig.json").write_text(
+                        _FRONTEND_TSCONFIG_JSON, encoding="utf-8"
+                    )
+                    (frontend_root / "vite.config.ts").write_text(
+                        _FRONTEND_VITE_CONFIG, encoding="utf-8"
+                    )
+                    src_root = frontend_root / "src"
+                    src_root.mkdir(parents=True, exist_ok=True)
+                    (src_root / "main.tsx").write_text(_FRONTEND_MAIN_TSX, encoding="utf-8")
+                    (src_root / "env.d.ts").write_text(_FRONTEND_ENV_D_TS, encoding="utf-8")
+                    (src_root / "styles.css").write_text(_FRONTEND_STYLES_CSS, encoding="utf-8")
+                    public_root = frontend_root / "public"
+                    public_root.mkdir(parents=True, exist_ok=True)
+                    # Specialist agent display names (never "orchestrator" -
+                    # that's the internal coordinator, not shown as its own
+                    # collaborator) - lets the deterministic shell render a
+                    # real, accurate live Agent Collaboration panel without
+                    # depending on the LLM-generated UI to invent/describe
+                    # its own agent roster correctly.
+                    mission_agent_names = [
+                        name
+                        for name in self._agent_foundry_names.get(pipeline_run.id, {})
+                        if name != "orchestrator"
+                    ]
+                    (public_root / "runtime-config.js").write_text(
+                        f'window.__MISSION_BACKEND_URL__ = "{pipeline_run.backend_url}";\n'
+                        f"window.__MISSION_TITLE__ = {json.dumps(mission_title)};\n"
+                        f"window.__MISSION_AGENTS__ = {json.dumps(mission_agent_names)};\n",
+                        encoding="utf-8",
                     )
                     detail = f"Frontend wired to real backend URL {pipeline_run.backend_url}."
 
@@ -2652,38 +2275,308 @@ class DeploymentPipelineService:
                     )
                     detail = f"Frontend deployed at {frontend_result.frontend_url}."
 
-                elif step_id == "security-copilot-scan":
-                    step_result.detail = (
-                        "Checking Microsoft Defender for Cloud and Security Copilot for "
-                        "this mission's deployed prototype..."
+                elif step_id == "generate-test-suite":
+                    # Generated for real, right here, against the approved
+                    # requirements and materialized pre-deployment build.
+                    # Deploy & Launch is deliberately NOT
+                    # a workflow step (see module docstring), so this calls
+                    # the Test Generation Agent directly via
+                    # AgentOrchestrator.execute_agent, the same
+                    # outside-any-workflow-step execution path already used
+                    # by Workshop's per-component "Regenerate" action.
+                    build_output_text = await self._get_step_output(
+                        run, self._build_step_id, trace_id=trace_id
                     )
-                    defender_report = await self._defender_for_cloud_gateway.scan(
-                        resource_group_name=pipeline_run.resource_group_name,
+                    requirements_text = await self._get_approved_requirements(
+                        run, trace_id=trace_id
                     )
-                    copilot_report = await self._security_copilot_gateway.scan(
-                        mission_slug=mission_slug,
-                        mission_title=mission_title,
-                        resource_group_name=pipeline_run.resource_group_name,
+                    report = create_fidelity_report(
+                        requirements_text,
+                        max_repair_attempts=self._fidelity_max_repair_attempts,
                     )
-                    scan_report = _merge_security_scan_reports(defender_report, copilot_report)
-                    pipeline_run.security_scan_report = scan_report
-                    detail = scan_report.summary
+                    if pipeline_run.fidelity_report is not None:
+                        report = report.model_copy(
+                            update={
+                                "repair_attempts": pipeline_run.fidelity_report.repair_attempts,
+                            }
+                        )
+                    if report.total_requirements == 0:
+                        pipeline_run.fidelity_report = report
+                        raise DeploymentPipelineStepFailedError(
+                            "Requirement fidelity cannot run because the approved baseline "
+                            "contains no REQ IDs. Re-run Requirement Discovery and approve "
+                            "the resulting requirements before deployment."
+                        )
+                    generation_result = await self._orchestrator.execute_agent(
+                        agent_id="test-generation-agent",
+                        prompt_id="test-generation-v1",
+                        variables={
+                            "artifact": build_output_text,
+                            "requirements": requirements_text,
+                            "user_message": (
+                                "Generate black-box acceptance tests against the real deployed "
+                                "prototype. Read its URLs only from MISSION_BACKEND_URL and "
+                                "MISSION_FRONTEND_URL environment variables. Exercise real HTTP "
+                                "behavior. Do not use mocks, patches, monkeypatch, response "
+                                "interceptors, fabricated responses, or static assertions."
+                            ),
+                        },
+                        session_id=pipeline_run.session_id,
+                        trace_id=pipeline_run.id,
+                    )
+                    test_output_text = generation_result.output_text
+                    modules = extract_test_modules(test_output_text)
+                    if not has_pytest_discoverable_tests(modules):
+                        correction_result = await self._orchestrator.execute_agent(
+                            agent_id="test-generation-agent",
+                            prompt_id="test-generation-v1",
+                            variables={
+                                "artifact": build_output_text,
+                                "requirements": requirements_text,
+                                "user_message": (
+                                    "Your prior response contained no pytest-discoverable Python test. "
+                                    "Return one or more fenced python blocks containing module-level "
+                                    "test_<name> functions with real assertions."
+                                ),
+                            },
+                            session_id=pipeline_run.session_id,
+                            trace_id=pipeline_run.id,
+                        )
+                        test_output_text = correction_result.output_text
+                        modules = extract_test_modules(test_output_text)
+                    if not has_pytest_discoverable_tests(modules):
+                        raise DeploymentPipelineStepFailedError(
+                            "Test Generation Agent did not produce a pytest-discoverable test function "
+                            "after a corrective retry."
+                        )
+                    report = record_test_coverage(
+                        report,
+                        modules,
+                        minimum_coverage_percent=self._fidelity_min_coverage_percent,
+                    )
+                    missing_test_ids = [
+                        item.requirement_id
+                        for item in report.requirements
+                        if item.status == "missing"
+                    ]
+                    # Large approved-requirement sets can exceed what the agent
+                    # covers in a single completion; give it the same repair
+                    # budget used later for whole-prototype fidelity repairs
+                    # instead of giving up after exactly one corrective retry.
+                    # Each retry only asks for the STILL-missing IDs and its
+                    # new modules are ACCUMULATED alongside every earlier
+                    # completion's modules (never discarded) - a "complete
+                    # replacement suite" re-ask made large gaps unrecoverable
+                    # because every retry had to re-cover already-covered
+                    # requirements too within the same completion-length
+                    # budget that produced the gap in the first place.
+                    coverage_retry = 0
+                    while (
+                        report.coverage_percent < self._fidelity_min_coverage_percent
+                        and coverage_retry < self._fidelity_max_repair_attempts
+                    ):
+                        coverage_retry += 1
+                        correction_result = await self._orchestrator.execute_agent(
+                            agent_id="test-generation-agent",
+                            prompt_id="test-generation-v1",
+                            variables={
+                                "artifact": build_output_text,
+                                "requirements": requirements_text,
+                                "user_message": (
+                                    "Your prior suite omitted these approved requirement IDs: "
+                                    + ", ".join(missing_test_ids)
+                                    + ". Return ONLY new test module(s) covering these still-"
+                                    "missing requirement IDs - do not repeat tests for "
+                                    "requirement IDs you already covered. Every executable "
+                                    "test function name must include its normalized requirement ID "
+                                    "(for example, REQ-001 must use test_req_001_<behavior>) and "
+                                    "must assert that requirement's real behavior."
+                                ),
+                            },
+                            session_id=pipeline_run.session_id,
+                            trace_id=pipeline_run.id,
+                        )
+                        test_output_text = test_output_text + "\n\n" + correction_result.output_text
+                        modules = extract_test_modules(test_output_text)
+                        report = record_test_coverage(
+                            report,
+                            modules,
+                            minimum_coverage_percent=self._fidelity_min_coverage_percent,
+                        )
+                        missing_test_ids = [
+                            item.requirement_id
+                            for item in report.requirements
+                            if item.status == "missing"
+                        ]
+                    self._generated_test_outputs[pipeline_run.id] = test_output_text
+                    pipeline_run.fidelity_report = report
+                    if (
+                        not has_pytest_discoverable_tests(modules)
+                        or report.coverage_percent < self._fidelity_min_coverage_percent
+                    ):
+                        raise DeploymentPipelineStepFailedError(
+                            "Generated test suite does not meet the minimum executable coverage "
+                            f"threshold of {self._fidelity_min_coverage_percent:g}%; actual "
+                            f"coverage is {report.coverage_percent:g}%; missing requirement ids: "
+                            + ", ".join(missing_test_ids)
+                        )
+                    if pipeline_run.backend_url and pipeline_run.backend_url.startswith("https://"):
+                        real_action_errors = validate_real_action_tests(modules)
+                        real_action_retry = 0
+                        while (
+                            real_action_errors
+                            and real_action_retry < self._fidelity_max_repair_attempts
+                        ):
+                            real_action_retry += 1
+                            correction_result = await self._orchestrator.execute_agent(
+                                agent_id="test-generation-agent",
+                                prompt_id="test-generation-v1",
+                                variables={
+                                    "artifact": build_output_text,
+                                    "requirements": requirements_text,
+                                    "user_message": (
+                                        "Your prior suite failed this fail-closed check: "
+                                        + " ".join(real_action_errors)
+                                        + " Return a complete replacement suite. Every Python "
+                                        "test must exercise the real deployed prototype over "
+                                        "real HTTP using MISSION_BACKEND_URL and/or "
+                                        "MISSION_FRONTEND_URL from the environment - never "
+                                        "unittest.mock, MagicMock, patch(), monkeypatch, respx, "
+                                        "responses, or any other interception library."
+                                    ),
+                                },
+                                session_id=pipeline_run.session_id,
+                                trace_id=pipeline_run.id,
+                            )
+                            test_output_text = correction_result.output_text
+                            modules = extract_test_modules(test_output_text)
+                            if not has_pytest_discoverable_tests(modules):
+                                real_action_errors = validate_real_action_tests(modules)
+                                continue
+                            report = record_test_coverage(
+                                report,
+                                modules,
+                                minimum_coverage_percent=self._fidelity_min_coverage_percent,
+                            )
+                            self._generated_test_outputs[pipeline_run.id] = test_output_text
+                            pipeline_run.fidelity_report = report
+                            real_action_errors = validate_real_action_tests(modules)
+                        if real_action_errors:
+                            raise DeploymentPipelineStepFailedError(
+                                "Generated acceptance tests are not real-action tests: "
+                                + " ".join(real_action_errors)
+                            )
+                        # The real-action repair loop replaces the whole suite on
+                        # every attempt to purge mocks/patches, which can regress
+                        # the requirement coverage the earlier loop secured -
+                        # re-verify it here rather than silently shipping a gap.
+                        final_missing_ids = [
+                            item.requirement_id
+                            for item in report.requirements
+                            if item.status == "missing"
+                        ]
+                        if report.coverage_percent < self._fidelity_min_coverage_percent:
+                            raise DeploymentPipelineStepFailedError(
+                                "Generated test suite does not meet the minimum executable coverage "
+                                f"threshold of {self._fidelity_min_coverage_percent:g}%; actual "
+                                f"coverage is {report.coverage_percent:g}%; missing requirement ids: "
+                                + ", ".join(final_missing_ids)
+                            )
+                    detail = (
+                        f"Generated {len(modules)} requirement acceptance test module(s) "
+                        "for the real deployed prototype."
+                    )
 
-                elif step_id == "finops-cost-report":
+                elif step_id == "execute-test-suite":
+                    test_output_text = self._generated_test_outputs.get(
+                        pipeline_run.id, test_output_text
+                    )
+                    modules = extract_test_modules(test_output_text)
+                    timeout_minutes = max(1, round(self._test_execution_service.timeout_seconds / 60))
                     step_result.detail = (
-                        "Querying Azure Cost Management for this mission's real spend..."
+                        f"Running {len(modules)} generated test module(s) with pytest against the "
+                        f"real deployed prototype (up to {timeout_minutes} minute(s))..."
                     )
-                    cost_report = await self._finops_cost_service.get_cost_report(
-                        resource_group_name=pipeline_run.resource_group_name or ""
+                    runtime_environment = {
+                        "MISSION_BACKEND_URL": pipeline_run.backend_url or "",
+                        "MISSION_FRONTEND_URL": pipeline_run.frontend_url or "",
+                    }
+                    test_result = await self._test_execution_service.run_tests(
+                        build_root=backend_root,
+                        test_output_text=test_output_text,
+                        runtime_environment=runtime_environment,
                     )
-                    pipeline_run.cost_report = cost_report
-                    detail = cost_report.summary
+                    pipeline_run.test_summary = test_result.summary
+                    # ``success`` fails closed even when pytest itself exits 0
+                    # (e.g. zero test functions were actually collected) - see
+                    # TestExecutionResult.success's docstring.
+                    report = pipeline_run.fidelity_report
+                    if report is None:
+                        raise DeploymentPipelineStepFailedError(
+                            "Requirement fidelity report is unavailable after test execution."
+                        )
+                    final_failure = report.repair_attempts >= report.max_repair_attempts
+                    pipeline_run.fidelity_report = record_fidelity_execution(
+                        report,
+                        success=test_result.success,
+                        summary=test_result.summary,
+                        passed_test_names=test_result.passed_test_names,
+                        failed_test_names=test_result.failed_test_names,
+                        errored_test_names=test_result.errored_test_names,
+                        skipped_test_names=test_result.skipped_test_names,
+                        final_failure=final_failure,
+                        execution_incomplete=test_result.timed_out,
+                        minimum_coverage_percent=self._fidelity_min_coverage_percent,
+                    )
+                    if pipeline_run.fidelity_report.status == "passed":
+                        detail = test_result.summary
+                    else:
+                        if final_failure:
+                            raise DeploymentPipelineStepFailedError(
+                                "Requirement fidelity gate failed after "
+                                f"{report.repair_attempts} automatic repair attempt(s): "
+                                f"{test_result.summary}"
+                            )
+                        raise _RequirementFidelityRepairNeeded(
+                            summary=(
+                                "Requirement fidelity evidence failed; automatically regenerating "
+                                f"the prototype (attempt {report.repair_attempts + 1} of "
+                                f"{report.max_repair_attempts})."
+                            ),
+                            evidence=test_result.raw_output or test_result.summary,
+                        )
+
+                elif step_id == "run-security-scan":
+                    step_result.detail = "Scanning the deployed backend build's dependencies and code for vulnerabilities..."
+                    scan_result = await self._security_scan_service.scan(build_root=backend_root)
+                    pipeline_run.security_findings_count = len(scan_result.findings)
+                    if scan_result.blocking:
+                        step_result.status = "failed"
+                        step_result.error = scan_result.summary
+                        step_result.completed_at = datetime.now(UTC)
+                        await self._publish(
+                            pipeline_run,
+                            step_id=step_id,
+                            event_type="step_failed",
+                            error=scan_result.summary,
+                        )
+                        raise DeploymentPipelineStepFailedError(
+                            f"Security scan found blocking findings: {scan_result.summary}"
+                        )
+                    detail = scan_result.summary
 
                 elif step_id == "launch-mission":
-                    if not pipeline_run.frontend_url:
+                    report = pipeline_run.fidelity_report
+                    if (
+                        report is None
+                        or report.status != "passed"
+                        or report.coverage_percent < self._fidelity_min_coverage_percent
+                        or report.pass_percent != 100
+                    ):
                         raise DeploymentPipelineStepFailedError(
-                            "Launch blocked: no deployed frontend URL is available for this "
-                            "mission."
+                            "Launch blocked: requirement fidelity must meet the minimum executable "
+                            f"coverage threshold of {self._fidelity_min_coverage_percent:g}% and "
+                            "have 100% passing executable evidence."
                         )
                     pipeline_run.launch_url = pipeline_run.frontend_url
                     detail = f"Mission launched at {pipeline_run.launch_url}."
@@ -2803,15 +2696,14 @@ def create_deployment_pipeline_service(
         mission_agent_provisioning_service=mission_agent_provisioning_service,
         backend_deployment_service=backend_deployment_service,
         frontend_deployment_service=frontend_deployment_service,
-        security_copilot_gateway=create_security_copilot_gateway(settings=settings),
-        defender_for_cloud_gateway=create_defender_for_cloud_gateway(settings=settings),
-        finops_cost_service=create_finops_cost_service(
-            settings=settings, agent_gateway=orchestrator.agent_gateway
-        ),
         run_repository=run_repository,
         prototype_default_ttl_days=settings.prototype_default_ttl_days,
         prototype_max_active_per_owner=settings.prototype_max_active_per_owner,
+        test_execution_service=TestExecutionService(
+            timeout_seconds=settings.deployment_test_execution_timeout_seconds
+        ),
+        security_scan_service=SecurityScanService(),
         build_workspace_root=settings.deployment_build_workspace_root,
-        max_repair_attempts=settings.deployment_max_repair_attempts,
+        fidelity_max_repair_attempts=settings.deployment_fidelity_max_repair_attempts,
+        fidelity_min_coverage_percent=settings.deployment_fidelity_min_coverage_percent,
     )
-
