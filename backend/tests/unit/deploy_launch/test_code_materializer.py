@@ -69,22 +69,6 @@ def test_materialize_build_parses_all_three_pieces():
     assert "MissionApp" in build.ui_component
 
 
-def test_materialize_build_accepts_awaited_nested_progress_forwarder():
-    output = _SAMPLE_OUTPUT.replace(
-        "await on_progress(", "await _notify_progress(", 2
-    ).replace(
-        "        specialist = MissionFoundryAgent(",
-        "        async def _notify_progress(message: str) -> None:\n"
-        "            if on_progress is not None:\n"
-        "                await on_progress(message)\n\n"
-        "        specialist = MissionFoundryAgent(",
-    )
-
-    build = materialize_build(output)
-
-    assert build.orchestrator_module is not None
-
-
 def test_materialize_build_rejects_unawaited_nested_progress_forwarder():
     output = _SAMPLE_OUTPUT.replace(
         "await on_progress(", "await _notify_progress(", 2
@@ -156,207 +140,13 @@ def test_materialize_build_rejects_orchestrator_that_omits_specialist_execution(
         materialize_build(output)
 
 
-def test_materialize_build_accepts_configured_agent_name_local_alias():
-    output = _SAMPLE_OUTPUT.replace(
-        "specialist = MissionFoundryAgent(\n"
-        '            agent_name=AGENT_FOUNDRY_NAMES["Requirements Specialist"]\n'
-        "        )",
-        'agent_name = AGENT_FOUNDRY_NAMES["Requirements Specialist"]\n'
-        "        specialist = MissionFoundryAgent(agent_name=agent_name)",
-    )
-
-    build = materialize_build(output)
-
-    assert build.orchestrator_module is not None
-
-
-def test_materialize_build_accepts_reused_local_alias_for_multiple_specialists():
-    second_specialist = '''
-```python
-# agent: Review Specialist
-async def run() -> None:
-    pass
-```
-
-'''
-    output = _SAMPLE_OUTPUT.replace(
-        "```python\n# agent: orchestrator",
-        second_specialist + "```python\n# agent: orchestrator",
-    ).replace(
-        "specialist = MissionFoundryAgent(\n"
-        '            agent_name=AGENT_FOUNDRY_NAMES["Requirements Specialist"]\n'
-        "        )\n"
-        '        tool = FunctionTool(name="requirements", func=specialist.run)',
-        'agent_name = AGENT_FOUNDRY_NAMES["Requirements Specialist"]\n'
-        "        specialist = MissionFoundryAgent(agent_name=agent_name)\n"
-        '        tool = FunctionTool(name="requirements", func=specialist.run)\n'
-        '        agent_name = AGENT_FOUNDRY_NAMES["Review Specialist"]\n'
-        "        reviewer = MissionFoundryAgent(agent_name=agent_name)\n"
-        '        review_tool = FunctionTool(name="review", func=reviewer.run)',
-    ).replace(
-        '            await on_progress("Requirements Specialist completed.")',
-        '            await on_progress("Requirements Specialist completed.")\n'
-        '            await on_progress("Handing off to Review Specialist...")\n'
-        "            review = await reviewer.run(ui_message)\n"
-        '            await on_progress("Review Specialist completed.")',
-    ).replace(
-        'return {"result": result, "tool": str(tool)}',
-        'return {"result": result, "review": review, "tool": str(tool), '
-        '"review_tool": str(review_tool)}',
-    )
-
-    build = materialize_build(output)
-
-    assert set(build.agent_modules) == {"Requirements Specialist", "Review Specialist"}
-
-    unrelated_run_mask = output.replace(
-        "review = await reviewer.run(ui_message)",
-        'await unrelated.run()\n            review = {"skipped": True}',
-    )
-    with pytest.raises(MaterializedCodeError, match="awaited specialist runs"):
-        materialize_build(unrelated_run_mask)
-
-
-def test_materialize_build_accepts_exact_name_tools_through_shared_mapped_helper():
-    second_specialist = '''
-```python
-# agent: Review Specialist
-async def run() -> None:
-    pass
-```
-
-'''
-    indirect_orchestrator = '''```python
-# agent: orchestrator
-from agent_config import AGENT_FOUNDRY_NAMES
-from agent_framework import FunctionTool
-from mission_foundry_runtime import MissionFoundryAgent
-
-class OrchestratorAgent:
-    def __init__(self):
-        self.requirements_tool = FunctionTool(
-            name="Requirements Specialist",
-            coroutine=self._call_requirements,
-        )
-        self.review_tool = FunctionTool(
-            name="Review Specialist",
-            coroutine=self._call_review,
-        )
-
-    async def _invoke(self, agent_logical_name, payload):
-        foundry_name = AGENT_FOUNDRY_NAMES[agent_logical_name]
-        agent = MissionFoundryAgent(agent_name=foundry_name)
-        return await agent.run(payload)
-
-    async def _call_requirements(self, payload):
-        return await self._invoke("Requirements Specialist", payload)
-
-    async def _call_review(self, payload):
-        return await self._invoke("Review Specialist", payload)
-
-    async def _narrate(self, on_progress, message):
-        if on_progress is not None:
-            await on_progress(message)
-
-    async def run(self, ui_message: str, on_progress=None):
-        await self._narrate(on_progress, "Handing off to Requirements Specialist...")
-        requirements = await self.requirements_tool({"message": ui_message})
-        await self._narrate(on_progress, "Requirements Specialist completed.")
-        await self._narrate(on_progress, "Handing off to Review Specialist...")
-        review = await self.review_tool({"requirements": requirements})
-        await self._narrate(on_progress, "Review Specialist completed.")
-        return {"requirements": requirements, "review": review}
-```
-'''
-    output = _SAMPLE_OUTPUT.replace(
-        "```python\n# agent: orchestrator",
-        second_specialist + "```python\n# agent: orchestrator",
-    )
-    output = re.sub(
-        r"```python\n# agent: orchestrator.*?```\n",
-        indirect_orchestrator,
-        output,
-        flags=re.DOTALL,
-    )
-
-    build = materialize_build(output)
-
-    assert set(build.agent_modules) == {"Requirements Specialist", "Review Specialist"}
-
-    mismatched_tool = output.replace(
-        "coroutine=self._call_review",
-        "coroutine=self._call_requirements",
-    )
-    with pytest.raises(
-        MaterializedCodeError,
-        match="does not execute and visibly report every specialist",
-    ):
-        materialize_build(mismatched_tool)
-
-    unawaited_resolver = output.replace(
-        'return await self._invoke("Review Specialist", payload)',
-        'return self._invoke("Review Specialist", payload)',
-    )
-    with pytest.raises(
-        MaterializedCodeError,
-        match="does not execute and visibly report every specialist",
-    ):
-        materialize_build(unawaited_resolver)
-
-
-def _dynamic_delegation_helper_output() -> str:
-    dynamic_helper_orchestrator = '''```python
-# agent: orchestrator
-from agent_config import AGENT_FOUNDRY_NAMES
-from agent_framework import FunctionTool
-from mission_foundry_runtime import MissionFoundryAgent
-
-class OrchestratorAgent:
-    async def _invoke_specialist(self, agent_display_name, payload, on_progress):
-        async def _delegate(**tool_input):
-            agent = MissionFoundryAgent(
-                agent_name=AGENT_FOUNDRY_NAMES[agent_display_name]
-            )
-            return await agent.run(tool_input)
-
-        tool = FunctionTool(name=agent_display_name, func=_delegate)
-        if on_progress is not None:
-            await on_progress(f"Handing off to {agent_display_name}...")
-        result = await tool(payload=payload)
-        if on_progress is not None:
-            await on_progress(f"{agent_display_name} completed.")
-        return result
-
-    async def run(self, ui_message: str, on_progress=None):
-        result = await self._invoke_specialist(
-            agent_display_name="Requirements Specialist",
-            payload={"message": ui_message},
-            on_progress=on_progress,
-        )
-        return {"result": result}
-```
-'''
-    return re.sub(
-        r"```python\n# agent: orchestrator.*?```\n",
-        dynamic_helper_orchestrator,
-        _SAMPLE_OUTPUT,
-        flags=re.DOTALL,
-    )
-
-
-def test_materialize_build_accepts_constant_calls_to_dynamic_delegation_helper():
-    build = materialize_build(_dynamic_delegation_helper_output())
-
-    assert build.orchestrator_module is not None
-
-
-def _parallel_gathered_specialist_output() -> str:
-    """Regression fixture for the 2026-09-27 "Judge Panel Agent"/"Deterministic
-    QA Agent" incident: two specialists invoked through the same shared
-    ``_invoke_specialist`` helper, but one is scheduled via
-    ``asyncio.create_task`` and awaited through ``asyncio.gather`` (the
-    architecture-required "run in parallel" pattern) instead of being
-    awaited directly.
+def test_materialize_build_rejects_specialist_only_scheduled_via_gather():
+    """After the 2026-09-27 revert (see ``_validate_orchestrator_delegations``'s
+    docstring in code_materializer.py), running a specialist through
+    ``asyncio.create_task``/``asyncio.gather`` is not a recognized delegation
+    pattern - only a directly awaited ``specialist_agent.run(...)`` call
+    counts. This regression test locks in that the revert holds even when
+    the scheduled task is later properly awaited via ``asyncio.gather``.
     """
     second_specialist = '''
 ```python
@@ -374,57 +164,36 @@ from agent_framework import FunctionTool
 from mission_foundry_runtime import MissionFoundryAgent
 
 class OrchestratorAgent:
-    async def _invoke_specialist(self, agent_display_name, payload, on_progress):
-        async def _delegate(**tool_input):
-            agent = MissionFoundryAgent(
-                agent_name=AGENT_FOUNDRY_NAMES[agent_display_name]
-            )
-            return await agent.run(tool_input)
-
-        tool = FunctionTool(name=agent_display_name, func=_delegate)
-        if on_progress is not None:
-            await on_progress(f"Handing off to {agent_display_name}...")
-        result = await tool(payload=payload)
-        if on_progress is not None:
-            await on_progress(f"{agent_display_name} completed.")
-        return result
-
     async def run(self, ui_message: str, on_progress=None):
-        requirements = await self._invoke_specialist(
-            agent_display_name="Requirements Specialist",
-            payload={"message": ui_message},
-            on_progress=on_progress,
+        requirements_agent = MissionFoundryAgent(
+            agent_name=AGENT_FOUNDRY_NAMES["Requirements Specialist"]
         )
-        review_task = asyncio.create_task(
-            self._invoke_specialist(
-                agent_display_name="Review Specialist",
-                payload={"message": ui_message},
-                on_progress=on_progress,
-            )
+        review_agent = MissionFoundryAgent(
+            agent_name=AGENT_FOUNDRY_NAMES["Review Specialist"]
         )
+        requirements_tool = FunctionTool(name="requirements", func=requirements_agent.run)
+        review_tool = FunctionTool(name="review", func=review_agent.run)
+        await on_progress("Handing off to Requirements Specialist...")
+        await on_progress("Handing off to Review Specialist...")
+        review_task = asyncio.create_task(review_agent.run(ui_message))
+        requirements = await requirements_agent.run(ui_message)
         (review,) = await asyncio.gather(review_task)
-        return {"result": requirements, "review": review}
+        await on_progress("Requirements Specialist completed.")
+        await on_progress("Review Specialist completed.")
+        return {
+            "result": requirements,
+            "review": review,
+            "tool": str(requirements_tool),
+            "review_tool": str(review_tool),
+        }
 ```
 '''
     output = second_specialist + _SAMPLE_OUTPUT
-    return re.sub(
+    output = re.sub(
         r"```python\n# agent: orchestrator.*?```\n",
         parallel_orchestrator,
         output,
         flags=re.DOTALL,
-    )
-
-
-def test_materialize_build_accepts_specialist_scheduled_via_create_task_and_gathered():
-    build = materialize_build(_parallel_gathered_specialist_output())
-
-    assert set(build.agent_modules) == {"Requirements Specialist", "Review Specialist"}
-
-
-def test_materialize_build_rejects_specialist_scheduled_but_never_gathered():
-    output = _parallel_gathered_specialist_output().replace(
-        "        (review,) = await asyncio.gather(review_task)\n",
-        "        review = None\n",
     )
 
     with pytest.raises(
@@ -432,239 +201,6 @@ def test_materialize_build_rejects_specialist_scheduled_but_never_gathered():
         match="does not execute and visibly report every specialist",
     ):
         materialize_build(output)
-
-
-def _captured_mapped_agent_helper_output() -> str:
-    return _dynamic_delegation_helper_output().replace(
-        "        async def _delegate(**tool_input):\n"
-        "            agent = MissionFoundryAgent(\n"
-        "                agent_name=AGENT_FOUNDRY_NAMES[agent_display_name]\n"
-        "            )\n"
-        "            return await agent.run(tool_input)\n",
-        "        foundry_name = AGENT_FOUNDRY_NAMES[agent_display_name]\n"
-        "        specialist_agent = MissionFoundryAgent(agent_name=foundry_name)\n\n"
-        "        async def _delegate(**tool_input):\n"
-        "            return await specialist_agent.run(tool_input)\n",
-    )
-
-
-def test_materialize_build_accepts_dynamic_helper_with_captured_mapped_agent():
-    output = _captured_mapped_agent_helper_output()
-
-    build = materialize_build(output)
-
-    assert build.orchestrator_module is not None
-
-
-def test_materialize_build_accepts_captured_mapped_delegate_inside_try():
-    output = _captured_mapped_agent_helper_output().replace(
-        "        foundry_name = AGENT_FOUNDRY_NAMES[agent_display_name]\n"
-        "        specialist_agent = MissionFoundryAgent(agent_name=foundry_name)\n\n"
-        "        async def _delegate(**tool_input):\n"
-        "            return await specialist_agent.run(tool_input)\n",
-        "        try:\n"
-        "            foundry_name = AGENT_FOUNDRY_NAMES[agent_display_name]\n"
-        "            specialist_agent = MissionFoundryAgent(agent_name=foundry_name)\n\n"
-        "            async def _delegate(**tool_input):\n"
-        "                return await specialist_agent.run(tool_input)\n"
-        "        except Exception:\n"
-        "            raise\n",
-    )
-
-    build = materialize_build(output)
-
-    assert build.orchestrator_module is not None
-
-
-@pytest.mark.parametrize(
-    ("original", "replacement", "failure_match"),
-    [
-        (
-            "foundry_name = AGENT_FOUNDRY_NAMES[agent_display_name]",
-            'foundry_name = "hardcoded-agent"',
-            "AGENT_FOUNDRY_NAMES mappings",
-        ),
-        (
-            "return await specialist_agent.run(tool_input)",
-            "return await unrelated_agent.run(tool_input)",
-            "awaited specialist runs",
-        ),
-        (
-            "result = await tool(payload=payload)",
-            "result = tool(payload=payload)",
-            "awaited specialist runs",
-        ),
-        (
-            'await on_progress(f"{agent_display_name} completed.")',
-            'await on_progress("Specialist completed.")',
-            "start/completion progress narration",
-        ),
-    ],
-)
-def test_materialize_build_rejects_unproven_captured_mapped_agent_helper(
-    original: str,
-    replacement: str,
-    failure_match: str,
-):
-    output = _captured_mapped_agent_helper_output()
-    assert original in output
-
-    with pytest.raises(MaterializedCodeError, match=failure_match):
-        materialize_build(output.replace(original, replacement))
-
-
-def test_materialize_build_rejects_agent_from_sibling_nested_scope():
-    output = _captured_mapped_agent_helper_output().replace(
-        "        async def _delegate(**tool_input):\n"
-        "            return await specialist_agent.run(tool_input)\n",
-        "        async def _sibling():\n"
-        "            unrelated_agent = MissionFoundryAgent(agent_name=foundry_name)\n"
-        "            return unrelated_agent\n\n"
-        "        async def _delegate(**tool_input):\n"
-        "            return await unrelated_agent.run(tool_input)\n",
-    )
-
-    with pytest.raises(MaterializedCodeError, match="awaited specialist runs"):
-        materialize_build(output)
-
-
-@pytest.mark.parametrize(
-    ("original", "replacement", "failure_match"),
-    [
-        (
-            'agent_display_name="Requirements Specialist"',
-            "agent_display_name=ui_message",
-            "awaited specialist runs",
-        ),
-        (
-            "result = await self._invoke_specialist(",
-            "result = self._invoke_specialist(",
-            "awaited specialist runs",
-        ),
-        (
-            "AGENT_FOUNDRY_NAMES[agent_display_name]",
-            "agent_display_name",
-            "AGENT_FOUNDRY_NAMES mappings",
-        ),
-        (
-            "result = await tool(payload=payload)",
-            "result = tool(payload=payload)",
-            "awaited specialist runs",
-        ),
-        (
-            'await on_progress(f"{agent_display_name} completed.")',
-            'await on_progress("Specialist completed.")',
-            "start/completion progress narration",
-        ),
-    ],
-)
-def test_materialize_build_rejects_unproven_dynamic_delegation_helper(
-    original: str,
-    replacement: str,
-    failure_match: str,
-):
-    output = _dynamic_delegation_helper_output()
-    assert original in output
-
-    with pytest.raises(MaterializedCodeError, match=failure_match):
-        materialize_build(output.replace(original, replacement))
-
-
-def _tool_runner_helper_output() -> str:
-    orchestrator = '''```python
-# agent: orchestrator
-from agent_config import AGENT_FOUNDRY_NAMES
-from agent_framework import FunctionTool
-from mission_foundry_runtime import MissionFoundryAgent
-
-class OrchestratorAgent:
-    def __init__(self):
-        self.requirements_tool = FunctionTool(
-            name="Requirements Specialist",
-            func=self._call_requirements,
-        )
-
-    async def _invoke_specialist(self, agent_display_name, payload):
-        agent = MissionFoundryAgent(
-            agent_name=AGENT_FOUNDRY_NAMES[agent_display_name]
-        )
-        return await agent.run(payload)
-
-    async def _call_requirements(self, payload):
-        return await self._invoke_specialist("Requirements Specialist", payload)
-
-    async def _emit_progress(self, on_progress, message):
-        if on_progress is not None:
-            await on_progress(message)
-
-    async def run(self, ui_message: str, on_progress=None):
-        async def run_with_progress(tool, agent_name, payload):
-            await self._emit_progress(
-                on_progress, f"Handing off to {agent_name}..."
-            )
-            result = await tool(payload)
-            await self._emit_progress(
-                on_progress, f"{agent_name} completed."
-            )
-            return result
-
-        result = await run_with_progress(
-            self.requirements_tool,
-            "Requirements Specialist",
-            {"message": ui_message},
-        )
-        return {"result": result}
-```
-'''
-    return re.sub(
-        r"```python\n# agent: orchestrator.*?```\n",
-        orchestrator,
-        _SAMPLE_OUTPUT,
-        flags=re.DOTALL,
-    )
-
-
-def test_materialize_build_accepts_exact_tool_through_narrated_runner_helper():
-    build = materialize_build(_tool_runner_helper_output())
-
-    assert build.orchestrator_module is not None
-
-
-@pytest.mark.parametrize(
-    ("original", "replacement", "failure_match"),
-    [
-        (
-            '"Requirements Specialist",\n            {"message": ui_message}',
-            '"Unknown Specialist",\n            {"message": ui_message}',
-            "awaited specialist runs",
-        ),
-        (
-            "result = await run_with_progress(",
-            "result = run_with_progress(",
-            "awaited specialist runs",
-        ),
-        (
-            "result = await tool(payload)",
-            "result = tool(payload)",
-            "awaited specialist runs",
-        ),
-        (
-            'f"{agent_name} completed."',
-            '"Specialist completed."',
-            "start/completion progress narration",
-        ),
-    ],
-)
-def test_materialize_build_rejects_unproven_tool_runner_helper(
-    original: str,
-    replacement: str,
-    failure_match: str,
-):
-    output = _tool_runner_helper_output()
-    assert original in output
-
-    with pytest.raises(MaterializedCodeError, match=failure_match):
-        materialize_build(output.replace(original, replacement))
 
 
 def test_materialize_build_rejects_nonexistent_function_tool_factory():
