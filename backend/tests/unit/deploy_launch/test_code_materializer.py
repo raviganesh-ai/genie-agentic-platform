@@ -28,8 +28,10 @@ async def run() -> None:
 ```python
 # agent: orchestrator
 class OrchestratorAgent:
-    async def run(self, ui_message: str) -> None:
-        pass
+    async def run(self, ui_message: str, on_progress=None) -> None:
+        if on_progress is not None:
+            await on_progress("Handing off to Requirements Specialist...")
+            await on_progress("Requirements Specialist completed.")
 ```
 
 ```tsx
@@ -99,6 +101,57 @@ def test_materialize_build_allows_non_file_name_comparison():
 
     assert build.ui_component is not None
     assert 'agent.name === "orchestrator"' in build.ui_component
+
+
+@pytest.mark.parametrize(
+    "source",
+    (
+        "const isFileValid = parsedDocCount === 30;",
+        "if (docsArray.length !== 30) { setFileError('wrong count'); }",
+    ),
+)
+def test_materialize_build_rejects_exact_ui_sample_cardinality_gate(source: str):
+    output = _SAMPLE_OUTPUT.replace(
+        "export function MissionApp() {",
+        f"export function MissionApp() {{\n    {source}",
+    )
+
+    with pytest.raises(MaterializedCodeError, match="representative sample"):
+        materialize_build(output)
+
+
+def test_materialize_build_rejects_exact_orchestrator_sample_cardinality_gate():
+    output = _SAMPLE_OUTPUT.replace(
+        "class OrchestratorAgent:",
+        "document_count = 7\nif document_count != 30:\n    raise ValueError('wrong count')\n\nclass OrchestratorAgent:",
+    )
+
+    with pytest.raises(MaterializedCodeError, match="coverage evidence"):
+        materialize_build(output)
+
+
+def test_materialize_build_allows_non_empty_sample_validation():
+    output = _SAMPLE_OUTPUT.replace(
+        "export function MissionApp() {",
+        "export function MissionApp() {\n    const isFileValid = parsedDocCount > 0;",
+    ).replace(
+        "class OrchestratorAgent:",
+        "document_count = 7\nif document_count < 1:\n    raise ValueError('empty')\n\nclass OrchestratorAgent:",
+    )
+
+    build = materialize_build(output)
+
+    assert build.ui_component is not None
+
+
+def test_materialize_build_rejects_missing_specialist_progress_narration():
+    output = _SAMPLE_OUTPUT.replace(
+        'await on_progress("Requirements Specialist completed.")',
+        'await on_progress("Pipeline phase completed.")',
+    )
+
+    with pytest.raises(MaterializedCodeError, match="Requirements Specialist"):
+        materialize_build(output)
 
 
 def test_materialize_build_rejects_nested_submit_payload():
@@ -215,7 +268,9 @@ agent = FoundryAgent("requirements-specialist")
 # agent: orchestrator
 from agent_framework.foundry import FoundryAgent  # type: ignore
 class OrchestratorAgent:
-    pass
+    async def run(self, ui_message, on_progress=None):
+        await on_progress("Handing off to Requirements Specialist...")
+        await on_progress("Requirements Specialist completed.")
 ```
 '''
     build = materialize_build(output)

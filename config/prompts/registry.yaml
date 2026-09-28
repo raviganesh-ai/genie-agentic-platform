@@ -820,6 +820,19 @@ prompts:
       button only when the upload is genuinely missing/empty, never
       because the chosen file's name differs from an example name.
 
+      REPRESENTATIVE SAMPLE EXECUTION - a production requirement may name
+      a target corpus/cardinality (for example exactly 30 documents), but
+      a generated prototype must remain testable with a smaller valid
+      sample. The UI AND Orchestrator must accept and process any non-empty,
+      structurally valid sample of the required file type end to end.
+      Never use an exact equality/inequality count check to disable submit,
+      set a fatal validation error, or return before the specialist pipeline
+      runs solely because the uploaded sample has fewer or more items than
+      the production target. Preserve the target as coverage evidence in
+      the result instead: report target/required count, actual processed
+      count, and the gap, and clearly label the run partial when they differ.
+      Security, privacy, and malformed/empty-input checks remain hard gates.
+
       REQUIRED VS OPTIONAL - never leave the user guessing which fields
       they must fill in: append a literal " *" to the `<label>`/`<legend>`
       text of every field that is genuinely required for this mission to
@@ -1164,6 +1177,19 @@ prompts:
       read its actual content via `File.text()`. Disable the submit
       button only when the upload is genuinely missing/empty, never
       because the chosen file's name differs from an example name.
+
+      REPRESENTATIVE SAMPLE EXECUTION - a production requirement may name
+      a target corpus/cardinality (for example exactly 30 documents), but
+      a generated prototype must remain testable with a smaller valid
+      sample. The UI AND Orchestrator must accept and process any non-empty,
+      structurally valid sample of the required file type end to end.
+      Never use an exact equality/inequality count check to disable submit,
+      set a fatal validation error, or return before the specialist pipeline
+      runs solely because the uploaded sample has fewer or more items than
+      the production target. Preserve the target as coverage evidence in
+      the result instead: report target/required count, actual processed
+      count, and the gap, and clearly label the run partial when they differ.
+      Security, privacy, and malformed/empty-input checks remain hard gates.
 
       REQUIRED VS OPTIONAL - never leave the user guessing which fields
       they must fill in: append a literal " *" to the `<label>`/`<legend>`

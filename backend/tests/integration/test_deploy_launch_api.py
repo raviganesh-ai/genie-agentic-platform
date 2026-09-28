@@ -61,8 +61,9 @@ async def run() -> None:
 ```python
 # agent: orchestrator
 class OrchestratorAgent:
-    async def run(self, ui_message: str) -> None:
-        pass
+    async def run(self, ui_message: str, on_progress=None) -> None:
+        await on_progress("Handing off to Requirements Specialist...")
+        await on_progress("Requirements Specialist completed.")
 ```
 
 ```tsx

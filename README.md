@@ -691,6 +691,12 @@ The script uses Microsoft Entra authentication, creates only missing model deplo
 
 Every deployment to the shared Azure evaluation environment (backend Container App and/or frontend Static Web App) is recorded here: commit, what changed, and why. Update this section as part of the same commit that ships the fix/feature, before pushing to `master` triggers [Continuous deployment](#continuous-deployment-github-actions).
 
+### 2026-09-28 — Keep generated POCs testable with representative samples
+
+- **Sample-friendly execution**: Build prompts now require generated UIs and orchestrators to process any non-empty, structurally valid representative sample end to end. Production target counts remain visible as required/processed/gap coverage evidence instead of blocking submit or stopping the agent pipeline.
+- **Visible agent work**: generated orchestrators must contain exact start and completion narration for every specialist agent, ensuring the Agent Pipeline can light up node by node during real processing.
+- **Deterministic generation gate**: materialization rejects exact uploaded-item cardinality gates and missing specialist progress narration before a broken prototype can deploy; focused unit and real-prompt contract tests cover both rules.
+
 ### 2026-09-27 — Preserve workflow handoffs across revisions
 
 - **Durable collaboration memory**: production Shared Collaboration Memory now uses the same managed-identity Cosmos store as durable workflow runs, so requirements and architecture handoffs survive backend revisions.

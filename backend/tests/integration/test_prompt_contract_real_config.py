@@ -165,6 +165,17 @@ def test_ui_prompts_forbid_binding_file_uploads_to_one_exact_literal_name():
         assert "accept` attribute to that type's extension/MIME list" in template
 
 
+def test_build_prompts_keep_representative_samples_runnable():
+    registry = PromptRegistry.load(_REPO_CONFIG_ROOT / "prompts")
+
+    for prompt_id in ("build-generation-v1", "build-generation-component-v1"):
+        template = " ".join(registry.get(prompt_id).template.split())
+        assert "REPRESENTATIVE SAMPLE EXECUTION" in template
+        assert "accept and process any non-empty" in template
+        assert "Never use an exact equality/inequality count check" in template
+        assert "target/required count, actual processed count, and the gap" in template
+
+
 def test_orchestrator_prompts_require_live_on_progress_hand_off_narration():
     """Regression guard: a live "blind MQM" mission's Agent Pipeline panel
     never visibly animated - the generated Orchestrator's `run()` awaited

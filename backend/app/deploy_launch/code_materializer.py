@@ -57,6 +57,21 @@ _EXACT_FILE_NAME_COMPARISON_PATTERN: Final = re.compile(
     r"\b[A-Za-z_$][\w$]*\.name\s*(?:===|!==|==|!=)\s*"
     r"(?P<quote>['\"`])[^'\"`\r\n]*\.[A-Za-z0-9]{1,10}(?P=quote)",
 )
+_STRICT_SAMPLE_CARDINALITY_PATTERN: Final = re.compile(
+    r"(?:"
+    r"\b(?:parsed|uploaded|input|actual)?(?:doc(?:ument)?|record|row|item|sample|file)s?"
+    r"_?(?:count|length|size)\b"
+    r"|\b(?:docs?|documents?|records?|rows?|items?|samples?|files?)(?:array)?\.length\b"
+    r"|\blen\(\s*(?:docs?|documents?|records?|rows?|items?|samples?|files?)\s*\)"
+    r")\s*(?:===|!==|==|!=)\s*[1-9]\d*"
+    r"|[1-9]\d*\s*(?:===|!==|==|!=)\s*(?:"
+    r"\b(?:parsed|uploaded|input|actual)?(?:doc(?:ument)?|record|row|item|sample|file)s?"
+    r"_?(?:count|length|size)\b"
+    r"|\b(?:docs?|documents?|records?|rows?|items?|samples?|files?)(?:array)?\.length\b"
+    r"|\blen\(\s*(?:docs?|documents?|records?|rows?|items?|samples?|files?)\s*\)"
+    r")",
+    re.IGNORECASE,
+)
 _ON_SUBMIT_INLINE_STRINGIFY_PATTERN: Final = re.compile(
     r"\bonSubmit\s*\(\s*JSON\.stringify\(\s*(\{)"
 )
@@ -310,6 +325,31 @@ def materialize_build(output_text: str) -> MaterializedBuild:
             "literal. Generated prototypes must validate uploaded content and file "
             "type, never an end-user-controlled filename or example filename."
         )
+
+    generated_sources = [
+        source for source in (ui_component, orchestrator_module) if source is not None
+    ]
+    if any(_STRICT_SAMPLE_CARDINALITY_PATTERN.search(source) for source in generated_sources):
+        raise MaterializedCodeError(
+            "The generated prototype gates execution on an exact uploaded sample count. "
+            "Production target cardinality must be reported as coverage evidence, while "
+            "any non-empty structurally valid representative sample remains runnable."
+        )
+
+    if orchestrator_module is not None and agent_modules:
+        missing_progress = [
+            agent_name
+            for agent_name in agent_modules
+            if (
+                f"Handing off to {agent_name}" not in orchestrator_module
+                or f"{agent_name} completed." not in orchestrator_module
+            )
+        ]
+        if missing_progress:
+            raise MaterializedCodeError(
+                "The generated orchestrator does not emit live start/completion progress "
+                "for every specialist agent: " + ", ".join(sorted(missing_progress))
+            )
 
     if ui_component is not None and any(
         _has_nested_object_value(literal) for literal in _submit_payload_literals(ui_component)
