@@ -1,47 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { Route, Routes } from "react-router-dom";
 import { renderWithProviders, mockFetchSequence } from "./testUtils";
 import { buildWorkflowRunResult, FIXTURE_SESSION_ID, FIXTURE_WORKFLOW_RUN_ID } from "./fixtures";
 import { WorkshopPage } from "@/features/workshop-center/WorkshopPage";
 
 describe("WorkshopPage", () => {
-  it("immediately names the component being generated before its first code delta arrives", async () => {
-    const componentStarted = {
-      event_type: "component_started",
-      session_id: FIXTURE_SESSION_ID,
-      workflow_run_id: FIXTURE_WORKFLOW_RUN_ID,
-      step_id: "build-solution",
-      agent_id: "build-agent",
-      component_name: "Ticket Classifier Agent",
-      delta: null,
-      output_preview: null,
-      error: null,
-      emitted_at: "2026-07-23T10:00:00Z",
-    };
-
-    mockFetchSequence([
-      {
-        match: `/workflows/runs/${FIXTURE_WORKFLOW_RUN_ID}`,
-        response: buildWorkflowRunResult({ status: "running", step_results: [] }),
-      },
-      {
-        match: "/workflow-events/stream",
-        sseChunks: [`data: ${JSON.stringify(componentStarted)}\n\n`],
-      },
-    ]);
-
-    renderWithProviders(<WorkshopPage />, {
-      sessionId: FIXTURE_SESSION_ID,
-      workflowRunId: FIXTURE_WORKFLOW_RUN_ID,
-    });
-
-    await waitFor(() =>
-      expect(screen.getByText("Generating Ticket Classifier Agent...")).toBeInTheDocument(),
-    );
-  });
-
   it("shows only the generated code, and reveals Proceed to Deploy & Launch once the review checkbox is checked", async () => {
     const fetchMock = mockFetchSequence([
       {
@@ -61,10 +25,6 @@ describe("WorkshopPage", () => {
         }),
       },
       { match: "/approvals", response: [] },
-      {
-        match: `/workshop/build-components/${FIXTURE_WORKFLOW_RUN_ID}/validate`,
-        response: { valid: true },
-      },
     ]);
 
     renderWithProviders(<WorkshopPage />, {
@@ -96,179 +56,13 @@ describe("WorkshopPage", () => {
     const callsBeforeProceed = fetchMock.mock.calls.length;
     await user.click(screen.getByRole("button", { name: /Proceed to Deploy & Launch/i }));
 
-    await waitFor(() =>
-      expect(fetchMock.mock.calls.length).toBeGreaterThan(callsBeforeProceed),
-    );
-    expect(
-      fetchMock.mock.calls.some((call) =>
-        String(call[0]).endsWith(
-          `/workshop/build-components/${FIXTURE_WORKFLOW_RUN_ID}/validate`,
-        ),
-      ),
-    ).toBe(true);
+    // Proceeding is a plain client-side navigation to Deploy & Launch - the
+    // review checkbox/click above is the human checkpoint, so clicking
+    // Proceed doesn't need to call any approval/resume endpoint.
+    expect(fetchMock.mock.calls.length).toBe(callsBeforeProceed);
     expect(fetchMock.mock.calls.some((call) => String(call[0]).endsWith("/decide"))).toBe(false);
     expect(fetchMock.mock.calls.some((call) => String(call[0]).endsWith("/resume"))).toBe(false);
   });
-
-  it("keeps an invalid reviewed build out of Deploy & Launch when the automatic repair attempt also fails", async () => {
-    mockFetchSequence([
-      {
-        match: `/workflows/runs/${FIXTURE_WORKFLOW_RUN_ID}`,
-        response: buildWorkflowRunResult({
-          step_results: [
-            {
-              step_id: "build-solution",
-              agent_id: "orchestrator",
-              status: "completed",
-              output_text: "```tsx\n// agent: ui\nexport function App() { return null; }\n```",
-              error: null,
-              started_at: "2026-07-23T10:00:00Z",
-              completed_at: "2026-07-23T10:01:00Z",
-            },
-          ],
-        }),
-      },
-      { match: "/approvals", response: [] },
-      {
-        match: `/workshop/build-components/${FIXTURE_WORKFLOW_RUN_ID}/validate`,
-        status: 422,
-        response: {
-          detail: "The generated orchestrator does not execute every specialist.",
-          component: "orchestrator",
-        },
-      },
-      {
-        match: "/resume",
-        response: buildWorkflowRunResult({ status: "completed", step_results: [] }),
-      },
-    ]);
-
-    renderWithProviders(<WorkshopPage />, {
-      sessionId: FIXTURE_SESSION_ID,
-      workflowRunId: FIXTURE_WORKFLOW_RUN_ID,
-    });
-
-    const user = userEvent.setup();
-    await user.click(
-      await screen.findByRole("checkbox", { name: /AI can perform mistake/i }),
-    );
-    await user.click(screen.getByRole("button", { name: /Proceed to Deploy & Launch/i }));
-
-    // The same failure persists on the mocked backend even after the
-    // automatic repair attempt (both validate calls hit the same 422
-    // handler above) - the banner must still show once that one automatic
-    // attempt is exhausted, and a manual retry must remain available.
-    const validationError = await screen.findByText(
-      /Automatic repair did not resolve this validation failure.*does not execute every specialist/,
-    );
-    expect(validationError).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "Try automatic repair again" }),
-    ).toBeInTheDocument();
-  });
-
-  it("automatically repairs and re-validates the exact failing component (with its exact validation error as guidance) as soon as Proceed to Deploy & Launch fails, navigating through without requiring a second click", async () => {
-    let validateCallCount = 0;
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      const url = typeof input === "string" ? input : input.toString();
-      const pathname = new URL(url).pathname;
-      if (pathname.endsWith("/workflow-events/stream")) {
-        return new Response(new ReadableStream({ start: (controller) => controller.close() }), {
-          status: 200,
-          headers: { "Content-Type": "text/event-stream" },
-        });
-      }
-      if (pathname.endsWith(`/workflows/runs/${FIXTURE_WORKFLOW_RUN_ID}`)) {
-        return new Response(
-          JSON.stringify(
-            buildWorkflowRunResult({
-              step_results: [
-                {
-                  step_id: "build-solution",
-                  agent_id: "orchestrator",
-                  status: "completed",
-                  output_text: "```tsx\n// agent: ui\nexport function App() { return null; }\n```",
-                  error: null,
-                  started_at: "2026-07-23T10:00:00Z",
-                  completed_at: "2026-07-23T10:01:00Z",
-                },
-              ],
-            }),
-          ),
-          { status: 200, headers: { "Content-Type": "application/json" } },
-        );
-      }
-      if (pathname.endsWith("/approvals")) {
-        return new Response(JSON.stringify([]), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        });
-      }
-      if (pathname.endsWith(`/workshop/build-components/${FIXTURE_WORKFLOW_RUN_ID}/validate`)) {
-        validateCallCount += 1;
-        if (validateCallCount === 1) {
-          return new Response(
-            JSON.stringify({
-              detail:
-                "The generated mission UI's submit payload groups fields inside nested objects.",
-              component: "ui",
-            }),
-            { status: 422, headers: { "Content-Type": "application/json" } },
-          );
-        }
-        return new Response(JSON.stringify({}), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        });
-      }
-      if (pathname.endsWith("/resume")) {
-        return new Response(
-          JSON.stringify(buildWorkflowRunResult({ status: "completed", step_results: [] })),
-          { status: 200, headers: { "Content-Type": "application/json" } },
-        );
-      }
-      throw new Error(`No mock handler registered for URL: ${url}`);
-    });
-    vi.stubGlobal("fetch", fetchMock);
-
-    renderWithProviders(
-      <Routes>
-        <Route path="/" element={<WorkshopPage />} />
-        <Route path="/outputs" element={<div>Outputs reached</div>} />
-      </Routes>,
-      {
-        sessionId: FIXTURE_SESSION_ID,
-        workflowRunId: FIXTURE_WORKFLOW_RUN_ID,
-        governancePolicies: "Never expose PII.",
-      },
-    );
-
-    const user = userEvent.setup();
-    await user.click(
-      await screen.findByRole("checkbox", { name: /AI can perform mistake/i }),
-    );
-    await user.click(screen.getByRole("button", { name: /Proceed to Deploy & Launch/i }));
-
-    await waitFor(() => {
-      const resumeCall = fetchMock.mock.calls.find((call) => String(call[0]).endsWith("/resume"));
-      expect(resumeCall).toBeDefined();
-      const [, resumeInit] = resumeCall as unknown as [string, RequestInit];
-      const body = JSON.parse(resumeInit.body as string);
-      const stepInput = body.step_inputs["build-solution"];
-      expect(stepInput.variables.regenerate_components).toBe("ui");
-      expect(stepInput.variables.policies).toContain("Never expose PII.");
-      expect(stepInput.variables.policies).toContain(
-        "The generated mission UI's submit payload groups fields inside nested objects.",
-      );
-    });
-
-    // No error banner ever appears, and no second click is required - the
-    // one automatic repair attempt succeeded (the second mocked validate
-    // call returns 200) and the page moved straight on to Deploy & Launch.
-    await screen.findByText("Outputs reached");
-    expect(screen.queryByText(/Automatic repair did not resolve/)).not.toBeInTheDocument();
-  });
-
 
   it("shows the review checkbox once the Build Agent's live streamed UI code block closes, even before build-solution is marked completed server-side", async () => {
     const deltaEvent = (delta: string) => ({
@@ -351,31 +145,6 @@ describe("WorkshopPage", () => {
     expect(
       screen.queryByRole("checkbox", { name: /AI can perform mistake/i }),
     ).not.toBeInTheDocument();
-  });
-
-  it("renders accumulated component code from polling when the SSE stream was missed", async () => {
-    mockFetchSequence([
-      {
-        match: `/workflows/runs/${FIXTURE_WORKFLOW_RUN_ID}`,
-        response: buildWorkflowRunResult({ status: "running", step_results: [] }),
-      },
-      {
-        match: `/workshop/build-components/${FIXTURE_WORKFLOW_RUN_ID}`,
-        response: {
-          build_output:
-            "```python\n# agent: Ticket Classifier Agent\nclass TicketClassifierAgent:\n    pass\n```",
-        },
-      },
-    ]);
-
-    renderWithProviders(<WorkshopPage />, {
-      sessionId: FIXTURE_SESSION_ID,
-      workflowRunId: FIXTURE_WORKFLOW_RUN_ID,
-    });
-
-    await waitFor(() =>
-      expect(screen.getByText(/Generated Agent Code - Ticket Classifier Agent/i)).toBeInTheDocument(),
-    );
   });
 
   it("regenerates only the UI component's code after the user types an instruction and clicks Regenerate", async () => {

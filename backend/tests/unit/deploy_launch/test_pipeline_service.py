@@ -12,7 +12,6 @@ near the bottom of this file.
 """
 from __future__ import annotations
 
-import asyncio
 import shutil
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -28,7 +27,6 @@ from app.deploy_launch.backend_deployment_service import (
     BackendDeploymentResult,
     NullBackendDeploymentService,
 )
-from app.deploy_launch.code_materializer import materialize_build
 from app.deploy_launch.defender_for_cloud_gateway import NullDefenderForCloudGateway
 from app.deploy_launch.finops_cost_service import NullFinOpsCostService
 from app.deploy_launch.frontend_deployment_service import (
@@ -37,9 +35,7 @@ from app.deploy_launch.frontend_deployment_service import (
     NullFrontendDeploymentService,
 )
 from app.deploy_launch.mission_agent_provisioning_service import (
-    MissionAgentProvisioningError,
     NullMissionAgentProvisioningService,
-    ProvisionedMissionAgent,
 )
 from app.deploy_launch.mission_identity_service import NullMissionIdentityService
 from app.deploy_launch.models import (
@@ -68,26 +64,15 @@ async def run() -> None:
 
 ```python
 # agent: orchestrator
-from agent_config import AGENT_FOUNDRY_NAMES
-from agent_framework import FunctionTool
-from mission_foundry_runtime import MissionFoundryAgent
 class OrchestratorAgent:
-    async def run(self, ui_message: str, on_progress=None):
-        specialist = MissionFoundryAgent(
-            agent_name=AGENT_FOUNDRY_NAMES["Requirements Specialist"]
-        )
-        tool = FunctionTool(name="requirements", func=specialist.run)
-        if on_progress:
-            await on_progress("Handing off to Requirements Specialist...")
-            result = await specialist.run(ui_message)
-            await on_progress("Requirements Specialist completed.")
-        return {"result": result, "tool": str(tool)}
+    async def run(self, ui_message: str) -> None:
+        pass
 ```
 
 ```tsx
 // agent: ui
-export function MissionApp({ onSubmit }) {
-    return <button className="genie-btn" onClick={() => onSubmit(JSON.stringify({ request: "run" }))}>Run</button>;
+export function MissionApp() {
+    return null;
 }
 ```
 '''
@@ -154,8 +139,8 @@ class _BuildValidationRepairingFakeOrchestrator(_FakeOrchestrator):
         super().__init__()
         self.resume_calls: list[dict[str, WorkflowStepInput]] = []
         invalid_build = _BUILD_OUTPUT.replace(
-            "export function MissionApp({ onSubmit }) {",
-            'export function MissionApp({ onSubmit }) {\n    const invalid = file.name !== "fixed.json";',
+            "export function MissionApp() {",
+            'export function MissionApp() {\n    const invalid = file.name !== "fixed.json";',
         )
         self._run.step_results[-1] = _completed_step(
             "build-solution", "genie-orchestrator", invalid_build
@@ -361,22 +346,6 @@ def _build_service(
     )
 
 
-@pytest.mark.parametrize("backend_url", [None, "", "/invoke", "ftp://backend.example.com"])
-def test_frontend_workspace_rejects_invalid_backend_url(
-    tmp_path: Path, backend_url: str | None
-) -> None:
-    service = _build_service(tmp_path=tmp_path)
-
-    with pytest.raises(DeploymentPipelineStepFailedError, match="backend URL"):
-        service._write_frontend_workspace(
-            frontend_root=tmp_path / "frontend",
-            materialized=materialize_build(_BUILD_OUTPUT),
-            mission_title="Acme Mission",
-            backend_url=backend_url,
-            agent_foundry_names={"Requirements Specialist": "requirements-agent"},
-        )
-
-
 async def test_discovery_build_run_supplies_deploy_requirements_and_architecture(
     tmp_path: Path,
 ) -> None:
@@ -465,111 +434,7 @@ async def test_full_pipeline_runs_every_step(tmp_path: Path):
     runtime_config_source = (build_root.parent / "frontend" / "public" / "runtime-config.js").read_text(
         encoding="utf-8"
     )
-    assert (
-        'window.__MISSION_BACKEND_URL__ = "http://localhost/missions/'
-        in runtime_config_source
-    )
-    assert 'window.__MISSION_BACKEND_URL__ = null' not in runtime_config_source
     assert '__MISSION_AGENTS__ = ["Requirements Specialist"]' in runtime_config_source
-
-    # index.html must reference runtime-config.js (a public/ asset) with a
-    # root-absolute path. A bare relative "runtime-config.js" src makes Vite
-    # try to bundle it as a module graph entry instead of treating it as a
-    # public asset, and Vite refuses to bundle any non-"type=module" script -
-    # failing the real ACR frontend build with "can't be bundled without
-    # type='module' attribute" before any prototype is ever reachable.
-    index_html_source = (build_root.parent / "frontend" / "index.html").read_text(encoding="utf-8")
-    assert '<script src="/runtime-config.js"></script>' in index_html_source
-
-    # main.tsx is a Python triple-quoted template - any single-backslash "\n"
-    # meant to appear literally inside a generated JS string is instead
-    # interpreted by Python as a real newline, splitting the JS string
-    # literal across two lines and failing Vite's build with "Unterminated
-    # string literal" (confirmed via a real ACR build failure). The
-    # generated source must contain the literal two-character sequence.
-    main_tsx_source = (build_root.parent / "frontend" / "src" / "main.tsx").read_text(encoding="utf-8")
-    assert 'parsed.progress + "\\n" }' in main_tsx_source
-    assert '\n" }' not in main_tsx_source
-
-
-class _PartialMissionAgentProvisioningService(NullMissionAgentProvisioningService):
-    def __init__(self) -> None:
-        self.deleted_names: list[str] = []
-
-    async def provision(self, **kwargs):
-        record = ProvisionedMissionAgent(
-            agent_name="Requirements Specialist",
-            foundry_agent_name="foundry-requirements-specialist",
-            provisioned_at=datetime.now(UTC),
-        )
-        callback = kwargs.get("on_agent_provisioned")
-        if callback is not None:
-            await callback(record)
-        return [record]
-
-    async def delete(self, *, foundry_agent_names: list[str]) -> None:
-        self.deleted_names.extend(foundry_agent_names)
-
-
-async def test_pipeline_fails_before_backend_when_foundry_fleet_is_partial(tmp_path: Path):
-    provisioning_service = _PartialMissionAgentProvisioningService()
-    service = _build_service(
-        tmp_path=tmp_path,
-        mission_agent_provisioning_service=provisioning_service,
-    )
-
-    run = await service.start(
-        session_id="session-1", requesting_user_id="user-1", workflow_run_id="run-1"
-    )
-    run = await service.wait_for_run(run.id)
-
-    provision_step = next(
-        step for step in run.steps if step.step_id == "provision-foundry-agents"
-    )
-    backend_step = next(step for step in run.steps if step.step_id == "deploy-backend-service")
-    assert run.status == "failed"
-    assert provision_step.status == "failed"
-    assert "one unique, verified resource" in (provision_step.error or "")
-    assert backend_step.status == "pending"
-    assert all(agent.status == "failed" for agent in run.provisioned_agents)
-    assert all(agent.foundry_agent_name is None for agent in run.provisioned_agents)
-    assert provisioning_service.deleted_names == ["foundry-requirements-specialist"]
-
-
-class _FailingAfterFirstMissionAgentProvisioningService(NullMissionAgentProvisioningService):
-    async def provision(self, **kwargs):
-        callback = kwargs.get("on_agent_provisioned")
-        assert callback is not None
-        await callback(
-            ProvisionedMissionAgent(
-                agent_name="Requirements Specialist",
-                foundry_agent_name="foundry-requirements-specialist",
-                provisioned_at=datetime.now(UTC),
-            )
-        )
-        raise MissionAgentProvisioningError("Foundry did not confirm the orchestrator")
-
-
-async def test_pipeline_clears_completed_agents_after_provisioning_rollback(tmp_path: Path):
-    service = _build_service(
-        tmp_path=tmp_path,
-        mission_agent_provisioning_service=_FailingAfterFirstMissionAgentProvisioningService(),
-    )
-
-    run = await service.start(
-        session_id="session-1", requesting_user_id="user-1", workflow_run_id="run-1"
-    )
-    run = await service.wait_for_run(run.id)
-
-    provision_step = next(
-        step for step in run.steps if step.step_id == "provision-foundry-agents"
-    )
-    backend_step = next(step for step in run.steps if step.step_id == "deploy-backend-service")
-    assert run.status == "failed"
-    assert provision_step.status == "failed"
-    assert backend_step.status == "pending"
-    assert all(agent.status == "failed" for agent in run.provisioned_agents)
-    assert all(agent.foundry_agent_name is None for agent in run.provisioned_agents)
 
 
 class _FakeSecurityCopilotGateway:
@@ -1101,12 +966,6 @@ def test_generated_mission_shell_uses_one_visual_system_without_nested_cards() -
     assert ".genie-input-surface form > section {" in _FRONTEND_STYLES_CSS
     assert "background: transparent !important;" in _FRONTEND_STYLES_CSS
     assert ".genie-input-surface fieldset label {" in _FRONTEND_STYLES_CSS
-    assert '.genie-input-surface input[type="file"] {' in _FRONTEND_STYLES_CSS
-    assert "max-width: 100%;" in _FRONTEND_STYLES_CSS
-    assert "overflow-wrap: anywhere;" in _FRONTEND_STYLES_CSS
-    assert ".genie-input-surface .genie-dropzone {" in _FRONTEND_STYLES_CSS
-    assert "minmax(min(280px, 100%), 1fr)" in _FRONTEND_STYLES_CSS
-    assert ".genie-input-surface fieldset legend {" in _FRONTEND_STYLES_CSS
     assert '.genie-input-surface [role="alert"] {' in _FRONTEND_STYLES_CSS
     assert "background-color: var(--genie-danger-soft);" in _FRONTEND_STYLES_CSS
     assert '.genie-input-surface :where(input, textarea, select) {' in _FRONTEND_STYLES_CSS
@@ -1120,21 +979,7 @@ def test_generated_mission_shell_uses_one_visual_system_without_nested_cards() -
     )
 
 
-def test_generated_mission_shell_replaces_native_widget_chrome_with_custom_styling() -> None:
-    """Checkboxes/radios/file inputs keep native OS chrome unless explicitly restyled -
-    a real live mission was reported looking unpolished because of exactly this gap."""
-    from app.deploy_launch.pipeline_service import _FRONTEND_STYLES_CSS
-
-    assert 'input[type="checkbox"] {\n    border-radius: 4px;' in _FRONTEND_STYLES_CSS
-    assert 'input[type="radio"] {\n    border-radius: 50%;' in _FRONTEND_STYLES_CSS
-    assert 'input[type="checkbox"]:checked,' in _FRONTEND_STYLES_CSS
-    assert 'input[type="checkbox"]:disabled,' in _FRONTEND_STYLES_CSS
-    assert 'input[type="checkbox"]:focus-visible,' in _FRONTEND_STYLES_CSS
-    assert '::file-selector-button {' in _FRONTEND_STYLES_CSS
-    assert '::file-selector-button:hover {' in _FRONTEND_STYLES_CSS
-
-
-async def test_pipeline_does_not_regenerate_approved_build_before_provisioning(
+async def test_pipeline_repairs_invalid_generated_ui_before_provisioning(
     tmp_path: Path,
 ) -> None:
     orchestrator = _BuildValidationRepairingFakeOrchestrator()
@@ -1151,6 +996,7 @@ async def test_pipeline_does_not_regenerate_approved_build_before_provisioning(
         defender_for_cloud_gateway=NullDefenderForCloudGateway(),
         finops_cost_service=NullFinOpsCostService(),
         build_workspace_root=tmp_path,
+        max_repair_attempts=3,
     )
 
     run = await service.start(
@@ -1160,22 +1006,20 @@ async def test_pipeline_does_not_regenerate_approved_build_before_provisioning(
     )
     run = await service.wait_for_run(run.id)
 
-    assert run.status == "failed"
-    assert orchestrator.resume_calls == []
-    failed_step = next(step for step in run.steps if step.step_id == "provision-foundry-agents")
-    assert failed_step.status == "failed"
-    assert failed_step.error is not None
-    assert "Deploy & Launch does not regenerate an approved build" in failed_step.error
-    assert "end-user-controlled filename" in failed_step.error
+    assert run.status == "completed"
+    assert len(orchestrator.resume_calls) == 1
+    repair_input = orchestrator.resume_calls[0]["build-solution"]
+    assert "end-user-controlled filename" in repair_input.variables["user_message"]
+    assert run.steps[1].status == "completed"
 
 
-async def test_pipeline_exposes_validation_evidence_without_build_repair(
+async def test_pipeline_exposes_validation_evidence_after_build_repair_is_exhausted(
     tmp_path: Path,
 ) -> None:
     orchestrator = _NonFixingResumeOrchestrator()
     invalid_build = _BUILD_OUTPUT.replace(
-        "export function MissionApp({ onSubmit }) {",
-        'export function MissionApp({ onSubmit }) {\n    const invalid = file.name !== "fixed.json";',
+        "export function MissionApp() {",
+        'export function MissionApp() {\n    const invalid = file.name !== "fixed.json";',
     )
     orchestrator._run.step_results[-1] = _completed_step(
         "build-solution", "genie-orchestrator", invalid_build
@@ -1193,6 +1037,7 @@ async def test_pipeline_exposes_validation_evidence_without_build_repair(
         defender_for_cloud_gateway=NullDefenderForCloudGateway(),
         finops_cost_service=NullFinOpsCostService(),
         build_workspace_root=tmp_path,
+        max_repair_attempts=1,
     )
 
     run = await service.start(
@@ -1204,8 +1049,7 @@ async def test_pipeline_exposes_validation_evidence_without_build_repair(
     failed_step = next(step for step in run.steps if step.step_id == "provision-foundry-agents")
     assert failed_step.status == "failed"
     assert failed_step.error is not None
-    assert orchestrator.resume_calls == []
-    assert "Deploy & Launch does not regenerate an approved build" in failed_step.error
+    assert "after 1 automatic repair attempt(s)" in failed_step.error
     assert "end-user-controlled filename" in failed_step.error
 
 
@@ -1290,63 +1134,6 @@ class _FailOnceThenSucceedBackendDeploymentService:
         self, *, mission_slug: str, frontend_origin: str
     ) -> None:
         del mission_slug, frontend_origin
-
-
-class _ProgressBlockingBackendDeploymentService:
-    def __init__(self) -> None:
-        self.progress_reported = asyncio.Event()
-        self.release = asyncio.Event()
-
-    async def deploy(
-        self,
-        *,
-        mission_slug: str,
-        build_root: Path,
-        mission_identity_resource_id: str | None = None,
-        on_progress=None,
-    ) -> BackendDeploymentResult:
-        del build_root, mission_identity_resource_id
-        assert on_progress is not None
-        await on_progress("Provisioning the prototype internal Container Apps environment...")
-        self.progress_reported.set()
-        await self.release.wait()
-        return BackendDeploymentResult(
-            image_tag=f"local/{mission_slug}:dev",
-            backend_url=f"http://localhost/missions/{mission_slug}/backend",
-        )
-
-    async def configure_gateway_frontend_origin(
-        self, *, mission_slug: str, frontend_origin: str
-    ) -> None:
-        del mission_slug, frontend_origin
-
-
-async def test_backend_progress_is_persisted_while_deployment_is_running(tmp_path: Path):
-    repository = InMemoryDeploymentRunRepository()
-    backend = _ProgressBlockingBackendDeploymentService()
-    service = _build_service(
-        tmp_path=tmp_path,
-        backend_deployment_service=backend,
-        run_repository=repository,
-    )
-
-    run = await service.start(
-        session_id="session-1", requesting_user_id="user-1", workflow_run_id="run-1"
-    )
-    await backend.progress_reported.wait()
-
-    persisted_run = next(item for item in await repository.list_all() if item.id == run.id)
-    backend_step = next(
-        step for step in persisted_run.steps if step.step_id == "deploy-backend-service"
-    )
-    assert backend_step.status == "running"
-    assert backend_step.detail == (
-        "Provisioning the prototype internal Container Apps environment..."
-    )
-
-    backend.release.set()
-    completed = await service.wait_for_run(run.id)
-    assert completed.status == "completed"
 
 
 class _CountingMissionAgentProvisioningService(NullMissionAgentProvisioningService):
@@ -1645,27 +1432,6 @@ async def test_owner_cannot_exceed_active_prototype_limit(tmp_path: Path):
         )
 
 
-async def test_list_runs_for_owner_returns_only_that_owners_runs(tmp_path: Path):
-    service = _build_service(tmp_path=tmp_path)
-    mine = await service.start(
-        session_id="session-1",
-        requesting_user_id="user-a",
-        workflow_run_id="run-1",
-    )
-    await service.wait_for_run(mine.id)
-    other = await service.start(
-        session_id="session-2",
-        requesting_user_id="user-b",
-        workflow_run_id="run-1",
-    )
-    await service.wait_for_run(other.id)
-
-    owned = service.list_runs_for_owner("user-a")
-
-    assert [run.id for run in owned] == [mine.id]
-    assert all(run.owner_user_id == "user-a" for run in owned)
-
-
 async def test_cleanup_expired_deletes_terminal_prototype(tmp_path: Path):
     repository = InMemoryDeploymentRunRepository()
     service = _build_service(
@@ -1733,11 +1499,7 @@ def test_frontend_main_tsx_renders_a_gamified_multi_input_mission_queue():
 
     assert "type QueueItem = {" in _FRONTEND_MAIN_TSX
     assert 'type QueueItemStatus = "queued" | "running" | "complete" | "error"' in _FRONTEND_MAIN_TSX
-    assert "agentProgress: string;" in _FRONTEND_MAIN_TSX
     assert "async function runItem(item: QueueItem)" in _FRONTEND_MAIN_TSX
-    assert "if (parsed.progress)" in _FRONTEND_MAIN_TSX
-    assert "entry.agentProgress + parsed.progress" in _FRONTEND_MAIN_TSX
-    assert "computeAgentStatuses(missionAgents, item.agentProgress" in _FRONTEND_MAIN_TSX
     assert "body: JSON.stringify({ message: item.message, attachments: item.attachments })" in _FRONTEND_MAIN_TSX
     assert "function addMessageToQueue()" in _FRONTEND_MAIN_TSX
     assert "async function addFilesToQueue(files: FileList | File[])" in _FRONTEND_MAIN_TSX

@@ -14,7 +14,6 @@ resumed run - never synthesized here.
 """
 from __future__ import annotations
 
-from app.deploy_launch.code_materializer import MaterializedCodeError, materialize_build
 from app.models.reanalysis_models import ReanalysisRequestType, ReanalysisResult
 from app.models.workflow_models import WorkflowRunResult, WorkflowStepInput
 from app.orchestration.agent_orchestrator import AgentOrchestrator
@@ -224,37 +223,12 @@ class WorkshopService:
             (r for r in run.step_results if r.step_id == "build-solution"),
             None,
         )
-        live_output = self._orchestrator.workflow_event_bus.get_step_delta_text(
-            session_id=session_id,
-            workflow_run_id=workflow_run_id,
-            step_id="build-solution",
-            agent_id="build-agent",
-        )
-        if run.status == "running":
-            return live_output
-        if build_step is not None and build_step.output_text:
-            return build_step.output_text
-        return live_output
-
-    async def validate_build_output(
-        self,
-        *,
-        session_id: str,
-        requesting_user_id: str,
-        workflow_run_id: str,
-    ) -> None:
-        """Validate the exact reviewed Build before Deploy & Launch navigation."""
-
-        output = await self.get_build_output(
-            session_id=session_id,
-            requesting_user_id=requesting_user_id,
-            workflow_run_id=workflow_run_id,
-        )
-        if not output.strip():
-            raise MaterializedCodeError(
-                "UI & Agent Design has not produced a complete build to validate yet."
-            )
-        materialize_build(output)
+        
+        # Return output whether the step is still running or has completed
+        # (frontend just gets whatever is available right now)
+        if build_step is not None:
+            return build_step.output_text or ""
+        return ""
 
     async def _authorize(self, session_id: str, requesting_user_id: str) -> None:
         await self._session_service.get_session(

@@ -170,6 +170,11 @@ class Settings(BaseSettings):
     prototype_api_gateway_publisher_name: str | None = None
     prototype_api_gateway_sku_name: Literal["StandardV2", "PremiumV2"] = "StandardV2"
     prototype_api_gateway_capacity: int = Field(default=1, ge=1, le=10)
+    # Max automatic regenerate-and-redeploy attempts the pipeline makes when
+    # the generated build itself fails deterministic validation (see
+    # ``_GeneratedBuildRepairNeeded`` in ``app.deploy_launch.pipeline_service``)
+    # before failing closed.
+    deployment_max_repair_attempts: int = 3
     prototype_default_ttl_days: int = Field(default=7, ge=1, le=90)
     prototype_max_active_per_owner: int = Field(default=3, ge=1, le=20)
     prototype_cleanup_interval_seconds: int = Field(default=3600, ge=60, le=86400)

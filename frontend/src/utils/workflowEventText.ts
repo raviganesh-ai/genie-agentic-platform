@@ -5,9 +5,6 @@ const EVENT_LABELS: Record<WorkflowStreamEvent["event_type"], string> = {
   step_delta: "working",
   step_completed: "completed",
   step_failed: "failed",
-  component_started: "started",
-  component_completed: "completed",
-  component_failed: "failed",
 };
 
 /** Longest preview snippet ever shown inline - keeps the live activity
@@ -40,17 +37,6 @@ export function sanitizePreview(preview: string, maxLength: number = MAX_PREVIEW
  * `AgentActivityAnimation` (prominent waiting-state banner) so both surfaces
  * describe live agent activity identically. */
 export function describeEvent(event: WorkflowStreamEvent): string {
-  if (event.component_name) {
-    if (event.event_type === "component_started") {
-      return `Generating ${event.component_name}...`;
-    }
-    if (event.event_type === "component_completed") {
-      return `Generated ${event.component_name}.`;
-    }
-    if (event.event_type === "component_failed") {
-      return `Could not generate ${event.component_name}. Continuing with the next component...`;
-    }
-  }
   const label = EVENT_LABELS[event.event_type];
   const rawPreview = event.delta ?? event.output_preview ?? event.error ?? "";
   const preview = sanitizePreview(rawPreview);

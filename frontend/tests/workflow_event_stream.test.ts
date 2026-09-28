@@ -20,7 +20,6 @@ const SAMPLE_EVENT: WorkflowStreamEvent = {
   workflow_run_id: "run-1",
   step_id: "step-a",
   agent_id: "requirements-analyst",
-  component_name: null,
   delta: null,
   output_preview: "done",
   error: null,
@@ -70,7 +69,6 @@ describe("useWorkflowEventStream", () => {
       workflow_run_id: "run-1",
       step_id: "build-solution",
       agent_id: "build-agent",
-      component_name: null,
       delta,
       output_preview: null,
       error: null,
@@ -104,7 +102,6 @@ describe("useWorkflowEventStream", () => {
       workflow_run_id: "run-1",
       step_id: "build-solution",
       agent_id: "build-agent",
-      component_name: null,
       delta: null,
       output_preview: null,
       error: null,
@@ -125,36 +122,5 @@ describe("useWorkflowEventStream", () => {
     const { result } = renderHook(() => useWorkflowEventStream("session-1"));
 
     await waitFor(() => expect(result.current.stepDeltaText[key]).toBe(""));
-  });
-
-  it("clears delegated agent text when the orchestrator restarts the same step", async () => {
-    const buildKey = workflowStepDeltaKey("build-solution", "build-agent");
-    const buildDelta: WorkflowStreamEvent = {
-      ...SAMPLE_EVENT,
-      event_type: "step_delta",
-      step_id: "build-solution",
-      agent_id: "build-agent",
-      delta: "stale build",
-    };
-    const restarted: WorkflowStreamEvent = {
-      ...SAMPLE_EVENT,
-      event_type: "step_started",
-      step_id: "build-solution",
-      agent_id: "genie-orchestrator",
-    };
-
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () =>
-        sseResponse([
-          `data: ${JSON.stringify(buildDelta)}\n\n`,
-          `data: ${JSON.stringify(restarted)}\n\n`,
-        ]),
-      ),
-    );
-
-    const { result } = renderHook(() => useWorkflowEventStream("session-1"));
-
-    await waitFor(() => expect(result.current.stepDeltaText[buildKey]).toBeUndefined());
   });
 });

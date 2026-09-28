@@ -49,7 +49,6 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Final
-from urllib.parse import urlsplit
 from uuid import uuid4
 
 from app.agents.gateway import get_enabled_agent
@@ -179,7 +178,7 @@ _FRONTEND_INDEX_HTML_TEMPLATE = """<!doctype html>
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>{mission_title}</title>
     <link rel="icon" href="data:,">
-  <script src="/runtime-config.js"></script>
+  <script src="runtime-config.js"></script>
 </head>
 <body>
   <div id="root"></div>
@@ -411,36 +410,10 @@ input:focus, textarea:focus, select:focus {
     color: var(--genie-text);
     background-color: var(--genie-surface);
     border-color: var(--genie-border-strong);
-    min-width: 0;
-    max-width: 100%;
 }
 
 .genie-input-surface :where(input[type="text"], input[type="number"], input[type="date"], input[type="datetime-local"], textarea, select) {
-    width: 100%;
     min-height: 42px;
-}
-
-.genie-input-surface input[type="file"] {
-    width: 100%;
-    overflow: hidden;
-    padding: 6px;
-}
-
-.genie-input-surface input[type="file"]::file-selector-button {
-    margin-right: 12px;
-    padding: 8px 16px;
-    color: #ffffff;
-    font: inherit;
-    font-weight: 650;
-    background-color: var(--genie-accent);
-    border: none;
-    border-radius: 4px;
-    cursor: pointer;
-    transition: background-color 120ms ease;
-}
-
-.genie-input-surface input[type="file"]::file-selector-button:hover {
-    background-color: var(--genie-accent-strong);
 }
 
 .genie-input-surface :where(input[type="range"]) {
@@ -461,81 +434,10 @@ input:focus, textarea:focus, select:focus {
 
 .genie-input-surface input[type="checkbox"],
 .genie-input-surface input[type="radio"] {
-    appearance: none;
-    -webkit-appearance: none;
-    display: inline-grid;
-    place-content: center;
-    flex: 0 0 20px;
-    width: 20px;
-    height: 20px;
-    margin: 0;
-    background-color: var(--genie-surface);
-    border: 1.5px solid var(--genie-border-strong);
-    cursor: pointer;
-    transition: background-color 120ms ease, border-color 120ms ease;
-}
-
-.genie-input-surface input[type="checkbox"] {
-    border-radius: 4px;
-}
-
-.genie-input-surface input[type="radio"] {
-    border-radius: 50%;
-}
-
-.genie-input-surface input[type="checkbox"]::before {
-    content: "";
-    width: 11px;
-    height: 11px;
-    transform: scale(0);
-    transition: transform 120ms ease;
-    background-color: #ffffff;
-    clip-path: polygon(14% 44%, 0 65%, 50% 100%, 100% 16%, 80% 0%, 43% 62%);
-}
-
-.genie-input-surface input[type="radio"]::before {
-    content: "";
-    width: 9px;
-    height: 9px;
-    border-radius: 50%;
-    transform: scale(0);
-    transition: transform 120ms ease;
-    background-color: #ffffff;
-}
-
-.genie-input-surface input[type="checkbox"]:checked,
-.genie-input-surface input[type="radio"]:checked {
-    background-color: var(--genie-accent);
-    border-color: var(--genie-accent);
-}
-
-.genie-input-surface input[type="checkbox"]:checked::before,
-.genie-input-surface input[type="radio"]:checked::before {
-    transform: scale(1);
-}
-
-.genie-input-surface input[type="checkbox"]:hover:not(:disabled),
-.genie-input-surface input[type="radio"]:hover:not(:disabled) {
-    border-color: var(--genie-accent);
-}
-
-.genie-input-surface input[type="checkbox"]:focus-visible,
-.genie-input-surface input[type="radio"]:focus-visible {
-    outline: 3px solid rgba(24, 90, 189, 0.28);
-    outline-offset: 2px;
-}
-
-.genie-input-surface input[type="checkbox"]:disabled,
-.genie-input-surface input[type="radio"]:disabled {
-    background-color: var(--genie-surface-subtle);
-    border-color: var(--genie-border);
-    cursor: not-allowed;
-}
-
-.genie-input-surface input[type="checkbox"]:disabled:checked,
-.genie-input-surface input[type="radio"]:disabled:checked {
-    background-color: #9fb3c8;
-    border-color: #9fb3c8;
+    width: 17px;
+    height: 17px;
+    flex: 0 0 17px;
+    accent-color: var(--genie-accent);
 }
 
 .genie-input-surface .genie-card {
@@ -546,33 +448,16 @@ input:focus, textarea:focus, select:focus {
 }
 
 .genie-input-surface fieldset {
-    width: 100%;
     min-width: 0;
-    margin: 0;
-    padding: 12px;
-    border: 1px solid var(--genie-border-strong);
-    border-radius: 6px;
-}
-
-.genie-input-surface fieldset legend {
-    max-width: 100%;
-    padding: 0 4px;
-    overflow-wrap: anywhere;
 }
 
 .genie-input-surface fieldset label {
-    display: flex;
-    align-items: flex-start;
-    gap: 8px;
-    width: 100%;
-    min-width: 0;
     min-height: 36px;
     padding: 7px 9px;
     background-color: var(--genie-surface-subtle);
     border: 1px solid var(--genie-border);
     border-radius: 4px;
     cursor: pointer;
-    overflow-wrap: anywhere;
 }
 
 .genie-input-surface fieldset label:hover {
@@ -581,15 +466,11 @@ input:focus, textarea:focus, select:focus {
 }
 
 .genie-input-surface .genie-dropzone {
-    display: block;
-    width: 100%;
-    min-width: 0;
     color: var(--genie-text);
     background-color: var(--genie-surface-subtle) !important;
     border: 1px dashed var(--genie-border-strong) !important;
     border-radius: 6px !important;
     padding: 22px !important;
-    overflow: hidden;
 }
 
 .genie-input-surface .genie-dropzone:hover,
@@ -1039,8 +920,7 @@ input:focus, textarea:focus, select:focus {
 
 .genie-form-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr));
-    align-items: start;
+    grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr));
     gap: 16px;
 }
 
@@ -1048,7 +928,6 @@ input:focus, textarea:focus, select:focus {
     display: grid;
     align-content: start;
     gap: 6px;
-    width: 100%;
     min-width: 0;
 }
 
@@ -1203,7 +1082,6 @@ type QueueItem = {
     message: string;
     attachments: Attachment[];
     status: QueueItemStatus;
-    agentProgress: string;
     output: string;
     error: string;
 };
@@ -1254,7 +1132,7 @@ function MissionConsole() {
     // status, its own streamed output, and its own download button, instead
     // of forcing everything through a single shared request/response.
     async function runItem(item: QueueItem) {
-        setQueue((prior) => prior.map((entry) => (entry.id === item.id ? { ...entry, status: "running", agentProgress: "", output: "", error: "" } : entry)));
+        setQueue((prior) => prior.map((entry) => (entry.id === item.id ? { ...entry, status: "running", output: "", error: "" } : entry)));
         try {
             const backendUrl = window.__MISSION_BACKEND_URL__;
             if (!backendUrl) throw new Error("Mission backend URL is not configured.");
@@ -1280,9 +1158,7 @@ function MissionConsole() {
                     const payload = frame.replace(/^data:\\s*/, "");
                     if (!payload) continue;
                     const parsed = JSON.parse(payload);
-                    if (parsed.progress) {
-                        setQueue((prior) => prior.map((entry) => (entry.id === item.id ? { ...entry, agentProgress: entry.agentProgress + parsed.progress + "\\n" } : entry)));
-                    } else if (parsed.delta) {
+                    if (parsed.delta) {
                         sawOutput = true;
                         setQueue((prior) => prior.map((entry) => (entry.id === item.id ? { ...entry, output: entry.output + parsed.delta } : entry)));
                     } else if (parsed.done) {
@@ -1323,7 +1199,6 @@ function MissionConsole() {
             message: trimmed,
             attachments: attachments ?? [],
             status: "queued",
-            agentProgress: "",
             output: "",
             error: "",
         });
@@ -1339,7 +1214,6 @@ function MissionConsole() {
             message: trimmed,
             attachments: [],
             status: "queued",
-            agentProgress: "",
             output: "",
             error: "",
         });
@@ -1362,7 +1236,6 @@ function MissionConsole() {
                     message: `Process the attached file "${file.name}" and report the outcome.`,
                     attachments: [{ name: file.name, content }],
                     status: "queued",
-                    agentProgress: "",
                     output: "",
                     error: "",
                 });
@@ -1415,7 +1288,7 @@ function MissionConsole() {
                     {missionAgents.map((name, index) => {
                         const perItemStatuses = queue
                             .filter((entry) => entry.status === "running" || entry.status === "complete")
-                            .map((entry) => computeAgentStatuses(missionAgents, entry.agentProgress, entry.status === "running")[name]);
+                            .map((entry) => computeAgentStatuses(missionAgents, entry.output, entry.status === "running")[name]);
                         const status: AgentStatus = perItemStatuses.includes("active")
                             ? "active"
                             : perItemStatuses.includes("complete")
@@ -1551,7 +1424,7 @@ function MissionConsole() {
             ) : (
                 <div className="genie-queue-grid">
                     {queue.map((item) => {
-                        const itemAgentStatuses = computeAgentStatuses(missionAgents, item.agentProgress, item.status === "running");
+                        const itemAgentStatuses = computeAgentStatuses(missionAgents, item.output, item.status === "running");
                         return (
                             <article key={item.id} className={item.status === "running" ? "genie-queue-item genie-agent-activity" : "genie-queue-item"}>
                                 <div className="genie-queue-item-header">
@@ -1561,14 +1434,14 @@ function MissionConsole() {
                                 </div>
                                 <p className="genie-step-label">
                                     {item.status === "queued" ? "Waiting in queue…" : null}
-                                    {item.status === "running" ? (item.agentProgress ? "Agents collaborating…" : "Contacting mission backend…") : null}
+                                    {item.status === "running" ? (item.output ? "Agents collaborating…" : "Contacting mission backend…") : null}
                                     {item.status === "complete" ? "Complete" : null}
                                     {item.status === "error" ? "Failed" : null}
                                 </p>
-                                {item.status === "running" && !item.agentProgress && !item.output ? (
+                                {item.status === "running" && !item.output ? (
                                     <span className="genie-bounce-dots"><span className="genie-bounce-dot" /><span className="genie-bounce-dot" /><span className="genie-bounce-dot" /></span>
                                 ) : null}
-                                {(item.status === "running" || item.status === "complete") && missionAgents.length > 0 ? (
+                                {item.status === "running" && missionAgents.length > 0 ? (
                                     <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
                                         {missionAgents.map((name) => (
                                             <span key={name} className={`genie-badge genie-badge-${itemAgentStatuses[name] ?? "pending"}`} style={{ fontSize: 11 }}>
@@ -1658,6 +1531,7 @@ class DeploymentPipelineService:
         architecture_step_id: str = "design-architecture",
         build_step_id: str = "build-solution",
         requirements_step_id: str = "analyze-requirements",
+        max_repair_attempts: int = 3,
         upstream_grace_check_attempts: int = 5,
         upstream_grace_check_interval_seconds: float = 2.0,
     ) -> None:
@@ -1679,6 +1553,7 @@ class DeploymentPipelineService:
         self._architecture_step_id = architecture_step_id
         self._build_step_id = build_step_id
         self._requirements_step_id = requirements_step_id
+        self._max_repair_attempts = max_repair_attempts
         self._upstream_grace_check_attempts = upstream_grace_check_attempts
         self._upstream_grace_check_interval_seconds = upstream_grace_check_interval_seconds
         self._runs: dict[str, DeploymentPipelineRun] = {}
@@ -1713,17 +1588,6 @@ class DeploymentPipelineService:
 
     def list_all_runs(self) -> list[DeploymentPipelineRun]:
         return sorted(self._runs.values(), key=lambda run: run.created_at, reverse=True)
-
-    def list_runs_for_owner(self, owner_user_id: str) -> list[DeploymentPipelineRun]:
-        """Every prototype run owned by one user, across ALL of their sessions -
-        the self-service inventory a user needs to find and delete a stale
-        prototype themselves after hitting ``prototype_max_active_per_owner``
-        (see ``start()``'s active-count check), without requiring admin access."""
-        return sorted(
-            (run for run in self._runs.values() if run.owner_user_id == owner_user_id),
-            key=lambda run: run.created_at,
-            reverse=True,
-        )
 
     def get_build_root(self, pipeline_run_id: str) -> Path | None:
         workspace = self._workspaces.get(pipeline_run_id)
@@ -1890,12 +1754,6 @@ class DeploymentPipelineService:
         when a retry resumes at/after ``deploy-frontend-app`` (that step reads this
         directory but never writes it itself; ``sync-frontend-integration``, the step
         that normally writes it, is skipped on such a retry)."""
-        parsed_backend_url = urlsplit(backend_url or "")
-        if parsed_backend_url.scheme not in {"http", "https"} or not parsed_backend_url.netloc:
-            raise DeploymentPipelineStepFailedError(
-                "Cannot generate the mission frontend without an absolute HTTP(S) "
-                "backend URL. Backend deployment must complete before frontend integration."
-            )
         frontend_root.mkdir(parents=True, exist_ok=True)
         (frontend_root / "MissionApp.tsx").write_text(
             materialized.ui_component or "", encoding="utf-8"
@@ -1918,7 +1776,7 @@ class DeploymentPipelineService:
         # internal coordinator, not shown as its own collaborator).
         mission_agent_names = [name for name in agent_foundry_names if name != "orchestrator"]
         (public_root / "runtime-config.js").write_text(
-            f"window.__MISSION_BACKEND_URL__ = {json.dumps(backend_url)};\n"
+            f'window.__MISSION_BACKEND_URL__ = "{backend_url}";\n'
             f"window.__MISSION_TITLE__ = {json.dumps(mission_title)};\n"
             f"window.__MISSION_AGENTS__ = {json.dumps(mission_agent_names)};\n",
             encoding="utf-8",
@@ -2059,37 +1917,75 @@ class DeploymentPipelineService:
                 await self._persist_run(pipeline_run)
                 return
 
-        try:
-            await self._execute_steps(
-                pipeline_run=pipeline_run,
-                run=run,
-                mission_slug=mission_slug,
-                mission_title=session.title,
-                backend_root=backend_root,
-                frontend_root=frontend_root,
-                trace_id=trace_id,
-                resume_from_step=resume_from_step,
-            )
-        except _GeneratedBuildRepairNeeded as exc:
-            step = self._step_result(pipeline_run, "provision-foundry-agents")
-            step.status = "failed"
-            step.error = (
-                "Approved build validation failed before Foundry provisioning. "
-                "Deploy & Launch does not regenerate an approved build: "
-                f"{exc.evidence}"
-            )
-            step.completed_at = datetime.now(UTC)
-            pipeline_run.status = "failed"
-            pipeline_run.updated_at = datetime.now(UTC)
-            await self._persist_run(pipeline_run)
-            return
-        except Exception:  # noqa: BLE001 - top-level background-task boundary; every
-            # failure must resolve the run's status here since there is no
-            # synchronous caller left to catch/report it (see the docstring above).
-            pipeline_run.status = "failed"
-            pipeline_run.updated_at = datetime.now(UTC)
-            await self._persist_run(pipeline_run)
-            return
+        next_step = resume_from_step
+        generated_build_repair_attempts = 0
+        while True:
+            try:
+                await self._execute_steps(
+                    pipeline_run=pipeline_run,
+                    run=run,
+                    mission_slug=mission_slug,
+                    mission_title=session.title,
+                    backend_root=backend_root,
+                    frontend_root=frontend_root,
+                    trace_id=trace_id,
+                    resume_from_step=next_step,
+                )
+                break
+            except _GeneratedBuildRepairNeeded as exc:
+                if generated_build_repair_attempts >= self._max_repair_attempts:
+                    step = self._step_result(pipeline_run, "provision-foundry-agents")
+                    step.error = (
+                        "Generated build validation failed after "
+                        f"{generated_build_repair_attempts} automatic repair attempt(s): "
+                        f"{exc.evidence}"
+                    )
+                    pipeline_run.status = "failed"
+                    pipeline_run.updated_at = datetime.now(UTC)
+                    await self._persist_run(pipeline_run)
+                    return
+                generated_build_repair_attempts += 1
+                step = self._step_result(pipeline_run, "provision-foundry-agents")
+                step.status = "running"
+                step.detail = (
+                    "Regenerating the generated build to satisfy deterministic validation "
+                    f"(attempt {generated_build_repair_attempts} of "
+                    f"{self._max_repair_attempts})..."
+                )
+                step.error = None
+                step.completed_at = None
+                pipeline_run.updated_at = datetime.now(UTC)
+                await self._persist_run(pipeline_run)
+                await self._publish(
+                    pipeline_run,
+                    step_id="provision-foundry-agents",
+                    event_type="step_started",
+                    output_preview=step.detail,
+                )
+                try:
+                    run = await self._repair_prototype(
+                        run=run,
+                        pipeline_run=pipeline_run,
+                        trace_id=trace_id,
+                        evidence=exc.evidence,
+                    )
+                except Exception as repair_exc:  # noqa: BLE001 - fail-closed repair boundary.
+                    step = self._step_result(pipeline_run, "provision-foundry-agents")
+                    step.status = "failed"
+                    step.error = f"Automatic generated-build repair failed: {repair_exc}"
+                    step.completed_at = datetime.now(UTC)
+                    pipeline_run.status = "failed"
+                    pipeline_run.updated_at = datetime.now(UTC)
+                    await self._persist_run(pipeline_run)
+                    return
+                next_step = "provision-foundry-agents"
+            except Exception:  # noqa: BLE001 - top-level background-task boundary; every
+                # failure must resolve the run's status here since there is no
+                # synchronous caller left to catch/report it (see the docstring above).
+                pipeline_run.status = "failed"
+                pipeline_run.updated_at = datetime.now(UTC)
+                await self._persist_run(pipeline_run)
+                return
 
         pipeline_run.status = "completed"
         pipeline_run.updated_at = datetime.now(UTC)
@@ -2425,6 +2321,112 @@ class DeploymentPipelineService:
                 return discovery_architecture
         return await self._get_step_output(run, self._architecture_step_id, trace_id=trace_id)
 
+    async def _restore_repair_memory_references(
+        self, run: WorkflowRunResult, *, trace_id: str
+    ) -> None:
+        """Restore missing workflow memory keys from durable completed steps."""
+
+        agent_registry = getattr(self._orchestrator, "agent_registry", None)
+        memory_service = getattr(self._orchestrator, "memory_service", None)
+        if agent_registry is None or memory_service is None:
+            return
+
+        orchestrator_agent = get_enabled_agent(agent_registry, "genie-orchestrator")
+        classifications = {
+            self._requirements_step_id: "requirement",
+            self._architecture_step_id: "architecture_finding",
+        }
+        for step_id, classification in classifications.items():
+            existing = await memory_service.shared.read(
+                requesting_agent=orchestrator_agent,
+                session_id=run.session_id,
+                trace_id=trace_id,
+                key=step_id,
+            )
+            if existing:
+                continue
+            step = next(
+                (
+                    result
+                    for result in run.step_results
+                    if result.step_id == step_id and result.status == "completed"
+                ),
+                None,
+            )
+            build_step = next(
+                (result for result in run.step_results if result.step_id == self._build_step_id),
+                None,
+            )
+            resolved_name = (
+                "requirements" if step_id == self._requirements_step_id else "architecture"
+            )
+            if (
+                step is None
+                and build_step is not None
+                and build_step.resolved_variables.get(resolved_name)
+            ):
+                continue
+            if step is None or not step.output_text:
+                raise UnknownWorkflowRunError(
+                    f"Automatic build repair cannot restore required workflow output '{step_id}'."
+                )
+            await memory_service.shared.write(
+                agent=orchestrator_agent,
+                session_id=run.session_id,
+                trace_id=trace_id,
+                key=step_id,
+                classification=classification,
+                content={"output_text": step.output_text},
+                approval_status="approved",
+                evidence_references=[f"workflow-run:{run.workflow_run_id}:{step_id}"],
+            )
+
+    async def _repair_prototype(
+        self,
+        *,
+        run: WorkflowRunResult,
+        pipeline_run: DeploymentPipelineRun,
+        trace_id: str,
+        evidence: str,
+    ) -> WorkflowRunResult:
+        approved_requirements = await self._get_approved_requirements(run, trace_id=trace_id)
+        instruction = (
+            "Regenerate the prototype to resolve every deterministic validation or deployed "
+            "acceptance failure below. "
+            "Keep every approved requirement in scope, preserve its REQ id, and fix the actual "
+            "implementation rather than weakening or removing tests.\n\n"
+            f"Approved requirements:\n{approved_requirements}\n\n"
+            f"Observed failure evidence:\n{evidence[-12_000:]}"
+        )
+        await self._restore_repair_memory_references(run, trace_id=trace_id)
+        repaired = await self._orchestrator.resume_workflow(
+            workflow_run_id=run.workflow_run_id,
+            session_id=run.session_id,
+            trace_id=trace_id,
+            step_inputs={
+                self._build_step_id: WorkflowStepInput(
+                    step_id=self._build_step_id,
+                    variables={
+                        "user_message": instruction,
+                        "previous_build_output": "",
+                    },
+                )
+            },
+        )
+        build_step = next(
+            (
+                result
+                for result in repaired.step_results
+                if result.step_id == self._build_step_id and result.status == "completed"
+            ),
+            None,
+        )
+        if build_step is None:
+            raise UnknownWorkflowRunError(
+                "Automatic build repair did not produce a completed build-solution step."
+            )
+        return repaired
+
     async def _execute_steps(
         self,
         *,
@@ -2553,31 +2555,6 @@ class DeploymentPipelineService:
                         model_deployment_ref=_approved_model_deployment_ref(run),
                     )
                     provisioned_by_name = {record.agent_name: record for record in provisioned}
-                    foundry_names = [record.foundry_agent_name.strip() for record in provisioned]
-                    expected_agent_names = set(agent_names)
-                    actual_agent_names = {record.agent_name for record in provisioned}
-                    invalid_fleet = (
-                        len(provisioned) != len(agent_names)
-                        or actual_agent_names != expected_agent_names
-                        or any(not foundry_name for foundry_name in foundry_names)
-                        or len(set(foundry_names)) != len(foundry_names)
-                    )
-                    if invalid_fleet:
-                        pipeline_run.provisioned_agents = [
-                            ProvisionedAgentStatus(
-                                agent_name=name,
-                                status="failed",
-                            )
-                            for name in agent_names
-                        ]
-                        if foundry_names:
-                            await self._mission_agent_provisioning_service.delete(
-                                foundry_agent_names=[name for name in foundry_names if name]
-                            )
-                        raise DeploymentPipelineStepFailedError(
-                            "Foundry provisioning did not return one unique, verified resource "
-                            "for every specialist and the orchestrator."
-                        )
                     pipeline_run.provisioned_agents = [
                         ProvisionedAgentStatus(
                             agent_name=name,
@@ -2614,8 +2591,6 @@ class DeploymentPipelineService:
                         message: str, *, _step_result: DeploymentStepResult = step_result
                     ) -> None:
                         _step_result.detail = message
-                        pipeline_run.updated_at = datetime.now(UTC)
-                        await self._persist_run(pipeline_run)
 
                     mission_identity_resource_id = (
                         pipeline_run.access_policy.mission_identity.identity_resource_id
@@ -2738,12 +2713,12 @@ class DeploymentPipelineService:
                 # to a terminal, detailed status (completed or failed).
                 if step_id == "provision-foundry-agents":
                     # Provisioning is atomic (all-or-nothing, see
-                    # MissionAgentProvisioningService.provision) - every
-                    # resource created by a failed attempt has been rolled
-                    # back, including agents whose progress callback had
-                    # already marked them completed.
+                    # MissionAgentProvisioningService.provision) - any agent
+                    # still "running" here never actually finished.
                     pipeline_run.provisioned_agents = [
-                        ProvisionedAgentStatus(agent_name=agent.agent_name, status="failed")
+                        agent.model_copy(update={"status": "failed"})
+                        if agent.status == "running"
+                        else agent
                         for agent in pipeline_run.provisioned_agents
                     ]
                 step_result.status = "failed"
@@ -2834,5 +2809,6 @@ def create_deployment_pipeline_service(
         prototype_default_ttl_days=settings.prototype_default_ttl_days,
         prototype_max_active_per_owner=settings.prototype_max_active_per_owner,
         build_workspace_root=settings.deployment_build_workspace_root,
+        max_repair_attempts=settings.deployment_max_repair_attempts,
     )
 

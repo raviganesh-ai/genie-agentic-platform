@@ -1,13 +1,6 @@
 /** Mirrors backend/app/models/workflow_stream_models.py 1:1. */
 
-export type WorkflowStreamEventType =
-  | "step_started"
-  | "step_delta"
-  | "step_completed"
-  | "step_failed"
-  | "component_started"
-  | "component_completed"
-  | "component_failed";
+export type WorkflowStreamEventType = "step_started" | "step_delta" | "step_completed" | "step_failed";
 
 /**
  * One live event about a single workflow step's execution, delivered over
@@ -20,7 +13,6 @@ export interface WorkflowStreamEvent {
   workflow_run_id: string;
   step_id: string;
   agent_id: string;
-  component_name: string | null;
   delta: string | null;
   output_preview: string | null;
   error: string | null;

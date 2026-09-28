@@ -102,16 +102,11 @@ export interface FinOpsCostReport {
   reported_at: string | null;
 }
 
-export type PrototypeCleanupStatus = "active" | "deletion_pending" | "deletion_failed";
-
 export interface DeploymentPipelineRun {
   id: string;
   session_id: string;
   workflow_run_id: string;
-  owner_user_id: string;
-  mission_title: string | null;
   status: DeploymentPipelineStatus;
-  cleanup_status: PrototypeCleanupStatus;
   steps: DeploymentStepResult[];
   access_policy: AccessPolicyDocument | null;
   provisioned_agents: ProvisionedAgentStatus[];

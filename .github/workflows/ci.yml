@@ -76,10 +76,7 @@ jobs:
       gateway-url: ${{ steps.prepare.outputs.gateway-url }}
     timeout-minutes: 75
     concurrency:
-      # This job and deploy-backend both write the fixed ARM deployment
-      # genie-platform-private-gateway. One shared cross-run lock prevents a
-      # newer push from racing an older run's backend finalization.
-      group: platform-gateway-and-backend-deploy
+      group: prepare-platform-gateway
       cancel-in-progress: false
     permissions:
       id-token: write
@@ -139,7 +136,7 @@ jobs:
     # running until the default 6h job timeout.
     timeout-minutes: 75
     concurrency:
-      group: platform-gateway-and-backend-deploy
+      group: deploy-backend
       cancel-in-progress: false
     permissions:
       id-token: write
@@ -256,7 +253,6 @@ jobs:
         run: npm run build
         env:
           VITE_GENIE_API_BASE_URL: ${{ needs.prepare-gateway.outputs.gateway-url }}
-          VITE_BUILD_COMPONENT_POLL_MS: ${{ vars.VITE_BUILD_COMPONENT_POLL_MS }}
 
       - name: Deploy to Azure Static Web Apps
         timeout-minutes: 5

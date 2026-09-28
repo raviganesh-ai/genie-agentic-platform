@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import re
 import sys
 import types
 from pathlib import Path
@@ -17,13 +16,6 @@ from app.deploy_launch.code_materializer import (
     materialize_build,
 )
 
-_SAMPLE_UI_SIGNATURE = "export function MissionApp({ onSubmit }) {"
-_SAMPLE_UI_RETURN = (
-    'return <button className="genie-btn" '
-    'onClick={() => onSubmit(JSON.stringify({ request: "run" }))}>Run</button>;'
-)
-_SAMPLE_UI_COMPONENT = f"{_SAMPLE_UI_SIGNATURE}\n    {_SAMPLE_UI_RETURN}\n}}"
-
 _SAMPLE_OUTPUT = '''
 Some narrative text before the code.
 
@@ -35,25 +27,16 @@ async def run() -> None:
 
 ```python
 # agent: orchestrator
-from agent_config import AGENT_FOUNDRY_NAMES
-from agent_framework import FunctionTool
-from mission_foundry_runtime import MissionFoundryAgent
 class OrchestratorAgent:
-    async def run(self, ui_message: str, on_progress=None):
-        specialist = MissionFoundryAgent(
-            agent_name=AGENT_FOUNDRY_NAMES["Requirements Specialist"]
-        )
-        tool = FunctionTool(name="requirements", func=specialist.run)
-        if on_progress:
-            await on_progress("Handing off to Requirements Specialist...")
-            result = await specialist.run(ui_message)
-            await on_progress("Requirements Specialist completed.")
-        return {"result": result, "tool": str(tool)}
+    async def run(self, ui_message: str) -> None:
+        pass
 ```
 
 ```tsx
 // agent: ui
-''' + _SAMPLE_UI_COMPONENT + '''
+export function MissionApp() {
+    return null;
+}
 ```
 '''
 
@@ -67,21 +50,6 @@ def test_materialize_build_parses_all_three_pieces():
     assert "class OrchestratorAgent" in build.orchestrator_module
     assert build.ui_component is not None
     assert "MissionApp" in build.ui_component
-
-
-def test_materialize_build_rejects_unawaited_nested_progress_forwarder():
-    output = _SAMPLE_OUTPUT.replace(
-        "await on_progress(", "await _notify_progress(", 2
-    ).replace(
-        "        specialist = MissionFoundryAgent(",
-        "        async def _notify_progress(message: str) -> None:\n"
-        "            if on_progress is not None:\n"
-        "                on_progress(message)\n\n"
-        "        specialist = MissionFoundryAgent(",
-    )
-
-    with pytest.raises(MaterializedCodeError, match="start/completion progress narration"):
-        materialize_build(output)
 
 
 def test_materialize_build_raises_when_no_code_blocks_found():
@@ -105,128 +73,10 @@ class FactoryOrchestratorAgent:
         materialize_build(misnamed_output)
 
 
-@pytest.mark.parametrize(
-    ("missing_block", "expected_component"),
-    [
-        ("specialist", "specialist agent modules"),
-        ("orchestrator", "orchestrator module"),
-        ("ui", "UI component"),
-    ],
-)
-def test_materialize_build_rejects_incomplete_end_to_end_build(
-    missing_block: str, expected_component: str
-):
-    block_patterns = {
-        "specialist": r"```python\n# agent: Requirements Specialist.*?```\n",
-        "orchestrator": r"```python\n# agent: orchestrator.*?```\n",
-        "ui": r"```tsx\n// agent: ui.*?```\n",
-    }
-    output = re.sub(block_patterns[missing_block], "", _SAMPLE_OUTPUT, flags=re.DOTALL)
-
-    with pytest.raises(MaterializedCodeError, match=expected_component):
-        materialize_build(output)
-
-
-def test_materialize_build_rejects_orchestrator_that_omits_specialist_execution():
-    output = _SAMPLE_OUTPUT.replace(
-        'agent_name=AGENT_FOUNDRY_NAMES["Requirements Specialist"]',
-        'agent_name="not-a-real-delegation"',
-    )
-
-    with pytest.raises(
-        MaterializedCodeError,
-        match="does not execute and visibly report every specialist",
-    ):
-        materialize_build(output)
-
-
-def test_materialize_build_rejects_specialist_only_scheduled_via_gather():
-    """After the 2026-09-27 revert (see ``_validate_orchestrator_delegations``'s
-    docstring in code_materializer.py), running a specialist through
-    ``asyncio.create_task``/``asyncio.gather`` is not a recognized delegation
-    pattern - only a directly awaited ``specialist_agent.run(...)`` call
-    counts. This regression test locks in that the revert holds even when
-    the scheduled task is later properly awaited via ``asyncio.gather``.
-    """
-    second_specialist = '''
-```python
-# agent: Review Specialist
-async def run() -> None:
-    pass
-```
-
-'''
-    parallel_orchestrator = '''```python
-# agent: orchestrator
-import asyncio
-from agent_config import AGENT_FOUNDRY_NAMES
-from agent_framework import FunctionTool
-from mission_foundry_runtime import MissionFoundryAgent
-
-class OrchestratorAgent:
-    async def run(self, ui_message: str, on_progress=None):
-        requirements_agent = MissionFoundryAgent(
-            agent_name=AGENT_FOUNDRY_NAMES["Requirements Specialist"]
-        )
-        review_agent = MissionFoundryAgent(
-            agent_name=AGENT_FOUNDRY_NAMES["Review Specialist"]
-        )
-        requirements_tool = FunctionTool(name="requirements", func=requirements_agent.run)
-        review_tool = FunctionTool(name="review", func=review_agent.run)
-        await on_progress("Handing off to Requirements Specialist...")
-        await on_progress("Handing off to Review Specialist...")
-        review_task = asyncio.create_task(review_agent.run(ui_message))
-        requirements = await requirements_agent.run(ui_message)
-        (review,) = await asyncio.gather(review_task)
-        await on_progress("Requirements Specialist completed.")
-        await on_progress("Review Specialist completed.")
-        return {
-            "result": requirements,
-            "review": review,
-            "tool": str(requirements_tool),
-            "review_tool": str(review_tool),
-        }
-```
-'''
-    output = second_specialist + _SAMPLE_OUTPUT
-    output = re.sub(
-        r"```python\n# agent: orchestrator.*?```\n",
-        parallel_orchestrator,
-        output,
-        flags=re.DOTALL,
-    )
-
-    with pytest.raises(
-        MaterializedCodeError,
-        match="does not execute and visibly report every specialist",
-    ):
-        materialize_build(output)
-
-
-def test_materialize_build_rejects_nonexistent_function_tool_factory():
-    output = _SAMPLE_OUTPUT.replace(
-        'FunctionTool(name="requirements", func=specialist.run)',
-        'FunctionTool.from_function(specialist.run, name="requirements")',
-    )
-
-    with pytest.raises(MaterializedCodeError, match="no from_function factory"):
-        materialize_build(output)
-
-
-def test_materialize_build_rejects_unawaited_progress_mentions():
-    output = _SAMPLE_OUTPUT.replace(
-        'await on_progress("Requirements Specialist completed.")',
-        'completion_note = "Requirements Specialist completed."',
-    )
-
-    with pytest.raises(MaterializedCodeError, match="start/completion progress"):
-        materialize_build(output)
-
-
 def test_materialize_build_rejects_exact_uploaded_filename_gate():
     output = _SAMPLE_OUTPUT.replace(
-        _SAMPLE_UI_SIGNATURE,
-        """export function MissionApp({ onSubmit }) {
+        "export function MissionApp() {",
+        """export function MissionApp() {
     const validateUpload = (file: File) => {
         if (file.name !== "blind_mqm_n30_package.json") {
             return "Please select the expected package";
@@ -241,8 +91,8 @@ def test_materialize_build_rejects_exact_uploaded_filename_gate():
 
 def test_materialize_build_allows_non_file_name_comparison():
     output = _SAMPLE_OUTPUT.replace(
-        _SAMPLE_UI_SIGNATURE,
-        'export function MissionApp({ onSubmit }) {\n  const isOrchestrator = agent.name === "orchestrator";',
+        "export function MissionApp() {",
+        'export function MissionApp() {\n  const isOrchestrator = agent.name === "orchestrator";',
     )
 
     build = materialize_build(output)
@@ -253,7 +103,7 @@ def test_materialize_build_allows_non_file_name_comparison():
 
 def test_materialize_build_rejects_browser_side_uploaded_json_schema_gate():
     output = _SAMPLE_OUTPUT.replace(
-        _SAMPLE_UI_COMPONENT,
+        "export function MissionApp() {\n    return null;",
         """export function MissionApp() {
     const validatePacket = async (file: File) => {
         const packet = JSON.parse(await file.text());
@@ -268,7 +118,7 @@ def test_materialize_build_rejects_browser_side_uploaded_json_schema_gate():
 
 def test_materialize_build_rejects_browser_side_wildcard_key_scan():
     output = _SAMPLE_OUTPUT.replace(
-        _SAMPLE_UI_COMPONENT,
+        "export function MissionApp() {\n    return null;",
         """export function MissionApp() {
     const containsKeyMaterial = (content: string) =>
         content.toLowerCase().includes("key");
@@ -279,78 +129,10 @@ def test_materialize_build_rejects_browser_side_wildcard_key_scan():
         materialize_build(output)
 
 
-def test_materialize_build_allows_wildcard_key_scan_backed_by_orchestrator_policy():
-    output = _SAMPLE_OUTPUT.replace(
-        _SAMPLE_UI_COMPONENT,
-        """export function MissionApp({ onSubmit }) {
-    const containsKeyMaterial = (content: string) =>
-        content.toLowerCase().includes("key");
-    const handleFile = async (file: File) => {
-        const content = await file.text();
-        const attachments = [{ name: file.name, content }];
-        onSubmit(JSON.stringify({ filename: file.name }), attachments);
-    };
-    return <form className=\"genie-form\">
-        <div className=\"genie-field genie-dropzone\">
-            <input type=\"file\" style={{ display: \"none\" }} onChange={(event) => handleFile(event.target.files[0])} />
-        </div>
-    </form>;
-}""",
-    ).replace(
-        'return {"result": result, "tool": str(tool)}',
-        'name_lower = ui_message.lower()\n'
-        '        if "key" in name_lower:\n'
-        '            raise ValueError("blocked")\n'
-        '        return {"result": result, "tool": str(tool)}',
-    )
-
-    build = materialize_build(output)
-
-    assert build.ui_component is not None
-    assert "containsKeyMaterial" in build.ui_component
-
-
-def test_materialize_build_allows_wildcard_key_scan_backed_by_specialist_agent_policy():
-    # The blindness/key-artifact policy is often owned by a dedicated
-    # specialist agent (e.g. a "Blind Run Manager Agent"), not inline in
-    # orchestrator.py itself - the gate must scan every generated backend
-    # module, not just the orchestrator's own source.
-    output = _SAMPLE_OUTPUT.replace(
-        _SAMPLE_UI_COMPONENT,
-        """export function MissionApp({ onSubmit }) {
-    const containsKeyMaterial = (content: string) =>
-        content.toLowerCase().includes("key");
-    const handleFile = async (file: File) => {
-        const content = await file.text();
-        const attachments = [{ name: file.name, content }];
-        onSubmit(JSON.stringify({ filename: file.name }), attachments);
-    };
-    return <form className=\"genie-form\">
-        <div className=\"genie-field genie-dropzone\">
-            <input type=\"file\" style={{ display: \"none\" }} onChange={(event) => handleFile(event.target.files[0])} />
-        </div>
-    </form>;
-}""",
-    ).replace(
-        "# agent: Requirements Specialist\nasync def run() -> None:\n    pass",
-        "# agent: Requirements Specialist\n"
-        "_KEY_PATTERN = re.compile(r\"key\", re.IGNORECASE)\n\n"
-        "async def run(filename: str = \"\") -> None:\n"
-        "    if _KEY_PATTERN.search(filename):\n"
-        "        raise ValueError(\"blocked\")",
-    )
-
-    build = materialize_build(output)
-
-    assert build.ui_component is not None
-    assert "containsKeyMaterial" in build.ui_component
-
-
-
 def test_materialize_build_allows_non_upload_json_parsing():
     output = _SAMPLE_OUTPUT.replace(
-        _SAMPLE_UI_SIGNATURE,
-        """export function MissionApp({ onSubmit }) {
+        "export function MissionApp() {",
+        """export function MissionApp() {
     const parseStructuredText = (value: string) => JSON.parse(value);""",
     )
 
@@ -362,18 +144,8 @@ def test_materialize_build_allows_non_upload_json_parsing():
 
 def test_materialize_build_rejects_interactive_ui_without_backend_handoff():
     output = _SAMPLE_OUTPUT.replace(
-        _SAMPLE_UI_RETURN,
+        "return null;",
         'return <input aria-label="Mission request" />;',
-    )
-
-    with pytest.raises(MaterializedCodeError, match="never calls its onSubmit prop"):
-        materialize_build(output)
-
-
-def test_materialize_build_rejects_button_only_ui_without_backend_handoff():
-    output = _SAMPLE_OUTPUT.replace(
-        _SAMPLE_UI_RETURN,
-        'return <button className="genie-btn">Run</button>;',
     )
 
     with pytest.raises(MaterializedCodeError, match="never calls its onSubmit prop"):
@@ -382,7 +154,7 @@ def test_materialize_build_rejects_button_only_ui_without_backend_handoff():
 
 def test_materialize_build_rejects_file_input_without_attachment_handoff():
     output = _SAMPLE_OUTPUT.replace(
-        _SAMPLE_UI_COMPONENT,
+        "export function MissionApp() {\n    return null;",
         """export function MissionApp({ onSubmit }) {
     const handleFile = async (file: File) => {
         const content = await file.text();
@@ -397,7 +169,7 @@ def test_materialize_build_rejects_file_input_without_attachment_handoff():
 
 def test_materialize_build_allows_file_input_handed_to_provisioned_backend():
     output = _SAMPLE_OUTPUT.replace(
-        _SAMPLE_UI_COMPONENT,
+        "export function MissionApp() {\n    return null;",
         """export function MissionApp({ onSubmit }) {
     const handleFile = async (file: File) => {
         const content = await file.text();
@@ -419,7 +191,7 @@ def test_materialize_build_allows_file_input_handed_to_provisioned_backend():
 
 def test_materialize_build_rejects_hidden_style_on_non_file_input():
     output = _SAMPLE_OUTPUT.replace(
-        _SAMPLE_UI_RETURN,
+        "return null;",
         'return <input type="text" style={{ display: "none" }} />;',
     )
 
@@ -429,7 +201,7 @@ def test_materialize_build_rejects_hidden_style_on_non_file_input():
 
 def test_materialize_build_rejects_interactive_ui_without_shell_semantics():
     output = _SAMPLE_OUTPUT.replace(
-        _SAMPLE_UI_COMPONENT,
+        "export function MissionApp() {\n    return null;",
         """export function MissionApp({ onSubmit }) {
     const submit = () => onSubmit(JSON.stringify({ request: "review" }));
     return <form><input aria-label="Request" /><button onClick={submit}>Run</button></form>;""",
@@ -439,29 +211,10 @@ def test_materialize_build_rejects_interactive_ui_without_shell_semantics():
         materialize_build(output)
 
 
-def test_materialize_build_rejects_multi_control_form_without_responsive_grid():
-    output = _SAMPLE_OUTPUT.replace(
-        _SAMPLE_UI_COMPONENT,
-        """export function MissionApp({ onSubmit }) {
-    const submit = () => onSubmit(JSON.stringify({ first: "a", second: "b" }));
-    return <form className=\"genie-form\">
-        <label className=\"genie-field\"><input aria-label=\"First\" /></label>
-        <label className=\"genie-field\"><input aria-label=\"Second\" /></label>
-        <button className=\"genie-btn\" onClick={submit}>Run</button>
-    </form>;""",
-    )
-
-    with pytest.raises(
-        MaterializedCodeError,
-        match="genie-form-section, genie-form-grid",
-    ):
-        materialize_build(output)
-
-
 def test_materialize_build_rejects_generated_ui_direct_backend_invoke():
     output = _SAMPLE_OUTPUT.replace(
-        _SAMPLE_UI_SIGNATURE,
-        """export function MissionApp({ onSubmit }) {
+        "export function MissionApp() {",
+        """export function MissionApp() {
     const run = () => fetch(`/invoke/stream`, { method: \"POST\" });""",
     )
 
@@ -482,7 +235,7 @@ def test_materialize_build_rejects_inline_styles_that_override_shell_system(
     inline_style: str,
 ):
     output = _SAMPLE_OUTPUT.replace(
-        _SAMPLE_UI_RETURN,
+        "return null;",
         f"return <form {inline_style}>Mission input</form>;",
     )
 
@@ -495,7 +248,7 @@ def test_materialize_build_rejects_nested_submit_payload():
     # orchestrator's flat `config.get("primary_model_id")` read silently found
     # nothing, surfacing as "Primary strong-model identifier is required".
     output = _SAMPLE_OUTPUT.replace(
-        _SAMPLE_UI_COMPONENT,
+        "export function MissionApp() {\n    return null;\n}",
         """export function MissionApp() {
     const handleSubmit = () => {
         const payload = {
@@ -515,7 +268,7 @@ def test_materialize_build_rejects_nested_submit_payload():
 
 def test_materialize_build_allows_flat_submit_payload():
     output = _SAMPLE_OUTPUT.replace(
-        _SAMPLE_UI_COMPONENT,
+        "export function MissionApp() {\n    return null;\n}",
         """export function MissionApp() {
     const handleSubmit = () => {
         const payload = {
@@ -539,7 +292,7 @@ def test_materialize_build_allows_flat_submit_payload():
 
 def test_materialize_build_allows_unrelated_nested_serialization():
     output = _SAMPLE_OUTPUT.replace(
-        _SAMPLE_UI_COMPONENT,
+        "export function MissionApp() {\n    return null;\n}",
         """export function MissionApp() {
     const preview = JSON.stringify({counts: {valid: 3, invalid: 0}});
     const message = JSON.stringify({primary_model_id: primaryModel});
@@ -594,14 +347,19 @@ def test_write_to_directory_includes_backend_service_scaffold(tmp_path: Path):
 
 
 def test_write_to_directory_routes_generated_foundry_imports_through_runtime(tmp_path: Path):
-    output = _SAMPLE_OUTPUT.replace(
-        "# agent: Requirements Specialist\n",
-        "# agent: Requirements Specialist\nfrom agent_framework.foundry import FoundryAgent\n",
-    ).replace(
-        "from agent_config import AGENT_FOUNDRY_NAMES\n",
-        "from agent_config import AGENT_FOUNDRY_NAMES\n"
-        "from agent_framework.foundry import FoundryAgent  # type: ignore\n",
-    )
+    output = '''
+```python
+# agent: Requirements Specialist
+from agent_framework.foundry import FoundryAgent
+agent = FoundryAgent("requirements-specialist")
+```
+```python
+# agent: orchestrator
+from agent_framework.foundry import FoundryAgent  # type: ignore
+class OrchestratorAgent:
+    pass
+```
+'''
     build = materialize_build(output)
 
     build.write_to_directory(
@@ -867,7 +625,7 @@ def test_stream_agent_response_relays_on_progress_narration_as_it_happens(monkey
     done), so the mission UI's live pipeline visualization never had a
     chance to light up node-by-node while specialist agents were actually
     working. The generated backend proxy must relay each ``on_progress``
-    narration call as its OWN SSE progress event in real time, with the
+    narration call as its OWN SSE delta event in real time, with the
     pipeline's final structured result arriving only in the closing
     "done" event.
     """
@@ -912,7 +670,7 @@ def test_stream_agent_response_relays_on_progress_narration_as_it_happens(monkey
 
     events = asyncio.run(_collect_events())
 
-    assert events[0] == {"progress": "Handing off to Requirements Specialist..."}
-    assert events[1] == {"progress": "Requirements Specialist completed."}
+    assert events[0] == {"delta": "Handing off to Requirements Specialist..."}
+    assert events[1] == {"delta": "Requirements Specialist completed."}
     assert events[-1]["done"] is True
     assert json.loads(events[-1]["output_text"]) == {"summary": "done", "requirement_count": 3}

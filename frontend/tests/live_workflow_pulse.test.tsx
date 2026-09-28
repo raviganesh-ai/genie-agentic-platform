@@ -10,7 +10,6 @@ function buildEvent(overrides: Partial<WorkflowStreamEvent> = {}): WorkflowStrea
     workflow_run_id: "run-1",
     step_id: "design-architecture",
     agent_id: "architecture-designer",
-    component_name: null,
     delta: null,
     output_preview: "Recommended a serverless design.",
     error: null,

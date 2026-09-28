@@ -41,7 +41,7 @@ from app.agents.tools.architecture_parsing import (
 from app.governance.governance_service import GovernanceService
 from app.memory.memory_models import SharedMemoryClassification
 from app.memory.memory_service import MemoryService
-from app.models.workflow_stream_models import WorkflowStreamEvent, WorkflowStreamEventType
+from app.models.workflow_stream_models import WorkflowStreamEvent
 from app.orchestration.workflow_event_bus import WorkflowEventBus
 from app.services.requirement_fidelity_service import missing_requirement_ids
 
@@ -172,10 +172,6 @@ _DELEGATIONS: tuple[_Delegation, ...] = (
             # attempt. Never surfaced to the model as a tool-call argument
             # it needs to supply - see _delegate's caller_value precedence.
             "previous_build_output",
-            # Internal repair hint supplied by Deploy & Launch. Components
-            # named here are regenerated even when their prior fenced block
-            # is otherwise reusable.
-            "regenerate_components",
         ),
         shared_memory_classification="roadmap_artifact",
     ),
@@ -471,9 +467,6 @@ async def _generate_build_by_component(
         base_variables.get("architecture", "")
     )
     reusable_components = _extract_reusable_components(base_variables.get("previous_build_output", ""))
-    regenerate_components = _parse_excluded_agent_names(
-        base_variables.get("regenerate_components", "")
-    )
 
     async def _publish_delta(delta: str) -> None:
         if event_bus is not None and workflow_run_id is not None and step_id is not None:
@@ -485,25 +478,6 @@ async def _generate_build_by_component(
                     step_id=step_id,
                     agent_id=delegation.target_agent_id,
                     delta=delta,
-                )
-            )
-
-    async def _publish_component_event(
-        event_type: WorkflowStreamEventType,
-        component_name: str,
-        *,
-        error: str | None = None,
-    ) -> None:
-        if event_bus is not None and workflow_run_id is not None and step_id is not None:
-            await event_bus.publish(
-                WorkflowStreamEvent(
-                    event_type=event_type,
-                    session_id=context.session_id,
-                    workflow_run_id=workflow_run_id,
-                    step_id=step_id,
-                    agent_id=delegation.target_agent_id,
-                    component_name=component_name,
-                    error=error,
                 )
             )
 
@@ -523,14 +497,7 @@ async def _generate_build_by_component(
         # placeholder (_component_failure_piece) must use the same literal
         # label, not component_name, for those two kinds.
         label_name = component_name if component_kind == "agent" else component_kind
-        display_name = "Customer UI" if component_kind == "ui" else component_name
-        await _publish_component_event("component_started", display_name)
-        normalized_label = label_name.strip().lower()
-        reused_piece = (
-            None
-            if normalized_label in regenerate_components
-            else reusable_components.get(normalized_label)
-        )
+        reused_piece = reusable_components.get(label_name.strip().lower())
         if reused_piece is not None:
             # Already succeeded on a prior attempt at this same step - reuse
             # its real code verbatim (see _extract_reusable_components)
@@ -539,7 +506,6 @@ async def _generate_build_by_component(
             # output.
             await _publish_delta(reused_piece)
             pieces.append(reused_piece)
-            await _publish_component_event("component_completed", display_name)
             continue
 
         assigned_ids = requirement_assignments.get(label_name.strip().lower(), ())
@@ -585,10 +551,8 @@ async def _generate_build_by_component(
             )
             await _publish_delta(failure_piece)
             pieces.append(failure_piece)
-            await _publish_component_event("component_failed", display_name, error=str(exc))
             continue
         pieces.append(component_result.output_text)
-        await _publish_component_event("component_completed", display_name)
 
     return AgentExecutionResult(
         agent_id=delegation.target_agent_id,

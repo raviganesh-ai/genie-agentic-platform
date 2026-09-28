@@ -5,7 +5,6 @@ import { useSessionContext } from "@/state/SessionContext";
 import { useWorkshop } from "@/hooks/useWorkshop";
 import { useAsyncResource } from "@/hooks/useAsyncResource";
 import { workflowApi } from "@/services/workflowApi";
-import { workshopApi } from "@/services/workshopApi";
 import { getTraceId } from "@/state/traceRegistry";
 import { ApiError } from "@/services/httpClient";
 import { PageHeader } from "@/layouts/AppShell";
@@ -23,7 +22,6 @@ import { GeneratedArtifacts } from "./GeneratedArtifacts";
  * rendered live while the Build Agent is still generating. */
 const BUILD_STEP_ID = "build-solution";
 const BUILD_AGENT_ID = "build-agent";
-const BUILD_COMPONENT_POLL_MS = Number(import.meta.env.VITE_BUILD_COMPONENT_POLL_MS ?? 0);
 
 export function WorkshopPage(): JSX.Element {
   const navigate = useNavigate();
@@ -34,11 +32,6 @@ export function WorkshopPage(): JSX.Element {
   const [retryError, setRetryError] = useState<string | null>(null);
   const [rerunningBuild, setRerunningBuild] = useState(false);
   const [rerunBuildError, setRerunBuildError] = useState<string | null>(null);
-  const [validatingBuild, setValidatingBuild] = useState(false);
-  const [repairingBuild, setRepairingBuild] = useState(false);
-  const [buildValidationError, setBuildValidationError] = useState<string | null>(null);
-  const [fixingUiComponent, setFixingUiComponent] = useState(false);
-  const [fixUiComponentError, setFixUiComponentError] = useState<string | null>(null);
   const [reviewAcknowledged, setReviewAcknowledged] = useState(false);
   // Architecture Studio's approval handler kicks off build-solution with a
   // fire-and-forget resume call (it navigates here immediately rather than
@@ -79,22 +72,6 @@ export function WorkshopPage(): JSX.Element {
   );
   const buildOutputText = buildStepResult?.output_text ?? "";
   const buildError = buildStepResult?.error ?? null;
-  const buildInProgress = run?.status === "running";
-  const partialBuildFetcher = useCallback(
-    () =>
-      sessionId && workflowRunId
-        ? workshopApi.getBuildComponents(sessionId, workflowRunId)
-        : Promise.reject(new Error("No active workflow run")),
-    [sessionId, workflowRunId],
-  );
-  const { data: partialBuild } = useAsyncResource(
-    partialBuildFetcher,
-    [sessionId, workflowRunId],
-    {
-      enabled: Boolean(sessionId && workflowRunId && (buildInProgress || !buildOutputText)),
-      pollIntervalMs: BUILD_COMPONENT_POLL_MS,
-    },
-  );
   // The Build Agent's own real streamed content so far, tagged with its own
   // agent_id (never genie-orchestrator's later verbatim echo of the same
   // text - see _stream_and_publish_deltas in orchestration_tools.py) - shown
@@ -102,9 +79,6 @@ export function WorkshopPage(): JSX.Element {
   // next poll confirms `buildOutputText` above is the final, authoritative
   // text.
   const liveBuildText = stepDeltaText[workflowStepDeltaKey(BUILD_STEP_ID, BUILD_AGENT_ID)] ?? "";
-  const polledBuildText = partialBuild?.build_output ?? "";
-  const currentBuildText =
-    liveBuildText.length >= polledBuildText.length ? liveBuildText : polledBuildText;
   // While a "Re-run UI & Agent Design" retry is in flight, prefer the live
   // streaming buffer over the OLD stored `buildOutputText` - otherwise the
   // prior (partially-failed) result would just sit frozen on screen for the
@@ -121,9 +95,9 @@ export function WorkshopPage(): JSX.Element {
   // (`liveBuildText`/`stepDeltaText`) - `buildOutputText` (the official
   // stored step result) only exists once build-solution has fully
   // completed, since `step_results` never has a partial/in-progress entry.
-  const displayedBuildText = buildInProgress
-    ? currentBuildText || buildOutputText
-    : buildOutputText || currentBuildText;
+  const displayedBuildText = rerunningBuild
+    ? liveBuildText || buildOutputText
+    : buildOutputText || liveBuildText;
   // True as soon as the Build Agent's own real generation (every
   // specialist agent, the Orchestrator Agent, then the UI) has actually
   // finished streaming - well before `buildOutputText` above is populated,
@@ -133,9 +107,7 @@ export function WorkshopPage(): JSX.Element {
   // proceed button below on this instead means the user is not stuck
   // staring at fully-generated code with no way to proceed while that
   // redundant echo is still being generated.
-  const buildGenerationComplete = buildInProgress
-    ? isBuildOutputComplete(currentBuildText)
-    : Boolean(buildOutputText) || isBuildOutputComplete(currentBuildText);
+  const buildGenerationComplete = Boolean(buildOutputText) || isBuildOutputComplete(displayedBuildText);
 
   // Any live event at all for build-solution (not just its own delta text)
   // is direct proof the step has already started server-side - a
@@ -145,11 +117,8 @@ export function WorkshopPage(): JSX.Element {
   // `liveBuildText` alone would forget that proof and could false-positive
   // "hasn't started" on a run that is genuinely still generating.
   const hasBuildStepLiveEvent = useMemo(
-    () =>
-      liveEvents.some(
-        (event) => event.workflow_run_id === workflowRunId && event.step_id === BUILD_STEP_ID,
-      ),
-    [liveEvents, workflowRunId],
+    () => liveEvents.some((event) => event.step_id === BUILD_STEP_ID),
+    [liveEvents],
   );
 
   // Arms a one-shot timer whenever this run has neither a recorded
@@ -162,7 +131,7 @@ export function WorkshopPage(): JSX.Element {
   // legitimately take a while between visible chunks, especially right
   // after switching tabs away and back.
   useEffect(() => {
-    if (buildStepResult || currentBuildText || hasBuildStepLiveEvent) {
+    if (buildStepResult || liveBuildText || hasBuildStepLiveEvent) {
       setBuildStartStuck(false);
       return;
     }
@@ -173,7 +142,7 @@ export function WorkshopPage(): JSX.Element {
     // the step started server-side at all, not while it's still generating.
     const timer = window.setTimeout(() => setBuildStartStuck(true), 300_000);
     return () => window.clearTimeout(timer);
-  }, [workflowRunId, buildStepResult, currentBuildText, hasBuildStepLiveEvent]);
+  }, [workflowRunId, buildStepResult, liveBuildText, hasBuildStepLiveEvent]);
 
   // missionError only ever means "the fire-and-forget request that was
   // supposed to KICK OFF build-solution failed to confirm that" (see
@@ -185,10 +154,10 @@ export function WorkshopPage(): JSX.Element {
   // either arrives - otherwise the user sees an alarming error over a run
   // that is actually succeeding.
   useEffect(() => {
-    if (missionError && (buildStepResult || currentBuildText)) {
+    if (missionError && (buildStepResult || liveBuildText)) {
       setMissionError(null);
     }
-  }, [missionError, buildStepResult, currentBuildText, setMissionError]);
+  }, [missionError, buildStepResult, liveBuildText, setMissionError]);
 
   // The build-solution step can fail (e.g. a transient Foundry/agent
   // execution error) - the backend now stores that as a retryable "failed"
@@ -214,7 +183,6 @@ export function WorkshopPage(): JSX.Element {
     if (!sessionId || !workflowRunId) return;
     setRerunningBuild(true);
     setRerunBuildError(null);
-    setBuildValidationError(null);
     // Retrying always supersedes whatever earlier silent failure (see
     // ArchitectureStudioPage's handleApproveArchitecture) may have set this -
     // otherwise the stale banner would keep showing even after this retry
@@ -236,90 +204,14 @@ export function WorkshopPage(): JSX.Element {
     }
   }, [sessionId, workflowRunId, governancePolicies, refreshRun, setMissionError]);
 
-  // Force-regenerates exactly the generated piece a build-solution
-  // validation failure was actually about (see MaterializedCodeError's
-  // `component` in code_materializer.py / error_mapping.py) instead of
-  // always guessing "ui" - an orchestrator-only failure previously could
-  // never converge because the actually-broken orchestrator kept getting
-  // reused verbatim (see _extract_reusable_components in
-  // orchestration_tools.py) while only the (already-fine) UI was
-  // regenerated. `validationError.component` is undefined for a failure
-  // that spans/predates having distinct pieces (e.g. no code at all was
-  // produced) - in that case no override is forced, so a plain resume
-  // regenerates whatever wasn't already recorded reusable.
-  const repairFailedComponent = useCallback(
-    async (validationError: ApiError): Promise<void> => {
-      if (!sessionId || !workflowRunId) return;
-      const traceId = getTraceId(workflowRunId) ?? undefined;
-      const repairPolicies = [
-        governancePolicies.trim(),
-        "Fix this exact validation failure and do not repeat it: " +
-          (validationError.message ?? ""),
-      ]
-        .filter((entry) => entry.length > 0)
-        .join("\n\n");
-      const variables: Record<string, string> = { policies: repairPolicies };
-      if (validationError.component) variables.regenerate_components = validationError.component;
-      await workflowApi.resumeRun(sessionId, workflowRunId, traceId, {
-        "build-solution": { step_id: "build-solution", variables },
-      });
-      await refreshRun();
-    },
-    [sessionId, workflowRunId, governancePolicies, refreshRun],
-  );
-
-  const handleProceedToDeployLaunch = useCallback(async () => {
-    if (!sessionId || !workflowRunId) return;
-    setValidatingBuild(true);
-    setBuildValidationError(null);
-    setFixUiComponentError(null);
-    try {
-      await workshopApi.validateBuild(sessionId, workflowRunId);
-    } catch (err) {
-      const validationError = err as ApiError;
-      // Self-heal automatically, once, before ever bothering the user with an
-      // error banner: a build-solution validation failure is an LLM output
-      // defect the Build Agent can usually correct given its own exact
-      // failure back as guidance (see repairFailedComponent) - the user
-      // should only ever see an error if that one automatic attempt also
-      // doesn't fix it.
-      try {
-        setRepairingBuild(true);
-        await repairFailedComponent(validationError);
-        await workshopApi.validateBuild(sessionId, workflowRunId);
-      } catch (repairErr) {
-        setValidatingBuild(false);
-        setRepairingBuild(false);
-        setBuildValidationError(
-          (repairErr as ApiError).message ??
-            validationError.message ??
-            "The generated build is not ready to deploy.",
-        );
-        return;
-      }
-      setRepairingBuild(false);
-    }
-    setValidatingBuild(false);
+  // Once the user has ticked the risk-acknowledgment checkbox and clicks
+  // Proceed, THIS is the human review this app's single gate represents -
+  // the reviewed-generated-code gesture the Workshop page's checkbox copy
+  // already describes. Deploy & Launch has no separate approval screen of
+  // its own; it just starts running the moment the user gets there.
+  const handleProceedToDeployLaunch = useCallback(() => {
     navigate("/outputs");
-  }, [navigate, sessionId, workflowRunId, repairFailedComponent]);
-
-  const handleFixUiValidationFailure = useCallback(async () => {
-    if (!sessionId || !workflowRunId || !buildValidationError) return;
-    setFixingUiComponent(true);
-    setFixUiComponentError(null);
-    try {
-      await repairFailedComponent(new ApiError(buildValidationError));
-      await workshopApi.validateBuild(sessionId, workflowRunId);
-      setBuildValidationError(null);
-      navigate("/outputs");
-    } catch (err) {
-      setFixUiComponentError(
-        (err as ApiError).message ?? "Failed to regenerate the generated build.",
-      );
-    } finally {
-      setFixingUiComponent(false);
-    }
-  }, [buildValidationError, navigate, repairFailedComponent, sessionId, workflowRunId]);
+  }, [navigate]);
 
   if (!workflowRunId || !sessionId) {
     return (
@@ -354,7 +246,7 @@ export function WorkshopPage(): JSX.Element {
       />
       {workshop.error ? <ErrorState error={workshop.error} /> : null}
       {rerunBuildError ? <ErrorState error={{ message: rerunBuildError }} /> : null}
-      {missionError && !buildStepResult && !currentBuildText ? (
+      {missionError && !buildStepResult && !liveBuildText ? (
         // Set by ArchitectureStudioPage's approval handler if its own
         // fire-and-forget kickoff of build-solution failed after already
         // navigating here - must not be left as a console-only log the user
@@ -378,7 +270,7 @@ export function WorkshopPage(): JSX.Element {
             // - in both cases the staggered from-scratch reveal animation
             // must be skipped so already-shown artifacts don't flicker away
             // and re-reveal on every delta.
-            revealImmediately={buildInProgress || !buildOutputText || rerunningBuild}
+            revealImmediately={!buildOutputText || rerunningBuild}
           />
         ) : buildError ? (
           <ErrorState
@@ -411,44 +303,13 @@ export function WorkshopPage(): JSX.Element {
             onChange={(_, data) => setReviewAcknowledged(Boolean(data.checked))}
           />
           {reviewAcknowledged ? (
-            <div aria-live="polite">
-              <Button
-                appearance="primary"
-                style={{ marginTop: 8 }}
-                disabled={validatingBuild}
-                onClick={() => void handleProceedToDeployLaunch()}
-              >
-                {repairingBuild
-                  ? "Validation failed - automatically repairing..."
-                  : validatingBuild
-                    ? "Validating build..."
-                    : "Proceed to Deploy & Launch"}
-              </Button>
-              {buildValidationError ? (
-                <div style={{ marginTop: 12 }}>
-                  <ErrorState
-                    error={{
-                      message:
-                        "Automatic repair did not resolve this validation failure: " +
-                        buildValidationError,
-                    }}
-                  />
-                  <Button
-                    appearance="secondary"
-                    style={{ marginTop: 8 }}
-                    disabled={fixingUiComponent}
-                    onClick={() => void handleFixUiValidationFailure()}
-                  >
-                    {fixingUiComponent ? "Repairing again..." : "Try automatic repair again"}
-                  </Button>
-                  {fixUiComponentError ? (
-                    <div style={{ marginTop: 8 }}>
-                      <ErrorState error={{ message: fixUiComponentError }} />
-                    </div>
-                  ) : null}
-                </div>
-              ) : null}
-            </div>
+            <Button
+              appearance="primary"
+              style={{ marginTop: 8 }}
+              onClick={handleProceedToDeployLaunch}
+            >
+              Proceed to Deploy & Launch
+            </Button>
           ) : null}
         </SectionCard>
       ) : null}

@@ -12,7 +12,6 @@ returned.
 """
 from __future__ import annotations
 
-import ast
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -64,21 +63,6 @@ _OVERBROAD_KEY_MATERIAL_PATTERN: Final = re.compile(
     r"/[^/\r\n]*key[^/\r\n]*/[a-z]*\.test\s*\()",
     re.IGNORECASE,
 )
-# A UI-side '*key*' scan is only a real problem when it is the ONLY place the
-# policy is enforced - if the backend ALSO runs its own authoritative check
-# (e.g. ``"key" in name_lower``, a compiled regex, or a substring search),
-# the UI check is just an early, non-authoritative UX hint on top of real
-# enforcement. Generated missions phrase this check in many equivalent ways
-# and it may live in a specialist agent (e.g. a "Blind Run Manager Agent")
-# rather than inline in orchestrator.py, so this pattern is intentionally
-# broad and is checked against every generated backend module, not just the
-# orchestrator's own source.
-_BACKEND_KEY_POLICY_ENFORCEMENT_PATTERN: Final = re.compile(
-    r"['\"]key['\"]\s+(?:in|not\s+in)\s+\w"
-    r"|re\.(?:search|match|fullmatch|compile)\s*\(\s*r?['\"][^'\"\r\n]*key"
-    r"|\.(?:find|count|index)\s*\(\s*['\"]key['\"]",
-    re.IGNORECASE,
-)
 _INTERACTIVE_INPUT_PATTERN: Final = re.compile(r"<(?:input|select|textarea)\b", re.IGNORECASE)
 _FORM_PATTERN: Final = re.compile(r"<form\b", re.IGNORECASE)
 _BUTTON_PATTERN: Final = re.compile(r"<button\b", re.IGNORECASE)
@@ -108,140 +92,7 @@ _ON_SUBMIT_IDENTIFIER_PATTERN: Final = re.compile(
 
 
 class MaterializedCodeError(RuntimeError):
-    """Raised when the Build Agent's output does not contain a materializable build.
-
-    ``component`` names the exact generated piece this failure is actually
-    about ("ui", "orchestrator", or ``None`` when the failure spans/predates
-    having distinct pieces at all - e.g. no code blocks found, or an entire
-    piece missing) - callers (see ``workshop_service.py``'s
-    ``validate_build_output`` and its HTTP surface in ``error_mapping.py``)
-    use this to force-regenerate only the piece that is actually broken
-    instead of guessing, which previously always force-regenerated the UI
-    even for orchestrator-only failures and could never converge on those.
-    """
-
-    def __init__(self, message: str, *, component: str | None = None) -> None:
-        super().__init__(message)
-        self.component = component
-
-
-def _validate_orchestrator_delegations(
-    orchestrator_module: str, agent_names: set[str]
-) -> None:
-    """Require every generated specialist to be invoked and visibly narrated.
-
-    Deliberately kept to this single, simple contract - one direct
-    ``FunctionTool(name=<exact specialist name>, func=<delegate>)`` per
-    specialist, an awaited ``.run(...)``, an ``AGENT_FOUNDRY_NAMES[...]``
-    literal mapping, and two ``on_progress`` narrations naming the
-    specialist - after a 2026-09-27 incident where reactively broadening
-    this check (shared delegation helpers, ``asyncio.gather`` scheduling,
-    nested resolver wrappers) to accept whatever shape a given generated
-    orchestrator happened to use caused unrelated missions to fail
-    validation for shifting reasons. The fix belongs in the Build-stage
-    prompts (``config/prompts/registry.yaml``'s ``build-generation-v1``/
-    ``build-generation-component-v1``) so generated orchestrators keep
-    producing this one proven shape, not in this validator.
-    """
-
-    try:
-        tree = ast.parse(orchestrator_module)
-    except SyntaxError as exc:
-        raise MaterializedCodeError(
-            f"The generated orchestrator module is not valid Python: {exc}.",
-            component="orchestrator",
-        ) from exc
-
-    unsupported_tool_factories = [
-        node
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Attribute)
-        and isinstance(node.func.value, ast.Name)
-        and node.func.value.id == "FunctionTool"
-        and node.func.attr == "from_function"
-    ]
-    if unsupported_tool_factories:
-        raise MaterializedCodeError(
-            "The generated orchestrator calls unsupported "
-            "FunctionTool.from_function(...). The installed Agent Framework exposes no "
-            "from_function factory; construct FunctionTool(name=<specialist name>, "
-            "func=<async delegate>) and await that tool instead.",
-            component="orchestrator",
-        )
-
-    mapped_agents: set[str] = set()
-    narration_counts = {name: 0 for name in agent_names}
-    function_tool_count = 0
-    specialist_run_count = 0
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Call):
-            called_name = (
-                node.func.id
-                if isinstance(node.func, ast.Name)
-                else node.func.attr
-                if isinstance(node.func, ast.Attribute)
-                else None
-            )
-            if called_name == "FunctionTool":
-                function_tool_count += 1
-            if called_name == "MissionFoundryAgent":
-                for keyword in node.keywords:
-                    value = keyword.value
-                    if (
-                        keyword.arg == "agent_name"
-                        and isinstance(value, ast.Subscript)
-                        and isinstance(value.value, ast.Name)
-                        and value.value.id == "AGENT_FOUNDRY_NAMES"
-                        and isinstance(value.slice, ast.Constant)
-                        and isinstance(value.slice.value, str)
-                    ):
-                        mapped_agents.add(value.slice.value)
-        if not isinstance(node, ast.Await) or not isinstance(node.value, ast.Call):
-            continue
-        awaited_call = node.value
-        if isinstance(awaited_call.func, ast.Attribute) and awaited_call.func.attr == "run":
-            specialist_run_count += 1
-        if not (
-            isinstance(awaited_call.func, ast.Name)
-            and awaited_call.func.id == "on_progress"
-            and awaited_call.args
-            and isinstance(awaited_call.args[0], ast.Constant)
-            and isinstance(awaited_call.args[0].value, str)
-        ):
-            continue
-        narration = awaited_call.args[0].value
-        for agent_name in agent_names:
-            if agent_name in narration:
-                narration_counts[agent_name] += 1
-
-    missing_mappings = sorted(agent_names - mapped_agents)
-    missing_narration = sorted(
-        name for name, count in narration_counts.items() if count < 2
-    )
-    failures: list[str] = []
-    if function_tool_count < len(agent_names):
-        failures.append(
-            f"FunctionTool delegations ({function_tool_count}/{len(agent_names)})"
-        )
-    if specialist_run_count < len(agent_names):
-        failures.append(
-            f"awaited specialist runs ({specialist_run_count}/{len(agent_names)})"
-        )
-    if missing_mappings:
-        failures.append(
-            "AGENT_FOUNDRY_NAMES mappings for " + ", ".join(missing_mappings)
-        )
-    if missing_narration:
-        failures.append(
-            "start/completion progress narration for " + ", ".join(missing_narration)
-        )
-    if failures:
-        raise MaterializedCodeError(
-            "The generated orchestrator does not execute and visibly report every "
-            "specialist. Missing: " + "; ".join(failures) + ".",
-            component="orchestrator",
-        )
+    """Raised when the Build Agent's output does not contain a materializable build."""
 
 
 def _slugify(name: str) -> str:
@@ -489,31 +340,14 @@ def materialize_build(output_text: str) -> MaterializedBuild:
             "'class OrchestratorAgent' - this mission's backend proxy always "
             "does 'from orchestrator import OrchestratorAgent', so any other "
             "class name would silently fall back to a generic conversational "
-            "reply instead of running this mission's real pipeline.",
-            component="orchestrator",
+            "reply instead of running this mission's real pipeline."
         )
-
-    missing_components: list[str] = []
-    if not agent_modules:
-        missing_components.append("specialist agent modules")
-    if orchestrator_module is None:
-        missing_components.append("the orchestrator module")
-    if ui_component is None:
-        missing_components.append("the UI component")
-    if missing_components:
-        raise MaterializedCodeError(
-            "The generated build is incomplete and cannot be connected end to end. "
-            "Missing: " + ", ".join(missing_components) + "."
-        )
-
-    _validate_orchestrator_delegations(orchestrator_module, set(agent_modules))
 
     if ui_component is not None and _EXACT_FILE_NAME_COMPARISON_PATTERN.search(ui_component):
         raise MaterializedCodeError(
             "The generated mission UI compares an uploaded file's name to an exact "
             "literal. Generated prototypes must validate uploaded content and file "
-            "type, never an end-user-controlled filename or example filename.",
-            component="ui",
+            "type, never an end-user-controlled filename or example filename."
         )
 
     has_file_input = bool(
@@ -526,32 +360,26 @@ def materialize_build(output_text: str) -> MaterializedBuild:
             "Mission UIs may validate only that an upload exists, is readable and "
             "non-empty, and has the required general file type. The provisioned "
             "backend/orchestrator must own schema and business-rule validation so "
-            "every upload reaches the real mission process.",
-            component="ui",
+            "every upload reaches the real mission process."
         )
 
     if (
         has_file_input
         and ui_component is not None
         and _OVERBROAD_KEY_MATERIAL_PATTERN.search(ui_component)
-        and not _BACKEND_KEY_POLICY_ENFORCEMENT_PATTERN.search(
-            "\n".join(module for module in (orchestrator_module, *agent_modules.values()) if module)
-        )
     ):
         raise MaterializedCodeError(
             "The generated mission UI uses a broad '*key*' substring scan. That can "
             "reject legitimate uploaded content or filenames before the provisioned "
             "backend runs. Explicit key-artifact and blindness policy checks belong "
-            "in the mission's backend/orchestrator.",
-            component="ui",
+            "in the mission's backend/orchestrator."
         )
 
     if ui_component is not None and _DIRECT_INVOKE_PATTERN.search(ui_component):
         raise MaterializedCodeError(
             "The generated mission UI calls the backend invoke endpoint directly. "
             "Every generated component must hand off through its onSubmit prop so "
-            "the deterministic Mission Queue owns backend transport and streaming.",
-            component="ui",
+            "the deterministic Mission Queue owns backend transport and streaming."
         )
 
     if ui_component is not None and _has_disallowed_inline_style(ui_component):
@@ -559,47 +387,39 @@ def materialize_build(output_text: str) -> MaterializedBuild:
             "The generated mission UI contains an inline style prop. Mission Input must "
             "use semantic HTML and the deterministic shell's genie-form, genie-form-section, "
             "genie-form-grid, genie-field, genie-field-help, genie-actions, genie-dropzone, "
-            "and genie-btn classes so every prototype remains visually coherent.",
-            component="ui",
+            "and genie-btn classes so every prototype remains visually coherent."
         )
 
-    if not _ON_SUBMIT_CALL_PATTERN.search(ui_component):
+    if (
+        ui_component is not None
+        and _INTERACTIVE_INPUT_PATTERN.search(ui_component)
+        and not _ON_SUBMIT_CALL_PATTERN.search(ui_component)
+    ):
         raise MaterializedCodeError(
-            "The generated mission UI never calls its onSubmit prop. Every prototype "
-            "must hand one flat JSON message to the deterministic shell so the "
-            "provisioned backend and orchestrator actively run.",
-            component="ui",
+            "The generated mission UI renders user inputs but never calls its "
+            "onSubmit prop. Interactive prototypes must hand one flat JSON message "
+            "to the deterministic shell so the provisioned backend actually runs."
         )
 
     if has_file_input and ui_component is not None:
         if not _FILE_TEXT_READ_PATTERN.search(ui_component):
             raise MaterializedCodeError(
                 "The generated mission UI renders a file input but never reads the "
-                "selected File with File.text() before submission.",
-                component="ui",
+                "selected File with File.text() before submission."
             )
         if not _ON_SUBMIT_ATTACHMENTS_PATTERN.search(ui_component):
             raise MaterializedCodeError(
                 "The generated mission UI renders a file input but does not pass an "
                 "attachments array to onSubmit. Uploaded content must reach the "
-                "provisioned backend unchanged.",
-                component="ui",
+                "provisioned backend unchanged."
             )
 
     if ui_component is not None:
         missing_semantic_classes: list[str] = []
-        interactive_control_count = len(
-            _INTERACTIVE_INPUT_PATTERN.findall(ui_component)
-        )
         if _FORM_PATTERN.search(ui_component) and "genie-form" not in ui_component:
             missing_semantic_classes.append("genie-form")
-        if interactive_control_count > 1:
-            if "genie-form-section" not in ui_component:
-                missing_semantic_classes.append("genie-form-section")
-            if "genie-form-grid" not in ui_component:
-                missing_semantic_classes.append("genie-form-grid")
         if (
-            interactive_control_count
+            _INTERACTIVE_INPUT_PATTERN.search(ui_component)
             and "genie-field" not in ui_component
         ):
             missing_semantic_classes.append("genie-field")
@@ -612,8 +432,7 @@ def materialize_build(output_text: str) -> MaterializedBuild:
                 "The generated mission UI does not use the deterministic shell's "
                 "semantic visual system. Add these required classes: "
                 + ", ".join(missing_semantic_classes)
-                + ".",
-                component="ui",
+                + "."
             )
 
     if ui_component is not None and any(
@@ -624,8 +443,7 @@ def materialize_build(output_text: str) -> MaterializedBuild:
             "objects (for example {\"evaluation_config\": {\"primary_model_id\": ...}}). "
             "The UI/orchestrator contract requires one flat JSON object with exactly "
             "one key per rendered field - a nested payload silently breaks every "
-            "'config.get(...)' read in the orchestrator's json.loads(ui_message).",
-            component="ui",
+            "'config.get(...)' read in the orchestrator's json.loads(ui_message)."
         )
 
     return MaterializedBuild(
@@ -861,9 +679,8 @@ async def invoke(request: InvokeRequest) -> InvokeResponse:
 async def _stream_agent_response(request: InvokeRequest) -> AsyncIterator[str]:
     """Yields Server-Sent Events as the mission's response streams in.
 
-    Each event line is a JSON object: ``{{"progress": "<agent hand-off>"}}``
-    for orchestrator progress, ``{{"delta": "<incremental text>"}}`` for
-    conversational output, then exactly one final
+    Each event line is a JSON object: ``{{"delta": "<incremental text>"}}``
+    while the response is still being generated, then exactly one final
     ``{{"done": true, "output_text": "<full response>"}}`` once finished -
     lets the mission UI show the Orchestrator genuinely working in real
     time instead of waiting on one long blocking call. When this mission's
@@ -899,7 +716,7 @@ async def _stream_agent_response(request: InvokeRequest) -> AsyncIterator[str]:
         narration = await progress_queue.get()
         if narration is None:
             break
-        yield "data: " + json.dumps(dict(progress=narration)) + "\\n\\n"
+        yield "data: " + json.dumps(dict(delta=narration)) + "\\n\\n"
     await pipeline_task
 
     pipeline_output = pipeline_result["output"]
