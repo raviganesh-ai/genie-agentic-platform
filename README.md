@@ -694,7 +694,8 @@ Every deployment to the shared Azure evaluation environment (backend Container A
 ### 2026-09-27 — Restore the September 13 application baseline
 
 - **Baseline restoration**: application, configuration, workflow, frontend, and test sources are restored to commit `cd41592`, the final commit from 2026-09-13, while retaining git history.
-- **Unlimited prototypes**: the explicit `GENIE_PROTOTYPE_MAX_ACTIVE_PER_OWNER=0` contract remains as the sole runtime compatibility exception; positive values still enable an operator cap.
+- **Unlimited prototypes**: the explicit `GENIE_PROTOTYPE_MAX_ACTIVE_PER_OWNER=0` contract remains; positive values still enable an operator cap.
+- **Forward-compatible recovery**: the restored backend accepts the two later persisted deployment-step identifiers and preserves their JSON reports without adding either step to the September 13 execution order. This lets startup fail interrupted runs closed and complete governed cleanup instead of crash-looping on durable inventory.
 - **Fresh-run cleanup**: the governed prototype cleanup path removes the interrupted MSFT-DEMO run, its mission identity, and its provisioned Foundry agents after the restored backend rehydrates the run as terminal.
 
 ### 2026-09-13 — Complete Discovery PDF export and recoverable Azure pricing

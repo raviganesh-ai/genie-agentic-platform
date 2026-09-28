@@ -29,7 +29,11 @@ from app.deploy_launch.mission_agent_provisioning_service import (
     NullMissionAgentProvisioningService,
 )
 from app.deploy_launch.mission_identity_service import NullMissionIdentityService
-from app.deploy_launch.models import DeploymentPipelineRun, DeploymentStepResult
+from app.deploy_launch.models import (
+    DEPLOYMENT_STEP_ORDER,
+    DeploymentPipelineRun,
+    DeploymentStepResult,
+)
 from app.deploy_launch.pipeline_service import (
     DeploymentPipelineService,
     DeploymentPipelineStepFailedError,
@@ -1599,6 +1603,38 @@ async def test_interrupted_prototype_fails_closed_when_inventory_rehydrates(tmp_
     assert restored.status == "failed"
     assert restored.steps[0].status == "failed"
     assert restored.steps[0].error == "Deployment was interrupted by a service restart."
+
+
+def test_newer_persisted_run_schema_remains_recoverable_without_enabling_newer_steps():
+    persisted = DeploymentPipelineRun.model_validate(
+        {
+            "id": "prototype-1",
+            "session_id": "session-1",
+            "workflow_run_id": "workflow-1",
+            "owner_user_id": "tenant-1:object-1",
+            "steps": [
+                {
+                    "step_id": "security-copilot-scan",
+                    "name": "Microsoft Defender & Security Copilot Scan",
+                },
+                {
+                    "step_id": "finops-cost-report",
+                    "name": "Azure FinOps Cost Report",
+                },
+            ],
+            "security_scan_report": {"status": "completed", "findings": []},
+            "cost_report": {"currency": "USD", "line_items": []},
+        }
+    )
+
+    assert [step.step_id for step in persisted.steps] == [
+        "security-copilot-scan",
+        "finops-cost-report",
+    ]
+    assert persisted.security_scan_report == {"status": "completed", "findings": []}
+    assert persisted.cost_report == {"currency": "USD", "line_items": []}
+    assert "security-copilot-scan" not in DEPLOYMENT_STEP_ORDER
+    assert "finops-cost-report" not in DEPLOYMENT_STEP_ORDER
 
 
 async def test_owner_cannot_exceed_active_prototype_limit(tmp_path: Path):

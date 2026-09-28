@@ -21,7 +21,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
 __all__ = [
     "DEPLOYMENT_STEP_NAMES",
@@ -48,12 +48,14 @@ DeploymentStepId = Literal[
     "generate-test-suite",
     "execute-test-suite",
     "run-security-scan",
+    "security-copilot-scan",
+    "finops-cost-report",
     "launch-mission",
 ]
 
-# The fixed, ordered pipeline for new runs. ``run-security-scan`` remains a
-# valid legacy step id so persisted historical runs still deserialize, but a
-# passing Requirement Fidelity Gate now proceeds directly to Launch.
+# The fixed, ordered pipeline for new runs. Legacy step ids remain valid so
+# persisted runs from adjacent revisions can be recovered and cleaned up, but
+# they are intentionally absent from this execution order.
 DEPLOYMENT_STEP_ORDER: tuple[DeploymentStepId, ...] = (
     "generate-access-policy",
     "provision-foundry-agents",
@@ -74,6 +76,8 @@ DEPLOYMENT_STEP_NAMES: dict[DeploymentStepId, str] = {
     "generate-test-suite": "Generate Requirement Acceptance Tests",
     "execute-test-suite": "Requirement Fidelity Gate",
     "run-security-scan": "Security Scan (Backend & Frontend)",
+    "security-copilot-scan": "Microsoft Defender & Security Copilot Scan",
+    "finops-cost-report": "Azure FinOps Cost Report",
     "launch-mission": "Launch",
 }
 
@@ -244,5 +248,7 @@ class DeploymentPipelineRun(BaseModel):
     test_summary: str | None = None
     fidelity_report: RequirementFidelityReport | None = None
     security_findings_count: int | None = None
+    security_scan_report: dict[str, JsonValue] | None = None
+    cost_report: dict[str, JsonValue] | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
