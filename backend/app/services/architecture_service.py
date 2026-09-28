@@ -125,12 +125,14 @@ class ArchitectureService:
             recommended_by = _architecture_agent_id_for_step(step, self._orchestrator.agent_registry)
             if recommended_by is None:
                 continue
+            result = results_by_step_id.get(step.id)
             content = await self._read_step_output(
                 session_id=run.session_id, step_id=step.id, results_by_step_id=results_by_step_id
             )
             if content is None:
-                continue
-            result = results_by_step_id.get(step.id)
+                if result is None or result.status != "failed":
+                    continue
+                content = ""
             components.append(
                 ArchitectureComponent(
                     step_id=step.id,

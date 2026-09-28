@@ -693,7 +693,7 @@ Every deployment to the shared Azure evaluation environment (backend Container A
 
 ### 2026-09-27 — Restore architecture fidelity gate state
 
-- **Approval integrity**: Architecture Studio now carries the persisted `generating`, `completed`, or `failed` workflow-step state with each displayed architecture. Rejected architecture output can no longer be approved as if it completed successfully; the page shows the exact fidelity failure and offers regeneration.
+- **Approval integrity**: Architecture Studio now carries the persisted `generating`, `completed`, or `failed` workflow-step state with each displayed architecture. Rejected architecture output can no longer be approved as if it completed successfully; the page shows the exact fidelity failure and offers regeneration, including after a service restart when the rejected shared-memory artifact is no longer available.
 - **Mission Trace truth**: the trace polls the durable workflow result and gives a persisted step failure precedence over route-based optimistic state. After a valid architecture approval navigates to UI & Agent Design, the build gate displays as proceeded while the first build event is still arriving.
 - **Regression coverage**: backend and frontend tests cover failed architecture output recovered from shared memory, blocked approval, regeneration affordance, and approved-build trace state.
 
