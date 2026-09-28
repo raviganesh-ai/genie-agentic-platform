@@ -107,7 +107,7 @@ def test_materialize_build_allows_non_file_name_comparison():
     "source",
     (
         "const isFileValid = parsedDocCount === 30;",
-        "if (docsArray.length !== 30) { setFileError('wrong count'); }",
+        "if (docsArray.length !== 30) { return null; }",
     ),
 )
 def test_materialize_build_rejects_exact_ui_sample_cardinality_gate(source: str):
@@ -118,6 +118,20 @@ def test_materialize_build_rejects_exact_ui_sample_cardinality_gate(source: str)
 
     with pytest.raises(MaterializedCodeError, match="representative sample"):
         materialize_build(output)
+
+
+def test_materialize_build_allows_exact_count_comparison_for_coverage_warning():
+    output = _SAMPLE_OUTPUT.replace(
+        "export function MissionApp() {",
+        "export function MissionApp() {\n"
+        "    if (parsedDocCount !== 30) {\n"
+        "        setCoverageWarning('This run uses a partial representative sample.');\n"
+        "    }",
+    )
+
+    build = materialize_build(output)
+
+    assert build.ui_component is not None
 
 
 def test_materialize_build_rejects_exact_orchestrator_sample_cardinality_gate():
@@ -152,6 +166,17 @@ def test_materialize_build_rejects_missing_specialist_progress_narration():
 
     with pytest.raises(MaterializedCodeError, match="Requirements Specialist"):
         materialize_build(output)
+
+
+def test_materialize_build_allows_unique_base_name_progress_for_qualified_agent():
+    output = _SAMPLE_OUTPUT.replace(
+        "# agent: Requirements Specialist",
+        "# agent: Requirements Specialist (Primary Reviewer)",
+    )
+
+    build = materialize_build(output)
+
+    assert "Requirements Specialist (Primary Reviewer)" in build.agent_modules
 
 
 def test_materialize_build_rejects_nested_submit_payload():

@@ -1792,6 +1792,8 @@ def test_frontend_main_tsx_gives_custom_ui_an_onsubmit_contract_and_animated_pip
     assert 'className="genie-pipeline"' in _FRONTEND_MAIN_TSX
     assert "genie-pipeline-node genie-pipeline-node-" in _FRONTEND_MAIN_TSX
     assert "genie-pipeline-connector" in _FRONTEND_MAIN_TSX
+    assert 'name.replace(/\\s*\\([^()]*\\)\\s*$/, "")' in _FRONTEND_MAIN_TSX
+    assert "const baseNameIsUnique" in _FRONTEND_MAIN_TSX
 
     # The generic composer is de-emphasized into a collapsed disclosure once
     # a real custom mission-input form exists, instead of competing with it.

@@ -792,7 +792,17 @@ type QueueItem = {
 function computeAgentStatuses(agents: string[], text: string, loading: boolean): Record<string, AgentStatus> {
     const lowerText = text.toLowerCase();
     const mentions = agents
-        .map((name) => ({ name, index: lowerText.lastIndexOf(name.toLowerCase()) }))
+        .map((name) => {
+            const baseName = name.replace(/\\s*\\([^()]*\\)\\s*$/, "").trim();
+            const baseNameIsUnique = agents.filter(
+                (candidate) => candidate.replace(/\\s*\\([^()]*\\)\\s*$/, "").trim().toLowerCase() === baseName.toLowerCase(),
+            ).length === 1;
+            const aliases = baseNameIsUnique && baseName !== name ? [name, baseName] : [name];
+            return {
+                name,
+                index: Math.max(...aliases.map((alias) => lowerText.lastIndexOf(alias.toLowerCase()))),
+            };
+        })
         .filter((entry) => entry.index >= 0)
         .sort((a, b) => a.index - b.index);
     if (mentions.length === 0) {
@@ -1195,7 +1205,10 @@ class _GeneratedBuildRepairNeeded(DeploymentPipelineStepFailedError):
     """Carries deterministic generated-code validation evidence into a rebuild."""
 
     def __init__(self, evidence: str) -> None:
-        super().__init__("Generated build validation failed; automatically regenerating it.")
+        super().__init__(
+            f"Generated build validation failed: {evidence} "
+            "Automatically regenerating it."
+        )
         self.evidence = evidence
 
 

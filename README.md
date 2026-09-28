@@ -691,6 +691,12 @@ The script uses Microsoft Entra authentication, creates only missing model deplo
 
 Every deployment to the shared Azure evaluation environment (backend Container App and/or frontend Static Web App) is recorded here: commit, what changed, and why. Update this section as part of the same commit that ships the fix/feature, before pushing to `master` triggers [Continuous deployment](#continuous-deployment-github-actions).
 
+### 2026-09-28 — Prevent false generated-build repair loops
+
+- **Gate-aware sample validation**: exact target-count comparisons are rejected only when they disable submission or terminate execution. Warning-only comparisons that report representative-sample coverage no longer force pointless Build Agent regeneration.
+- **Qualified agent progress**: specialist labels with trailing role qualifiers, such as `Evaluator (Primary Judge)`, may use their unique base name in live hand-off narration. Materialization and Mission Control apply the same collision-safe alias rule, so Agent Pipeline nodes still animate without rejecting a valid build.
+- **Actionable retries**: deterministic validation failures now include the actual failed contract in the displayed Deploy & Launch step while automatic repair runs, rather than showing only a generic regeneration message.
+
 ### 2026-09-28 — Keep generated POCs testable with representative samples
 
 - **Sample-friendly execution**: Build prompts now require generated UIs and orchestrators to process any non-empty, structurally valid representative sample end to end. Production target counts remain visible as required/processed/gap coverage evidence instead of blocking submit or stopping the agent pipeline.
