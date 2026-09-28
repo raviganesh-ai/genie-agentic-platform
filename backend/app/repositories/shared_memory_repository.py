@@ -10,6 +10,28 @@ import asyncio
 from typing import Protocol
 
 from app.memory.memory_models import SharedMemoryRecord
+from app.repositories.document_store import DocumentStore
+
+__all__ = [
+    "CosmosSharedMemoryRepository",
+    "InMemorySharedMemoryRepository",
+    "SharedMemoryRepository",
+]
+
+_PARTITION_PREFIX = "shared-memory"
+_METADATA_FIELDS = {
+    "partitionKey",
+    "recordType",
+    "_rid",
+    "_self",
+    "_etag",
+    "_attachments",
+    "_ts",
+}
+
+
+def _partition_key(session_id: str) -> str:
+    return f"{_PARTITION_PREFIX}:{session_id}"
 
 
 class SharedMemoryRepository(Protocol):
@@ -70,3 +92,53 @@ class InMemorySharedMemoryRepository:
             for key in keys:
                 del self._records[key]
             return len(keys)
+
+
+class CosmosSharedMemoryRepository:
+    """Durable Shared Collaboration Memory in the managed-identity Cosmos store."""
+
+    def __init__(self, *, store: DocumentStore) -> None:
+        self._store = store
+
+    async def get(self, *, session_id: str, key: str) -> SharedMemoryRecord | None:
+        document = await self._store.read(
+            document_id=key,
+            partition_key=_partition_key(session_id),
+        )
+        if document is None:
+            return None
+        return self._to_model(document)
+
+    async def put(self, record: SharedMemoryRecord) -> None:
+        document = record.model_dump(mode="json")
+        document.update(
+            {
+                "partitionKey": _partition_key(record.session_id),
+                "recordType": "shared-memory",
+            }
+        )
+        await self._store.upsert(document)
+
+    async def list_for_session(self, *, session_id: str) -> list[SharedMemoryRecord]:
+        documents = await self._store.query(
+            query="SELECT * FROM c WHERE c.recordType = @recordType",
+            parameters=[{"name": "@recordType", "value": "shared-memory"}],
+            partition_key=_partition_key(session_id),
+        )
+        return [self._to_model(document) for document in documents]
+
+    async def delete_prefix(self, *, session_id: str, key_prefix: str) -> int:
+        records = await self.list_for_session(session_id=session_id)
+        matching_ids = [record.id for record in records if record.id.startswith(key_prefix)]
+        for record_id in matching_ids:
+            await self._store.delete(
+                document_id=record_id,
+                partition_key=_partition_key(session_id),
+            )
+        return len(matching_ids)
+
+    @staticmethod
+    def _to_model(document: dict[str, object]) -> SharedMemoryRecord:
+        return SharedMemoryRecord.model_validate(
+            {key: value for key, value in document.items() if key not in _METADATA_FIELDS}
+        )

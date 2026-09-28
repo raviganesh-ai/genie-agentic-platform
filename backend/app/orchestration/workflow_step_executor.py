@@ -160,7 +160,11 @@ class WorkflowStepExecutor:
         agent = get_enabled_agent(self._agent_registry, step.agent_id)
 
         await self._check_required_memory_references(
-            step=step, agent_id=agent.id, session_id=session_id, trace_id=trace_id
+            step=step,
+            agent_id=agent.id,
+            session_id=session_id,
+            trace_id=trace_id,
+            explicit_variables=step_input.variables if step_input else {},
         )
 
         prompt_id = (step_input.prompt_id if step_input else None) or step.prompt_id
@@ -486,7 +490,13 @@ class WorkflowStepExecutor:
         return step_outputs.get(source_step_id)
 
     async def _check_required_memory_references(
-        self, *, step: WorkflowStep, agent_id: str, session_id: str, trace_id: str
+        self,
+        *,
+        step: WorkflowStep,
+        agent_id: str,
+        session_id: str,
+        trace_id: str,
+        explicit_variables: dict[str, str],
     ) -> None:
         if not step.required_memory_references:
             return
@@ -497,11 +507,21 @@ class WorkflowStepExecutor:
             )
 
         agent = get_enabled_agent(self._agent_registry, step.agent_id)
+        explicit_reference_keys: list[str] = []
         for key in step.required_memory_references:
             records = await self._memory_service.shared.read(
                 requesting_agent=agent, session_id=session_id, trace_id=trace_id, key=key
             )
             if not records:
+                source = f"step:{key}"
+                override_names = [
+                    variable_name
+                    for variable_name, variable_source in step.variable_sources.items()
+                    if variable_source == source
+                ]
+                if any(explicit_variables.get(name) for name in override_names):
+                    explicit_reference_keys.append(key)
+                    continue
                 raise MissingMemoryReferenceError(
                     f"Workflow step '{step.id}' requires shared memory reference "
                     f"'{key}' which does not exist for session '{session_id}'."
@@ -511,5 +531,9 @@ class WorkflowStepExecutor:
             session_id=session_id,
             trace_id=trace_id,
             agent_id=agent_id,
-            detail={"step_id": step.id, "keys": step.required_memory_references},
+            detail={
+                "step_id": step.id,
+                "keys": step.required_memory_references,
+                "explicit_override_keys": explicit_reference_keys,
+            },
         )

@@ -7,11 +7,13 @@ from typing import Any
 from app.deploy_launch.models import DeploymentPipelineRun
 from app.discovery.models import DiscoveryCase
 from app.discovery.repository import CosmosDiscoveryCaseRepository
+from app.memory.memory_models import MemoryLineage, SharedMemoryRecord
 from app.models.session_models import Session
 from app.models.upload_models import UploadRecord
 from app.models.workflow_models import WorkflowRunResult, WorkflowStepResult
 from app.repositories.deployment_run_repository import CosmosDeploymentRunRepository
 from app.repositories.session_repository import CosmosSessionRepository
+from app.repositories.shared_memory_repository import CosmosSharedMemoryRepository
 from app.repositories.upload_repository import CosmosUploadRepository
 from app.repositories.workflow_run_repository import CosmosWorkflowRunRepository
 
@@ -128,6 +130,37 @@ async def test_cosmos_workflow_repository_survives_repository_recreation() -> No
     assert await restarted_repository.get(workflow_run_id=run.workflow_run_id) == run
     assert await restarted_repository.list_for_session(session_id=run.session_id) == [run]
     assert await restarted_repository.list_for_session(session_id="session-2") == []
+
+
+async def test_cosmos_shared_memory_repository_survives_repository_recreation() -> None:
+    store = _FakeDocumentStore()
+    now = datetime.now(UTC)
+    record = SharedMemoryRecord(
+        id="analyze-requirements",
+        session_id="session-1",
+        classification="requirement",
+        content={"output_text": "Approved requirements"},
+        lineage=MemoryLineage(
+            session_id="session-1",
+            trace_id="trace-1",
+            agent_id="requirements-analyst",
+            agent_version="1.0.0",
+            timestamp=now,
+            confidence_score=1.0,
+        ),
+    )
+
+    await CosmosSharedMemoryRepository(store=store).put(record)
+    restarted_repository = CosmosSharedMemoryRepository(store=store)
+
+    assert await restarted_repository.get(session_id="session-1", key=record.id) == record
+    assert await restarted_repository.list_for_session(session_id="session-1") == [record]
+    assert await restarted_repository.list_for_session(session_id="session-2") == []
+
+    assert await restarted_repository.delete_prefix(
+        session_id="session-1", key_prefix="analyze-"
+    ) == 1
+    assert await restarted_repository.get(session_id="session-1", key=record.id) is None
 
 
 async def test_cosmos_upload_repository_preserves_extracted_text_after_restart() -> None:

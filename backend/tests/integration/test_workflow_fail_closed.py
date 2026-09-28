@@ -62,6 +62,23 @@ async def test_missing_required_memory_reference_raises(orchestrator) -> None:
         )
 
 
+async def test_explicit_source_override_recovers_missing_memory_reference(orchestrator) -> None:
+    result = await orchestrator.run_workflow(
+        workflow_id="memory-gated-workflow",
+        session_id="session-1",
+        trace_id="trace-1",
+        step_inputs={
+            "step-mem": WorkflowStepInput(
+                step_id="step-mem",
+                variables={"x": "Durably recovered approved input."},
+            )
+        },
+    )
+
+    assert result.status == "completed"
+    assert result.step_results[0].resolved_variables["x"] == "Durably recovered approved input."
+
+
 async def test_approval_required_but_no_approval_service_configured_raises(
     tmp_path: Path,
 ) -> None:

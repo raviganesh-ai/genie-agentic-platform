@@ -128,6 +128,8 @@ workflows:
         prompt_id: prompt-a
         required_memory_references:
           - missing-key
+        variable_sources:
+          x: "step:missing-key"
     enabled: true
 
   - id: debugging-workflow

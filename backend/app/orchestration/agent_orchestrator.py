@@ -48,6 +48,7 @@ from app.prompts.registry import PromptRegistry
 from app.repositories.recommendation_lineage_repository import (
     InMemoryRecommendationLineageRepository,
 )
+from app.repositories.shared_memory_repository import SharedMemoryRepository
 from app.repositories.workflow_run_repository import (
     InMemoryWorkflowRunRepository,
     WorkflowRunRepository,
@@ -353,6 +354,7 @@ def create_agent_orchestrator(
     approval_service: ApprovalService | None = None,
     workflow_event_bus: WorkflowEventBus | None = None,
     workflow_run_repository: WorkflowRunRepository | None = None,
+    shared_memory_repository: SharedMemoryRepository | None = None,
 ) -> AgentOrchestrator:
     """Build an ``AgentOrchestrator`` wired to the externally configured registries.
 
@@ -373,7 +375,10 @@ def create_agent_orchestrator(
     resolved_governance_service = governance_service or create_governance_service(
         settings=settings
     )
-    resolved_memory_service = memory_service or create_memory_service(settings=settings)
+    resolved_memory_service = memory_service or create_memory_service(
+        settings=settings,
+        shared_repository=shared_memory_repository,
+    )
     resolved_approval_service = approval_service or create_approval_service(
         settings=settings, governance_service=resolved_governance_service
     )

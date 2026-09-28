@@ -84,7 +84,7 @@ Each prototype receives a tagged `genie-proto-<mission-slug>` resource group, de
 | Tier | Purpose | Backend |
 |---|---|---|
 | **Personal Agent Memory** | Observations, work products, intermediate summaries — accessible only by the owning agent unless policy allows | In-memory (dev) / Cosmos DB (production) |
-| **Shared Collaboration Memory** | Goals, constraints, assumptions, risks, findings, approved artifacts — every read/write emits a governance event | In-memory (dev) / Cosmos DB (production) |
+| **Shared Collaboration Memory** | Goals, constraints, assumptions, risks, findings, approved artifacts — every read/write emits a governance event | In-memory (dev) / Cosmos DB (production, including workflow handoffs across revisions) |
 | **Enterprise Knowledge Memory** | Industry patterns, reference architectures, reusable best practices — customer data is never promoted here without approval | Azure AI Search |
 
 ### Governance
@@ -690,6 +690,12 @@ The script uses Microsoft Entra authentication, creates only missing model deplo
 ## Deploy log
 
 Every deployment to the shared Azure evaluation environment (backend Container App and/or frontend Static Web App) is recorded here: commit, what changed, and why. Update this section as part of the same commit that ships the fix/feature, before pushing to `master` triggers [Continuous deployment](#continuous-deployment-github-actions).
+
+### 2026-09-27 — Preserve workflow handoffs across revisions
+
+- **Durable collaboration memory**: production Shared Collaboration Memory now uses the same managed-identity Cosmos store as durable workflow runs, so requirements and architecture handoffs survive backend revisions.
+- **Governed recovery**: a missing historical handoff may be satisfied only by a non-empty explicit override for that exact configured `step:<id>` variable. Unresolved required references still fail closed, while durable pre-fix runs can regenerate from their persisted approved inputs.
+- **Regression coverage**: repository tests recreate the Cosmos adapter and recover the same record; orchestration tests cover both explicit recovery and the unchanged missing-reference failure.
 
 ### 2026-09-27 — Restore architecture fidelity gate state
 

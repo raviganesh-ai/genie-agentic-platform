@@ -64,6 +64,7 @@ from app.prompts.registry import PromptRegistry
 from app.repositories.deployment_run_repository import CosmosDeploymentRunRepository
 from app.repositories.document_store import CosmosDocumentStore
 from app.repositories.session_repository import CosmosSessionRepository
+from app.repositories.shared_memory_repository import CosmosSharedMemoryRepository
 from app.repositories.upload_repository import CosmosUploadRepository
 from app.repositories.workflow_run_repository import CosmosWorkflowRunRepository
 from app.services.architecture_service import create_architecture_service
@@ -167,6 +168,7 @@ def create_app(
         discovery_case_repository = None
         upload_repository = None
         workflow_run_repository = None
+        shared_memory_repository = None
         if resolved_settings.memory_store_backend == "cosmos_db":
             document_store = CosmosDocumentStore(
                 endpoint=resolved_settings.memory_store_endpoint or "",
@@ -178,10 +180,12 @@ def create_app(
             discovery_case_repository = CosmosDiscoveryCaseRepository(store=document_store)
             upload_repository = CosmosUploadRepository(store=document_store)
             workflow_run_repository = CosmosWorkflowRunRepository(store=document_store)
+            shared_memory_repository = CosmosSharedMemoryRepository(store=document_store)
         app.state.document_store = document_store
         orchestrator = create_agent_orchestrator(
             settings=resolved_settings,
             workflow_run_repository=workflow_run_repository,
+            shared_memory_repository=shared_memory_repository,
         )
         app.state.agent_orchestrator = orchestrator
         app.state.model_catalog_service = create_model_catalog_service(
