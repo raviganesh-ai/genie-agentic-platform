@@ -243,6 +243,8 @@ Deploy & Launch is deliberately **not** an LLM-narrative workflow step — it is
 
 Each step's real status (`pending` → `running` → `completed`/`failed`/`skipped`) streams live to the Deploy & Launch page so the human watches actual provisioning happen — never a simulated progress bar. The **Requirement Fidelity Gate** (step 7) is Genie's last line of defense: it never trusts the Build Agent's or Test Generation Agent's own claims of completeness, it only trusts pytest actually passing against the real running prototype.
 
+Prototype backend and frontend Container App names preserve the readable `genie-<mission>-<component>` form when it fits Azure's 32-character limit. Longer workload names are shortened deterministically with a collision-resistant hash; deployment and governed cleanup use the same derived name.
+
 ---
 
 ## Repository layout
@@ -690,6 +692,12 @@ The script uses Microsoft Entra authentication, creates only missing model deplo
 ## Deploy log
 
 Every deployment to the shared Azure evaluation environment (backend Container App and/or frontend Static Web App) is recorded here: commit, what changed, and why. Update this section as part of the same commit that ships the fix/feature, before pushing to `master` triggers [Continuous deployment](#continuous-deployment-github-actions).
+
+### 2026-09-28 — Keep generated Container App names Azure-valid
+
+- **Length-safe naming**: backend and frontend Container App names now respect Azure's 32-character limit. Existing short names are unchanged; only overlength workload names receive deterministic truncation plus a collision-resistant hash.
+- **Lifecycle consistency**: deployment and governed cleanup derive the same component name, preventing both provisioning failures and orphaned resources for long workload titles.
+- **Regression coverage**: tests reproduce the `interal-demo-c0d89e27` failure, verify Azure's full naming contract, prevent truncation collisions, and preserve existing short-name behavior.
 
 ### 2026-09-28 — Prevent false generated-build repair loops
 

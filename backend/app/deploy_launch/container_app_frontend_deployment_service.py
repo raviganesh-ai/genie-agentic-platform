@@ -17,6 +17,7 @@ from typing import Any
 
 from app.config.settings import Settings
 from app.deploy_launch.resource_naming import (
+    prototype_container_app_name,
     prototype_frontend_environment_name,
     prototype_resource_group_name,
 )
@@ -132,7 +133,7 @@ class ContainerAppFrontendDeploymentService:
 
         dockerfile = ui_root / "Dockerfile"
         dockerfile.write_text(_FRONTEND_DOCKERFILE, encoding="utf-8")
-        app_name = app_name or f"genie-{mission_slug}-frontend"
+        app_name = app_name or prototype_container_app_name(mission_slug, "frontend")
         image_tag = f"{self._acr_name}.azurecr.io/{app_name}:latest"
 
         try:
@@ -272,7 +273,7 @@ class ContainerAppFrontendDeploymentService:
     async def delete(self, *, mission_slug: str, app_name: str | None = None) -> None:
         """Deletes the generated frontend Container App for an abandoned run."""
 
-        app_name = app_name or f"genie-{mission_slug}-frontend"
+        app_name = app_name or prototype_container_app_name(mission_slug, "frontend")
         client = self._container_apps_client()
         for resource_group in (
             prototype_resource_group_name(mission_slug),

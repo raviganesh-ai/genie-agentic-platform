@@ -47,7 +47,10 @@ from uuid import NAMESPACE_URL, uuid5
 
 from app.config.settings import Settings
 from app.deploy_launch.prototype_api_gateway_service import PrototypeApiGatewayService
-from app.deploy_launch.resource_naming import prototype_resource_group_name
+from app.deploy_launch.resource_naming import (
+    prototype_container_app_name,
+    prototype_resource_group_name,
+)
 
 # Invoked with a short human-readable message right before each real,
 # potentially slow sub-phase of ``deploy()`` (source upload, remote ACR
@@ -217,7 +220,7 @@ class BackendDeploymentService:
     async def delete(self, *, mission_slug: str) -> None:
         """Deletes the Container App that owns the generated backend."""
 
-        app_name = f"genie-{mission_slug}-backend"
+        app_name = prototype_container_app_name(mission_slug, "backend")
         client = self._container_apps_client()
         for resource_group in (
             prototype_resource_group_name(mission_slug),
@@ -468,7 +471,7 @@ class BackendDeploymentService:
                 UserAssignedIdentity,
             )
 
-            app_name = f"genie-{mission_slug}-backend"
+            app_name = prototype_container_app_name(mission_slug, "backend")
             # The mission backend's own generated main.py (see
             # ``code_materializer._MAIN_PY_TEMPLATE``) reads
             # os.environ["FOUNDRY_ENDPOINT"]/os.environ["FOUNDRY_PROJECT_NAME"] at

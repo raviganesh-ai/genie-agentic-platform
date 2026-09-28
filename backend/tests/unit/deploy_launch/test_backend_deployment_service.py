@@ -302,6 +302,7 @@ async def test_protected_backend_deploys_private_backend_without_mise_sidecar(
 
     envelope = captured["envelope"]
     assert result.backend_url == "https://claims-1234.azure-api.net"
+    assert captured["app_name"] == "genie-claims-1234-backend"
     assert envelope.managed_environment_id == "private-env-123"
     assert envelope.configuration.ingress.external is True
     assert envelope.configuration.ingress.target_port == 8000
@@ -359,6 +360,7 @@ async def test_frontend_deployment_uses_mission_identity_for_acr(monkeypatch, tm
 
     def begin_create_or_update(resource_group, app_name, envelope):
         captured["app_resource_group"] = resource_group
+        captured["app_name"] = app_name
         captured["envelope"] = envelope
         return SimpleNamespace(
             result=lambda: SimpleNamespace(
@@ -397,6 +399,7 @@ async def test_frontend_deployment_uses_mission_identity_for_acr(monkeypatch, tm
     assert result.frontend_url == "https://frontend.example.com"
     assert captured["environment_resource_group"] == "genie-proto-claims-1234"
     assert captured["app_resource_group"] == "genie-proto-claims-1234"
+    assert captured["app_name"] == "genie-claims-1234-frontend"
     assert captured["environment_name"].startswith("genie-fe-")
     assert captured["environment"].vnet_configuration is None
     assert captured["environment"].as_dict()["zone_redundant"] is False
