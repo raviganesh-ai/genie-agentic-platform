@@ -138,6 +138,8 @@ export function buildArchitectureSnapshot(): ArchitectureSnapshot {
         step_id: "design-architecture",
         recommended_by: "architecture-designer",
         content: FIXTURE_ARCHITECTURE_CONTENT,
+        status: "completed",
+        error: null,
       },
     ],
     decision_graph: buildDecisionGraph(),

@@ -691,6 +691,12 @@ The script uses Microsoft Entra authentication, creates only missing model deplo
 
 Every deployment to the shared Azure evaluation environment (backend Container App and/or frontend Static Web App) is recorded here: commit, what changed, and why. Update this section as part of the same commit that ships the fix/feature, before pushing to `master` triggers [Continuous deployment](#continuous-deployment-github-actions).
 
+### 2026-09-27 — Restore architecture fidelity gate state
+
+- **Approval integrity**: Architecture Studio now carries the persisted `generating`, `completed`, or `failed` workflow-step state with each displayed architecture. Rejected architecture output can no longer be approved as if it completed successfully; the page shows the exact fidelity failure and offers regeneration.
+- **Mission Trace truth**: the trace polls the durable workflow result and gives a persisted step failure precedence over route-based optimistic state. After a valid architecture approval navigates to UI & Agent Design, the build gate displays as proceeded while the first build event is still arriving.
+- **Regression coverage**: backend and frontend tests cover failed architecture output recovered from shared memory, blocked approval, regeneration affordance, and approved-build trace state.
+
 ### 2026-09-27 — Restore the September 13 application baseline
 
 - **Baseline restoration**: application, configuration, workflow, frontend, and test sources are restored to commit `cd41592`, the final commit from 2026-09-13, while retaining git history.

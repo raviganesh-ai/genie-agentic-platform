@@ -23,6 +23,8 @@ as-is, alongside which specialist agent produced it.
 """
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.agents.gateway import get_enabled_agent
@@ -78,6 +80,8 @@ class ArchitectureComponent(BaseModel):
     step_id: str = Field(min_length=1)
     recommended_by: str = Field(min_length=1)
     content: str
+    status: Literal["generating", "completed", "failed"]
+    error: str | None = None
 
 
 class ArchitectureSnapshot(BaseModel):
@@ -126,8 +130,15 @@ class ArchitectureService:
             )
             if content is None:
                 continue
+            result = results_by_step_id.get(step.id)
             components.append(
-                ArchitectureComponent(step_id=step.id, recommended_by=recommended_by, content=content)
+                ArchitectureComponent(
+                    step_id=step.id,
+                    recommended_by=recommended_by,
+                    content=content,
+                    status=result.status if result is not None else "generating",
+                    error=result.error if result is not None else None,
+                )
             )
 
         return ArchitectureSnapshot(

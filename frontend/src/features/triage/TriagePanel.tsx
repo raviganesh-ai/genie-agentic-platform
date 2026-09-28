@@ -1,13 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { MessageBar, Spinner, Text } from "@fluentui/react-components";
+import { useLocation } from "react-router-dom";
 import { useSessionContext } from "@/state/SessionContext";
 import { useAsyncResource } from "@/hooks/useAsyncResource";
 import { useWorkflowEventStream, workflowStepDeltaKey } from "@/hooks/useWorkflowEventStream";
 import { governanceApi } from "@/services/governanceApi";
+import { workflowApi } from "@/services/workflowApi";
 import { END_TO_END_MISSION_PHASES, type MissionPhase } from "@/config/discoveryWorkflow";
 import { summarizeAgentOutput } from "@/utils/textArtifacts";
 import { sanitizePreview } from "@/utils/workflowEventText";
 import type { GovernanceEvent } from "@/types/governance";
+import type { WorkflowStepResult } from "@/types/workflow";
 import type { WorkflowStreamEvent } from "@/types/workflowEvents";
 
 function relativeTime(timestamp: string): string {
@@ -75,6 +78,8 @@ function computePhaseTraces(
   governanceCompletedStepIds: Set<string>,
   governanceOutputByStep: Map<string, string>,
   governanceAgentByStep: Map<string, string>,
+  proceededStepIds: Set<string>,
+  persistedStepById: Map<string, WorkflowStepResult>,
 ): PhaseTrace[] {
   const traces: PhaseTrace[] = [];
   let previousCompleted = true; // the first phase is free to start the instant the mission begins
@@ -84,6 +89,12 @@ function computePhaseTraces(
     const latest = stepEvents.length > 0 ? stepEvents[stepEvents.length - 1] : null;
     const attempt = stepEvents.filter((event) => event.event_type === "step_started").length;
     const governanceCompleted = governanceCompletedStepIds.has(phase.stepId);
+    const persistedStep = persistedStepById.get(phase.stepId);
+    const persistedAtMs = persistedStep ? Date.parse(persistedStep.completed_at) : Number.NaN;
+    const latestAtMs = latest ? Date.parse(latest.emitted_at) : Number.NaN;
+    const persistedStepIsCurrent =
+      Boolean(persistedStep) &&
+      (!latest || Number.isNaN(persistedAtMs) || Number.isNaN(latestAtMs) || persistedAtMs >= latestAtMs);
 
     let status: PhaseStatus;
     let outputSummary: string | null = null;
@@ -93,12 +104,17 @@ function computePhaseTraces(
 
     const fullText = latest ? stepDeltaText[workflowStepDeltaKey(latest.step_id, latest.agent_id)] : undefined;
 
-    if (latest?.event_type === "step_failed") {
+    if (persistedStepIsCurrent && persistedStep?.status === "failed") {
+      status = "failed";
+      errorText = persistedStep.error ?? "This step failed for an unknown reason.";
+      specialistId = persistedStep.agent_id;
+      timestamp = persistedStep.completed_at;
+    } else if (latest?.event_type === "step_failed") {
       status = "failed";
       errorText = latest.error ?? "This step failed for an unknown reason.";
       specialistId = latest.agent_id;
       timestamp = latest.emitted_at;
-    } else if (latest?.event_type === "step_completed" || (governanceCompleted && !latest)) {
+    } else if (latest?.event_type === "step_completed") {
       status = "completed";
       const previewText = latest?.output_preview ?? governanceOutputByStep.get(phase.stepId) ?? null;
       outputSummary =
@@ -111,14 +127,23 @@ function computePhaseTraces(
         specialistId = latest.agent_id;
         timestamp = latest.emitted_at;
       }
+    } else if (persistedStepIsCurrent && persistedStep?.status === "completed") {
+      status = "completed";
+      outputSummary = persistedStep.output_text ? sanitizePreview(persistedStep.output_text, 260) : null;
+      specialistId = persistedStep.agent_id;
+      timestamp = persistedStep.completed_at;
     } else if (latest?.event_type === "step_started" || latest?.event_type === "step_delta") {
       status = "running";
       specialistId = latest.agent_id;
       timestamp = latest.emitted_at;
+    } else if (governanceCompleted) {
+      status = "completed";
+      const previewText = governanceOutputByStep.get(phase.stepId) ?? null;
+      outputSummary = previewText ? sanitizePreview(previewText, 260) : null;
     } else if (!previousCompleted) {
       status = "pending";
     } else if (phase.requiresProceed) {
-      status = "awaiting-proceed";
+      status = proceededStepIds.has(phase.stepId) ? "running" : "awaiting-proceed";
     } else {
       status = "pending";
     }
@@ -332,7 +357,22 @@ function PhaseCard({ phase, trace }: { phase: MissionPhase; trace: PhaseTrace })
  *   all (see `WorkflowStepExecutor._run_agent`).
  */
 export function TriagePanel({ enabled }: { enabled: boolean }): JSX.Element | null {
-  const { sessionId, missionStartedAt } = useSessionContext();
+  const { sessionId, workflowRunId, missionStartedAt } = useSessionContext();
+  const { pathname } = useLocation();
+
+  // Approval handlers navigate before the background resume request emits
+  // its first event, so the destination route is immediate evidence that
+  // the corresponding human-proceed gate has already been cleared.
+  const proceededStepIds = useMemo(() => {
+    const ids = new Set<string>();
+    if (pathname === "/architecture-studio" || pathname === "/workshop" || pathname.startsWith("/outputs")) {
+      ids.add("design-architecture");
+    }
+    if (pathname === "/workshop" || pathname.startsWith("/outputs")) {
+      ids.add("build-solution");
+    }
+    return ids;
+  }, [pathname]);
 
   const eventsFetcher = useCallback(
     () =>
@@ -341,6 +381,18 @@ export function TriagePanel({ enabled }: { enabled: boolean }): JSX.Element | nu
   );
   const { data: events } = useAsyncResource(eventsFetcher, [sessionId], {
     enabled: enabled && Boolean(sessionId),
+    pollIntervalMs: 2000,
+  });
+
+  const workflowRunFetcher = useCallback(
+    () =>
+      sessionId && workflowRunId
+        ? workflowApi.getRun(sessionId, workflowRunId)
+        : Promise.reject(new Error("No active workflow run")),
+    [sessionId, workflowRunId],
+  );
+  const { data: workflowRun } = useAsyncResource(workflowRunFetcher, [sessionId, workflowRunId], {
+    enabled: enabled && Boolean(sessionId && workflowRunId),
     pollIntervalMs: 2000,
   });
 
@@ -382,6 +434,11 @@ export function TriagePanel({ enabled }: { enabled: boolean }): JSX.Element | nu
     return map;
   }, [specialistCalls]);
 
+  const persistedStepById = useMemo(
+    () => new Map((workflowRun?.step_results ?? []).map((result) => [result.step_id, result])),
+    [workflowRun],
+  );
+
   const traces = useMemo(
     () =>
       computePhaseTraces(
@@ -391,8 +448,10 @@ export function TriagePanel({ enabled }: { enabled: boolean }): JSX.Element | nu
         governanceCompletedStepIds,
         governanceOutputByStep,
         governanceAgentByStep,
+        proceededStepIds,
+        persistedStepById,
       ),
-    [sseEvents, stepDeltaText, governanceCompletedStepIds, governanceOutputByStep, governanceAgentByStep],
+    [sseEvents, stepDeltaText, governanceCompletedStepIds, governanceOutputByStep, governanceAgentByStep, proceededStepIds, persistedStepById],
   );
 
   const missionComplete = traces.length > 0 && traces.every((trace) => trace.status === "completed");

@@ -7,6 +7,8 @@ export interface ArchitectureComponent {
   step_id: string;
   recommended_by: string;
   content: string;
+  status: "generating" | "completed" | "failed";
+  error: string | null;
 }
 
 export interface ArchitectureSnapshot {

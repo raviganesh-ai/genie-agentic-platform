@@ -167,6 +167,8 @@ async def test_get_architecture_recovers_component_from_delegated_step(
     component = snapshot.components[0]
     assert component.recommended_by == "architecture-designer"
     assert component.content == "Recommended Azure architecture."
+    assert component.status == "completed"
+    assert component.error is None
 
 
 async def test_get_architecture_excludes_steps_with_no_architecture_delegation(
@@ -227,3 +229,48 @@ async def test_get_architecture_falls_back_to_shared_memory_before_official_comp
     component = snapshot.components[0]
     assert component.recommended_by == "architecture-designer"
     assert component.content == "Recommended Azure architecture."
+    assert component.status == "generating"
+    assert component.error is None
+
+
+async def test_get_architecture_exposes_failed_fidelity_status_with_memory_output(
+    agent_registry: AgentRegistry, workflow: WorkflowDefinition
+) -> None:
+    now = datetime.now(UTC)
+    run = WorkflowRunResult(
+        workflow_run_id="run-1",
+        workflow_id=workflow.id,
+        session_id="session-1",
+        status="failed",
+        waves=[["analyze-requirements"], ["design-architecture"]],
+        step_results=[
+            _step_result("analyze-requirements", output_text="Extracted requirements."),
+            WorkflowStepResult(
+                step_id="design-architecture",
+                agent_id="genie-orchestrator",
+                status="failed",
+                output_text=None,
+                error="Workflow step 'design-architecture' omitted approved requirement ids: REQ-048",
+                started_at=now,
+                completed_at=now,
+            ),
+        ],
+    )
+    orchestrator = _FakeOrchestrator(run=run, workflow=workflow, agent_registry=agent_registry)
+    orchestrator.memory_service = SimpleNamespace(
+        shared=_FakeSharedMemory({"design-architecture": "Incomplete architecture."})
+    )
+    session_service = create_session_service(orchestrator=orchestrator)  # type: ignore[arg-type]
+    session = await session_service.create_session(owner_user_id="user-1", title="t")
+    service = ArchitectureService(orchestrator=orchestrator, session_service=session_service)  # type: ignore[arg-type]
+
+    snapshot = await service.get_architecture(
+        session_id=session.id, requesting_user_id="user-1", workflow_run_id="run-1"
+    )
+
+    component = snapshot.components[0]
+    assert component.content == "Incomplete architecture."
+    assert component.status == "failed"
+    assert component.error == (
+        "Workflow step 'design-architecture' omitted approved requirement ids: REQ-048"
+    )

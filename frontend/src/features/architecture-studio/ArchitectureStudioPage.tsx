@@ -123,6 +123,8 @@ export function ArchitectureStudioPage(): JSX.Element {
   const architectureComponent = snapshot?.components.find(
     (component) => component.step_id === "design-architecture",
   );
+  const architectureReady = architectureComponent?.status === "completed";
+  const architectureFailed = architectureComponent?.status === "failed";
   const topSections = useMemo(
     () =>
       (architectureComponent ? splitTopLevelSections(architectureComponent.content) : []).filter(
@@ -506,7 +508,26 @@ export function ArchitectureStudioPage(): JSX.Element {
         </div>
       ) : null}
 
-      {architectureComponent ? (
+      {architectureFailed ? (
+        <SectionCard title="Architecture needs regeneration">
+          <MessageBar intent="error" layout="multiline" style={{ marginBottom: 12 }}>
+            <MessageBarBody>
+              <MessageBarTitle>Architecture did not pass requirement fidelity</MessageBarTitle>
+              {architectureComponent.error ??
+                "The architecture output did not satisfy the approved requirements."}
+            </MessageBarBody>
+          </MessageBar>
+          <Button
+            appearance="primary"
+            disabled={rerunningDesign}
+            onClick={() => void handleRerunArchitectureStage()}
+          >
+            {rerunningDesign ? "Regenerating Architecture..." : "Regenerate Architecture"}
+          </Button>
+        </SectionCard>
+      ) : null}
+
+      {architectureReady ? (
         <SectionCard title="Approve Architecture">
           {approveError ? (
             <MessageBar intent="error" layout="multiline" style={{ marginBottom: 12 }}>

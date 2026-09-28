@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import { renderWithProviders, mockFetchSequence } from "./testUtils";
-import { FIXTURE_SESSION_ID, FIXTURE_WORKFLOW_RUN_ID } from "./fixtures";
+import { buildWorkflowRunResult, FIXTURE_SESSION_ID, FIXTURE_WORKFLOW_RUN_ID } from "./fixtures";
 import { TriagePanel } from "@/features/triage/TriagePanel";
 import type { GovernanceEvent } from "@/types/governance";
 import type { WorkflowStreamEvent } from "@/types/workflowEvents";
@@ -69,6 +69,7 @@ describe("TriagePanel", () => {
           }),
         ],
       },
+      { match: `/workflows/runs/${FIXTURE_WORKFLOW_RUN_ID}`, response: buildWorkflowRunResult() },
     ]);
 
     renderWithProviders(<TriagePanel enabled />, {
@@ -97,10 +98,12 @@ describe("TriagePanel", () => {
   it("shows a phase as live 'Running' the instant its SSE step_started event arrives", async () => {
     mockFetchSequence([
       { match: "/peer-review/events", response: [] },
+      { match: `/workflows/runs/${FIXTURE_WORKFLOW_RUN_ID}`, response: buildWorkflowRunResult() },
       {
         match: "/workflow-events/stream",
         sseChunks: [sseFrame(buildStreamEvent({ step_id: "build-solution", agent_id: "build-agent" }))],
       },
+      { match: `/workflows/runs/${FIXTURE_WORKFLOW_RUN_ID}`, response: buildWorkflowRunResult() },
     ]);
 
     renderWithProviders(<TriagePanel enabled />, {
@@ -113,9 +116,89 @@ describe("TriagePanel", () => {
     expect(screen.getByText(/delegating to build-agent/i)).toBeInTheDocument();
   });
 
+  it("shows Build as proceeded immediately after architecture approval navigates to Workshop", async () => {
+    mockFetchSequence([
+      {
+        match: "/peer-review/events",
+        response: [
+          buildAgentExecutionEvent(),
+          buildAgentExecutionEvent({
+            id: "event-2",
+            agent_id: "architecture-designer",
+            detail: {
+              step_id: "design-architecture",
+              workflow_step: false,
+              output_preview: "Recommended an Azure Container Apps based architecture.",
+            },
+          }),
+        ],
+      },
+    ]);
+
+    renderWithProviders(<TriagePanel enabled />, {
+      sessionId: FIXTURE_SESSION_ID,
+      workflowRunId: FIXTURE_WORKFLOW_RUN_ID,
+      missionStartedAt: Date.now() - 5000,
+      route: "/workshop",
+    });
+
+    await waitFor(() => expect(screen.getAllByText(/Human: proceeded/i)).toHaveLength(2));
+    expect(screen.queryByText(/Awaiting your proceed/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Awaiting your review to proceed/i)).not.toBeInTheDocument();
+  });
+
+  it("shows a persisted architecture fidelity failure instead of marking Build ready", async () => {
+    mockFetchSequence([
+      {
+        match: "/peer-review/events",
+        response: [
+          buildAgentExecutionEvent({
+            agent_id: "architecture-designer",
+            detail: {
+              step_id: "design-architecture",
+              workflow_step: false,
+              output_preview: "Generated architecture content.",
+            },
+          }),
+        ],
+      },
+      {
+        match: `/workflows/runs/${FIXTURE_WORKFLOW_RUN_ID}`,
+        response: buildWorkflowRunResult({
+          status: "failed",
+          step_results: [
+            {
+              step_id: "design-architecture",
+              agent_id: "genie-orchestrator",
+              status: "failed",
+              output_text: null,
+              error: "Workflow step 'design-architecture' omitted approved requirement ids: REQ-048",
+              started_at: "2026-09-11T20:00:00Z",
+              completed_at: "2026-09-11T20:01:00Z",
+            },
+          ],
+        }),
+      },
+    ]);
+
+    renderWithProviders(<TriagePanel enabled />, {
+      sessionId: FIXTURE_SESSION_ID,
+      workflowRunId: FIXTURE_WORKFLOW_RUN_ID,
+      missionStartedAt: Date.now() - 5000,
+      route: "/workshop",
+    });
+
+    expect(await screen.findByText(/omitted approved requirement ids: REQ-048/i)).toBeInTheDocument();
+    const buildHeading = screen.getByText(/Build \(UI & Agent Workflow\)/i);
+    const buildCard = buildHeading.closest(".genie-fade-in");
+    expect(buildCard).not.toBeNull();
+    expect(within(buildCard as HTMLElement).getByText(/Not started/i)).toBeInTheDocument();
+  });
+
   it("shows a phase's real error message the instant its SSE step_failed event arrives", async () => {
     mockFetchSequence([
       { match: "/peer-review/events", response: [] },
+      { match: `/workflows/runs/${FIXTURE_WORKFLOW_RUN_ID}`, response: buildWorkflowRunResult() },
       {
         match: "/workflow-events/stream",
         sseChunks: [

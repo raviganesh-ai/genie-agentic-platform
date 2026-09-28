@@ -20,11 +20,12 @@ export function renderWithProviders(
     missionStartedAt?: number | null;
     missionError?: SafeError | null;
     governancePolicies?: string;
+    route?: string;
   } = {},
 ) {
   return render(
     <FluentProvider theme={genieDarkTheme}>
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[options.route ?? "/"]}>
         <SessionProvider
           initialSessionId={options.sessionId ?? null}
           initialWorkflowRunId={options.workflowRunId ?? null}

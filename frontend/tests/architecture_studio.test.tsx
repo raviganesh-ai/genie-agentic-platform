@@ -75,6 +75,36 @@ describe("ArchitectureStudioPage", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("blocks code generation and offers regeneration when architecture fidelity fails", async () => {
+    mockFetchSequence([
+      {
+        match: `/architecture/${FIXTURE_WORKFLOW_RUN_ID}`,
+        response: {
+          ...buildArchitectureSnapshot(),
+          components: [
+            {
+              ...buildArchitectureSnapshot().components[0],
+              status: "failed",
+              error: "Workflow step 'design-architecture' omitted approved requirement ids: REQ-048",
+            },
+          ],
+        },
+      },
+      { match: "/approvals", response: [] },
+    ]);
+
+    renderWithProviders(<ArchitectureStudioPage />, {
+      sessionId: FIXTURE_SESSION_ID,
+      workflowRunId: FIXTURE_WORKFLOW_RUN_ID,
+    });
+
+    expect(await screen.findByText(/omitted approved requirement ids: REQ-048/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Regenerate Architecture/i })).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /Approve Architecture & Generate Code/i }),
+    ).not.toBeInTheDocument();
+  });
+
   it("requires governance policies before approving the architecture and generating code", async () => {
     const fetchMock = mockFetchSequence([
       { match: `/architecture/${FIXTURE_WORKFLOW_RUN_ID}`, response: buildArchitectureSnapshot() },
