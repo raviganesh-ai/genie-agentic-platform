@@ -38,6 +38,10 @@ param(
     [string]$PrototypeApiGatewayPublisherName,
 
     [Parameter(Mandatory = $true)]
+    [ValidateRange(0, 20)]
+    [int]$PrototypeMaxActivePerOwner,
+
+    [Parameter(Mandatory = $true)]
     [ValidatePattern('^[a-z0-9-]{1,10}$')]
     [string]$RevisionSuffix,
 
@@ -136,6 +140,7 @@ Set-ContainerEnvironmentVariable -Container $backend -Name "GENIE_MEMORY_STORE_B
 Set-ContainerEnvironmentVariable -Container $backend -Name "GENIE_MEMORY_STORE_ENDPOINT" -Value $MemoryStoreEndpoint
 Set-ContainerEnvironmentVariable -Container $backend -Name "GENIE_MEMORY_STORE_DATABASE_NAME" -Value "genie"
 Set-ContainerEnvironmentVariable -Container $backend -Name "GENIE_MEMORY_STORE_CONTAINER_NAME" -Value "memory"
+Set-ContainerEnvironmentVariable -Container $backend -Name "GENIE_PROTOTYPE_MAX_ACTIVE_PER_OWNER" -Value $PrototypeMaxActivePerOwner.ToString([System.Globalization.CultureInfo]::InvariantCulture)
 $probes = @(
     [pscustomobject]@{
         type = "Liveness"

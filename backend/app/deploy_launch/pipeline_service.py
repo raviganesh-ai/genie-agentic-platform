@@ -1527,7 +1527,7 @@ class DeploymentPipelineService:
         build_workspace_root: Path,
         run_repository: DeploymentRunRepository | None = None,
         prototype_default_ttl_days: int = 7,
-        prototype_max_active_per_owner: int = 3,
+        prototype_max_active_per_owner: int = 0,
         architecture_step_id: str = "design-architecture",
         build_step_id: str = "build-solution",
         requirements_step_id: str = "analyze-requirements",
@@ -1650,7 +1650,10 @@ class DeploymentPipelineService:
                 and run.cleanup_status == "active"
                 and (run.status == "running" or run.backend_url or run.frontend_url)
             )
-            if active_count >= self._prototype_max_active_per_owner:
+            if (
+                self._prototype_max_active_per_owner > 0
+                and active_count >= self._prototype_max_active_per_owner
+            ):
                 raise DeploymentPipelineStepFailedError(
                     "Active prototype limit reached; delete or wait for an existing prototype "
                     "to expire before creating another."

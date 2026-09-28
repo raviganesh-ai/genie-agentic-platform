@@ -402,7 +402,7 @@ All backend configuration is via environment variables prefixed `GENIE_` (pydant
 | `GENIE_PROTOTYPE_API_GATEWAY_SKU_NAME` | `StandardV2` | APIM SKU; `StandardV2` or `PremiumV2` so the gateway can reach the private backend VNet |
 | `GENIE_PROTOTYPE_API_GATEWAY_CAPACITY` | `1` | Capacity units for each prototype's dedicated APIM service |
 | `GENIE_PROTOTYPE_DEFAULT_TTL_DAYS` | `7` | Initial owner prototype lifetime (1-90 days) |
-| `GENIE_PROTOTYPE_MAX_ACTIVE_PER_OWNER` | `3` | Per-owner active prototype quota |
+| `GENIE_PROTOTYPE_MAX_ACTIVE_PER_OWNER` | `0` | Optional per-owner active prototype quota; `0` allows unlimited active prototypes |
 | `GENIE_PROTOTYPE_CLEANUP_INTERVAL_SECONDS` | `3600` | Expired-prototype reconciliation interval; failed deletion remains visible and retryable |
 | `GENIE_KEY_VAULT_URI` | *(none)* | Required in production |
 | `GENIE_CORS_ALLOWED_ORIGINS` | *(empty)* | Comma-separated browser origins allowed to call the API (e.g. the deployed frontend's URL) |
@@ -655,7 +655,7 @@ The workflow runs application builds on Node.js 24 and consumes actions only fro
 3. The **runtime Genie backend managed identity** has the custom `Genie Prototype Resource Group Operator` role plus API Management Service Contributor, Network Contributor, Container Apps Contributor, Managed Identity Contributor, and Managed Identity Operator at subscription scope. The custom role permits resource-group lifecycle plus only the managed-environment create/read and operation-status actions missing from Azure's built-in Container Apps Contributor role; the built-in roles remain restricted to their respective provider surfaces. Shared ACR and role-assignment permissions remain constrained to existing resource scopes. New prototypes do not require Microsoft Graph application writes. Create/update and assign the custom role with `scripts/configure_prototype_operator.ps1 -SubscriptionId <id> -PrincipalObjectId <runtime-managed-identity-object-id>`.
 4. The repo's **Settings → Secrets and variables → Actions** has:
   - **Secrets**: `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID` (identify the federated deployment app, not credentials by themselves), and `SWA_DEPLOYMENT_TOKEN`.
-  - **Variables**: `AZURE_ACR_NAME`, `AZURE_CONTAINER_APP_NAME`, `AZURE_RESOURCE_GROUP`, `GENIE_GATEWAY_ALLOWED_ORIGIN`, `GENIE_MEMORY_STORE_ENDPOINT`, `GENIE_PROTOTYPE_API_GATEWAY_PUBLISHER_EMAIL`, and `GENIE_PROTOTYPE_API_GATEWAY_PUBLISHER_NAME`. `VITE_GENIE_API_BASE_URL` is no longer a production GitHub variable; `prepare-gateway` emits it from the APIM deployment.
+  - **Variables**: `AZURE_ACR_NAME`, `AZURE_CONTAINER_APP_NAME`, `AZURE_RESOURCE_GROUP`, `GENIE_GATEWAY_ALLOWED_ORIGIN`, `GENIE_MEMORY_STORE_ENDPOINT`, `GENIE_PROTOTYPE_API_GATEWAY_PUBLISHER_EMAIL`, `GENIE_PROTOTYPE_API_GATEWAY_PUBLISHER_NAME`, and `GENIE_PROTOTYPE_MAX_ACTIVE_PER_OWNER` (`0` for unlimited). `VITE_GENIE_API_BASE_URL` is no longer a production GitHub variable; `prepare-gateway` emits it from the APIM deployment.
 
 If this identity/RBAC/secrets setup is ever missing or revoked, `deploy-backend`/`deploy-frontend` fail fast (within seconds, at an explicit "Check required secrets" step) rather than hanging — the `backend`/`frontend` test jobs are unaffected either way and still gate every PR.
 

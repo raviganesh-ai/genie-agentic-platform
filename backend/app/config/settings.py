@@ -176,7 +176,7 @@ class Settings(BaseSettings):
     # before failing closed.
     deployment_max_repair_attempts: int = 3
     prototype_default_ttl_days: int = Field(default=7, ge=1, le=90)
-    prototype_max_active_per_owner: int = Field(default=3, ge=1, le=20)
+    prototype_max_active_per_owner: int = Field(default=0, ge=0, le=20)
     prototype_cleanup_interval_seconds: int = Field(default=3600, ge=60, le=86400)
     # Local filesystem root the pipeline materializes each mission's generated
     # build under (one subdirectory per pipeline run id) before packaging it

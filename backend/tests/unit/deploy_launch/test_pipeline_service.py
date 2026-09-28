@@ -319,7 +319,7 @@ def _build_service(
     mission_agent_provisioning_service=None,
     requirements_output: str = _REQUIREMENTS_OUTPUT,
     run_repository=None,
-    prototype_max_active_per_owner: int = 3,
+    prototype_max_active_per_owner: int = 0,
     security_copilot_gateway=None,
     defender_for_cloud_gateway=None,
     finops_cost_service=None,
@@ -1430,6 +1430,28 @@ async def test_owner_cannot_exceed_active_prototype_limit(tmp_path: Path):
             requesting_user_id="tenant-1:object-1",
             workflow_run_id="run-1",
         )
+
+
+async def test_owner_can_create_multiple_active_prototypes_when_limit_is_disabled(
+    tmp_path: Path,
+):
+    service = _build_service(tmp_path=tmp_path)
+    first = await service.start(
+        session_id="session-1",
+        requesting_user_id="tenant-1:object-1",
+        workflow_run_id="run-1",
+    )
+    await service.wait_for_run(first.id)
+
+    second = await service.start(
+        session_id="session-2",
+        requesting_user_id="tenant-1:object-1",
+        workflow_run_id="run-1",
+    )
+    await service.wait_for_run(second.id)
+
+    assert first.id != second.id
+    assert len(service.list_all_runs()) == 2
 
 
 async def test_cleanup_expired_deletes_terminal_prototype(tmp_path: Path):
