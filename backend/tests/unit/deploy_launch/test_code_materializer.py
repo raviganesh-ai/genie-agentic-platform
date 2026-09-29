@@ -513,7 +513,7 @@ def test_backend_stream_returns_fallback_output_when_generated_pipeline_glue_fai
     monkeypatch,
     tmp_path,
 ):
-    monkeypatch.setenv("MISSION_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("FACTORY_WORKING_DIR", str(tmp_path))
     scaffold = generate_backend_service_scaffold(
         mission_title="Acme Mission",
         orchestrator_agent_name="acme-orchestrator",
