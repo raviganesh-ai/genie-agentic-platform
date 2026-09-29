@@ -693,6 +693,12 @@ The script uses Microsoft Entra authentication, creates only missing model deplo
 
 Every deployment to the shared Azure evaluation environment (backend Container App and/or frontend Static Web App) is recorded here: commit, what changed, and why. Update this section as part of the same commit that ships the fix/feature, before pushing to `master` triggers [Continuous deployment](#continuous-deployment-github-actions).
 
+### 2026-09-29 — Orchestrator prompts must surface specialist stage failures instead of silently swallowing them
+
+- **Incident**: the live `sampl-989d7318` blind-MQM translation-QA mission was given a valid, correctly-formatted uploaded package and its generated Orchestrator ran to completion, but returned a well-formed, entirely empty result (0 documents processed, 0 experiments, null system winner, all 7 required languages reported as "missing"). The existing COVERAGE VALIDATION contract faithfully reported the gap, but could not distinguish "the input genuinely had none of the required items" from "an upstream specialist agent's call raised and was silently caught".
+- **Prompt fix, not a patch to the deployed prototype**: both `build-generation-v1` and `build-generation-component-v1` gained a STAGE FAILURE TRANSPARENCY instruction requiring generated Orchestrators to never wrap a specialist agent's call in a broad try/except that swallows an exception into an empty/default result. Any caught specialist-agent failure must be captured into the returned `dict` as `"stage_errors"`, narrated via `on_progress` so the live UI shows it, and must set `"success": false` — so a broken pipeline is never indistinguishable from a plain empty-input success. This applies to all future generated missions; the already-deployed Sampl prototype instance itself was left unmodified.
+- **Verification**: a new regression test (`test_orchestrator_prompts_require_surfacing_specialist_stage_failures`) pins the presence of this instruction and its required JSON keys in both prompts; the full prompt-contract and registry test suites (65 tests) pass.
+
 ### 2026-09-29 — Connect generated UI and backend by construction
 
 - **Sample integration fix**: the Sample prototype UI submitted shorthand JSON fields such as `runId`, while its generated orchestrator read different names such as `runIdOutputDirectoryName`; the backend therefore failed before its first stream event and the UI reported that it returned no output.
