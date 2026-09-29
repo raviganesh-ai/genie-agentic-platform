@@ -1029,6 +1029,77 @@ async def test_pipeline_launches_at_ninety_percent_and_preserves_requirement_gap
     assert len(orchestrator.execute_agent_calls) == 1
 
 
+async def test_pipeline_repairs_a_missing_goal_at_ninety_percent_coverage(
+    tmp_path: Path,
+) -> None:
+    requirements = "\n".join(
+        [
+            "Goals:",
+            "- [REQ-001] Deliver the approved end-user outcome.",
+            "Must-Have Functional Requirements:",
+            *[
+                f"- [REQ-{number:03d}] Supporting requirement {number}."
+                for number in range(2, 11)
+            ],
+        ]
+    )
+    supporting_suite = "\n".join(
+        "```python\n"
+        f"# REQ-{number:03d}\n"
+        f"def test_req_{number:03d}():\n"
+        "    assert True\n"
+        "```"
+        for number in range(2, 11)
+    )
+    goal_suite = """
+```python
+# REQ-001
+def delivered_outcome():
+    return "approved"
+
+def test_goal_req_001_delivers_approved_outcome():
+    assert delivered_outcome() == "approved"
+```
+"""
+    orchestrator = _RepairingFakeOrchestrator(
+        test_outputs=[supporting_suite, goal_suite],
+        requirements_output=requirements,
+    )
+    service = DeploymentPipelineService(
+        orchestrator=orchestrator,  # type: ignore[arg-type]
+        session_service=_FakeSessionService(),  # type: ignore[arg-type]
+        event_bus=WorkflowEventBus(),
+        access_policy_service=_access_policy_service(),
+        mission_identity_service=NullMissionIdentityService(),
+        mission_agent_provisioning_service=NullMissionAgentProvisioningService(),
+        backend_deployment_service=NullBackendDeploymentService(),
+        frontend_deployment_service=NullFrontendDeploymentService(),
+        test_execution_service=TestExecutionService(timeout_seconds=60),
+        security_scan_service=SecurityScanService(timeout_seconds=60),
+        build_workspace_root=tmp_path,
+        fidelity_max_repair_attempts=1,
+        fidelity_min_coverage_percent=90,
+    )
+
+    run = await service.start(
+        session_id="session-1", requesting_user_id="user-1", workflow_run_id="run-1"
+    )
+    run = await service.wait_for_run(run.id)
+
+    assert run.status == "completed"
+    assert run.fidelity_report is not None
+    assert run.fidelity_report.status == "passed"
+    assert run.fidelity_report.coverage_percent == 100
+    test_generation_calls = [
+        call
+        for call in orchestrator.execute_agent_calls
+        if call["agent_id"] == "test-generation-agent"
+    ]
+    assert len(test_generation_calls) == 2
+    assert "REQ-001" in test_generation_calls[1]["variables"]["user_message"]
+    assert "test_goal_req_" in test_generation_calls[1]["variables"]["user_message"]
+
+
 def test_generated_frontend_runs_pinned_impeccable_detector_before_build() -> None:
     from app.deploy_launch.pipeline_service import _FRONTEND_PACKAGE_JSON
 

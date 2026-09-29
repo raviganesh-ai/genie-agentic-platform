@@ -89,6 +89,7 @@ from app.deploy_launch.test_execution_service import (
     TestExecutionService,
     extract_test_modules,
     has_pytest_discoverable_tests,
+    validate_goal_outcome_tests,
     validate_real_action_tests,
 )
 from app.models.workflow_models import WorkflowRunResult, WorkflowStepInput
@@ -2385,7 +2386,7 @@ class DeploymentPipelineService:
                     # budget that produced the gap in the first place.
                     coverage_retry = 0
                     while (
-                        report.coverage_percent < self._fidelity_min_coverage_percent
+                        report.status == "failed"
                         and coverage_retry < self._fidelity_max_repair_attempts
                     ):
                         coverage_retry += 1
@@ -2403,7 +2404,9 @@ class DeploymentPipelineService:
                                     "requirement IDs you already covered. Every executable "
                                     "test function name must include its normalized requirement ID "
                                     "(for example, REQ-001 must use test_req_001_<behavior>) and "
-                                    "must assert that requirement's real behavior."
+                                    "must assert that requirement's real behavior. IDs from the "
+                                    "approved Goals section must instead use "
+                                    "test_goal_req_<digits>_<observable_outcome>."
                                 ),
                             },
                             session_id=pipeline_run.session_id,
@@ -2425,16 +2428,20 @@ class DeploymentPipelineService:
                     pipeline_run.fidelity_report = report
                     if (
                         not has_pytest_discoverable_tests(modules)
-                        or report.coverage_percent < self._fidelity_min_coverage_percent
+                        or report.status == "failed"
                     ):
                         raise DeploymentPipelineStepFailedError(
-                            "Generated test suite does not meet the minimum executable coverage "
-                            f"threshold of {self._fidelity_min_coverage_percent:g}%; actual "
-                            f"coverage is {report.coverage_percent:g}%; missing requirement ids: "
+                            "Generated test suite does not meet the required goal and executable "
+                            f"coverage gates; aggregate threshold is "
+                            f"{self._fidelity_min_coverage_percent:g}%, actual coverage is "
+                            f"{report.coverage_percent:g}%; missing requirement ids: "
                             + ", ".join(missing_test_ids)
                         )
                     if pipeline_run.backend_url and pipeline_run.backend_url.startswith("https://"):
-                        real_action_errors = validate_real_action_tests(modules)
+                        real_action_errors = (
+                            *validate_real_action_tests(modules),
+                            *validate_goal_outcome_tests(modules),
+                        )
                         real_action_retry = 0
                         while (
                             real_action_errors
@@ -2456,6 +2463,9 @@ class DeploymentPipelineService:
                                         "MISSION_FRONTEND_URL from the environment - never "
                                         "unittest.mock, MagicMock, patch(), monkeypatch, respx, "
                                         "responses, or any other interception library."
+                                        " Every test_goal_req_<id>_<outcome> test must assert a "
+                                        "mission-specific end-user outcome; HTTP status, nonempty "
+                                        "JSON, or constant assertions alone are insufficient."
                                     ),
                                 },
                                 session_id=pipeline_run.session_id,
@@ -2464,7 +2474,10 @@ class DeploymentPipelineService:
                             test_output_text = correction_result.output_text
                             modules = extract_test_modules(test_output_text)
                             if not has_pytest_discoverable_tests(modules):
-                                real_action_errors = validate_real_action_tests(modules)
+                                real_action_errors = (
+                                    *validate_real_action_tests(modules),
+                                    *validate_goal_outcome_tests(modules),
+                                )
                                 continue
                             report = record_test_coverage(
                                 report,
@@ -2473,10 +2486,14 @@ class DeploymentPipelineService:
                             )
                             self._generated_test_outputs[pipeline_run.id] = test_output_text
                             pipeline_run.fidelity_report = report
-                            real_action_errors = validate_real_action_tests(modules)
+                            real_action_errors = (
+                                *validate_real_action_tests(modules),
+                                *validate_goal_outcome_tests(modules),
+                            )
                         if real_action_errors:
                             raise DeploymentPipelineStepFailedError(
-                                "Generated acceptance tests are not real-action tests: "
+                                "Generated acceptance tests do not meet real-action and "
+                                "goal-outcome policies: "
                                 + " ".join(real_action_errors)
                             )
                         # The real-action repair loop replaces the whole suite on
@@ -2488,11 +2505,12 @@ class DeploymentPipelineService:
                             for item in report.requirements
                             if item.status == "missing"
                         ]
-                        if report.coverage_percent < self._fidelity_min_coverage_percent:
+                        if report.status == "failed":
                             raise DeploymentPipelineStepFailedError(
-                                "Generated test suite does not meet the minimum executable coverage "
-                                f"threshold of {self._fidelity_min_coverage_percent:g}%; actual "
-                                f"coverage is {report.coverage_percent:g}%; missing requirement ids: "
+                                "Generated test suite does not meet the required goal and executable "
+                                f"coverage gates; aggregate threshold is "
+                                f"{self._fidelity_min_coverage_percent:g}%, actual coverage is "
+                                f"{report.coverage_percent:g}%; missing requirement ids: "
                                 + ", ".join(final_missing_ids)
                             )
                     detail = (

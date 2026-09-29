@@ -17,6 +17,7 @@ sandbox: generated acceptance tests need network access.
 
 from __future__ import annotations
 
+import ast
 import asyncio
 import os
 import re
@@ -27,7 +28,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Final
 
-__all__ = ["TestExecutionResult", "TestExecutionService", "extract_test_modules"]
+__all__ = [
+    "TestExecutionResult",
+    "TestExecutionService",
+    "extract_test_modules",
+    "validate_goal_outcome_tests",
+]
 
 # Line-anchored so triple backticks inside a generated test's own string
 # literals cannot terminate the block early (see code_materializer).
@@ -58,6 +64,7 @@ _TEST_DOUBLE_PATTERN: Final = re.compile(
     r"\b(?:unittest\.mock|MagicMock|Mock\s*\(|patch\s*\(|monkeypatch\b|respx\b|responses\b)"
 )
 _RUNTIME_URL_NAMES: Final = ("MISSION_BACKEND_URL", "MISSION_FRONTEND_URL")
+_GOAL_TEST_NAME_PATTERN: Final = re.compile(r"^test_goal_req_\d+(?:_|$)", re.IGNORECASE)
 
 
 def extract_test_modules(output_text: str) -> list[str]:
@@ -90,6 +97,93 @@ def validate_real_action_tests(modules: list[str]) -> tuple[str, ...]:
         reasons.append(
             "Acceptance tests do not reference MISSION_BACKEND_URL or MISSION_FRONTEND_URL."
         )
+    return tuple(reasons)
+
+
+def _is_obviously_weak_goal_assertion(expression: ast.expr) -> bool:
+    if not any(
+        isinstance(node, (ast.Name, ast.Attribute, ast.Call, ast.Subscript))
+        for node in ast.walk(expression)
+    ):
+        return True
+    if isinstance(expression, ast.Constant):
+        return expression.value is True
+    if isinstance(expression, ast.Attribute):
+        return expression.attr in {"ok", "status_code"}
+    if isinstance(expression, ast.Call):
+        return isinstance(expression.func, ast.Attribute) and expression.func.attr == "json"
+    if isinstance(expression, ast.Compare):
+        compared = [expression.left, *expression.comparators]
+        if any(
+            isinstance(node, ast.Attribute) and node.attr in {"ok", "status_code"}
+            for node in ast.walk(expression)
+        ):
+            return True
+        if any(
+            isinstance(node, ast.Call)
+            and (
+                (isinstance(node.func, ast.Name) and node.func.id == "len")
+                or (isinstance(node.func, ast.Attribute) and node.func.attr == "json")
+            )
+            for node in ast.walk(expression)
+        ):
+            if not any(isinstance(node, ast.Subscript) for node in ast.walk(expression)):
+                return True
+            return all(
+                isinstance(node, (ast.Call, ast.Constant, ast.Name, ast.Attribute))
+                for node in compared
+            )
+    return False
+
+
+def _has_goal_outcome_assertion(
+    function: ast.FunctionDef | ast.AsyncFunctionDef,
+    functions: dict[str, ast.FunctionDef | ast.AsyncFunctionDef],
+    visited: set[str],
+) -> bool:
+    if function.name in visited:
+        return False
+    visited.add(function.name)
+    if any(
+        not _is_obviously_weak_goal_assertion(node.test)
+        for node in ast.walk(function)
+        if isinstance(node, ast.Assert)
+    ):
+        return True
+    called_helpers = {
+        node.func.id
+        for node in ast.walk(function)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+    }
+    return any(
+        helper_name in functions
+        and _has_goal_outcome_assertion(functions[helper_name], functions, visited)
+        for helper_name in called_helpers
+    )
+
+
+def validate_goal_outcome_tests(modules: list[str]) -> tuple[str, ...]:
+    """Rejects goal tests whose assertions cannot prove any domain outcome."""
+
+    reasons: list[str] = []
+    for module in modules:
+        try:
+            tree = ast.parse(module)
+        except SyntaxError:
+            continue
+        functions = {
+            node.name: node
+            for node in tree.body
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        }
+        for name, function in functions.items():
+            if _GOAL_TEST_NAME_PATTERN.match(name) and not _has_goal_outcome_assertion(
+                function, functions, set()
+            ):
+                reasons.append(
+                    f"Goal test '{name}' has no mission-outcome assertion; status, "
+                    "nonempty JSON, or constant assertions alone are insufficient."
+                )
     return tuple(reasons)
 
 

@@ -10,6 +10,7 @@ from app.deploy_launch.test_execution_service import (
     TestExecutionService,
     extract_test_modules,
     has_pytest_discoverable_tests,
+    validate_goal_outcome_tests,
     validate_real_action_tests,
 )
 
@@ -302,6 +303,38 @@ def test_real_action_policy_accepts_black_box_test_using_deployed_url() -> None:
                 "    response = httpx.get(os.environ['MISSION_BACKEND_URL'] + '/health')\n"
                 "    assert response.status_code == 200"
             )
+        ]
+    )
+
+    assert reasons == ()
+
+
+def test_goal_outcome_policy_rejects_status_or_constant_only_evidence() -> None:
+    reasons = validate_goal_outcome_tests(
+        [
+            "def test_goal_req_001_returns_success():\n"
+            "    assert response.status_code == 200\n",
+            "def test_goal_req_002_returns_content():\n"
+            "    assert response.json()\n",
+            "def test_goal_req_003_always_passes():\n"
+            "    assert True\n",
+            "def test_goal_req_004_constant_comparison():\n"
+            "    assert 1 + 1 == 2\n",
+        ]
+    )
+
+    assert len(reasons) == 4
+    assert all("no mission-outcome assertion" in reason for reason in reasons)
+
+
+def test_goal_outcome_policy_accepts_domain_assertion_through_helper() -> None:
+    reasons = validate_goal_outcome_tests(
+        [
+            "def assert_translation_improved(result):\n"
+            "    assert result['improved_score'] > result['baseline_score']\n\n"
+            "def test_goal_req_001_improves_translation():\n"
+            "    assert response.status_code == 200\n"
+            "    assert_translation_improved(response.json())\n"
         ]
     )
 

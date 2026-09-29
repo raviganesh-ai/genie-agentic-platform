@@ -266,6 +266,7 @@ def test_generation_prompts_require_end_to_end_goal_alignment_evidence():
     )
     assert "GOAL OUTCOME GATE" in test_generation
     assert "test_goal_req_" in test_generation
+    assert "Every approved goal requires 100% coverage and passing evidence" in test_generation
     assert "metadata, configuration, schema, or HTTP status alone" in test_generation
 
 

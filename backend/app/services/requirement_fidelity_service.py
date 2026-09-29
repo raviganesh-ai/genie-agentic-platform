@@ -205,6 +205,10 @@ def record_test_coverage(
     covered = sum(item.status == "covered" for item in requirements)
     total = report.total_requirements
     coverage_percent = 0.0 if total == 0 else round(covered * 100 / total, 1)
+    covered_ids = {
+        item.requirement_id for item in requirements if item.status == "covered"
+    }
+    all_goals_covered = set(report.goal_requirement_ids) <= covered_ids
     gaps = [
         (
             f"{item.requirement_id}: no executable end-to-end goal test"
@@ -218,7 +222,9 @@ def record_test_coverage(
         update={
             "status": (
                 "testing"
-                if total > 0 and coverage_percent >= minimum_coverage_percent
+                if total > 0
+                and coverage_percent >= minimum_coverage_percent
+                and all_goals_covered
                 else "failed"
             ),
             "requirements": requirements,
@@ -273,7 +279,13 @@ def record_fidelity_execution(
         expected_names = set(item.test_names)
         if not expected_names:
             requirements.append(item)
-            gaps.append(f"{item.requirement_id}: no executable acceptance test")
+            gaps.append(
+                (
+                    f"{item.requirement_id}: no executable end-to-end goal test"
+                    if item.requirement_id in report.goal_requirement_ids
+                    else f"{item.requirement_id}: no executable acceptance test"
+                )
+            )
             continue
         failed: list[str] = []
         errored: list[str] = []
@@ -322,11 +334,16 @@ def record_fidelity_execution(
         requirements.append(item.model_copy(update={"status": status, "evidence": evidence}))
 
     passed = sum(item.status == "passed" for item in requirements)
+    passed_ids = {
+        item.requirement_id for item in requirements if item.status == "passed"
+    }
+    all_goals_passed = set(report.goal_requirement_ids) <= passed_ids
     executable_evidence_passed = (
         success
         and report.covered_requirements > 0
         and report.coverage_percent >= minimum_coverage_percent
         and passed == report.covered_requirements
+        and all_goals_passed
     )
     return report.model_copy(
         update={

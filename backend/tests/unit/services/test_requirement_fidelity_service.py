@@ -124,6 +124,42 @@ def test_ninety_percent_coverage_passes_when_every_executable_test_passes() -> N
     assert result.gaps == ["REQ-010: no executable acceptance test"]
 
 
+def test_ninety_percent_coverage_cannot_omit_an_approved_goal() -> None:
+    requirements = "\n".join(
+        [
+            "Goals:",
+            "- [REQ-001] Deliver the approved end-user outcome.",
+            "Must-Have Functional Requirements:",
+            *[
+                f"- [REQ-{number:03d}] Supporting requirement {number}."
+                for number in range(2, 11)
+            ],
+        ]
+    )
+    modules = [
+        f"# REQ-{number:03d}\ndef test_req_{number:03d}():\n    assert True"
+        for number in range(2, 11)
+    ]
+    report = record_test_coverage(
+        create_fidelity_report(requirements, max_repair_attempts=3),
+        modules,
+        minimum_coverage_percent=90,
+    )
+
+    result = record_fidelity_execution(
+        report,
+        success=True,
+        summary="9 passed",
+        passed_test_names=[f"test_req_{number:03d}" for number in range(2, 11)],
+        minimum_coverage_percent=90,
+    )
+
+    assert report.coverage_percent == 90
+    assert report.status == "failed"
+    assert result.status == "repairing"
+    assert "REQ-001: no executable end-to-end goal test" in result.gaps
+
+
 def test_coverage_below_threshold_does_not_pass_fidelity_execution() -> None:
     requirements = "\n".join(
         f"[REQ-{number:03d}] Requirement {number}." for number in range(1, 11)

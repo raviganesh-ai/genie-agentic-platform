@@ -438,6 +438,8 @@ prompts:
         exact REQ id. It must submit the generated UI's real payload to the
         deployed Orchestrator and assert the mission-specific end-user
         outcome described by the goal across the specialist pipeline.
+        Every approved goal requires 100% coverage and passing evidence,
+        independently of the aggregate supporting-requirement threshold.
         A result's metadata, configuration, schema, or HTTP status alone
         never proves a goal was achieved. A generic
         `test_req_<digits>_...` may cover a
@@ -507,7 +509,7 @@ prompts:
       - artifact
       - requirements
       - user_message
-    version: "1.10.0"
+    version: "1.11.0"
 
   - id: failure-diagnosis-v1
     name: Failure Diagnosis
