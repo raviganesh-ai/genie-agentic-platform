@@ -104,7 +104,7 @@ describe("DeployLaunchPage", () => {
     expect(screen.getByText(/^Launch$/i)).toBeInTheDocument();
   });
 
-  it("shows a compact Requirement Fidelity Gate summary (details live on the dedicated tab)", async () => {
+  it("shows a compact Requirement Validation summary (details live on the dedicated tab)", async () => {
     mockFetchSequence([
       {
         match: "/deploy-launch/",
@@ -150,9 +150,9 @@ describe("DeployLaunchPage", () => {
       workflowRunId: FIXTURE_WORKFLOW_RUN_ID,
     });
 
-    expect(await screen.findByText("Requirement Fidelity Gate")).toBeInTheDocument();
+    expect(await screen.findByText("Requirement Validation")).toBeInTheDocument();
     expect(await screen.findByText("50% passed")).toBeInTheDocument();
-    expect(screen.getByText(/See the Requirement Fidelity Gate tab for full per-requirement evidence/i)).toBeInTheDocument();
+    expect(screen.getByText(/See the Requirement Validation tab for full per-requirement evidence/i)).toBeInTheDocument();
     expect(screen.queryByText("REQ-002")).not.toBeInTheDocument();
     expect(screen.queryByText(/Launch blocked by requirement gaps/i)).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^Launch$/i })).not.toBeInTheDocument();

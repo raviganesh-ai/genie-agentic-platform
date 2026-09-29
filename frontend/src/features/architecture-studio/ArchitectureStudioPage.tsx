@@ -512,9 +512,9 @@ export function ArchitectureStudioPage(): JSX.Element {
         <SectionCard title="Architecture needs regeneration">
           <MessageBar intent="error" layout="multiline" style={{ marginBottom: 12 }}>
             <MessageBarBody>
-              <MessageBarTitle>Architecture did not pass requirement fidelity</MessageBarTitle>
+              <MessageBarTitle>Architecture generation did not complete</MessageBarTitle>
               {architectureComponent.error ??
-                "The architecture output did not satisfy the approved requirements."}
+                "The Architecture Designer did not complete this stage."}
             </MessageBarBody>
           </MessageBar>
           <Button

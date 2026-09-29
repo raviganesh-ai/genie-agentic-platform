@@ -10,7 +10,7 @@ import { RequirementFidelityDashboard } from "@/components/RequirementFidelityDa
 const POLL_MS = 4000;
 
 /**
- * The Requirement Fidelity Gate, rendered inline under its own Outputs sub-tab
+ * Requirement Validation, rendered inline under its own Outputs sub-tab
  * (not a popup) - shows the real per-requirement executable-test coverage/
  * passing-evidence gate for the most recent Deploy & Launch run.
  */
@@ -33,7 +33,7 @@ export function RequirementFidelityGatePage(): JSX.Element {
 
   return (
     <div>
-      {loading && !runs ? <LoadingState label="Loading Requirement Fidelity Gate..." /> : null}
+      {loading && !runs ? <LoadingState label="Loading Requirement Validation..." /> : null}
       {error ? <ErrorState error={error} onRetry={refresh} /> : null}
       {!loading && !error && !activeRun ? (
         <Text size={300} style={{ opacity: 0.7 }}>

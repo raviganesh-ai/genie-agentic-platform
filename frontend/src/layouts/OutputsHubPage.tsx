@@ -2,7 +2,7 @@ import { NavLink, Outlet } from "react-router-dom";
 
 const TABS: Array<{ to: string; label: string; end?: boolean }> = [
   { to: "/outputs", label: "Deploy & Launch", end: true },
-  { to: "/outputs/fidelity-gate", label: "Requirement Fidelity Gate" },
+  { to: "/outputs/fidelity-gate", label: "Requirement Validation" },
 ];
 
 function tabStyle(isActive: boolean): React.CSSProperties {
@@ -17,8 +17,8 @@ function tabStyle(isActive: boolean): React.CSSProperties {
 }
 
 /**
- * Hosts Deploy & Launch and the Requirement Fidelity Gate under a single
- * "Outputs" nav step, switched via sub-tabs. The Requirement Fidelity Gate
+ * Hosts Deploy & Launch and Requirement Validation under a single
+ * "Outputs" nav step, switched via sub-tabs. Requirement Validation
  * tab renders as a modal popup over whichever tab was active rather than a
  * plain page (see RequirementFidelityGatePage).
  */

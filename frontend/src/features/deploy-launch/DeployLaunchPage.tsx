@@ -643,7 +643,7 @@ export function DeployLaunchPage(): JSX.Element {
 
         {activeRun?.fidelity_report ? (
           <SectionCard
-            title="Requirement Fidelity Gate"
+            title="Requirement Validation"
             action={
               <Badge
                 shape="rounded"
@@ -662,7 +662,7 @@ export function DeployLaunchPage(): JSX.Element {
             }
           >
             <Text size={200} style={{ opacity: 0.7 }}>
-              See the Requirement Fidelity Gate tab for full per-requirement evidence.
+              See the Requirement Validation tab for full per-requirement evidence.
             </Text>
           </SectionCard>
         ) : null}

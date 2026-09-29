@@ -7,7 +7,7 @@ const FIDELITY_STATUS_LABELS: Record<RequirementFidelityReport["status"], string
   testing: "Testing",
   repairing: "Repairing gaps",
   passed: "100% verified",
-  failed: "Blocked",
+  failed: "Validation gaps",
 };
 
 const EVIDENCE_STATUS_COLORS: Record<RequirementEvidenceStatus, string> = {
@@ -33,9 +33,9 @@ function FidelityMetric({ label, value, tone }: { label: string; value: string; 
 
 /**
  * Renders the real, deterministic per-requirement executable-test coverage
- * and passing-evidence gate (backed by `RequirementFidelityReport`) -
+ * and passing evidence (backed by `RequirementFidelityReport`) -
  * shared between Deploy & Launch's inline view and the standalone
- * Requirement Fidelity Gate popup.
+ * Requirement Validation view.
  */
 export function RequirementFidelityDashboard({ report }: { report: RequirementFidelityReport }): JSX.Element {
   const goalRequirementIds = new Set(report.goal_requirement_ids ?? []);
@@ -49,7 +49,7 @@ export function RequirementFidelityDashboard({ report }: { report: RequirementFi
           : "#2f83e0";
   return (
     <SectionCard
-      title="Requirement Fidelity Gate"
+      title="Requirement Validation"
       action={
         <Badge shape="rounded" style={{ backgroundColor: statusColor, color: "#0b0f14" }}>
           {FIDELITY_STATUS_LABELS[report.status]}
@@ -136,9 +136,9 @@ export function RequirementFidelityDashboard({ report }: { report: RequirementFi
       </div>
 
       {report.gaps.length > 0 ? (
-        <MessageBar intent="error" layout="multiline" style={{ marginTop: 14 }}>
+        <MessageBar intent="warning" layout="multiline" style={{ marginTop: 14 }}>
           <MessageBarBody>
-            <MessageBarTitle>Launch blocked by requirement gaps</MessageBarTitle>
+            <MessageBarTitle>Prototype launched with validation gaps</MessageBarTitle>
             {report.gaps.join("; ")}
           </MessageBarBody>
         </MessageBar>

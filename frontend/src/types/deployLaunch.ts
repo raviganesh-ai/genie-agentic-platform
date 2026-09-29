@@ -30,7 +30,7 @@ export const DEPLOYMENT_STEP_NAMES: Record<DeploymentStepId, string> = {
   "sync-frontend-integration": "Update Frontend Integrations",
   "deploy-frontend-app": "Deploy Frontend",
   "generate-test-suite": "Generate Requirement Acceptance Tests",
-  "execute-test-suite": "Requirement Fidelity Gate",
+  "execute-test-suite": "Requirement Validation",
   "run-security-scan": "Security Scan (Backend & Frontend)",
   "launch-mission": "Launch",
 };

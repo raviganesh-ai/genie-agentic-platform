@@ -77,7 +77,7 @@ describe("RequirementFidelityGatePage", () => {
     expect(screen.getByText("Approved Goals")).toBeInTheDocument();
     expect(screen.getByText("Mission goal")).toBeInTheDocument();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    expect(screen.getByText(/Launch blocked by requirement gaps/i)).toBeInTheDocument();
+    expect(screen.getByText(/Prototype launched with validation gaps/i)).toBeInTheDocument();
   });
 
   it("shows a graceful message instead of a report when no run has started yet", async () => {

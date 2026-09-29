@@ -105,7 +105,7 @@ def parse_component_requirement_assignments(
     requirement ID to literally appear in the responsibility text of at
     least one specialist/orchestrator bullet or UI zone bullet, so this is
     a pure extraction (via ``extract_requirement_ids``, the same REQ-###
-    pattern the Requirement Fidelity Gate uses) over each bullet's own
+    pattern Requirement Validation uses) over each bullet's own
     span, not a new prompt contract.
 
     Each specialist/orchestrator agent name (lowercased, matching

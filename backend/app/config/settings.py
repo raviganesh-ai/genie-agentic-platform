@@ -172,7 +172,7 @@ class Settings(BaseSettings):
     prototype_api_gateway_capacity: int = Field(default=1, ge=1, le=10)
     deployment_fidelity_max_repair_attempts: int = 3
     deployment_fidelity_min_coverage_percent: float = Field(default=90.0, gt=0, le=100)
-    # How long the Requirement Fidelity Gate's real pytest subprocess is
+    # How long Requirement Validation's real pytest subprocess is
     # allowed to run before being killed. This suite executes real black-box
     # HTTP acceptance tests against a live deployed mission prototype (one
     # test per approved requirement) - not fast in-process unit tests - so it

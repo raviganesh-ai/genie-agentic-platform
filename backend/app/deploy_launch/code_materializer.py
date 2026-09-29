@@ -407,10 +407,6 @@ def _has_strict_sample_cardinality_gate(source: str, *, python_source: bool) -> 
     return False
 
 
-def _progress_alias(agent_name: str) -> str:
-    return re.sub(r"\s*\([^()]*\)\s*$", "", agent_name).strip()
-
-
 @dataclass(frozen=True)
 class MaterializedBuild:
     """The Build Agent's generated code, parsed into real, named files."""
@@ -532,34 +528,6 @@ def materialize_build(output_text: str) -> MaterializedBuild:
             "Production target cardinality must be reported as coverage evidence, while "
             "any non-empty structurally valid representative sample remains runnable."
         )
-
-    if orchestrator_module is not None and agent_modules:
-        aliases = {agent_name: _progress_alias(agent_name) for agent_name in agent_modules}
-        alias_counts = {
-            alias.casefold(): sum(
-                candidate.casefold() == alias.casefold() for candidate in aliases.values()
-            )
-            for alias in aliases.values()
-        }
-        missing_progress = [
-            agent_name
-            for agent_name in agent_modules
-            if not any(
-                f"Handing off to {candidate}" in orchestrator_module
-                and f"{candidate} completed." in orchestrator_module
-                for candidate in (
-                    [agent_name, aliases[agent_name]]
-                    if aliases[agent_name] != agent_name
-                    and alias_counts[aliases[agent_name].casefold()] == 1
-                    else [agent_name]
-                )
-            )
-        ]
-        if missing_progress:
-            raise MaterializedCodeError(
-                "The generated orchestrator does not emit live start/completion progress "
-                "for every specialist agent: " + ", ".join(sorted(missing_progress))
-            )
 
     submit_payloads = _submit_payload_literals(ui_component) if ui_component is not None else []
     if any(_has_nested_object_value(literal) for literal in submit_payloads):

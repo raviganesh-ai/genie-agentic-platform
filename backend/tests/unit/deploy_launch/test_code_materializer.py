@@ -168,14 +168,15 @@ def test_materialize_build_allows_non_empty_sample_validation():
     assert build.ui_component is not None
 
 
-def test_materialize_build_rejects_missing_specialist_progress_narration():
+def test_materialize_build_allows_missing_specialist_progress_narration():
     output = _SAMPLE_OUTPUT.replace(
         'await on_progress("Requirements Specialist completed.")',
         'await on_progress("Pipeline phase completed.")',
     )
 
-    with pytest.raises(MaterializedCodeError, match="Requirements Specialist"):
-        materialize_build(output)
+    build = materialize_build(output)
+
+    assert build.orchestrator_module is not None
 
 
 def test_materialize_build_allows_unique_base_name_progress_for_qualified_agent():

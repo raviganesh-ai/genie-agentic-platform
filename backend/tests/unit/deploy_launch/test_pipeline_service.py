@@ -216,6 +216,19 @@ class _BuildValidationRepairingFakeOrchestrator(_RepairingFakeOrchestrator):
         return self._run
 
 
+class _FailingFidelityRepairOrchestrator(_RepairingFakeOrchestrator):
+    async def resume_workflow(
+        self,
+        *,
+        workflow_run_id: str,
+        session_id: str,
+        trace_id: str,
+        step_inputs: dict[str, WorkflowStepInput],
+    ) -> WorkflowRunResult:
+        self.resume_calls.append(step_inputs)
+        raise RuntimeError("Build Agent repair unavailable")
+
+
 def _completed_step(step_id: str, agent_id: str, output_text: str) -> WorkflowStepResult:
     now = datetime.now(UTC)
     return WorkflowStepResult(
@@ -931,23 +944,23 @@ async def test_start_fails_closed_with_actionable_error_when_stuck_on_earlier_ga
     assert all(step.status == "pending" for step in run.steps[1:])
 
 
-async def test_pipeline_fails_closed_when_generated_tests_fail(tmp_path: Path):
+async def test_pipeline_launches_with_visible_warning_when_generated_tests_fail(tmp_path: Path):
     service = _build_service(test_output_text=_FAILING_TEST_OUTPUT, tmp_path=tmp_path)
 
-    # The step failure happens in the background task, so it surfaces as a
-    # "failed" run/step status once awaited - never as an exception raised
-    # out of start() itself (there is no synchronous caller left to catch
-    # it once the pipeline is running in the background).
     run = await service.start(session_id="session-1", requesting_user_id="user-1", workflow_run_id="run-1")
     run = await service.wait_for_run(run.id)
 
-    assert run.status == "failed"
-    failed_step = next(step for step in run.steps if step.step_id == "execute-test-suite")
-    assert failed_step.status == "failed"
-    assert failed_step.error is not None
+    assert run.status == "completed"
+    assert run.launch_url is not None
+    assert run.fidelity_report is not None
+    assert run.fidelity_report.status == "failed"
+    validation_step = next(step for step in run.steps if step.step_id == "execute-test-suite")
+    assert validation_step.status == "completed"
+    assert validation_step.error is None
+    assert "validation warning" in validation_step.detail.lower()
 
 
-async def test_pipeline_blocks_passing_tests_that_omit_an_approved_requirement(
+async def test_pipeline_launches_and_records_tests_that_omit_an_approved_requirement(
     tmp_path: Path,
 ) -> None:
     service = _build_service(
@@ -969,13 +982,14 @@ def test_search_documents():
     )
     run = await service.wait_for_run(run.id)
 
-    assert run.status == "failed", [
+    assert run.status == "completed", [
         (step.step_id, step.status, step.error) for step in run.steps
     ]
-    failed_step = next(step for step in run.steps if step.step_id == "generate-test-suite")
-    assert failed_step.status == "failed"
-    assert failed_step.error is not None
-    assert "REQ-002" in failed_step.error
+    assert run.launch_url is not None
+    validation_step = next(step for step in run.steps if step.step_id == "generate-test-suite")
+    assert validation_step.status == "completed"
+    assert validation_step.error is None
+    assert "REQ-002" in validation_step.detail
 
 
 async def test_pipeline_launches_at_ninety_percent_and_preserves_requirement_gaps(
@@ -1100,12 +1114,13 @@ def test_goal_req_001_delivers_approved_outcome():
     assert "test_goal_req_" in test_generation_calls[1]["variables"]["user_message"]
 
 
-def test_generated_frontend_runs_pinned_impeccable_detector_before_build() -> None:
+def test_generated_frontend_reports_impeccable_findings_without_blocking_build() -> None:
     from app.deploy_launch.pipeline_service import _FRONTEND_PACKAGE_JSON
 
     assert '"impeccable": "3.6.0"' in _FRONTEND_PACKAGE_JSON
     assert '"vite": "6.4.3"' in _FRONTEND_PACKAGE_JSON
-    assert '"design:check": "impeccable detect MissionApp.tsx src/"' in _FRONTEND_PACKAGE_JSON
+    assert "impeccable detect MissionApp.tsx src/ || node -e" in _FRONTEND_PACKAGE_JSON
+    assert "continuing prototype build" in _FRONTEND_PACKAGE_JSON
     assert '"build": "npm run design:check && vite build"' in _FRONTEND_PACKAGE_JSON
 
 
@@ -1282,7 +1297,7 @@ async def test_pipeline_repairs_invalid_generated_ui_before_provisioning(
     assert run.steps[1].status == "completed"
 
 
-async def test_pipeline_fails_closed_after_fidelity_repair_budget_is_exhausted(
+async def test_pipeline_launches_with_gaps_after_fidelity_repair_budget_is_exhausted(
     tmp_path: Path,
 ) -> None:
     requirements = "[REQ-001] Process every document."
@@ -1319,15 +1334,61 @@ def test_req_001_processes_every_document():
     )
     run = await service.wait_for_run(run.id)
 
-    assert run.status == "failed"
-    assert run.launch_url is None
+    assert run.status == "completed"
+    assert run.launch_url is not None
     assert run.fidelity_report is not None
     assert run.fidelity_report.status == "failed"
     assert run.fidelity_report.repair_attempts == 1
     assert run.fidelity_report.pass_percent == 0
     assert len(orchestrator.resume_calls) == 1
     launch_step = next(step for step in run.steps if step.step_id == "launch-mission")
-    assert launch_step.status == "pending"
+    assert launch_step.status == "completed"
+    assert "validation is incomplete" in launch_step.detail.lower()
+
+
+async def test_pipeline_launches_when_automatic_fidelity_repair_itself_fails(
+    tmp_path: Path,
+) -> None:
+    failing_suite = """
+```python
+# REQ-001
+def test_req_001_processes_every_document():
+    assert 1 == 2
+```
+"""
+    orchestrator = _FailingFidelityRepairOrchestrator(
+        test_outputs=[failing_suite],
+        requirements_output="[REQ-001] Process every document.",
+    )
+    service = DeploymentPipelineService(
+        orchestrator=orchestrator,  # type: ignore[arg-type]
+        session_service=_FakeSessionService(),  # type: ignore[arg-type]
+        event_bus=WorkflowEventBus(),
+        access_policy_service=_access_policy_service(),
+        mission_identity_service=NullMissionIdentityService(),
+        mission_agent_provisioning_service=NullMissionAgentProvisioningService(),
+        backend_deployment_service=NullBackendDeploymentService(),
+        frontend_deployment_service=NullFrontendDeploymentService(),
+        test_execution_service=TestExecutionService(timeout_seconds=60),
+        security_scan_service=SecurityScanService(timeout_seconds=60),
+        build_workspace_root=tmp_path,
+        fidelity_max_repair_attempts=1,
+    )
+
+    run = await service.start(
+        session_id="session-1", requesting_user_id="user-1", workflow_run_id="run-1"
+    )
+    run = await service.wait_for_run(run.id)
+
+    assert run.status == "completed"
+    assert run.launch_url is not None
+    assert run.fidelity_report is not None
+    assert run.fidelity_report.status == "failed"
+    assert any("Build Agent repair unavailable" in gap for gap in run.fidelity_report.gaps)
+    validation_step = next(step for step in run.steps if step.step_id == "execute-test-suite")
+    assert validation_step.status == "completed"
+    launch_step = next(step for step in run.steps if step.step_id == "launch-mission")
+    assert launch_step.status == "completed"
 
 
 class _FakeHttpsBackendDeploymentService:
@@ -1412,7 +1473,7 @@ def test_req_001_processes_every_document():
     assert "mock" in test_generation_calls[1]["variables"]["user_message"].lower()
 
 
-async def test_pipeline_fails_closed_when_test_generation_keeps_using_mocks(
+async def test_pipeline_launches_with_warning_when_test_generation_keeps_using_mocks(
     tmp_path: Path,
 ) -> None:
     requirements = "[REQ-001] Process every document."
@@ -1450,11 +1511,14 @@ def test_req_001_processes_every_document():
     )
     run = await service.wait_for_run(run.id)
 
-    assert run.status == "failed"
-    failed_step = next(step for step in run.steps if step.step_id == "generate-test-suite")
-    assert failed_step.status == "failed"
-    assert failed_step.error is not None
-    assert "not real-action tests" in failed_step.error
+    assert run.status == "completed"
+    assert run.launch_url is not None
+    assert run.fidelity_report is not None
+    assert run.fidelity_report.status == "failed"
+    validation_step = next(step for step in run.steps if step.step_id == "generate-test-suite")
+    assert validation_step.status == "completed"
+    assert validation_step.error is None
+    assert "not real-action tests" in validation_step.detail
     test_generation_calls = [
         call for call in orchestrator.execute_agent_calls if call["agent_id"] == "test-generation-agent"
     ]
