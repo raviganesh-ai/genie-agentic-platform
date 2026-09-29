@@ -677,12 +677,8 @@ _ARCHITECTURE_WITH_REQUIREMENT_ASSIGNMENTS = """
 """
 
 
-async def test_call_build_agent_fails_closed_when_architecture_omits_a_requirement():
-    """If the approved requirements name a requirement ID the architecture
-    document never assigns to any specialist, the Orchestrator, or a UI
-    zone, this must fail BEFORE any component is generated - catching the
-    gap for free instead of relying on a full build+deploy+test cycle and
-    the Requirement Fidelity Gate's repair budget to discover it later."""
+async def test_call_build_agent_generates_when_architecture_omits_a_literal_requirement_id():
+    """Architecture prose guides generation but is not an acceptance-test artifact."""
 
     registry = AgentToolRegistry()
     gateway = _StreamingAgentGateway()
@@ -696,21 +692,20 @@ async def test_call_build_agent_fails_closed_when_architecture_omits_a_requireme
         trace_id="run-1:build-solution",
     )
 
-    with pytest.raises(ToolExecutionError, match="REQ-005"):
-        await registry.execute(
-            agent_id="genie-orchestrator",
-            tool_name="call_build_agent",
-            arguments={
-                "requirements": "REQ-001: pick a category. REQ-005: send a confirmation email.",
-                "architecture": _ARCHITECTURE_WITH_REQUIREMENT_ASSIGNMENTS,
-                "policies": "",
-                "user_message": "",
-            },
-            context=context,
-        )
+    result = await registry.execute(
+        agent_id="genie-orchestrator",
+        tool_name="call_build_agent",
+        arguments={
+            "requirements": "REQ-001: pick a category. REQ-005: send a confirmation email.",
+            "architecture": _ARCHITECTURE_WITH_REQUIREMENT_ASSIGNMENTS,
+            "policies": "",
+            "user_message": "",
+        },
+        context=context,
+    )
 
-    # No component was generated once the gap was detected.
-    assert gateway.requests == []
+    assert len(gateway.requests) == 4
+    assert result["output_text"]
 
 
 async def test_call_build_agent_passes_each_components_own_assigned_requirement_ids():

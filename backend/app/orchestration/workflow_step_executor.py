@@ -96,9 +96,9 @@ def _require_complete_requirement_coverage(
         ),
         None,
     )
-    if step_id not in {"design-architecture", "build-solution"} or not requirements_text:
+    if step_id != "build-solution" or not requirements_text:
         return
-    if step_id == "build-solution" and _COMPONENT_FAILURE_MARKER in output_text:
+    if _COMPONENT_FAILURE_MARKER in output_text:
         raise FoundryUnavailableError(
             "Workflow step 'build-solution' contains a failed generated component; "
             "partial placeholder artifacts cannot proceed to deployment."

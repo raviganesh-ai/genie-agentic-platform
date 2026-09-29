@@ -693,6 +693,12 @@ The script uses Microsoft Entra authentication, creates only missing model deplo
 
 Every deployment to the shared Azure evaluation environment (backend Container App and/or frontend Static Web App) is recorded here: commit, what changed, and why. Update this section as part of the same commit that ships the fix/feature, before pushing to `master` triggers [Continuous deployment](#continuous-deployment-github-actions).
 
+### 2026-09-28 — Judge the prototype, not architecture formatting
+
+- **Unblocked generation**: Architecture no longer fails merely because its prose omits one or more literal approved `REQ-*` identifiers, and component generation no longer repeats that precheck before invoking the Build Agent.
+- **Intelligent responsibility split**: approved requirements and goals continue to guide architecture and generation, while semantic fidelity is established by the generated implementation and real deployed outcome evidence rather than ID repetition in an intermediate document.
+- **Meaningful gates preserved**: incomplete or failed generated components remain blocked; every approved goal still requires dedicated passing end-to-end evidence, and aggregate supporting-requirement coverage remains enforced.
+
 ### 2026-09-28 — Make approved goals non-negotiable
 
 - **Goal completeness**: every approved goal now requires its own dedicated end-to-end test and passing evidence, even when aggregate requirement coverage has already met the configured threshold. The threshold remains unchanged for non-goal requirements, avoiding a broader restriction.

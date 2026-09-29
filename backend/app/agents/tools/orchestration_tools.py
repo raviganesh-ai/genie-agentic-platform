@@ -43,7 +43,6 @@ from app.memory.memory_models import SharedMemoryClassification
 from app.memory.memory_service import MemoryService
 from app.models.workflow_stream_models import WorkflowStreamEvent
 from app.orchestration.workflow_event_bus import WorkflowEventBus
-from app.services.requirement_fidelity_service import missing_requirement_ids
 
 __all__ = ["register_orchestrator_delegation_tools", "resolve_delegate_agent_id"]
 
@@ -413,26 +412,10 @@ async def _generate_build_by_component(
     (re)generates the component(s) that actually still need it, never the
     whole build from scratch.
 
-    Fails closed BEFORE any component is generated when the architecture
-    document itself does not mention every approved requirement ID in some
-    specialist/orchestrator/UI responsibility bullet (see
-    ``parse_component_requirement_assignments``) - a design gap that would
-    otherwise only surface much later, after a full build+deploy+test
-    cycle, via the Requirement Fidelity Gate.
+    Architecture prose is not treated as an acceptance-test artifact. The
+    generated build and deployed prototype remain subject to their own
+    requirement and goal fidelity gates.
     """
-
-    unassigned_requirement_ids = missing_requirement_ids(
-        base_variables.get("requirements", ""), base_variables.get("architecture", "")
-    )
-    if unassigned_requirement_ids:
-        raise ToolExecutionError(
-            "Architecture design does not assign the following approved requirement "
-            "ID(s) to any specialist agent, the Orchestrator, or a UI zone: "
-            f"{', '.join(unassigned_requirement_ids)}. Revise the architecture on "
-            "Architecture Studio so each one is explicitly covered before building - "
-            "this must be caught here, before any code is generated, rather than "
-            "relying on Deploy & Launch's repair budget to catch it later."
-        )
 
     plan = parse_architecture_build_plan(base_variables.get("architecture", ""))
     if plan is None:

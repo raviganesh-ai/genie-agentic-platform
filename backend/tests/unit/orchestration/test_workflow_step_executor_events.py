@@ -58,13 +58,12 @@ def test_display_agent_id_falls_back_when_no_tool_name_resolves_to_a_delegation(
     assert _display_agent_id(step, "genie-orchestrator") == "genie-orchestrator"
 
 
-def test_architecture_coverage_fails_closed_when_one_approved_id_is_omitted() -> None:
-    with pytest.raises(FoundryUnavailableError, match="REQ-002"):
-        _require_complete_requirement_coverage(
-            step_id="design-architecture",
-            variables={"approved_requirements": "[REQ-001] Search. [REQ-002] Export."},
-            output_text="Search Agent covers REQ-001.",
-        )
+def test_architecture_does_not_require_literal_requirement_id_repetition() -> None:
+    _require_complete_requirement_coverage(
+        step_id="design-architecture",
+        variables={"approved_requirements": "[REQ-001] Search. [REQ-002] Export."},
+        output_text="Search and export are handled by the workflow.",
+    )
 
 
 def test_build_coverage_accepts_every_approved_id_across_generated_components() -> None:
