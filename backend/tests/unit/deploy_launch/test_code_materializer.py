@@ -511,7 +511,9 @@ def test_backend_scaffold_keeps_conversational_fallback_for_plain_text(monkeypat
 
 def test_backend_stream_returns_fallback_output_when_generated_pipeline_glue_fails(
     monkeypatch,
+    tmp_path,
 ):
+    monkeypatch.setenv("MISSION_DATA_DIR", str(tmp_path))
     scaffold = generate_backend_service_scaffold(
         mission_title="Acme Mission",
         orchestrator_agent_name="acme-orchestrator",

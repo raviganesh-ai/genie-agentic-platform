@@ -698,6 +698,7 @@ Every deployment to the shared Azure evaluation environment (backend Container A
 - **Sample integration fix**: the Sample prototype UI submitted shorthand JSON fields such as `runId`, while its generated orchestrator read different names such as `runIdOutputDirectoryName`; the backend therefore failed before its first stream event and the UI reported that it returned no output.
 - **No new gate**: UI generation now receives the already-generated orchestrator source as authoritative context and uses its exact request keys directly. Genie does not add a new validation stage or withhold a prototype over component naming.
 - **Prototype stays useful**: if generated pipeline glue still cannot accept a request, the mission backend records the error and uses its existing Orchestrator Agent fallback with the full uploaded sample content instead of returning an empty stream.
+- **Portable regression coverage**: the structured-upload fallback test uses an isolated temporary mission data directory on both Linux CI and Windows development hosts.
 
 ### 2026-09-29 — Fix generated prototype frontend manifests
 
