@@ -786,6 +786,23 @@ prompts:
       the result and its "summary" line, instead of silently reported as
       a plain success.
 
+      STAGE FAILURE TRANSPARENCY - never wrap a specialist agent's call in
+      a broad try/except that swallows a raised exception and silently
+      continues with an empty/default result (for example treating a
+      failed ingestion step as "zero documents found" and reporting the
+      full required scope as missing, as if the run had genuinely covered
+      nothing). If a specialist agent's call raises, capture its type and
+      message into the returned `dict` under `"stage_errors"` (a list of
+      objects with at least `"agent"` and `"error"` keys), narrate the
+      failure via `on_progress` if available (e.g. "<Agent name> failed:
+      <error>") so the live UI shows it instead of appearing to complete
+      cleanly, and set the returned `dict`'s `"success"` key to `false`
+      when any required stage failed to produce usable output. Never let
+      an unhandled or silently-caught upstream failure surface as an
+      apparently-successful, merely "unlucky" empty result - the end user
+      must be able to tell the difference between "the input genuinely
+      had none of the required items" and "the pipeline itself broke".
+
       CODE STRUCTURE - no noise:
       - imports: alphabetically sorted, stdlib first, third-party next
       - FunctionTool definitions: sorted alphabetically by tool name
@@ -1173,6 +1190,19 @@ prompts:
       inspecting the uploaded input's own fields, never guessed or
       hardcoded - so a partial or off-scope run is visible in the result
       instead of silently reported as a plain success.
+      STAGE FAILURE TRANSPARENCY - never wrap a specialist agent's call in
+      a broad try/except that swallows a raised exception and silently
+      continues with an empty/default result (for example treating a
+      failed ingestion step as "zero documents found" and reporting the
+      full required scope as missing). If a specialist agent's call
+      raises, capture its type and message into the returned `dict` under
+      `"stage_errors"` (a list of objects with at least `"agent"` and
+      `"error"` keys), narrate the failure via `on_progress` if available
+      (e.g. "<Agent name> failed: <error>"), and set the returned
+      `dict`'s `"success"` key to `false` when any required stage failed
+      to produce usable output. Never let a silently-caught upstream
+      failure surface as an apparently-successful, merely "unlucky" empty
+      result.
       Include a comment: "Once deployed to Azure AI Foundry, this
       Orchestrator Agent is reachable only through this mission's own
       backend service - never directly from the browser."

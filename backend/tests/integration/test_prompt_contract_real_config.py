@@ -224,6 +224,31 @@ def test_orchestrator_prompts_require_reporting_coverage_gaps_against_enumerated
         assert '"unexpected_items"' in template
 
 
+def test_orchestrator_prompts_require_surfacing_specialist_stage_failures():
+    """Regression guard for a live "sampl-989d7318" blind-MQM mission: the
+    generated Orchestrator caught the Package Ingest Agent's exception
+    (raised when it could not locate/parse a compatible package JSON) in a
+    broad try/except and silently continued, returning a well-formed but
+    entirely empty result (0 documents, 0 experiments, all 7 required
+    languages reported as "missing") that looked like a plain, if unlucky,
+    empty run rather than a broken pipeline. The COVERAGE VALIDATION
+    contract alone cannot distinguish "the input genuinely had none of the
+    required items" from "an upstream stage failed and was swallowed", so
+    both orchestrator-generation prompts must also require the returned
+    result to explicitly surface any caught specialist-agent exception
+    (via a `"stage_errors"` list and a `"success": false` flag) instead of
+    letting it disappear into an apparently-successful empty result.
+    """
+    registry = PromptRegistry.load(_REPO_CONFIG_ROOT / "prompts")
+
+    for prompt_id in ("build-generation-v1", "build-generation-component-v1"):
+        template = " ".join(registry.get(prompt_id).template.split())
+        assert "STAGE FAILURE TRANSPARENCY" in template
+        assert '"stage_errors"' in template
+        assert '"success"' in template
+        assert "never wrap a specialist agent's call in" in template.lower()
+
+
 def test_all_generation_prompts_preserve_every_approved_requirement_id():
     registry = PromptRegistry.load(_REPO_CONFIG_ROOT / "prompts")
 
