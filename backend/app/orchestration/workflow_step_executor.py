@@ -23,7 +23,6 @@ from app.models.workflow_stream_models import WorkflowStreamEvent
 from app.orchestration.workflow_event_bus import WorkflowEventBus
 from app.prompts.registry import PromptRegistry
 from app.services.model_catalog_service import ModelCatalogService
-from app.services.requirement_fidelity_service import missing_requirement_ids
 from app.workflows.models import WorkflowStep
 
 __all__ = ["MissingMemoryReferenceError", "MissingPromptError", "WorkflowStepExecutor"]
@@ -31,7 +30,6 @@ __all__ = ["MissingMemoryReferenceError", "MissingPromptError", "WorkflowStepExe
 _PREVIEW_MAX_LENGTH = 240
 _DELEGATED_OUTPUT_MARKER = "DELEGATED_OUTPUT_STORED"
 _COMPONENT_FAILURE_MARKER = "GENERATION FAILED"
-_REQUIREMENT_COVERAGE_VARIABLES = ("approved_requirements", "requirements")
 _MODEL_CATALOG_SOURCE = "model-catalog"
 
 
@@ -85,29 +83,13 @@ def _display_agent_id(step: WorkflowStep, fallback_agent_id: str) -> str:
     return fallback_agent_id
 
 
-def _require_complete_requirement_coverage(
-    *, step_id: str, variables: dict[str, str], output_text: str
-) -> None:
-    requirements_text = next(
-        (
-            variables[name]
-            for name in _REQUIREMENT_COVERAGE_VARIABLES
-            if variables.get(name)
-        ),
-        None,
-    )
-    if step_id != "build-solution" or not requirements_text:
+def _reject_failed_generated_build(*, step_id: str, output_text: str) -> None:
+    if step_id != "build-solution":
         return
     if _COMPONENT_FAILURE_MARKER in output_text:
         raise FoundryUnavailableError(
             "Workflow step 'build-solution' contains a failed generated component; "
             "partial placeholder artifacts cannot proceed to deployment."
-        )
-    missing_ids = missing_requirement_ids(requirements_text, output_text)
-    if missing_ids:
-        raise FoundryUnavailableError(
-            f"Workflow step '{step_id}' omitted approved requirement ids: "
-            + ", ".join(missing_ids)
         )
 
 
@@ -246,9 +228,8 @@ class WorkflowStepExecutor:
                     "without storing specialist output in shared memory."
                 )
 
-        _require_complete_requirement_coverage(
+        _reject_failed_generated_build(
             step_id=step.id,
-            variables=variables,
             output_text=output_text or "",
         )
 

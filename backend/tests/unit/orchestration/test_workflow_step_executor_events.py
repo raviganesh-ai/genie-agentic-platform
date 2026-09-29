@@ -26,7 +26,7 @@ from app.models.workflow_stream_models import WorkflowStreamEvent
 from app.orchestration.workflow_step_executor import (
     WorkflowStepExecutor,
     _display_agent_id,
-    _require_complete_requirement_coverage,
+    _reject_failed_generated_build,
 )
 from app.workflows.models import WorkflowStep
 
@@ -59,26 +59,23 @@ def test_display_agent_id_falls_back_when_no_tool_name_resolves_to_a_delegation(
 
 
 def test_architecture_does_not_require_literal_requirement_id_repetition() -> None:
-    _require_complete_requirement_coverage(
+    _reject_failed_generated_build(
         step_id="design-architecture",
-        variables={"approved_requirements": "[REQ-001] Search. [REQ-002] Export."},
         output_text="Search and export are handled by the workflow.",
     )
 
 
-def test_build_coverage_accepts_every_approved_id_across_generated_components() -> None:
-    _require_complete_requirement_coverage(
+def test_build_does_not_require_literal_requirement_id_repetition() -> None:
+    _reject_failed_generated_build(
         step_id="build-solution",
-        variables={"requirements": "[REQ-001] Search. [REQ-002] Export."},
-        output_text="# requirements: REQ-001\n// requirements: REQ-002",
+        output_text="Generated search and export implementation.",
     )
 
 
 def test_build_coverage_rejects_failed_component_placeholder() -> None:
     with pytest.raises(FoundryUnavailableError, match="placeholder artifacts"):
-        _require_complete_requirement_coverage(
+        _reject_failed_generated_build(
             step_id="build-solution",
-            variables={"requirements": "[REQ-001] Search."},
             output_text="# requirements: REQ-001\n# GENERATION FAILED: Foundry unavailable",
         )
 

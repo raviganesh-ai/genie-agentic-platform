@@ -695,7 +695,7 @@ Every deployment to the shared Azure evaluation environment (backend Container A
 
 ### 2026-09-28 — Judge the prototype, not architecture formatting
 
-- **Unblocked generation**: Architecture no longer fails merely because its prose omits one or more literal approved `REQ-*` identifiers, and component generation no longer repeats that precheck before invoking the Build Agent.
+- **Unblocked generation**: Architecture and generated source no longer fail merely because their text omits one or more literal approved `REQ-*` identifiers, and component generation no longer repeats that precheck before invoking the Build Agent.
 - **Intelligent responsibility split**: approved requirements and goals continue to guide architecture and generation, while semantic fidelity is established by the generated implementation and real deployed outcome evidence rather than ID repetition in an intermediate document.
 - **Meaningful gates preserved**: incomplete or failed generated components remain blocked; every approved goal still requires dedicated passing end-to-end evidence, and aggregate supporting-requirement coverage remains enforced.
 
