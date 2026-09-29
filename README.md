@@ -693,10 +693,11 @@ The script uses Microsoft Entra authentication, creates only missing model deplo
 
 Every deployment to the shared Azure evaluation environment (backend Container App and/or frontend Static Web App) is recorded here: commit, what changed, and why. Update this section as part of the same commit that ships the fix/feature, before pushing to `master` triggers [Continuous deployment](#continuous-deployment-github-actions).
 
-### 2026-09-29 — Preserve generated UI/backend payload contracts
+### 2026-09-29 — Connect generated UI and backend by construction
 
 - **Sample integration fix**: the Sample prototype UI submitted shorthand JSON fields such as `runId`, while its generated orchestrator read different names such as `runIdOutputDirectoryName`; the backend therefore failed before its first stream event and the UI reported that it returned no output.
-- **Existing repair restored**: JavaScript comments, including comments containing commas, can no longer hide UI payload keys from the existing materialization contract check. Mismatched generated UI/orchestrator code now enters the existing bounded build-repair path before deployment.
+- **No new gate**: UI generation now receives the already-generated orchestrator source as authoritative context and uses its exact request keys directly. Genie does not add a new validation stage or withhold a prototype over component naming.
+- **Prototype stays useful**: if generated pipeline glue still cannot accept a request, the mission backend records the error and uses its existing Orchestrator Agent fallback with the full uploaded sample content instead of returning an empty stream.
 
 ### 2026-09-29 — Fix generated prototype frontend manifests
 

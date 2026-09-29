@@ -447,6 +447,11 @@ async def test_call_build_agent_generates_one_component_at_a_time_when_architect
         assert r.variables["architecture"] == _ARCHITECTURE_WITH_TWO_SPECIALISTS
         assert r.variables["policies"] == "Must use managed identity (no embedded credentials)"
 
+    assert all(not request.variables["prior_components"] for request in gateway.requests[:-1])
+    ui_context = gateway.requests[-1].variables["prior_components"]
+    assert "# agent: orchestrator\norchestrator code" in ui_context
+    assert "# agent: Ticket Classifier Agent\nclassifier code" in ui_context
+
     expected_combined = (
         "```python\n# agent: Ticket Classifier Agent\nclassifier code\n```"
         "\n\n"

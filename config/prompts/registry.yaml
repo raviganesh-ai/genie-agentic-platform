@@ -1065,6 +1065,16 @@ prompts:
       Component to generate now: a "{component_kind}" named
       "{component_name}".
 
+      Earlier generated components available as integration context
+      (provided for UI generation and otherwise empty):
+      {prior_components}
+
+      If component_kind is "ui", the earlier Orchestrator source above is
+      the integration contract. Compose the UI's flat JSON message with the
+      exact keys that Orchestrator source already reads; do not rename,
+      reinterpret, or alias them. This is generation context, not a
+      validation gate: produce the working UI directly.
+
       If component_kind is "agent": Produce one Python 3.12 module for the
       agent named "{component_name}", literally from the architecture's
       "## Multi-Agent Workflow". Implement ONLY its described responsibility
@@ -1356,7 +1366,8 @@ prompts:
       - component_name
       - user_message
       - assigned_requirements
-    version: "1.23.0"
+      - prior_components
+    version: "1.24.0"
 
   - id: build-component-regeneration-v1
     name: Build Generation - Regenerate Single Component

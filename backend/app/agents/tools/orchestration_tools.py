@@ -503,6 +503,9 @@ async def _generate_build_by_component(
             "component_kind": component_kind,
             "component_name": component_name,
             "assigned_requirements": assigned_requirements,
+            "prior_components": (
+                "\n\n".join(pieces) if component_kind == "ui" else ""
+            ),
         }
         request = AgentExecutionRequest(
             agent_id=delegation.target_agent_id,
