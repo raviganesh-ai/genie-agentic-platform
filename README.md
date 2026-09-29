@@ -693,6 +693,11 @@ The script uses Microsoft Entra authentication, creates only missing model deplo
 
 Every deployment to the shared Azure evaluation environment (backend Container App and/or frontend Static Web App) is recorded here: commit, what changed, and why. Update this section as part of the same commit that ships the fix/feature, before pushing to `master` triggers [Continuous deployment](#continuous-deployment-github-actions).
 
+### 2026-09-29 — Preserve generated UI/backend payload contracts
+
+- **Sample integration fix**: the Sample prototype UI submitted shorthand JSON fields such as `runId`, while its generated orchestrator read different names such as `runIdOutputDirectoryName`; the backend therefore failed before its first stream event and the UI reported that it returned no output.
+- **Existing repair restored**: JavaScript comments, including comments containing commas, can no longer hide UI payload keys from the existing materialization contract check. Mismatched generated UI/orchestrator code now enters the existing bounded build-repair path before deployment.
+
 ### 2026-09-29 — Fix generated prototype frontend manifests
 
 - **Valid package metadata**: generated prototype frontends now serialize `package.json` from structured data, preserving the quoted nonblocking Impeccable command as valid JSON.

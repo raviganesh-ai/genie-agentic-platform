@@ -264,6 +264,31 @@ def test_materialize_build_rejects_ui_orchestrator_key_mismatch():
         materialize_build(output)
 
 
+def test_materialize_build_rejects_shorthand_ui_key_mismatch_after_line_comment():
+    output = _SAMPLE_OUTPUT.replace(
+        "class OrchestratorAgent:\n    async def run(self, ui_message: str, on_progress=None) -> None:",
+        """class OrchestratorAgent:
+    async def run(self, ui_message: str, on_progress=None) -> None:
+        config = json.loads(ui_message)
+        run_id = config.get("runIdOutputDirectoryName")""",
+    ).replace(
+        "export function MissionApp() {\n    return null;\n}",
+        """export function MissionApp() {
+    const messageObject = {
+        // Package and run identity
+        packageFileName: file.name,
+        runId, // REQ-006, REQ-009
+    };
+    const message = JSON.stringify(messageObject);
+    onSubmit(message, attachments);
+    return null;
+}""",
+    )
+
+    with pytest.raises(MaterializedCodeError, match="runIdOutputDirectoryName"):
+        materialize_build(output)
+
+
 def test_materialize_build_allows_matching_key_through_config_helper():
     output = _SAMPLE_OUTPUT.replace(
         "class OrchestratorAgent:\n    async def run(self, ui_message: str, on_progress=None) -> None:",

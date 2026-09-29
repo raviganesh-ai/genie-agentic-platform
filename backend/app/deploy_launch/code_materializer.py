@@ -136,10 +136,60 @@ def _extract_balanced_braces(text: str, open_index: int) -> str | None:
     return None
 
 
+def _strip_javascript_comments(source: str) -> str:
+    result: list[str] = []
+    in_string: str | None = None
+    in_line_comment = False
+    in_block_comment = False
+    i = 0
+    while i < len(source):
+        ch = source[i]
+        next_ch = source[i + 1] if i + 1 < len(source) else ""
+        if in_line_comment:
+            if ch in "\r\n":
+                in_line_comment = False
+                result.append(ch)
+            i += 1
+            continue
+        if in_block_comment:
+            if ch == "*" and next_ch == "/":
+                in_block_comment = False
+                i += 2
+            else:
+                i += 1
+            continue
+        if in_string is not None:
+            result.append(ch)
+            if ch == "\\" and i + 1 < len(source):
+                result.append(source[i + 1])
+                i += 2
+                continue
+            if ch == in_string:
+                in_string = None
+            i += 1
+            continue
+        if ch in "'\"`":
+            in_string = ch
+            result.append(ch)
+            i += 1
+            continue
+        if ch == "/" and next_ch == "/":
+            in_line_comment = True
+            i += 2
+            continue
+        if ch == "/" and next_ch == "*":
+            in_block_comment = True
+            i += 2
+            continue
+        result.append(ch)
+        i += 1
+    return "".join(result)
+
+
 def _top_level_object_entries(object_literal: str) -> list[str]:
     """Splits a ``{...}`` object literal's body into top-level ``key: value`` entries."""
 
-    body = object_literal.strip().removeprefix("{").removesuffix("}")
+    body = _strip_javascript_comments(object_literal).strip().removeprefix("{").removesuffix("}")
 
     entries: list[str] = []
     current: list[str] = []
@@ -238,10 +288,9 @@ def _static_object_keys(object_literal: str) -> set[str] | None:
     keys: set[str] = set()
     for entry in _top_level_object_entries(object_literal):
         entry = re.sub(
-            r"^(?:\s|//[^\r\n]*(?:\r?\n|$)|/\*.*?\*/)*",
+            r"^(?:\s|//[^\r\n]*(?:\r?\n|$)|/\*[\s\S]*?\*/)*",
             "",
             entry,
-            flags=re.DOTALL,
         )
         if not entry:
             continue
