@@ -157,14 +157,30 @@ _FRONTEND_INDEX_HTML_TEMPLATE = """<!doctype html>
 </html>
 """
 
-_FRONTEND_PACKAGE_JSON = """{
-    "private": true,
-    "type": "module",
-    "scripts": {"build": "npm run design:check && vite build", "design:check": "impeccable detect MissionApp.tsx src/ || node -e \"console.warn('Impeccable findings recorded; continuing prototype build.')\""},
-    "dependencies": {"react": "18.3.1", "react-dom": "18.3.1"},
-    "devDependencies": {"@vitejs/plugin-react": "4.3.4", "@types/react": "18.3.18", "@types/react-dom": "18.3.5", "impeccable": "3.6.0", "typescript": "5.7.2", "vite": "6.4.3"}
-}
-"""
+_FRONTEND_PACKAGE_JSON = json.dumps(
+    {
+        "private": True,
+        "type": "module",
+        "scripts": {
+            "build": "npm run design:check && vite build",
+            "design:check": (
+                "impeccable detect MissionApp.tsx src/ || "
+                "node -e \"console.warn('Impeccable findings recorded; continuing prototype "
+                "build.')\""
+            ),
+        },
+        "dependencies": {"react": "18.3.1", "react-dom": "18.3.1"},
+        "devDependencies": {
+            "@vitejs/plugin-react": "4.3.4",
+            "@types/react": "18.3.18",
+            "@types/react-dom": "18.3.5",
+            "impeccable": "3.6.0",
+            "typescript": "5.7.2",
+            "vite": "6.4.3",
+        },
+    },
+    indent=4,
+) + "\n"
 
 _FRONTEND_TSCONFIG_JSON = """{
     "compilerOptions": {

@@ -693,6 +693,11 @@ The script uses Microsoft Entra authentication, creates only missing model deplo
 
 Every deployment to the shared Azure evaluation environment (backend Container App and/or frontend Static Web App) is recorded here: commit, what changed, and why. Update this section as part of the same commit that ships the fix/feature, before pushing to `master` triggers [Continuous deployment](#continuous-deployment-github-actions).
 
+### 2026-09-29 — Fix generated prototype frontend manifests
+
+- **Valid package metadata**: generated prototype frontends now serialize `package.json` from structured data, preserving the quoted nonblocking Impeccable command as valid JSON.
+- **Observed failure fixed**: SampleDemo ACR runs `chdg` through `chdk` failed at `npm install` with `EJSONPARSE`; the generated application code was never reached.
+
 ### 2026-09-28 — Keep prototyping stages moving
 
 - **Prototype-first flow**: generated acceptance-test formatting, missing coverage, weak evidence, test failures, timeouts, and exhausted fidelity repair no longer withhold an already deployed prototype. Genie launches it with explicit validation gaps.

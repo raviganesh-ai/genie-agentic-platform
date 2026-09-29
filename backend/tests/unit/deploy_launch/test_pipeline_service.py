@@ -10,6 +10,7 @@ no separate approval-checkpoint request/decide dance to exercise here.
 """
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -1117,11 +1118,15 @@ def test_goal_req_001_delivers_approved_outcome():
 def test_generated_frontend_reports_impeccable_findings_without_blocking_build() -> None:
     from app.deploy_launch.pipeline_service import _FRONTEND_PACKAGE_JSON
 
-    assert '"impeccable": "3.6.0"' in _FRONTEND_PACKAGE_JSON
-    assert '"vite": "6.4.3"' in _FRONTEND_PACKAGE_JSON
-    assert "impeccable detect MissionApp.tsx src/ || node -e" in _FRONTEND_PACKAGE_JSON
-    assert "continuing prototype build" in _FRONTEND_PACKAGE_JSON
-    assert '"build": "npm run design:check && vite build"' in _FRONTEND_PACKAGE_JSON
+    package = json.loads(_FRONTEND_PACKAGE_JSON)
+
+    assert package["devDependencies"]["impeccable"] == "3.6.0"
+    assert package["devDependencies"]["vite"] == "6.4.3"
+    assert package["scripts"]["build"] == "npm run design:check && vite build"
+    assert package["scripts"]["design:check"] == (
+        "impeccable detect MissionApp.tsx src/ || "
+        "node -e \"console.warn('Impeccable findings recorded; continuing prototype build.')\""
+    )
 
 
 def test_generated_mission_input_does_not_nest_custom_zones_inside_a_shell_card() -> None:
