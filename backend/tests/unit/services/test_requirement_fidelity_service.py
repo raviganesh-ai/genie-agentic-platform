@@ -57,6 +57,44 @@ def test_req_001_processes_every_document():
     assert report.gaps == ["REQ-002: no executable acceptance test"]
 
 
+def test_goal_requires_dedicated_end_to_end_goal_test() -> None:
+    requirements = """
+Goals:
+- [REQ-001] Improve multilingual translation quality through iterative evaluation.
+Must-Have Functional Requirements:
+- [REQ-002] Produce an evaluation manifest.
+"""
+    generic_report = record_test_coverage(
+        create_fidelity_report(requirements, max_repair_attempts=3),
+        [
+            "# REQ-001\ndef test_req_001_manifest_has_models():\n    assert manifest_models()",
+            "# REQ-002\ndef test_req_002_manifest():\n    assert manifest_exists()",
+        ],
+    )
+
+    assert generic_report.goal_requirement_ids == ["REQ-001"]
+    assert generic_report.requirements[0].status == "missing"
+    assert generic_report.requirements[0].test_names == []
+    assert generic_report.gaps == ["REQ-001: no executable end-to-end goal test"]
+
+    goal_report = record_test_coverage(
+        create_fidelity_report(requirements, max_repair_attempts=3),
+        [
+            (
+                "# REQ-001\ndef test_goal_req_001_iteratively_improves_translation():\n"
+                "    assert deployed_run_improves_translation()"
+            ),
+            "# REQ-002\ndef test_req_002_manifest():\n    assert manifest_exists()",
+        ],
+    )
+
+    assert goal_report.coverage_percent == 100
+    assert goal_report.requirements[0].status == "covered"
+    assert goal_report.requirements[0].test_names == [
+        "test_goal_req_001_iteratively_improves_translation"
+    ]
+
+
 def test_ninety_percent_coverage_passes_when_every_executable_test_passes() -> None:
     requirements = "\n".join(
         f"[REQ-{number:03d}] Requirement {number}." for number in range(1, 11)

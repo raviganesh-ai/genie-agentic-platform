@@ -54,6 +54,7 @@ _DIRECT_FOUNDRY_AGENT_IMPORT_PATTERN: Final = re.compile(
     r"^from agent_framework\.foundry import FoundryAgent(?P<suffix>[^\n]*)$",
     re.MULTILINE,
 )
+_NONEXISTENT_ASYNCIO_RANDOM_PATTERN: Final = re.compile(r"\basyncio\.Random\b")
 _EXACT_FILE_NAME_COMPARISON_PATTERN: Final = re.compile(
     r"\b[A-Za-z_$][\w$]*\.name\s*(?:===|!==|==|!=)\s*"
     r"(?P<quote>['\"`])[^'\"`\r\n]*\.[A-Za-z0-9]{1,10}(?P=quote)",
@@ -233,6 +234,135 @@ def _has_nested_object_value(object_literal: str) -> bool:
     return False
 
 
+def _static_object_keys(object_literal: str) -> set[str] | None:
+    keys: set[str] = set()
+    for entry in _top_level_object_entries(object_literal):
+        entry = re.sub(
+            r"^(?:\s|//[^\r\n]*(?:\r?\n|$)|/\*.*?\*/)*",
+            "",
+            entry,
+            flags=re.DOTALL,
+        )
+        if not entry:
+            continue
+        key_source, separator, _ = entry.partition(":")
+        key_source = key_source.strip() if separator else entry.strip()
+        if key_source.startswith(("...", "[")):
+            return None
+        if re.fullmatch(r"[A-Za-z_$][\w$]*", key_source):
+            keys.add(key_source)
+            continue
+        quoted_key = re.fullmatch(r"(['\"])([^'\"]+)\1", key_source)
+        if quoted_key is None:
+            return None
+        keys.add(quoted_key.group(2))
+    return keys
+
+
+def _static_mapping_reads(root: ast.AST, variable_names: set[str]) -> set[str]:
+    keys: set[str] = set()
+    for node in ast.walk(root):
+        if (
+            isinstance(node, ast.Subscript)
+            and isinstance(node.value, ast.Name)
+            and node.value.id in variable_names
+            and isinstance(node.slice, ast.Constant)
+            and isinstance(node.slice.value, str)
+        ):
+            keys.add(node.slice.value)
+        elif (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id in variable_names
+            and node.func.attr == "get"
+            and node.args
+            and isinstance(node.args[0], ast.Constant)
+            and isinstance(node.args[0].value, str)
+        ):
+            keys.add(node.args[0].value)
+    return keys
+
+
+def _orchestrator_payload_keys(orchestrator_module: str) -> set[str]:
+    try:
+        tree = ast.parse(orchestrator_module)
+    except SyntaxError:
+        return set()
+
+    payload_variables: set[str] = set()
+    for node in ast.walk(tree):
+        value: ast.expr | None = None
+        targets: list[ast.expr] = []
+        if isinstance(node, ast.Assign):
+            value = node.value
+            targets = node.targets
+        elif isinstance(node, ast.AnnAssign):
+            value = node.value
+            targets = [node.target]
+        if not (
+            isinstance(value, ast.Call)
+            and isinstance(value.func, ast.Attribute)
+            and isinstance(value.func.value, ast.Name)
+            and value.func.value.id == "json"
+            and value.func.attr == "loads"
+        ):
+            continue
+        payload_variables.update(
+            target.id for target in targets if isinstance(target, ast.Name)
+        )
+
+    keys = _static_mapping_reads(tree, payload_variables)
+    function_definitions: dict[str, list[ast.FunctionDef | ast.AsyncFunctionDef]] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            function_definitions.setdefault(node.name, []).append(node)
+
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        if isinstance(node.func, ast.Attribute):
+            function_name = node.func.attr
+            bound_method = True
+        elif isinstance(node.func, ast.Name):
+            function_name = node.func.id
+            bound_method = False
+        else:
+            continue
+        for function_definition in function_definitions.get(function_name, []):
+            parameters = [
+                *function_definition.args.posonlyargs,
+                *function_definition.args.args,
+            ]
+            parameter_offset = (
+                1
+                if bound_method
+                and parameters
+                and parameters[0].arg in {"self", "cls"}
+                else 0
+            )
+            for argument_index, argument in enumerate(node.args):
+                parameter_index = argument_index + parameter_offset
+                if (
+                    isinstance(argument, ast.Name)
+                    and argument.id in payload_variables
+                    and parameter_index < len(parameters)
+                ):
+                    keys.update(
+                        _static_mapping_reads(
+                            function_definition, {parameters[parameter_index].arg}
+                        )
+                    )
+            for keyword in node.keywords:
+                if (
+                    keyword.arg is not None
+                    and isinstance(keyword.value, ast.Name)
+                    and keyword.value.id in payload_variables
+                ):
+                    keys.update(_static_mapping_reads(function_definition, {keyword.arg}))
+    return keys
+
+
 def _has_strict_sample_cardinality_gate(source: str, *, python_source: bool) -> bool:
     matches = list(_SAMPLE_CARDINALITY_COMPARISON_PATTERN.finditer(source))
     if not matches:
@@ -373,6 +503,16 @@ def materialize_build(output_text: str) -> MaterializedBuild:
             "reply instead of running this mission's real pipeline."
         )
 
+    if (
+        orchestrator_module is not None
+        and _NONEXISTENT_ASYNCIO_RANDOM_PATTERN.search(orchestrator_module)
+    ):
+        raise MaterializedCodeError(
+            "The generated orchestrator references 'asyncio.Random', which does not "
+            "exist and prevents the module from importing. Use 'random.Random' from "
+            "Python's random module for deterministic seeded randomness."
+        )
+
     if ui_component is not None and _EXACT_FILE_NAME_COMPARISON_PATTERN.search(ui_component):
         raise MaterializedCodeError(
             "The generated mission UI compares an uploaded file's name to an exact "
@@ -421,9 +561,8 @@ def materialize_build(output_text: str) -> MaterializedBuild:
                 "for every specialist agent: " + ", ".join(sorted(missing_progress))
             )
 
-    if ui_component is not None and any(
-        _has_nested_object_value(literal) for literal in _submit_payload_literals(ui_component)
-    ):
+    submit_payloads = _submit_payload_literals(ui_component) if ui_component is not None else []
+    if any(_has_nested_object_value(literal) for literal in submit_payloads):
         raise MaterializedCodeError(
             "The generated mission UI's submit payload groups fields inside nested "
             "objects (for example {\"evaluation_config\": {\"primary_model_id\": ...}}). "
@@ -431,6 +570,22 @@ def materialize_build(output_text: str) -> MaterializedBuild:
             "one key per rendered field - a nested payload silently breaks every "
             "'config.get(...)' read in the orchestrator's json.loads(ui_message)."
         )
+
+    if orchestrator_module is not None and submit_payloads:
+        payload_key_sets = [_static_object_keys(payload) for payload in submit_payloads]
+        if all(keys is not None for keys in payload_key_sets):
+            ui_keys = set().union(*(keys for keys in payload_key_sets if keys is not None))
+            missing_ui_keys = sorted(
+                _orchestrator_payload_keys(orchestrator_module) - ui_keys
+            )
+            if missing_ui_keys:
+                raise MaterializedCodeError(
+                    "The generated mission UI does not submit JSON key(s) required by "
+                    "the Orchestrator: "
+                    + ", ".join(missing_ui_keys)
+                    + ". The UI's JSON.stringify object and every Orchestrator "
+                    "config read must use the exact same key names and casing."
+                )
 
     return MaterializedBuild(
         agent_modules=agent_modules,

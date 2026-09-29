@@ -75,6 +75,16 @@ class FactoryOrchestratorAgent:
         materialize_build(misnamed_output)
 
 
+def test_materialize_build_rejects_nonexistent_asyncio_random_type():
+    output = _SAMPLE_OUTPUT.replace(
+        "class OrchestratorAgent:",
+        "class OrchestratorAgent:\n    def _deterministic_rng(self) -> asyncio.Random:\n        pass",
+    )
+
+    with pytest.raises(MaterializedCodeError, match="asyncio.Random"):
+        materialize_build(output)
+
+
 def test_materialize_build_rejects_exact_uploaded_filename_gate():
     output = _SAMPLE_OUTPUT.replace(
         "export function MissionApp() {",
@@ -224,6 +234,60 @@ def test_materialize_build_allows_flat_submit_payload():
 
     assert build.ui_component is not None
     assert "primary_model_id" in build.ui_component
+
+
+def test_materialize_build_rejects_ui_orchestrator_key_mismatch():
+    output = _SAMPLE_OUTPUT.replace(
+        "class OrchestratorAgent:\n    async def run(self, ui_message: str, on_progress=None) -> None:",
+        """class OrchestratorAgent:
+    async def run(self, ui_message: str, on_progress=None) -> None:
+        config_raw = json.loads(ui_message)
+        run_name = self._build_run_config(config_raw)
+
+    def _build_run_config(self, config):
+        return config["runName"]""",
+    ).replace(
+        "export function MissionApp() {\n    return null;\n}",
+        """export function MissionApp() {
+    const messagePayload = {
+        // Human-readable audit label
+        runNameTag: runName || null, // optional external label
+    };
+    const message = JSON.stringify(messagePayload);
+    onSubmit(message);
+    return null;
+}""",
+    )
+
+    with pytest.raises(MaterializedCodeError, match="runName"):
+        materialize_build(output)
+
+
+def test_materialize_build_allows_matching_key_through_config_helper():
+    output = _SAMPLE_OUTPUT.replace(
+        "class OrchestratorAgent:\n    async def run(self, ui_message: str, on_progress=None) -> None:",
+        """class OrchestratorAgent:
+    async def run(self, ui_message: str, on_progress=None) -> None:
+        config_raw = json.loads(ui_message)
+        run_name = self._build_run_config(config_raw)
+
+    def _build_run_config(self, config):
+        return config.get("runName")""",
+    ).replace(
+        "export function MissionApp() {\n    return null;\n}",
+        """export function MissionApp() {
+    const messagePayload = {
+        runName: runName || null, // optional external label
+    };
+    const message = JSON.stringify(messagePayload);
+    onSubmit(message);
+    return null;
+}""",
+    )
+
+    build = materialize_build(output)
+
+    assert build.ui_component is not None
 
 
 def test_materialize_build_allows_unrelated_nested_serialization():

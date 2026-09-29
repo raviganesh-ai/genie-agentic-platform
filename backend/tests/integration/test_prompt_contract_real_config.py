@@ -243,6 +243,32 @@ def test_all_generation_prompts_preserve_every_approved_requirement_id():
         assert "Prototype status never authorizes omission" in template
 
 
+def test_generation_prompts_require_end_to_end_goal_alignment_evidence():
+    registry = PromptRegistry.load(_REPO_CONFIG_ROOT / "prompts")
+
+    extraction = " ".join(registry.get("requirements-extraction-v1").template.split())
+    assert "Every goal must have its own stable REQ id" in extraction
+    assert "observable end-user outcome" in extraction
+
+    architecture = " ".join(
+        registry.get("architecture-recommendation-v1").template.split()
+    )
+    assert "MISSION GOAL ALIGNMENT" in architecture
+    assert "exact approved goal" in architecture
+
+    for prompt_id in ("build-generation-v1", "build-generation-component-v1"):
+        template = " ".join(registry.get(prompt_id).template.split())
+        assert "GOAL ALIGNMENT" in template
+        assert "goal is achieved end to end" in template
+
+    test_generation = " ".join(
+        registry.get("test-generation-v1").template.split()
+    )
+    assert "GOAL OUTCOME GATE" in test_generation
+    assert "test_goal_req_" in test_generation
+    assert "metadata, configuration, schema, or HTTP status alone" in test_generation
+
+
 def test_acceptance_test_prompt_uses_trusted_auth_proxy_without_disclosing_token():
     registry = PromptRegistry.load(_REPO_CONFIG_ROOT / "prompts")
 

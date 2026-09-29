@@ -41,6 +41,13 @@ prompts:
       requirement during the existing Requirements review; you may
       recommend priority, but must never silently reduce prototype scope.
 
+      Every goal must have its own stable REQ id from that same sequence
+      and state the observable end-user outcome that proves the goal was
+      achieved. A goal is not background narrative: it is an approved,
+      testable contract that must remain distinct from supporting
+      functional and non-functional requirements. Never replace a goal
+      with implementation details or duplicate its REQ id on another item.
+
       REVIEW & CATEGORIZATION PHASE:
       Review your extraction. For EVERY functional requirement, classify
       it as either:
@@ -123,7 +130,7 @@ prompts:
     variables:
       - transcript_excerpt
       - user_message
-    version: "2.2.0"
+    version: "2.3.0"
 
 
   - id: architecture-recommendation-v1
@@ -165,6 +172,15 @@ prompts:
       ID must appear in the responsibility text of at least one UI zone or
       agent. A requirement is out of scope only when it is absent from the
       user-approved payload below.
+
+      MISSION GOAL ALIGNMENT - treat every REQ id under the approved
+      `Goals:` heading as the mission's top-level invariant. Preserve the
+      exact approved goal text in the Orchestrator responsibility, define
+      the observable end-user outcome that proves it was achieved, and
+      design every specialist handoff and UI input as a necessary
+      contribution to that outcome. An architecture that implements
+      supporting features but does not achieve the exact approved goal is
+      invalid and must be corrected before returning.
 
       Approved requirements:
       {approved_requirements}
@@ -320,7 +336,7 @@ prompts:
     variables:
       - approved_requirements
       - user_message
-    version: "4.5.0"
+    version: "4.6.0"
 
   - id: security-assessment-v1
     name: Security Assessment
@@ -416,6 +432,16 @@ prompts:
         above. That test must assert the requirement's real acceptance
         behavior. Comments, docstrings, and narrative mentions elsewhere
         never count as coverage.
+      - GOAL OUTCOME GATE: for every REQ id listed under the approved
+        `Goals:` heading, generate a dedicated black-box test named
+        `test_goal_req_<digits>_<observable_outcome>` and tag it with that
+        exact REQ id. It must submit the generated UI's real payload to the
+        deployed Orchestrator and assert the mission-specific end-user
+        outcome described by the goal across the specialist pipeline.
+        A result's metadata, configuration, schema, or HTTP status alone
+        never proves a goal was achieved. A generic
+        `test_req_<digits>_...` may cover a
+        supporting requirement but never satisfies a goal.
       - acceptance tests must exercise the real deployed prototype through
         `MISSION_BACKEND_URL` and/or `MISSION_FRONTEND_URL` environment
         variables. Never use mocks, patches, monkeypatch, response
@@ -481,7 +507,7 @@ prompts:
       - artifact
       - requirements
       - user_message
-    version: "1.9.0"
+    version: "1.10.0"
 
   - id: failure-diagnosis-v1
     name: Failure Diagnosis
@@ -551,6 +577,14 @@ prompts:
       outputs, and prohibited behaviors. Include each covered REQ id in a
       concise `# requirements:` or `// requirements:` line in the code block
       that implements it; every approved ID must occur in at least one block.
+
+      GOAL ALIGNMENT: Treat every REQ id under the approved `Goals:`
+      heading as the mission's top-level invariant. The Orchestrator must
+      coordinate the complete specialist chain needed to achieve each
+      goal, and its returned result must contain concrete, user-visible
+      evidence that the goal is achieved end to end. Implementing isolated
+      supporting requirements, returning metadata, or describing intended
+      work does not satisfy a goal.
 
       Phase 2 - STRUCTURE: Map approved requirements to specialist agents,
       then to the UI zones where the user will see those agents working
@@ -972,7 +1006,7 @@ prompts:
       - excluded_agents
       - available_models
       - user_message
-    version: "5.19.0"
+    version: "5.20.0"
 
   - id: build-generation-component-v1
     name: Build Generation - Single Component
@@ -1001,6 +1035,13 @@ prompts:
       to its architecture responsibility, preserve exact stated quantities
       and constraints, and include those IDs in a concise `# requirements:`
       or `// requirements:` line in the returned code block.
+
+      GOAL ALIGNMENT: Every REQ id under the approved `Goals:` heading is
+      a top-level mission invariant. This component must make its assigned
+      responsibility a real contribution to the specialist chain that
+      proves the goal is achieved end to end; the Orchestrator result must
+      expose concrete goal-outcome evidence, not only metadata, status, or
+      a description of intended work.
 
       Requirement ID(s) deterministically assigned to THIS component by the
       architecture design below (extracted from its own responsibility
@@ -1313,7 +1354,7 @@ prompts:
       - component_name
       - user_message
       - assigned_requirements
-    version: "1.22.0"
+    version: "1.23.0"
 
   - id: build-component-regeneration-v1
     name: Build Generation - Regenerate Single Component

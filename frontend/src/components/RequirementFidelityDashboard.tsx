@@ -38,6 +38,7 @@ function FidelityMetric({ label, value, tone }: { label: string; value: string; 
  * Requirement Fidelity Gate popup.
  */
 export function RequirementFidelityDashboard({ report }: { report: RequirementFidelityReport }): JSX.Element {
+  const goalRequirementIds = new Set(report.goal_requirement_ids ?? []);
   const statusColor =
     report.status === "passed"
       ? "#3fa66a"
@@ -60,6 +61,11 @@ export function RequirementFidelityDashboard({ report }: { report: RequirementFi
           label="Approved Requirements"
           value={String(report.total_requirements)}
           tone="#a3c4f3"
+        />
+        <FidelityMetric
+          label="Approved Goals"
+          value={String(goalRequirementIds.size)}
+          tone="#55c2b8"
         />
         <FidelityMetric
           label="Executable Coverage"
@@ -107,9 +113,16 @@ export function RequirementFidelityDashboard({ report }: { report: RequirementFi
                 alignItems: "start",
               }}
             >
-              <Text size={200} weight="bold" style={{ color: EVIDENCE_STATUS_COLORS[item.status] }}>
-                {item.requirement_id}
-              </Text>
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 5 }}>
+                <Text size={200} weight="bold" style={{ color: EVIDENCE_STATUS_COLORS[item.status] }}>
+                  {item.requirement_id}
+                </Text>
+                {goalRequirementIds.has(item.requirement_id) ? (
+                  <Badge size="small" appearance="outline" color="informative">
+                    Mission goal
+                  </Badge>
+                ) : null}
+              </div>
               <Text size={200}>{item.statement}</Text>
               <Text size={100} style={{ fontFamily: "monospace", whiteSpace: "pre-wrap" }}>
                 {item.test_names.length > 0 ? item.test_names.join("\n") : "Missing"}

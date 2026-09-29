@@ -80,6 +80,7 @@ export interface RequirementFidelityItem {
 export interface RequirementFidelityReport {
   status: RequirementFidelityStatus;
   requirements: RequirementFidelityItem[];
+  goal_requirement_ids: string[];
   total_requirements: number;
   covered_requirements: number;
   passed_requirements: number;

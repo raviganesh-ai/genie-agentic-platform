@@ -52,6 +52,7 @@ describe("RequirementFidelityGatePage", () => {
                   evidence: "No executable acceptance test references this requirement.",
                 },
               ],
+              goal_requirement_ids: ["REQ-001"],
               total_requirements: 2,
               covered_requirements: 1,
               passed_requirements: 1,
@@ -73,6 +74,8 @@ describe("RequirementFidelityGatePage", () => {
     });
 
     expect(await screen.findByText("REQ-002")).toBeInTheDocument();
+    expect(screen.getByText("Approved Goals")).toBeInTheDocument();
+    expect(screen.getByText("Mission goal")).toBeInTheDocument();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(screen.getByText(/Launch blocked by requirement gaps/i)).toBeInTheDocument();
   });

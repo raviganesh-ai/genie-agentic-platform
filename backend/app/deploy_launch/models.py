@@ -107,6 +107,7 @@ class RequirementFidelityReport(BaseModel):
 
     status: RequirementFidelityStatus = "pending"
     requirements: list[RequirementFidelityItem] = Field(default_factory=list)
+    goal_requirement_ids: list[str] = Field(default_factory=list)
     total_requirements: int = Field(ge=0)
     covered_requirements: int = Field(default=0, ge=0)
     passed_requirements: int = Field(default=0, ge=0)

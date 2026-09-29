@@ -65,6 +65,9 @@ line-length = 100
 target-version = "py312"
 
 [tool.ruff.lint]
+# Ruff 0.16 broadened its implicit defaults. Keep the rule set that this
+# repository and CI previously enforced stable across tool upgrades.
+select = ["E4", "E7", "E9", "F"]
 # B008 (function call in argument default) is a false positive for FastAPI's
 # `Depends(...)` dependency-injection pattern, used throughout app.api/app.security.
 ignore = ["B008"]

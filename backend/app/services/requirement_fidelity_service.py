@@ -20,6 +20,7 @@ _REQUIREMENT_ID_DIGITS_PATTERN: Final = re.compile(r"^REQ-(\d+)$", re.IGNORECASE
 _TEST_FUNCTION_PATTERN: Final = re.compile(
     r"\b(?:async\s+)?def\s+(test_[A-Za-z0-9_]+)\s*\(", re.IGNORECASE
 )
+_SECTION_HEADING_PATTERN: Final = re.compile(r"^[^\s].*:\s*$")
 
 
 def extract_requirement_ids(text: str) -> tuple[str, ...]:
@@ -60,6 +61,21 @@ def _requirement_statements(text: str) -> tuple[tuple[str, str], ...]:
     return tuple(statements.items())
 
 
+def _goal_requirement_ids(text: str) -> tuple[str, ...]:
+    goal_ids: list[str] = []
+    in_goals_section = False
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.casefold() == "goals:":
+            in_goals_section = True
+            continue
+        if in_goals_section and _SECTION_HEADING_PATTERN.fullmatch(stripped):
+            break
+        if in_goals_section:
+            goal_ids.extend(extract_requirement_ids(stripped))
+    return tuple(dict.fromkeys(goal_ids))
+
+
 def create_fidelity_report(
     requirements_text: str, *, max_repair_attempts: int
 ) -> RequirementFidelityReport:
@@ -70,6 +86,7 @@ def create_fidelity_report(
     return RequirementFidelityReport(
         status="pending" if requirements else "failed",
         requirements=requirements,
+        goal_requirement_ids=list(_goal_requirement_ids(requirements_text)),
         total_requirements=len(requirements),
         max_repair_attempts=max_repair_attempts,
         gaps=[] if requirements else ["No approved REQ IDs are available for validation."],
@@ -88,6 +105,15 @@ def _requirement_name_pattern(requirement_id: str) -> re.Pattern[str]:
     digits = match.group(1) if match else requirement_id.rsplit("-", 1)[-1]
     significant = digits.lstrip("0") or "0"
     return re.compile(rf"(?<!\d)req_0*{re.escape(significant)}(?!\d)", re.IGNORECASE)
+
+
+def _goal_test_name_pattern(requirement_id: str) -> re.Pattern[str]:
+    match = _REQUIREMENT_ID_DIGITS_PATTERN.match(requirement_id)
+    digits = match.group(1) if match else requirement_id.rsplit("-", 1)[-1]
+    significant = digits.lstrip("0") or "0"
+    return re.compile(
+        rf"^test_goal_req_0*{re.escape(significant)}(?!\d)(?:_|$)", re.IGNORECASE
+    )
 
 
 def _tagged_test_names(module: str) -> dict[str, list[str]]:
@@ -151,15 +177,27 @@ def record_test_coverage(
     requirements: list[RequirementFidelityItem] = []
     for item in report.requirements:
         test_names = _test_names_for_requirement(item.requirement_id, module_list)
+        is_goal = item.requirement_id in report.goal_requirement_ids
+        if is_goal:
+            goal_test_pattern = _goal_test_name_pattern(item.requirement_id)
+            test_names = [name for name in test_names if goal_test_pattern.search(name)]
         requirements.append(
             item.model_copy(
                 update={
                     "status": "covered" if test_names else "missing",
                     "test_names": test_names,
                     "evidence": (
-                        "Executable acceptance test generated."
+                        (
+                            "Executable end-to-end goal test generated."
+                            if is_goal
+                            else "Executable acceptance test generated."
+                        )
                         if test_names
-                        else "No executable acceptance test name contains this requirement ID."
+                        else (
+                            "No dedicated end-to-end goal test was generated."
+                            if is_goal
+                            else "No executable acceptance test name contains this requirement ID."
+                        )
                     ),
                 }
             )
@@ -168,7 +206,11 @@ def record_test_coverage(
     total = report.total_requirements
     coverage_percent = 0.0 if total == 0 else round(covered * 100 / total, 1)
     gaps = [
-        f"{item.requirement_id}: no executable acceptance test"
+        (
+            f"{item.requirement_id}: no executable end-to-end goal test"
+            if item.requirement_id in report.goal_requirement_ids
+            else f"{item.requirement_id}: no executable acceptance test"
+        )
         for item in requirements
         if item.status == "missing"
     ]

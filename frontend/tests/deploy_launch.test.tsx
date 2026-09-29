@@ -129,6 +129,7 @@ describe("DeployLaunchPage", () => {
                   evidence: "No executable acceptance test references this requirement.",
                 },
               ],
+              goal_requirement_ids: ["REQ-001"],
               total_requirements: 2,
               covered_requirements: 1,
               passed_requirements: 1,
