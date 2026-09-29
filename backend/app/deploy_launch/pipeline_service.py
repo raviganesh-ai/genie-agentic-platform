@@ -2492,8 +2492,8 @@ class DeploymentPipelineService:
                             )
                         if real_action_errors:
                             raise DeploymentPipelineStepFailedError(
-                                "Generated acceptance tests do not meet real-action and "
-                                "goal-outcome policies: "
+                                "Generated acceptance tests are not real-action tests or do not "
+                                "meet goal-outcome policies: "
                                 + " ".join(real_action_errors)
                             )
                         # The real-action repair loop replaces the whole suite on
