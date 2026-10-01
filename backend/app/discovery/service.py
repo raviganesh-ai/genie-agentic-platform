@@ -7,7 +7,14 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_validator,
+)
 
 from app.discovery.models import (
     AiFeasibility,
@@ -34,6 +41,7 @@ from app.services.session_service import SessionAccessDeniedError, SessionServic
 
 _BUILD_WORKFLOW_ID = "discovery-build-workflow"
 _BUILD_STEP_ID = "build-solution"
+_SOLUTION_SUMMARY_MAX_LENGTH = 800
 
 __all__ = [
     "DiscoveryCaseNotFoundError",
@@ -96,7 +104,7 @@ class _SolutionDraft(BaseModel):
     model_config = ConfigDict(extra="forbid")
     id: str = Field(min_length=1)
     name: str = Field(min_length=1)
-    summary: str = Field(min_length=1, max_length=800)
+    summary: str = Field(min_length=1, max_length=_SOLUTION_SUMMARY_MAX_LENGTH)
     requirements_text: str = Field(min_length=1, max_length=12000)
     architecture_text: str = Field(min_length=1, max_length=12000)
     architecture_nodes: list[ArchitectureNode] = Field(min_length=1, max_length=10)
@@ -110,6 +118,33 @@ class _SolutionDraft(BaseModel):
         validation_alias=AliasChoices("evidence_references", "Evidence_references"),
     )
     pricing_queries: list[PricingQuery] = Field(default_factory=list, max_length=10)
+
+    @field_validator("summary", mode="before")
+    @classmethod
+    def condense_overlong_summary(cls, value: Any) -> Any:
+        if not isinstance(value, str):
+            return value
+        summary = " ".join(value.split())
+        if len(summary) <= _SOLUTION_SUMMARY_MAX_LENGTH:
+            return summary
+
+        available_length = _SOLUTION_SUMMARY_MAX_LENGTH - len("...")
+        sentences = re.split(r"(?<=[.!?])\s+", summary)
+        retained_sentences: list[str] = []
+        for sentence in sentences:
+            candidate = " ".join([*retained_sentences, sentence])
+            if len(candidate) > available_length:
+                break
+            retained_sentences.append(sentence)
+
+        if retained_sentences:
+            condensed = " ".join(retained_sentences).rstrip(" .!?;:")
+        else:
+            condensed = summary[:available_length]
+            if " " in condensed:
+                condensed = condensed.rsplit(" ", 1)[0]
+            condensed = condensed.rstrip(" .!?;:")
+        return f"{condensed}..."
 
     @model_validator(mode="after")
     def pricing_queries_match_architecture(self) -> _SolutionDraft:

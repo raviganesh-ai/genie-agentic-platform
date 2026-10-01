@@ -453,6 +453,45 @@ async def test_solution_generation_retries_once_after_truncated_json() -> None:
     )
 
 
+async def test_solution_generation_condenses_overlong_summary_and_proceeds() -> None:
+    service, orchestrator, session_id = await _create_service()
+    await service.analyze_personas(
+        session_id=session_id, requesting_user_id="user-1"
+    )
+    await service.select_persona(
+        session_id=session_id,
+        requesting_user_id="user-1",
+        persona_id="jordan-lee",
+    )
+    await service.set_qa_mode(
+        session_id=session_id,
+        requesting_user_id="user-1",
+        mode="batch",
+    )
+    await service.answer_question(
+        session_id=session_id,
+        requesting_user_id="user-1",
+        question_id="monthly-volume",
+        answer="10,000 to 100,000 documents",
+    )
+    orchestrator.outputs.popleft()
+    solution_output = json.loads(orchestrator.outputs.popleft())
+    solution_output["solutions"][0]["summary"] = (
+        "Automates evidence extraction and routes uncertain claims to reviewers. " * 20
+    )
+    orchestrator.outputs.appendleft(json.dumps(solution_output))
+
+    case = await service.generate_solutions(
+        session_id=session_id, requesting_user_id="user-1"
+    )
+
+    summary = case.proposed_solutions[0].summary
+    assert case.status == "awaiting_solution_selection"
+    assert len(summary) <= 800
+    assert summary.endswith("...")
+    assert orchestrator.calls.count("discovery-probable-solutions-v1") == 1
+
+
 async def test_refresh_solution_pricing_preserves_generated_solution() -> None:
     service, _, session_id = await _create_service()
     await service.analyze_personas(session_id=session_id, requesting_user_id="user-1")
