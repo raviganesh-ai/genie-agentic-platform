@@ -99,6 +99,20 @@ def test_ci_passes_the_verified_gateway_to_backend_and_frontend():
     assert "vars.VITE_GENIE_API_BASE_URL" not in workflow
 
 
+def test_backend_deployment_reads_the_unmodified_arm_resource():
+    script = (_repo_root() / "scripts" / "deploy_backend.ps1").read_text(
+        encoding="utf-8"
+    )
+
+    assert (
+        '$containerAppResourceUri = "${containerAppResourceId}?api-version=2025-01-01"'
+        in script
+    )
+    assert "$app = Invoke-AzJson rest `" in script
+    assert "$current = Invoke-AzJson rest `" in script
+    assert "Invoke-AzJson containerapp show" not in script
+
+
 def test_gateway_deployer_role_is_resource_group_scoped_and_has_no_delete_actions():
     script = (
         _repo_root() / "scripts" / "configure_platform_gateway_deployer.ps1"

@@ -99,10 +99,11 @@ if (-not $GatewayUrl.StartsWith("https://", [System.StringComparison]::OrdinalIg
     throw "GatewayUrl must use HTTPS."
 }
 
-$app = Invoke-AzJson containerapp show `
-    --subscription $SubscriptionId `
-    --resource-group $ResourceGroup `
-    --name $ContainerAppName
+$containerAppResourceId = "/subscriptions/$SubscriptionId/resourceGroups/$ResourceGroup/providers/Microsoft.App/containerApps/$ContainerAppName"
+$containerAppResourceUri = "${containerAppResourceId}?api-version=2025-01-01"
+$app = Invoke-AzJson rest `
+    --method get `
+    --uri $containerAppResourceUri
 
 $backend = @($app.properties.template.containers | Where-Object {
     $_.name -eq $BackendContainerName
@@ -202,10 +203,9 @@ finally {
 $deadline = (Get-Date).AddSeconds($WaitTimeoutSeconds)
 do {
     Start-Sleep -Seconds 10
-    $current = Invoke-AzJson containerapp show `
-        --subscription $SubscriptionId `
-        --resource-group $ResourceGroup `
-        --name $ContainerAppName
+    $current = Invoke-AzJson rest `
+        --method get `
+        --uri $containerAppResourceUri
     $ready = (
         $current.properties.latestRevisionName -eq $current.properties.latestReadyRevisionName -and
         $current.properties.latestRevisionName.EndsWith("-$RevisionSuffix") -and
