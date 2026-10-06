@@ -209,7 +209,7 @@ jobs:
             --subscription "${{ secrets.AZURE_SUBSCRIPTION_ID }}" `
             --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" `
             --name "${{ vars.AZURE_CONTAINER_APP_NAME }}" `
-            --secrets "github-mcp-token=${{ secrets.GENIE_GITHUB_MCP_TOKEN }}" `
+            --secrets 'github-mcp-token=${{ secrets.GENIE_GITHUB_MCP_TOKEN }}' `
             --only-show-errors `
             --output none
 
@@ -220,7 +220,7 @@ jobs:
             --subscription "${{ secrets.AZURE_SUBSCRIPTION_ID }}" `
             --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" `
             --name "${{ vars.AZURE_CONTAINER_APP_NAME }}" `
-            --secrets "genie-auth-signing-key=${{ secrets.GENIE_AUTH_TOKEN_SIGNING_KEY }}" "genie-auth-users=${{ secrets.GENIE_AUTH_USERS }}" `
+            --secrets 'genie-auth-signing-key=${{ secrets.GENIE_AUTH_TOKEN_SIGNING_KEY }}' 'genie-auth-users=${{ secrets.GENIE_AUTH_USERS }}' `
             --only-show-errors `
             --output none
 
