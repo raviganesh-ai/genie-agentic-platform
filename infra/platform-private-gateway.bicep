@@ -153,8 +153,12 @@ resource genieApiSubscription 'Microsoft.ApiManagement/service/subscriptions@202
     scope: genieApi.id
     displayName: 'Genie internal platform access'
     state: 'active'
+    // Only the primary key is a controlled value (the one every caller
+    // actually presents) - APIM rejects a subscription whose primary and
+    // secondary keys are identical, and the secondary key is purely a
+    // rotation spare nothing in this repo ever reads, so it's left for
+    // Azure to generate.
     primaryKey: genieApiSubscriptionKey
-    secondaryKey: genieApiSubscriptionKey
   }
 }
 
