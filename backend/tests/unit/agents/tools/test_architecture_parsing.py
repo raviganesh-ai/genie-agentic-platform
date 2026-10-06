@@ -119,3 +119,82 @@ def test_requirement_assignments_is_empty_when_no_ids_appear_anywhere():
 
     assert parse_component_requirement_assignments(document) == {}
 
+
+def test_other_components_are_empty_when_no_optional_sections_present():
+    plan = parse_architecture_build_plan(_ARCHITECTURE_DOCUMENT)
+
+    assert plan is not None
+    assert plan.other_components == ()
+
+
+def test_parses_optional_component_type_sections_in_declared_order():
+    document = """
+## Multi-Agent Workflow
+
+- **Ticket Classifier Agent**: classifies the incoming issue by category.
+- **Support Triage Orchestrator Agent**: the single entry point.
+
+## Single-Page UI Design
+
+- **Kickoff Screen**: lets the user describe their issue.
+
+## Deterministic Services
+
+- **Entitlement Checker**: validates a request against the entitlement store.
+
+## Data Models
+
+- **SandboxTenant**: the logical multi-tenant sandbox record.
+- **Entitlement**: a product/API grant for one tenant.
+
+## API Contracts
+
+- **Payments API**: the OpenAPI contract for payment operations.
+
+## Gateway Policies
+
+- **APIM JWT Policy**: validates bearer tokens at the gateway.
+
+## Identity Configuration
+
+- **Entra ID Adapter**: the identity-provider adapter configuration.
+"""
+
+    plan = parse_architecture_build_plan(document)
+
+    assert plan is not None
+    assert plan.other_components == (
+        ("deterministic_service", "Entitlement Checker"),
+        ("data_model", "SandboxTenant"),
+        ("data_model", "Entitlement"),
+        ("api_contract", "Payments API"),
+        ("gateway_policy", "APIM JWT Policy"),
+        ("identity_config", "Entra ID Adapter"),
+    )
+
+
+def test_other_component_requirement_assignments_are_extracted_per_bullet():
+    document = """
+## Multi-Agent Workflow
+
+- **Ticket Classifier Agent**: classifies the incoming issue by category.
+- **Support Triage Orchestrator Agent**: the single entry point.
+
+## Data Models
+
+- **SandboxTenant**: the logical multi-tenant sandbox record (REQ-007).
+- **Entitlement**: a product/API grant for one tenant (REQ-008, REQ-009).
+
+## Gateway Policies
+
+- **APIM JWT Policy**: validates bearer tokens with no cited requirement.
+"""
+
+    assignments = parse_component_requirement_assignments(document)
+
+    assert assignments["sandboxtenant"] == ("REQ-007",)
+    assert assignments["entitlement"] == ("REQ-008", "REQ-009")
+    # No requirement id was cited in this bullet - absent, not an error,
+    # matching the Orchestrator's own established behavior above.
+    assert "apim jwt policy" not in assignments
+

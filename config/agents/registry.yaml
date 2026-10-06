@@ -80,11 +80,13 @@ agents:
     memory_access:
       - shared
       - enterprise
-    # Explicit override, demonstrating per-agent LLM configurability. Set
-    # to the same model as the platform default today (gpt-5-1) because
-    # gpt-4o is deprecating on this account; change this to any other
-    # deployed model name to diverge from the default again.
-    model_deployment_ref: gpt-5-1
+    # Explicit override, demonstrating per-agent LLM configurability.
+    # Using claude-sonnet-4-6 (a real Azure AI Foundry deployment on this
+    # account, provisioned for this work) for the ACI Intelligent
+    # Developer Experience PoC platform-change work (Genie-SaS Build
+    # Alignment, Section 22): Architecture Designer drives the new typed
+    # component_type schema this initiative introduces.
+    model_deployment_ref: claude-sonnet-4-6
     foundry_agent_id: architecture-designer
     owner: architecture-team
     governance_policy_id: standard-governance-policy-v1
@@ -124,6 +126,11 @@ agents:
     owner: architecture-team
     governance_policy_id: standard-governance-policy-v1
     prompt_template_ref: build-generation-v1
+    # Explicit override (see architecture-designer's own comment above)
+    # for the same ACI Intelligent Developer Experience PoC
+    # platform-change work: Build Agent is the other agent central to
+    # this initiative, generating code for the new component types.
+    model_deployment_ref: claude-sonnet-4-6
     enabled: true
 
   - id: security-assessment-agent

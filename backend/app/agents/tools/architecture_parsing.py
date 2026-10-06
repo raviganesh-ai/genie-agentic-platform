@@ -10,6 +10,31 @@ the Orchestrator Agent, then the UI - instead of one single combined
 generation, so the Workshop page can stream each component's own code as
 soon as it completes (see ``build-generation-component-v1`` in
 ``config/prompts/registry.yaml``).
+
+TYPED ARCHITECTURE SCHEMA (component_type discriminator) - in addition to
+the always-required "## Multi-Agent Workflow" and "## Single-Page UI
+Design" sections above, an architecture document MAY also declare these
+optional, additional top-level sections when a mission genuinely needs a
+backend component that is not an agent or a UI zone:
+
+- "## Deterministic Services" -> ``component_type == "deterministic_service"``
+- "## Data Models" -> ``component_type == "data_model"``
+- "## API Contracts" -> ``component_type == "api_contract"``
+- "## Gateway Policies" -> ``component_type == "gateway_policy"``
+- "## Identity Configuration" -> ``component_type == "identity_config"``
+
+Each uses the exact same "**<Name>**: <description> (fulfills REQ-XXX...)"
+bullet convention as the two baseline sections, so this module's existing
+bullet-parsing helpers apply unchanged. This is currently a parsing-only
+capability: ``architecture-recommendation-v1`` does not yet instruct the
+Architecture Designer agent to emit these sections, and
+``call_build_agent``/``build-generation-component-v1`` do not yet generate
+or materialize code for these component types - see the Genie-SaS Build
+Alignment platform-change roadmap. Landing the schema and its parser first,
+ahead of (and decoupled from) the generation prompts that would populate
+it, avoids a mission ever being able to cite a requirement under a section
+whose component Build cannot yet produce - which would silently orphan
+that requirement.
 """
 from __future__ import annotations
 
@@ -32,6 +57,25 @@ _UI_SECTION_PATTERN = re.compile(
 )
 _BULLET_PATTERN = re.compile(r"^\s*(?:[-*]\s+)?\*\*(.+?)\*\*\s*:", re.MULTILINE)
 
+# Ordered (component_type, section header) pairs for the optional sections
+# documented above. Order here is the order these components are appended
+# to ``ArchitectureBuildPlan.other_components`` - stable and deterministic,
+# never dependent on dict/set iteration order.
+_OTHER_COMPONENT_SECTIONS: tuple[tuple[str, str], ...] = (
+    ("deterministic_service", "Deterministic Services"),
+    ("data_model", "Data Models"),
+    ("api_contract", "API Contracts"),
+    ("gateway_policy", "Gateway Policies"),
+    ("identity_config", "Identity Configuration"),
+)
+_OTHER_COMPONENT_SECTION_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
+    (
+        component_type,
+        re.compile(rf"##\s*{re.escape(header)}(.*?)(?=\n##\s|\Z)", re.DOTALL | re.IGNORECASE),
+    )
+    for component_type, header in _OTHER_COMPONENT_SECTIONS
+)
+
 
 @dataclass(frozen=True)
 class ArchitectureBuildPlan:
@@ -39,6 +83,12 @@ class ArchitectureBuildPlan:
 
     specialist_agent_names: tuple[str, ...]
     orchestrator_agent_name: str
+    # (component_type, component_name) pairs parsed from the optional
+    # "## Deterministic Services" / "## Data Models" / "## API Contracts" /
+    # "## Gateway Policies" / "## Identity Configuration" sections - see
+    # this module's docstring. Empty for every architecture document that
+    # only uses the two baseline sections, which remains the common case.
+    other_components: tuple[tuple[str, str], ...] = ()
 
 
 def parse_architecture_build_plan(architecture_document: str) -> ArchitectureBuildPlan | None:
@@ -71,8 +121,20 @@ def parse_architecture_build_plan(architecture_document: str) -> ArchitectureBui
     if not specialists:
         return None
 
+    other_components: list[tuple[str, str]] = []
+    for component_type, pattern in _OTHER_COMPONENT_SECTION_PATTERNS:
+        match = pattern.search(architecture_document)
+        if match is None:
+            continue
+        for bullet_name in (
+            m.group(1).strip() for m in _BULLET_PATTERN.finditer(match.group(1))
+        ):
+            other_components.append((component_type, bullet_name))
+
     return ArchitectureBuildPlan(
-        specialist_agent_names=specialists, orchestrator_agent_name=orchestrator_name
+        specialist_agent_names=specialists,
+        orchestrator_agent_name=orchestrator_name,
+        other_components=tuple(other_components),
     )
 
 
@@ -119,6 +181,13 @@ def parse_component_requirement_assignments(
     a specific requirement), is simply absent from the returned mapping -
     callers must treat a missing key as "no requirements assigned", not
     as a parsing failure.
+
+    Each optional "## Deterministic Services" / "## Data Models" /
+    "## API Contracts" / "## Gateway Policies" / "## Identity
+    Configuration" bullet (see ``ArchitectureBuildPlan.other_components``)
+    maps by its own lowercased name, exactly like a specialist agent -
+    these are independently named components, never unioned the way UI
+    zones are.
     """
 
     assignments: dict[str, tuple[str, ...]] = {}
@@ -139,5 +208,14 @@ def parse_component_requirement_assignments(
                 ui_ids.append(requirement_id)
     if ui_ids:
         assignments["ui"] = tuple(ui_ids)
+
+    for _component_type, pattern in _OTHER_COMPONENT_SECTION_PATTERNS:
+        section_match = pattern.search(architecture_document)
+        if section_match is None:
+            continue
+        for name, own_text in _bullet_spans(section_match.group(1)):
+            requirement_ids = extract_requirement_ids(own_text)
+            if requirement_ids:
+                assignments[name.strip().lower()] = requirement_ids
 
     return assignments
