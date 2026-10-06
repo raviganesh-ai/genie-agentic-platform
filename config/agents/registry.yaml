@@ -126,11 +126,16 @@ agents:
     owner: architecture-team
     governance_policy_id: standard-governance-policy-v1
     prompt_template_ref: build-generation-v1
-    # Explicit override (see architecture-designer's own comment above)
-    # for the same ACI Intelligent Developer Experience PoC
-    # platform-change work: Build Agent is the other agent central to
-    # this initiative, generating code for the new component types.
-    model_deployment_ref: claude-sonnet-4-6
+    # Explicit override: Build Agent iterates once per component (often
+    # 20-30+ calls per mission for a real multi-page/multi-agent
+    # solution), which exceeds claude-sonnet-4-6's hard tokens-per-minute
+    # deployment ceiling in this subscription/region (observed live:
+    # "Model deployment rate limit exceeded" on nearly every component).
+    # Using gpt-5-mini (a real Azure AI Foundry deployment on this
+    # account) instead, which has sufficient throughput for this
+    # call pattern. architecture-designer keeps claude-sonnet-4-6 since
+    # it only makes one call per mission.
+    model_deployment_ref: gpt-5-mini
     enabled: true
 
   - id: security-assessment-agent
