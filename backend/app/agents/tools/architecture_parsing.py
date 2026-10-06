@@ -71,8 +71,8 @@ _BULLET_PATTERN = re.compile(r"^\s*(?:[-*]\s+)?\*\*(.+?)\*\*\s*:", re.MULTILINE)
 # to ``ArchitectureBuildPlan.other_components`` - stable and deterministic,
 # never dependent on dict/set iteration order.
 _OTHER_COMPONENT_SECTIONS: tuple[tuple[str, str], ...] = (
-    ("deterministic_service", "Deterministic Services"),
     ("data_model", "Data Models"),
+    ("deterministic_service", "Deterministic Services"),
     ("api_contract", "API Contracts"),
     ("gateway_policy", "Gateway Policies"),
     ("identity_config", "Identity Configuration"),

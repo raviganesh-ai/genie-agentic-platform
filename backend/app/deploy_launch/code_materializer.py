@@ -23,6 +23,7 @@ __all__ = [
     "MaterializedCodeError",
     "generate_agent_config_module",
     "generate_backend_service_scaffold",
+    "generate_models_init",
     "generate_routing_shell",
     "materialize_build",
 ]
@@ -33,15 +34,38 @@ __all__ = [
 # without the line anchors those would terminate the block early and
 # materialize truncated, non-importable source.
 _FENCE_PATTERN: Final = re.compile(
-    r"^[ \t]*```(python|tsx)[ \t]*\n(.*?)^[ \t]*```[ \t]*$",
+    r"^[ \t]*```(python|tsx|yaml|yml)[ \t]*\n(.*?)^[ \t]*```[ \t]*$",
     re.DOTALL | re.IGNORECASE | re.MULTILINE,
 )
 _AGENT_MARKER_PATTERN: Final = re.compile(r"^#\s*agent:\s*(.+)$")
 _UI_MARKER_PATTERN: Final = re.compile(r"^//\s*agent:\s*ui\s*$", re.IGNORECASE)
+# Every non-agent/orchestrator/ui component kind below nests its own
+# marker under the SAME literal "agent:" word as every other component
+# (``// agent: page:<name>``, ``# agent: service:<name>``, ...), rather
+# than inventing an unrecognized top-level word. This keeps two existing,
+# otherwise-unchanged mechanisms working for free: orchestration_tools.py's
+# ``_AGENT_LABEL_BLOCK_PATTERN`` (component reuse-on-retry) and the
+# frontend's ``AGENT_LABEL_COMMENT``/``extractAgentLabel`` (Workshop UI
+# artifact titling) both already match ANY "agent: <value>" first line -
+# a differently worded marker would silently fall back to an unlabeled,
+# un-reusable generic code block for every one of these kinds.
+
 # One independently generated page of a multi-page mission UI (see "## UI
 # Pages" in architecture_parsing.py) - first line ``// agent: page:<Page
-# Name>``, parallel to the single-page ``// agent: ui`` marker above.
+# Name>``.
 _PAGE_MARKER_PATTERN: Final = re.compile(r"^//\s*agent:\s*page:(.+)$", re.IGNORECASE)
+# A deterministic backend service (see "## Deterministic Services" in
+# architecture_parsing.py) - ordinary Python, never an Azure AI Foundry
+# agent. First line ``# agent: service:<Service Name>``.
+_SERVICE_MARKER_PATTERN: Final = re.compile(r"^#\s*agent:\s*service:(.+)$", re.IGNORECASE)
+# One shared data model/entity definition (see "## Data Models"). First
+# line ``# agent: model:<Model Name>``.
+_MODEL_MARKER_PATTERN: Final = re.compile(r"^#\s*agent:\s*model:(.+)$", re.IGNORECASE)
+# One API's OpenAPI contract document (see "## API Contracts") - a YAML
+# fence, not code. First line ``# agent: api_contract:<API Name>``.
+_API_CONTRACT_MARKER_PATTERN: Final = re.compile(
+    r"^#\s*agent:\s*api_contract:(.+)$", re.IGNORECASE
+)
 
 _ORCHESTRATOR_MARKER: Final = "orchestrator"
 
@@ -296,6 +320,16 @@ class MaterializedBuild:
     # single-page case or a multi-page one, never both (enforced by
     # ``materialize_build``).
     page_components: dict[str, str] = field(default_factory=dict)
+    # One entry per declared "## Deterministic Services" component - plain
+    # Python, never an Azure AI Foundry agent (see architecture_parsing.py).
+    service_modules: dict[str, str] = field(default_factory=dict)
+    # One entry per declared "## Data Models" component - a shared
+    # entity/schema definition, written under models/ with a
+    # deterministically generated aggregator (see generate_models_init).
+    data_model_modules: dict[str, str] = field(default_factory=dict)
+    # One entry per declared "## API Contracts" component - an OpenAPI
+    # document (YAML), never executable code.
+    api_contract_documents: dict[str, str] = field(default_factory=dict)
 
     def write_to_directory(
         self, root: Path, *, backend_service_scaffold: dict[str, str] | None = None
@@ -350,6 +384,39 @@ class MaterializedBuild:
             path.write_text(self.ui_component, encoding="utf-8")
             written.append(path)
 
+        if self.service_modules:
+            services_dir = root / "services"
+            services_dir.mkdir(parents=True, exist_ok=True)
+            for service_name, code in self.service_modules.items():
+                path = services_dir / f"{_slugify(service_name)}.py"
+                path.write_text(_use_mission_foundry_runtime(code), encoding="utf-8")
+                written.append(path)
+
+        if self.data_model_modules:
+            # Each model gets its own file, with a deterministically
+            # generated __init__.py (never LLM-authored) re-exporting
+            # every one, so dependent code can do a single
+            # `from models import SandboxTenant, Entitlement` without
+            # needing to know which file each model actually lives in.
+            models_dir = root / "models"
+            models_dir.mkdir(parents=True, exist_ok=True)
+            model_names = tuple(self.data_model_modules.keys())
+            for model_name, code in self.data_model_modules.items():
+                path = models_dir / f"{_slugify(model_name)}.py"
+                path.write_text(code, encoding="utf-8")
+                written.append(path)
+            init_path = models_dir / "__init__.py"
+            init_path.write_text(generate_models_init(model_names), encoding="utf-8")
+            written.append(init_path)
+
+        if self.api_contract_documents:
+            contracts_dir = root / "api-contracts"
+            contracts_dir.mkdir(parents=True, exist_ok=True)
+            for api_name, document in self.api_contract_documents.items():
+                path = contracts_dir / f"{_slugify(api_name)}.yaml"
+                path.write_text(document, encoding="utf-8")
+                written.append(path)
+
         for file_name, content in (backend_service_scaffold or {}).items():
             path = root / file_name
             path.write_text(content, encoding="utf-8")
@@ -369,12 +436,23 @@ def materialize_build(output_text: str) -> MaterializedBuild:
     orchestrator_module: str | None = None
     ui_component: str | None = None
     page_components: dict[str, str] = {}
+    service_modules: dict[str, str] = {}
+    data_model_modules: dict[str, str] = {}
+    api_contract_documents: dict[str, str] = {}
 
     for language, body in _FENCE_PATTERN.findall(output_text):
         lines = body.splitlines()
         first_line = lines[0].strip() if lines else ""
 
         if language.lower() == "python":
+            service_match = _SERVICE_MARKER_PATTERN.match(first_line)
+            model_match = _MODEL_MARKER_PATTERN.match(first_line)
+            if service_match is not None:
+                service_modules[service_match.group(1).strip()] = body.strip("\n")
+                continue
+            if model_match is not None:
+                data_model_modules[model_match.group(1).strip()] = body.strip("\n")
+                continue
             marker_match = _AGENT_MARKER_PATTERN.match(first_line)
             if marker_match is None:
                 continue
@@ -383,6 +461,10 @@ def materialize_build(output_text: str) -> MaterializedBuild:
                 orchestrator_module = body.strip("\n")
             else:
                 agent_modules[agent_name] = body.strip("\n")
+        elif language.lower() in ("yaml", "yml"):
+            contract_match = _API_CONTRACT_MARKER_PATTERN.match(first_line)
+            if contract_match is not None:
+                api_contract_documents[contract_match.group(1).strip()] = body.strip("\n")
         elif language.lower() == "tsx":
             page_match = _PAGE_MARKER_PATTERN.match(first_line)
             if page_match is not None:
@@ -395,10 +477,13 @@ def materialize_build(output_text: str) -> MaterializedBuild:
         and orchestrator_module is None
         and ui_component is None
         and not page_components
+        and not service_modules
+        and not data_model_modules
+        and not api_contract_documents
     ):
         raise MaterializedCodeError(
-            "No materializable agent, orchestrator, UI, or page code block was found "
-            "in the build-solution step's output."
+            "No materializable agent, orchestrator, UI, page, service, model, or "
+            "API contract code block was found in the build-solution step's output."
         )
 
     if ui_component is not None and page_components:
@@ -476,6 +561,9 @@ def materialize_build(output_text: str) -> MaterializedBuild:
         orchestrator_module=orchestrator_module,
         ui_component=ui_component,
         page_components=page_components,
+        service_modules=service_modules,
+        data_model_modules=data_model_modules,
+        api_contract_documents=api_contract_documents,
     )
 
 
@@ -995,6 +1083,54 @@ def generate_routing_shell(page_names: tuple[str, ...]) -> str:
         for component_identifier, page_name in zip(component_identifiers, page_names)
     )
     return _ROUTING_SHELL_TEMPLATE.format(page_imports=page_imports, page_entries=page_entries)
+
+
+def _pascal_case_identifier(name: str) -> str:
+    """Strips spaces/punctuation from a declared component name to the
+    exact Python identifier the Build Agent is instructed (see
+    build-generation-component-v1's "data_model" branch) to name its
+    top-level model class - e.g. "Sandbox Tenant" -> "SandboxTenant". Used
+    by ``generate_models_init`` to derive the right import statement
+    deterministically, without needing to parse the model's own generated
+    source for whatever class name it happens to contain.
+    """
+
+    return re.sub(r"[^A-Za-z0-9]", "", name)
+
+
+def generate_models_init(model_names: tuple[str, ...]) -> str:
+    """Returns the real, deterministic ``models/__init__.py`` aggregator
+    content for a mission's "## Data Models" components - never
+    LLM-authored, mirroring ``generate_routing_shell``'s own
+    deterministic-stitching pattern. Re-exports every declared model by
+    its own PascalCase identifier (see ``_pascal_case_identifier``) so
+    dependent code (a deterministic service, the Orchestrator) can do one
+    ``from models import SandboxTenant, Entitlement`` without needing to
+    know which file under ``models/`` each class actually lives in.
+    """
+
+    if not model_names:
+        raise MaterializedCodeError(
+            "generate_models_init requires at least one model name - a mission "
+            "with zero declared data models has no models/__init__.py to generate."
+        )
+
+    class_names = [_pascal_case_identifier(name) for name in model_names]
+    import_lines = "\n".join(
+        f"from .{_slugify(name)} import {class_name}"
+        for name, class_name in zip(model_names, class_names)
+    )
+    exported = ", ".join(f'"{class_name}"' for class_name in class_names)
+    return (
+        '"""Real, deterministically generated aggregator for this mission\'s\n'
+        "shared data models - never LLM-authored. Generated by\n"
+        "``app.deploy_launch.code_materializer.generate_models_init`` so dependent\n"
+        "code can do one `from models import <Name>, ...` without knowing which\n"
+        'file each model actually lives in."""\n'
+        "from __future__ import annotations\n\n"
+        f"{import_lines}\n\n"
+        f"__all__ = [{exported}]\n"
+    )
 
 
 def generate_backend_service_scaffold(

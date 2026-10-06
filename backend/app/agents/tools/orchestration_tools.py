@@ -323,6 +323,29 @@ async def _stream_and_publish_deltas(
     return result
 
 
+_MARKER_NAME_PREFIXES: tuple[str, ...] = ("page:", "service:", "model:", "api_contract:")
+_MARKER_PREFIX_BY_COMPONENT_KIND: dict[str, str] = {
+    "page_view": "page:",
+    "deterministic_service": "service:",
+    "data_model": "model:",
+    "api_contract": "api_contract:",
+}
+
+
+def _strip_marker_prefix(name: str) -> str:
+    """Strips a known component-kind marker prefix (e.g. ``"page:"``,
+    ``"service:"``) from a raw ``agent: <value>`` label, returning the
+    bare component name every multi-instance kind's own reuse/lookup key
+    actually uses - see ``_MARKER_NAME_PREFIXES`` and both call sites
+    below."""
+
+    lowered = name.lower()
+    for prefix in _MARKER_NAME_PREFIXES:
+        if lowered.startswith(prefix):
+            return name[len(prefix) :].strip()
+    return name
+
+
 def _extract_reusable_components(previous_build_output: str) -> dict[str, str]:
     """Maps each component name (lowercased) that fully succeeded on a
     prior ``build-solution`` attempt to its own previously generated
@@ -350,15 +373,15 @@ def _extract_reusable_components(previous_build_output: str) -> dict[str, str]:
         block_text = match.group(0)
         if _COMPONENT_FAILURE_MARKER in block_text:
             continue
-        name = match.group("name").strip()
-        # A page_view component's own marker is "page:<Page Name>" (see
-        # code_materializer._PAGE_MARKER_PATTERN) - strip that prefix so
-        # the stored key matches the bare page name callers look reuse up
-        # by (the same ``label_name`` every other multi-instance component
-        # kind uses), exactly like "orchestrator"/"ui" are matched by
-        # their own literal kind name.
-        if name.lower().startswith("page:"):
-            name = name[len("page:") :].strip()
+        # Several component kinds (page_view, deterministic_service,
+        # data_model, api_contract) nest their own kind marker inside the
+        # "agent: <value>" label (e.g. "page:<Page Name>" - see
+        # code_materializer.py's own per-kind marker patterns); strip it
+        # so the stored key matches the bare component name callers look
+        # reuse up by (the same ``label_name`` every multi-instance
+        # component kind uses), exactly like "orchestrator"/"ui" are
+        # matched by their own literal kind name.
+        name = _strip_marker_prefix(match.group("name").strip())
         reusable[name.lower()] = block_text
     return reusable
 
@@ -462,6 +485,19 @@ async def _generate_build_by_component(
         for component_type, name in plan.other_components
         if component_type == "page_view"
     )
+    # Phase 3 kinds: ordinary non-agent backend components, generated
+    # before the UI/pages (never after) so they are the single-page "ui"
+    # or each "page_view"'s own available "prior_components" context, the
+    # same way every specialist agent and the Orchestrator already are.
+    # gateway_policy/identity_config are parsed (see
+    # architecture_parsing.py) but intentionally not yet wired here - that
+    # is later phases of the same roadmap, once their own Build codegen
+    # paths exist.
+    non_agent_backend_components = tuple(
+        (component_type, name)
+        for component_type, name in plan.other_components
+        if component_type in ("deterministic_service", "data_model", "api_contract")
+    )
 
     components: list[tuple[str, str]] = [
         ("agent", name)
@@ -469,6 +505,7 @@ async def _generate_build_by_component(
         if name.strip().lower() not in _parse_excluded_agent_names(base_variables.get("excluded_agents", ""))
     ]
     components.append(("orchestrator", plan.orchestrator_agent_name))
+    components.extend(non_agent_backend_components)
     if page_view_components:
         # A multi-page mission (architecture declared "## UI Pages")
         # replaces the usual single "ui" component with one "page_view"
@@ -541,7 +578,10 @@ async def _generate_build_by_component(
             "component_name": component_name,
             "assigned_requirements": assigned_requirements,
             "prior_components": (
-                "\n\n".join(pieces) if component_kind in ("ui", "page_view") else ""
+                "\n\n".join(pieces)
+                if component_kind
+                in ("ui", "page_view", "deterministic_service", "data_model", "api_contract")
+                else ""
             ),
         }
         request = AgentExecutionRequest(
@@ -569,7 +609,8 @@ async def _generate_build_by_component(
             # still-generatable component is not silently discarded along
             # with it (the "all or nothing" behavior this replaces) - see
             # _component_failure_piece and the module docstring.
-            marker_name = f"page:{label_name}" if component_kind == "page_view" else label_name
+            marker_prefix = _MARKER_PREFIX_BY_COMPONENT_KIND.get(component_kind, "")
+            marker_name = f"{marker_prefix}{label_name}"
             failure_piece = _component_failure_piece(
                 marker_name, is_ui=component_kind in ("ui", "page_view"), exc=exc
             )

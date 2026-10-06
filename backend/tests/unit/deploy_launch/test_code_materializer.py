@@ -13,6 +13,7 @@ from app.deploy_launch.code_materializer import (
     MaterializedCodeError,
     generate_agent_config_module,
     generate_backend_service_scaffold,
+    generate_models_init,
     generate_routing_shell,
     materialize_build,
 )
@@ -675,6 +676,85 @@ def test_generate_routing_shell_defaults_to_the_first_declared_page():
 def test_generate_routing_shell_rejects_empty_page_list():
     with pytest.raises(MaterializedCodeError):
         generate_routing_shell(())
+
+
+_MULTI_COMPONENT_TYPE_OUTPUT = '''
+```python
+# agent: orchestrator
+class OrchestratorAgent:
+    async def run(self, ui_message: str, on_progress=None) -> None:
+        pass
+```
+
+```python
+# agent: service:Entitlement Checker
+class EntitlementChecker:
+    def check(self) -> bool:
+        return True
+```
+
+```python
+# agent: model:SandboxTenant
+from pydantic import BaseModel
+
+class SandboxTenant(BaseModel):
+    tenant_id: str
+```
+
+```python
+# agent: model:Entitlement
+from pydantic import BaseModel
+
+class Entitlement(BaseModel):
+    product_id: str
+```
+
+```yaml
+# agent: api_contract:Payments API
+openapi: "3.0.0"
+info:
+  title: Payments API
+  version: "1.0"
+```
+'''
+
+
+def test_materialize_build_parses_service_model_and_api_contract_components():
+    build = materialize_build(_MULTI_COMPONENT_TYPE_OUTPUT)
+
+    assert "EntitlementChecker" in build.service_modules["Entitlement Checker"]
+    assert "class SandboxTenant" in build.data_model_modules["SandboxTenant"]
+    assert "class Entitlement" in build.data_model_modules["Entitlement"]
+    assert "openapi" in build.api_contract_documents["Payments API"]
+
+
+def test_write_to_directory_writes_services_models_and_api_contracts(tmp_path: Path):
+    build = materialize_build(_MULTI_COMPONENT_TYPE_OUTPUT)
+
+    build.write_to_directory(tmp_path)
+
+    assert (tmp_path / "services" / "entitlement_checker.py").exists()
+    assert (tmp_path / "models" / "sandboxtenant.py").exists()
+    assert (tmp_path / "models" / "entitlement.py").exists()
+    assert (tmp_path / "api-contracts" / "payments_api.yaml").exists()
+    init_source = (tmp_path / "models" / "__init__.py").read_text(encoding="utf-8")
+    assert "from .sandboxtenant import SandboxTenant" in init_source
+    assert "from .entitlement import Entitlement" in init_source
+    assert '"SandboxTenant"' in init_source
+    assert '"Entitlement"' in init_source
+
+
+def test_generate_models_init_derives_pascal_case_class_names_from_spaced_names():
+    init_source = generate_models_init(("Sandbox Tenant", "Entitlement"))
+
+    assert "from .sandbox_tenant import SandboxTenant" in init_source
+    assert "from .entitlement import Entitlement" in init_source
+    assert '__all__ = ["SandboxTenant", "Entitlement"]' in init_source
+
+
+def test_generate_models_init_rejects_empty_model_list():
+    with pytest.raises(MaterializedCodeError):
+        generate_models_init(())
 
 
 def test_stream_agent_response_relays_on_progress_narration_as_it_happens(monkeypatch):

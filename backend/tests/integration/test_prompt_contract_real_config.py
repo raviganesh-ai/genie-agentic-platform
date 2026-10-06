@@ -369,7 +369,7 @@ def test_architecture_prompt_shapes_an_impeccable_visual_direction_for_each_miss
     assert "shape-first method from https://impeccable.style/" in template
     assert "OPERATE (fast scanning and repeated action)" in template
     assert '"Surface mode: <OPERATE|READ|EXPERIENCE|PERSUADE>.' in template
-    assert "never a third top-level section" in template
+    assert "Never invent any other section name beyond the" in template
 
 
 def test_architecture_prompt_offers_ui_pages_as_the_multi_page_alternative():
@@ -402,5 +402,40 @@ def test_build_generation_component_prompt_has_a_page_view_branch():
     assert 'If component_kind is "page_view"' in template
     assert "page:{component_name}" in template
     assert "never render navigation, a page switcher, or any other page's own content" in template
+
+
+def test_architecture_prompt_offers_three_optional_non_agent_sections():
+    """Beyond the two baseline sections, the architecture prompt must
+    allow (never require) "## Data Models", "## Deterministic Services",
+    and "## API Contracts" - the sections build-generation-component-v1's
+    own "data_model"/"deterministic_service"/"api_contract" branches
+    consume (see architecture_parsing.py's typed component schema)."""
+
+    registry = PromptRegistry.load(_REPO_CONFIG_ROOT / "prompts")
+    template = " ".join(registry.get("architecture-recommendation-v1").template.split())
+
+    assert '"## Data Models"' in template
+    assert '"## Deterministic Services"' in template
+    assert '"## API Contracts"' in template
+    assert "use any subset, or none, exactly as needed" in template
+
+
+def test_build_generation_component_prompt_has_non_agent_branches():
+    """build-generation-component-v1 must know how to generate
+    "deterministic_service"/"data_model"/"api_contract" components as
+    themselves - plain backend code, a Pydantic model, and an OpenAPI
+    document respectively - never forced through the agent-wrapper or
+    single-UI-block path."""
+
+    registry = PromptRegistry.load(_REPO_CONFIG_ROOT / "prompts")
+    template = " ".join(registry.get("build-generation-component-v1").template.split())
+
+    assert 'If component_kind is "deterministic_service"' in template
+    assert "NEVER an Azure AI Foundry agent call" in template
+    assert "service:{component_name}" in template
+    assert 'If component_kind is "data_model"' in template
+    assert "model:{component_name}" in template
+    assert 'If component_kind is "api_contract"' in template
+    assert "api_contract:{component_name}" in template
 
 

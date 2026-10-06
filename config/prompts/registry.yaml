@@ -499,21 +499,23 @@ prompts:
          solve their specific business problem.
 
       RESPONSE FORMAT:
-      Respond with exactly two top-level sections, in this order, each as
-      a markdown "## " header followed by a one-sentence summary of that
-      section, then its own items; never a third top-level section. The
-      FIRST is always "## Multi-Agent Workflow". The SECOND is EITHER
-      "## Single-Page UI Design" (the default, standard shape - use this
-      for nearly every mission) OR "## UI Pages" (use ONLY when the
-      approved requirements genuinely describe multiple distinct,
-      independently navigable destinations a user moves between as
-      separate pages - a catalog browse page, an onboarding wizard, a
-      dashboard, an audit/trace view - rather than input fields collected
-      before one single run; having many input fields is NOT by itself a
-      reason to choose this - that still belongs on one "## Single-Page UI
-      Design" page). Produce exactly one of these two for this response,
-      never both. The Single-Page UI Design summary must use this exact
-      shape before its prose: "Surface mode: <OPERATE|READ|EXPERIENCE|PERSUADE>.
+      Respond with a fixed baseline of exactly two top-level sections,
+      each as a markdown "## " header followed by a one-sentence summary
+      of that section, then its own items, plus a small set of clearly
+      independent optional sections used only when genuinely needed - see
+      below. The FIRST baseline section is always "## Multi-Agent
+      Workflow". The SECOND is EITHER "## Single-Page UI Design" (the
+      default, standard shape - use this for nearly every mission) OR
+      "## UI Pages" (use ONLY when the approved requirements genuinely
+      describe multiple distinct, independently navigable destinations a
+      user moves between as separate pages - a catalog browse page, an
+      onboarding wizard, a dashboard, an audit/trace view - rather than
+      input fields collected before one single run; having many input
+      fields is NOT by itself a reason to choose this - that still
+      belongs on one "## Single-Page UI Design" page). Produce exactly
+      one of these two for this response, never both. The Single-Page UI
+      Design summary must use this exact shape before its prose: "Surface
+      mode: <OPERATE|READ|EXPERIENCE|PERSUADE>.
       Visual direction: <one concise, domain-specific direction
       covering density, typography, color, and interaction rhythm>." This
       is the design brief the Build Agent must implement:
@@ -565,6 +567,41 @@ prompts:
       "**<Page name>**: <what this page shows/collects and why>
       (fulfills REQ-XXX[, REQ-XXX...])"
 
+      OPTIONAL ADDITIONAL SECTIONS - beyond the two baseline sections
+      above, add any of these three ONLY when the approved requirements
+      genuinely need a concern that is not itself an agent or a UI zone/
+      page. Each is fully independent of the others and of the UI choice
+      above - use any subset, or none, exactly as needed; most missions
+      need none of them. Never invent any other section name beyond the
+      five documented in this prompt:
+
+      "## Data Models" - add ONLY when this mission has a shared data
+      entity/schema that more than one other component (a specialist
+      agent, a deterministic service, the UI) needs to reference with the
+      exact same shape, so defining it once and importing it elsewhere is
+      clearly better than letting each component redeclare its own
+      version. One bullet per entity:
+      "**<Entity name>**: <what it represents and its key fields>
+      (fulfills REQ-XXX[, REQ-XXX...])"
+
+      "## Deterministic Services" - add ONLY when part of this mission's
+      backend logic must behave identically every time given the same
+      input (validation, a rules engine, a provisioning/state-machine
+      step) - ordinary code, never an agent, because the approved
+      requirements explicitly call for deterministic rather than
+      AI-driven behavior for that specific piece. Do not use this merely
+      to avoid writing a specialist agent for work that genuinely needs
+      judgment/reasoning. One bullet per service:
+      "**<Service name>**: <what it deterministically does>
+      (fulfills REQ-XXX[, REQ-XXX...])"
+
+      "## API Contracts" - add ONLY when the approved requirements name a
+      specific external or mock API/product surface this mission must
+      document or expose with its own contract, distinct from this
+      mission's own single backend endpoint. One bullet per API:
+      "**<API name>**: <what it exposes>
+      (fulfills REQ-XXX[, REQ-XXX...])"
+
       "## Multi-Agent Workflow" - decide how many specialist agents this
       solution needs and what each one is responsible for, based solely
       on the approved requirements and centered on what the user is
@@ -595,7 +632,7 @@ prompts:
       - user_message
       - architecture_reference_text
       - standards_reference_text
-    version: "4.8.0"
+    version: "4.9.0"
 
   - id: security-assessment-v1
     name: Security Assessment
@@ -1631,6 +1668,54 @@ prompts:
       case), then a "## Multi-Agent Workflow" section listing ONLY the
       agents actually generated - same count and names as above.
 
+      If component_kind is "deterministic_service": Produce one Python
+      3.12 module implementing ONLY the component named
+      "{component_name}" from the architecture's "## Deterministic
+      Services" section - ordinary, fully deterministic backend code,
+      NEVER an Azure AI Foundry agent call, NEVER an LLM call of any
+      kind. Never import `MissionFoundryAgent`, `agent_config`, or
+      anything from `agent_framework` - this component's entire job is
+      plain business logic (validation, orchestration of plain function
+      calls, deterministic data transformations) that must behave
+      identically every time given the same input. If this component
+      needs a shared data model generated elsewhere in this same build
+      (see "prior_components" below), import it via `from models import
+      <Name>` - never redefine or duplicate that model's own fields here.
+      Return one fenced ```python code block, first line `# agent:
+      service:{component_name}` (the literal prefix `service:` followed
+      by this component's own name - this is how Genie's materializer
+      tells a deterministic service apart from a specialist agent module).
+
+      If component_kind is "data_model": Produce one Python 3.12 module
+      defining ONLY the shared data model/entity named "{component_name}"
+      from the architecture's "## Data Models" section, as one top-level
+      Pydantic `BaseModel` subclass. Name that class exactly
+      "{component_name}" with every space/punctuation character removed
+      (e.g. a component named "Sandbox Tenant" becomes `class
+      SandboxTenant(BaseModel):`) - Genie's deterministic
+      `models/__init__.py` aggregator re-exports this exact class name
+      and will fail to import if the class is named anything else.
+      Include every field this entity's own architecture bullet and the
+      approved requirements actually describe, with real types (never a
+      bare `dict`/`Any` placeholder for a field whose shape is already
+      known). Never reference another model's class directly here - a
+      related entity is referenced by its own id field (e.g.
+      `product_id: str`), never by importing and nesting that other
+      model, so every model file stays independently generatable. Return
+      one fenced ```python code block, first line `# agent:
+      model:{component_name}`.
+
+      If component_kind is "api_contract": Produce ONLY a real OpenAPI
+      3.0 document (YAML, not code) describing the API named
+      "{component_name}" from the architecture's "## API Contracts"
+      section - the operations, request/response schemas, and error
+      models its own architecture bullet and the approved requirements
+      actually describe. This is a reference/documentation artifact
+      consumed by this mission's own generated portal (e.g. an API
+      explorer page), never executable code - do not wrap it in any
+      Python/TypeScript. Return one fenced ```yaml code block, first line
+      `# agent: api_contract:{component_name}`.
+
       Security rules you MUST follow: never hardcode any URL, hostname,
       port, API key, token, secret, or credential anywhere - read every
       endpoint, deployment name, and secret from configuration/environment
@@ -1690,7 +1775,7 @@ prompts:
       - user_message
       - assigned_requirements
       - prior_components
-    version: "1.25.0"
+    version: "1.26.0"
 
   - id: build-component-regeneration-v1
     name: Build Generation - Regenerate Single Component

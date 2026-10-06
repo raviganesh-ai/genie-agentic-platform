@@ -164,9 +164,9 @@ def test_parses_optional_component_type_sections_in_declared_order():
 
     assert plan is not None
     assert plan.other_components == (
-        ("deterministic_service", "Entitlement Checker"),
         ("data_model", "SandboxTenant"),
         ("data_model", "Entitlement"),
+        ("deterministic_service", "Entitlement Checker"),
         ("api_contract", "Payments API"),
         ("gateway_policy", "APIM JWT Policy"),
         ("identity_config", "Entra ID Adapter"),

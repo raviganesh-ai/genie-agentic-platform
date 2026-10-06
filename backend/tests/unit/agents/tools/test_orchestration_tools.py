@@ -885,3 +885,128 @@ async def test_call_build_agent_reuses_a_previously_succeeded_page_on_retry():
     assert "Dashboard Page" in called_components
 
 
+_ARCHITECTURE_WITH_NON_AGENT_COMPONENTS = """
+## Multi-Agent Workflow
+
+- **Ticket Classifier Agent**: classifies the incoming issue by category.
+- **Support Triage Orchestrator Agent**: the single entry point.
+
+## Data Models
+
+- **SandboxTenant**: the logical multi-tenant sandbox record.
+
+## Deterministic Services
+
+- **Entitlement Checker**: validates a request against the entitlement store.
+
+## API Contracts
+
+- **Payments API**: the OpenAPI contract for payment operations.
+"""
+
+
+async def test_call_build_agent_generates_deterministic_service_data_model_and_api_contract_components():
+    """deterministic_service/data_model/api_contract components (see
+    architecture_parsing.py's typed schema) must each get their own real
+    Build Agent call, generated after the Orchestrator and before the UI -
+    never forced through the agent-wrapper or single-UI-block path."""
+
+    registry = AgentToolRegistry()
+    gateway = _StreamingAgentGateway(
+        texts_by_component={
+            "Ticket Classifier Agent": "```python\n# agent: Ticket Classifier Agent\nclassifier code\n```",
+            "Support Triage Orchestrator Agent": "```python\n# agent: orchestrator\norchestrator code\n```",
+            "SandboxTenant": "```python\n# agent: model:SandboxTenant\nmodel code\n```",
+            "Entitlement Checker": "```python\n# agent: service:Entitlement Checker\nservice code\n```",
+            "Payments API": "```yaml\n# agent: api_contract:Payments API\napi code\n```",
+            "ui": "```tsx\n// agent: ui\nui code\n```",
+        }
+    )
+    governance_service = _RecordingGovernanceService()
+    register_orchestrator_delegation_tools(
+        registry, agent_gateway=gateway, governance_service=governance_service
+    )
+    context = ToolCallContext(
+        agent=_orchestrator_agent(),
+        session_id="session-1",
+        trace_id="run-1:build-solution",
+    )
+
+    await registry.execute(
+        agent_id="genie-orchestrator",
+        tool_name="call_build_agent",
+        arguments={
+            "requirements": "Approved requirements text.",
+            "architecture": _ARCHITECTURE_WITH_NON_AGENT_COMPONENTS,
+            "policies": "",
+            "user_message": "",
+        },
+        context=context,
+    )
+
+    assert [
+        (r.variables["component_kind"], r.variables["component_name"]) for r in gateway.requests
+    ] == [
+        ("agent", "Ticket Classifier Agent"),
+        ("orchestrator", "Support Triage Orchestrator Agent"),
+        ("data_model", "SandboxTenant"),
+        ("deterministic_service", "Entitlement Checker"),
+        ("api_contract", "Payments API"),
+        ("ui", "ui"),
+    ]
+    # Data models, services, and API contracts all get the same
+    # "prior_components" context the single-page UI already gets.
+    assert "model code" in gateway.requests[3].variables["prior_components"]
+    assert "service code" in gateway.requests[4].variables["prior_components"]
+
+
+async def test_call_build_agent_reuses_a_previously_succeeded_service_on_retry():
+    """A deterministic_service component's reuse key is its bare name (no
+    "service:" prefix), exactly mirroring page_view's own fix."""
+
+    registry = AgentToolRegistry()
+    gateway = _StreamingAgentGateway(
+        texts_by_component={
+            "Ticket Classifier Agent": "```python\n# agent: Ticket Classifier Agent\nclassifier code\n```",
+            "Support Triage Orchestrator Agent": "```python\n# agent: orchestrator\norchestrator code\n```",
+            "SandboxTenant": "```python\n# agent: model:SandboxTenant\nmodel code\n```",
+            "Payments API": "```yaml\n# agent: api_contract:Payments API\napi code\n```",
+            "ui": "```tsx\n// agent: ui\nui code\n```",
+        }
+    )
+    governance_service = _RecordingGovernanceService()
+    register_orchestrator_delegation_tools(
+        registry, agent_gateway=gateway, governance_service=governance_service
+    )
+    context = ToolCallContext(
+        agent=_orchestrator_agent(),
+        session_id="session-1",
+        trace_id="run-1:build-solution",
+    )
+    previous_build_output = (
+        "```python\n# agent: Ticket Classifier Agent\nclassifier code\n```\n\n"
+        "```python\n# agent: orchestrator\norchestrator code\n```\n\n"
+        "```python\n# agent: model:SandboxTenant\nmodel code\n```\n\n"
+        "```python\n# agent: service:Entitlement Checker\nservice code\n```"
+    )
+
+    await registry.execute(
+        agent_id="genie-orchestrator",
+        tool_name="call_build_agent",
+        arguments={
+            "requirements": "Approved requirements text.",
+            "architecture": _ARCHITECTURE_WITH_NON_AGENT_COMPONENTS,
+            "policies": "",
+            "user_message": "",
+            "previous_build_output": previous_build_output,
+        },
+        context=context,
+    )
+
+    called_components = [r.variables["component_name"] for r in gateway.requests]
+    # Entitlement Checker was already generated successfully last time -
+    # reused verbatim, never re-called.
+    assert "Entitlement Checker" not in called_components
+    assert "Payments API" in called_components
+
+
