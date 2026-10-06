@@ -1071,3 +1071,63 @@ async def test_call_build_agent_generates_gateway_policy_component():
     ]
 
 
+_ARCHITECTURE_WITH_IDENTITY_CONFIG = """
+## Multi-Agent Workflow
+
+- **Ticket Classifier Agent**: classifies the incoming issue by category.
+- **Support Triage Orchestrator Agent**: the single entry point.
+
+## Identity Configuration
+
+- **Entra ID Adapter**: the identity-provider adapter configuration.
+"""
+
+
+async def test_call_build_agent_generates_identity_config_component():
+    """identity_config is wired into the Build loop (Build can generate
+    its adapter module) even though architecture-recommendation-v1 does
+    not yet instruct Architecture to emit "## Identity Configuration" -
+    mirrors gateway_policy's own test above."""
+
+    registry = AgentToolRegistry()
+    gateway = _StreamingAgentGateway(
+        texts_by_component={
+            "Ticket Classifier Agent": "```python\n# agent: Ticket Classifier Agent\nclassifier code\n```",
+            "Support Triage Orchestrator Agent": "```python\n# agent: orchestrator\norchestrator code\n```",
+            "Entra ID Adapter": "```ts\n// agent: identity_config:Entra ID Adapter\nadapter code\n```",
+            "ui": "```tsx\n// agent: ui\nui code\n```",
+        }
+    )
+    governance_service = _RecordingGovernanceService()
+    register_orchestrator_delegation_tools(
+        registry, agent_gateway=gateway, governance_service=governance_service
+    )
+    context = ToolCallContext(
+        agent=_orchestrator_agent(),
+        session_id="session-1",
+        trace_id="run-1:build-solution",
+    )
+
+    await registry.execute(
+        agent_id="genie-orchestrator",
+        tool_name="call_build_agent",
+        arguments={
+            "requirements": "Approved requirements text.",
+            "architecture": _ARCHITECTURE_WITH_IDENTITY_CONFIG,
+            "policies": "",
+            "user_message": "",
+        },
+        context=context,
+    )
+
+    assert [
+        (r.variables["component_kind"], r.variables["component_name"]) for r in gateway.requests
+    ] == [
+        ("agent", "Ticket Classifier Agent"),
+        ("orchestrator", "Support Triage Orchestrator Agent"),
+        ("identity_config", "Entra ID Adapter"),
+        ("ui", "ui"),
+    ]
+    assert "adapter code" in gateway.requests[3].variables["prior_components"]
+
+

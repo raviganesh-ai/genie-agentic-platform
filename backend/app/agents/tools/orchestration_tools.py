@@ -329,6 +329,7 @@ _MARKER_NAME_PREFIXES: tuple[str, ...] = (
     "model:",
     "api_contract:",
     "gateway_policy:",
+    "identity_config:",
 )
 _MARKER_PREFIX_BY_COMPONENT_KIND: dict[str, str] = {
     "page_view": "page:",
@@ -336,6 +337,7 @@ _MARKER_PREFIX_BY_COMPONENT_KIND: dict[str, str] = {
     "data_model": "model:",
     "api_contract": "api_contract:",
     "gateway_policy": "gateway_policy:",
+    "identity_config": "identity_config:",
 }
 
 
@@ -492,23 +494,29 @@ async def _generate_build_by_component(
         for component_type, name in plan.other_components
         if component_type == "page_view"
     )
-    # Phase 3/4 kinds: ordinary non-agent backend components, generated
+    # Phase 3/4/5 kinds: ordinary non-agent backend components, generated
     # before the UI/pages (never after) so they are the single-page "ui"
     # or each "page_view"'s own available "prior_components" context, the
     # same way every specialist agent and the Orchestrator already are.
-    # identity_config is parsed (see architecture_parsing.py) but
-    # intentionally not yet wired here - that is a later phase of the
-    # same roadmap, once its own Build codegen path exists. gateway_policy
-    # IS wired here (Build can generate its structured config), but
-    # architecture-recommendation-v1 does not yet instruct Architecture to
-    # emit "## Gateway Policies" - the generated config is not yet read
-    # into the real deployed APIM policy at Deploy & Launch time, so
-    # activating generation first would produce an artifact with no
-    # runtime effect.
+    # gateway_policy and identity_config are both wired here (Build can
+    # generate their config), but architecture-recommendation-v1 does not
+    # yet instruct Architecture to emit "## Gateway Policies"/"## Identity
+    # Configuration" - neither the generated gateway policy config nor
+    # the generated identity adapter is read into a real running mission
+    # yet (no Deploy & Launch wiring, no @azure/msal-browser dependency,
+    # no generated page calls the adapter's signIn()), so activating
+    # generation first would produce an artifact with no runtime effect.
     non_agent_backend_components = tuple(
         (component_type, name)
         for component_type, name in plan.other_components
-        if component_type in ("deterministic_service", "data_model", "api_contract", "gateway_policy")
+        if component_type
+        in (
+            "deterministic_service",
+            "data_model",
+            "api_contract",
+            "gateway_policy",
+            "identity_config",
+        )
     )
 
     components: list[tuple[str, str]] = [
@@ -599,6 +607,7 @@ async def _generate_build_by_component(
                     "data_model",
                     "api_contract",
                     "gateway_policy",
+                    "identity_config",
                 )
                 else ""
             ),
@@ -631,7 +640,7 @@ async def _generate_build_by_component(
             marker_prefix = _MARKER_PREFIX_BY_COMPONENT_KIND.get(component_kind, "")
             marker_name = f"{marker_prefix}{label_name}"
             failure_piece = _component_failure_piece(
-                marker_name, is_ui=component_kind in ("ui", "page_view"), exc=exc
+                marker_name, is_ui=component_kind in ("ui", "page_view", "identity_config"), exc=exc
             )
             await _publish_delta(failure_piece)
             pieces.append(failure_piece)

@@ -456,3 +456,20 @@ def test_build_generation_component_prompt_has_a_gateway_policy_branch_that_forb
     assert "gateway_policy:{component_name}" in template
 
 
+def test_build_generation_component_prompt_has_an_identity_config_branch():
+    """identity_config must implement a shared IdentityProvider interface
+    against Entra ID via @azure/msal-browser (authorization-code + PKCE,
+    never an implicit flow or client secret), reading configuration from
+    environment variables rather than hardcoding it - so a future,
+    different provider is a pure additive adapter."""
+
+    registry = PromptRegistry.load(_REPO_CONFIG_ROOT / "prompts")
+    template = " ".join(registry.get("build-generation-component-v1").template.split())
+
+    assert 'If component_kind is "identity_config"' in template
+    assert "IDENTITY_PROVIDER_INTERFACE" in template
+    assert "@azure/msal-browser" in template
+    assert "never a client secret" in template
+    assert "identity_config:{component_name}" in template
+
+

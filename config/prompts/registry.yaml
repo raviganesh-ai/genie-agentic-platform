@@ -1737,6 +1737,29 @@ prompts:
       ```yaml code block, first line `# agent:
       gateway_policy:{component_name}`.
 
+      If component_kind is "identity_config": Produce ONLY one TypeScript
+      module (never a React component) implementing the identity-provider
+      adapter named "{component_name}" from the architecture's "##
+      Identity Configuration" section, against exactly this shared
+      IDENTITY_PROVIDER_INTERFACE so a future, different provider is an
+      additive adapter, never a rewrite of anything that calls it:
+      "export interface IdentityProvider {{
+        signIn(): Promise<void>;
+        signOut(): Promise<void>;
+        getAccessToken(scopes: string[]): Promise<string | null>;
+        getAccountClaims(): Record<string, unknown> | null;
+      }}"
+      Implement it for Microsoft Entra ID using `@azure/msal-browser`'s
+      `PublicClientApplication` (authorization-code + PKCE, never an
+      implicit flow, never a client secret - this is a public SPA
+      client). Read the client id, authority/tenant, and redirect URI
+      from `import.meta.env` variables (e.g.
+      `VITE_GENIE_ENTRA_CLIENT_ID`, `VITE_GENIE_ENTRA_AUTHORITY`,
+      `VITE_GENIE_ENTRA_REDIRECT_URI`) - never hardcode any of these
+      values. Export the concrete implementation as the module's default
+      export. Return one fenced ```ts code block, first line `// agent:
+      identity_config:{component_name}`.
+
       Security rules you MUST follow: never hardcode any URL, hostname,
       port, API key, token, secret, or credential anywhere - read every
       endpoint, deployment name, and secret from configuration/environment
@@ -1796,7 +1819,7 @@ prompts:
       - user_message
       - assigned_requirements
       - prior_components
-    version: "1.27.0"
+    version: "1.28.0"
 
   - id: build-component-regeneration-v1
     name: Build Generation - Regenerate Single Component

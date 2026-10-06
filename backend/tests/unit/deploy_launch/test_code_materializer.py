@@ -789,6 +789,35 @@ def test_write_to_directory_writes_gateway_policies(tmp_path: Path):
     assert (tmp_path / "gateway-policies" / "apim_jwt_policy.yaml").exists()
 
 
+_IDENTITY_CONFIG_OUTPUT = '''
+```python
+# agent: orchestrator
+class OrchestratorAgent:
+    async def run(self, ui_message: str, on_progress=None) -> None:
+        pass
+```
+
+```ts
+// agent: identity_config:Entra ID Adapter
+export const signIn = () => {};
+```
+'''
+
+
+def test_materialize_build_parses_identity_config_as_a_ts_module():
+    build = materialize_build(_IDENTITY_CONFIG_OUTPUT)
+
+    assert "signIn" in build.identity_config_modules["Entra ID Adapter"]
+
+
+def test_write_to_directory_writes_identity_config(tmp_path: Path):
+    build = materialize_build(_IDENTITY_CONFIG_OUTPUT)
+
+    build.write_to_directory(tmp_path)
+
+    assert (tmp_path / "identity" / "entra_id_adapter.ts").exists()
+
+
 def test_stream_agent_response_relays_on_progress_narration_as_it_happens(monkeypatch):
     """Regression guard for the "Agent Pipeline never animates" incident: a
     real orchestrator pipeline run used to be awaited to completion before

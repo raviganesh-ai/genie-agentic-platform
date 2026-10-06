@@ -34,7 +34,7 @@ __all__ = [
 # without the line anchors those would terminate the block early and
 # materialize truncated, non-importable source.
 _FENCE_PATTERN: Final = re.compile(
-    r"^[ \t]*```(python|tsx|yaml|yml)[ \t]*\n(.*?)^[ \t]*```[ \t]*$",
+    r"^[ \t]*```(python|tsx|ts|yaml|yml)[ \t]*\n(.*?)^[ \t]*```[ \t]*$",
     re.DOTALL | re.IGNORECASE | re.MULTILINE,
 )
 _AGENT_MARKER_PATTERN: Final = re.compile(r"^#\s*agent:\s*(.+)$")
@@ -73,6 +73,12 @@ _API_CONTRACT_MARKER_PATTERN: Final = re.compile(
 # ``# agent: gateway_policy:<Policy Name>``.
 _GATEWAY_POLICY_MARKER_PATTERN: Final = re.compile(
     r"^#\s*agent:\s*gateway_policy:(.+)$", re.IGNORECASE
+)
+# One identity-provider adapter (see "## Identity Configuration") - a
+# TypeScript module (``ts`` fence), never a React component. First line
+# ``// agent: identity_config:<Adapter Name>``.
+_IDENTITY_CONFIG_MARKER_PATTERN: Final = re.compile(
+    r"^//\s*agent:\s*identity_config:(.+)$", re.IGNORECASE
 )
 
 _ORCHESTRATOR_MARKER: Final = "orchestrator"
@@ -342,6 +348,10 @@ class MaterializedBuild:
     # structured YAML configuration (never raw APIM policy XML - see
     # prototype_api_gateway_service.GatewayPolicyConfig).
     gateway_policy_documents: dict[str, str] = field(default_factory=dict)
+    # One entry per declared "## Identity Configuration" component - a
+    # TypeScript identity-provider adapter module (see
+    # "IDENTITY_PROVIDER_INTERFACE" in build-generation-component-v1).
+    identity_config_modules: dict[str, str] = field(default_factory=dict)
 
     def write_to_directory(
         self, root: Path, *, backend_service_scaffold: dict[str, str] | None = None
@@ -437,6 +447,14 @@ class MaterializedBuild:
                 path.write_text(document, encoding="utf-8")
                 written.append(path)
 
+        if self.identity_config_modules:
+            identity_dir = root / "identity"
+            identity_dir.mkdir(parents=True, exist_ok=True)
+            for adapter_name, code in self.identity_config_modules.items():
+                path = identity_dir / f"{_slugify(adapter_name)}.ts"
+                path.write_text(code, encoding="utf-8")
+                written.append(path)
+
         for file_name, content in (backend_service_scaffold or {}).items():
             path = root / file_name
             path.write_text(content, encoding="utf-8")
@@ -460,6 +478,7 @@ def materialize_build(output_text: str) -> MaterializedBuild:
     data_model_modules: dict[str, str] = {}
     api_contract_documents: dict[str, str] = {}
     gateway_policy_documents: dict[str, str] = {}
+    identity_config_modules: dict[str, str] = {}
 
     for language, body in _FENCE_PATTERN.findall(output_text):
         lines = body.splitlines()
@@ -495,6 +514,10 @@ def materialize_build(output_text: str) -> MaterializedBuild:
                 page_components[page_match.group(1).strip()] = body.strip("\n")
             elif _UI_MARKER_PATTERN.match(first_line):
                 ui_component = body.strip("\n")
+        elif language.lower() == "ts":
+            identity_match = _IDENTITY_CONFIG_MARKER_PATTERN.match(first_line)
+            if identity_match is not None:
+                identity_config_modules[identity_match.group(1).strip()] = body.strip("\n")
 
     if (
         not agent_modules
@@ -505,11 +528,12 @@ def materialize_build(output_text: str) -> MaterializedBuild:
         and not data_model_modules
         and not api_contract_documents
         and not gateway_policy_documents
+        and not identity_config_modules
     ):
         raise MaterializedCodeError(
             "No materializable agent, orchestrator, UI, page, service, model, API "
-            "contract, or gateway policy code block was found in the build-solution "
-            "step's output."
+            "contract, gateway policy, or identity config code block was found in "
+            "the build-solution step's output."
         )
 
     if ui_component is not None and page_components:
@@ -591,6 +615,7 @@ def materialize_build(output_text: str) -> MaterializedBuild:
         data_model_modules=data_model_modules,
         api_contract_documents=api_contract_documents,
         gateway_policy_documents=gateway_policy_documents,
+        identity_config_modules=identity_config_modules,
     )
 
 
