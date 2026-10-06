@@ -389,6 +389,24 @@ def test_architecture_prompt_offers_ui_pages_as_the_multi_page_alternative():
     assert "may use React Flow" in template
 
 
+def test_architecture_prompt_mandates_ui_pages_when_requirements_enumerate_named_destinations():
+    """Regression guard: found via a real end-to-end run of the ACI PoC
+    mission - the Architecture Designer chose the single-page default
+    even though the approved requirements explicitly named a multi-page
+    portal (landing page, catalog, onboarding wizard, dashboard, audit
+    timeline, ...) as what it must include. The choice between the two
+    top-level UI shapes must not be left to a soft judgment call once the
+    requirements themselves enumerate several of these distinct
+    destinations - it must be treated as a literal instruction for "## UI
+    Pages"."""
+
+    registry = PromptRegistry.load(_REPO_CONFIG_ROOT / "prompts")
+    template = " ".join(registry.get("architecture-recommendation-v1").template.split())
+
+    assert "This choice is NOT optional whenever a requirement explicitly names or enumerates" in template
+    assert "never a judgment call to fold into zones of one page" in template
+
+
 def test_build_generation_component_prompt_has_a_page_view_branch():
     """build-generation-component-v1 must know how to generate a
     "page_view" component - each declared "## UI Pages" page is Build-Agent

@@ -522,13 +522,23 @@ prompts:
       below. The FIRST baseline section is always "## Multi-Agent
       Workflow". The SECOND is EITHER "## Single-Page UI Design" (the
       default, standard shape - use this for nearly every mission) OR
-      "## UI Pages" (use ONLY when the approved requirements genuinely
-      describe multiple distinct, independently navigable destinations a
-      user moves between as separate pages - a catalog browse page, an
+      "## UI Pages" (use when the approved requirements genuinely describe
+      multiple distinct, independently navigable destinations a user
+      moves between as separate pages - a catalog browse page, an
       onboarding wizard, a dashboard, an audit/trace view - rather than
       input fields collected before one single run; having many input
       fields is NOT by itself a reason to choose this - that still
-      belongs on one "## Single-Page UI Design" page). Produce exactly
+      belongs on one "## Single-Page UI Design" page). This choice is NOT
+      optional whenever a requirement explicitly names or enumerates
+      several of these distinct destinations as the portal's own
+      structure (e.g. a requirement listing "landing page, catalog,
+      onboarding wizard, sandbox status page, API explorer, credential
+      view, audit timeline, activation dashboard" as what the portal
+      "must include/provide", or stating the portal itself is
+      "multi-page") - that is a direct, literal instruction for "## UI
+      Pages", never a judgment call to fold into zones of one page: one
+      page_view bullet per named destination, preserving the user's own
+      list rather than consolidating it into input zones. Produce exactly
       one of these two for this response, never both. The Single-Page UI
       Design summary must use this exact shape before its prose: "Surface
       mode: <OPERATE|READ|EXPERIENCE|PERSUADE>.
@@ -648,7 +658,7 @@ prompts:
       - user_message
       - architecture_reference_text
       - standards_reference_text
-    version: "4.9.0"
+    version: "4.10.0"
 
   - id: security-assessment-v1
     name: Security Assessment
