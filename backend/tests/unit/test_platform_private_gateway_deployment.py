@@ -18,7 +18,9 @@ def test_gateway_template_uses_standard_v2_vnet_integration_and_private_link():
     assert "publicNetworkAccess: 'Enabled'" in template
     assert "virtualNetworkType: 'External'" in template
     assert "serviceName: 'Microsoft.Web/serverFarms'" in template
-    assert "subscriptionRequired: false" in template
+    assert "subscriptionRequired: true" in template
+    assert "@secure()" in template
+    assert "param genieApiSubscriptionKey string" in template
     assert "groupIds: [\n            'managedEnvironments'" in template
     assert "privateDnsZoneName = 'privatelink.${location}.azurecontainerapps.io'" in template
 
@@ -49,7 +51,7 @@ def test_cutover_proves_gateway_before_and_after_disabling_public_access():
         encoding="utf-8"
     )
 
-    gateway_probe = "Wait-ForGatewayReadiness -GatewayUrl $gatewayUrl -Deadline $deadline"
+    gateway_probe = "Wait-ForGatewayReadiness -GatewayUrl $gatewayUrl -ApimSubscriptionKey $ApimSubscriptionKey -Deadline $deadline"
     first_probe = script.index(gateway_probe)
     private_dns_deploy = script.index("Preparing private DNS for")
     disable_public_access = script.index('publicNetworkAccess = "Disabled"')
