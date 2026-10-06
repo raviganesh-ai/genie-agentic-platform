@@ -314,6 +314,22 @@ prompts:
       scope unless the user removes it during review. Number each item in
       this list for clarity.
 
+      ACCEPTANCE CRITERIA (OPTIONAL - only when explicitly stated):
+      If, and only if, the source material itself states explicit,
+      testable acceptance criteria for the overall solution (e.g. its own
+      "Acceptance Criteria"/"Definition of Done" section listing concrete,
+      verifiable pass conditions - never criteria you infer or invent
+      yourself), add one final "Acceptance Criteria:" section, after
+      "Critical path (must build first):". Assign each criterion its own
+      stable `AC-001`, `AC-002`, ... id in source order - a separate id
+      sequence from REQ-XXX, never reusing or aliasing a requirement id.
+      Preserve each criterion's own exact, testable, observable pass
+      condition from the source material (what must be demonstrably true
+      for the solution to be accepted) - never paraphrase it into a vaguer
+      restatement. Omit this section entirely when the source material
+      states no explicit acceptance criteria of its own; do not fabricate
+      one from the functional requirements above.
+
       COMPLETENESS CHECK:
       Before outputting your response, ask yourself: "Did the customer
       describe a goal or problem they want to solve? Have I captured EVERY
@@ -345,7 +361,7 @@ prompts:
     variables:
       - transcript_excerpt
       - user_message
-    version: "2.3.0"
+    version: "2.4.0"
 
 
   - id: architecture-recommendation-v1

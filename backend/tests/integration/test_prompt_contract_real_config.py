@@ -508,3 +508,27 @@ def test_test_generation_prompt_has_an_acceptance_criteria_gate():
     assert "acceptance_criteria_service" in template
 
 
+def test_requirements_extraction_prompt_preserves_a_distinct_acceptance_criteria_section():
+    """Regression guard: the Requirements Analyst must preserve a source
+    document's own explicit "Acceptance Criteria:"/"Definition of Done"
+    section as its own distinct "Acceptance Criteria:" heading with
+    AC-XXX ids (a separate id sequence from REQ-XXX) - otherwise Phase 7's
+    acceptance-criteria verification stage (see
+    app.deploy_launch.acceptance_criteria_service.extract_acceptance_criteria
+    and test-generation-v1's own ACCEPTANCE CRITERIA GATE) can never
+    activate, since neither ever sees anything but generic REQ-XXX
+    requirements. Found via a real end-to-end run of the ACI PoC mission
+    before this fix: the Requirements Analyst folded the source document's
+    own Section 15 acceptance criteria into ordinary REQ-XXX requirements
+    and never emitted the "Acceptance Criteria:" heading at all."""
+
+    registry = PromptRegistry.load(_REPO_CONFIG_ROOT / "prompts")
+    template = " ".join(registry.get("requirements-extraction-v1").template.split())
+
+    assert "ACCEPTANCE CRITERIA (OPTIONAL" in template
+    assert '"Acceptance Criteria:"' in template
+    assert "AC-001" in template
+    assert "a separate id sequence from REQ-XXX" in template
+    assert "never invent" in template or "never criteria you infer or invent" in template
+
+
