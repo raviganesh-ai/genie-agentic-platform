@@ -48,6 +48,8 @@ $roleDefinition = @{
         "Microsoft.ApiManagement/service/apis/operations/write"
         "Microsoft.ApiManagement/service/apis/policies/read"
         "Microsoft.ApiManagement/service/apis/policies/write"
+        "Microsoft.ApiManagement/service/subscriptions/read"
+        "Microsoft.ApiManagement/service/subscriptions/write"
         "Microsoft.Network/virtualNetworks/read"
         "Microsoft.Network/virtualNetworks/join/action"
         "Microsoft.Network/virtualNetworks/subnets/read"
