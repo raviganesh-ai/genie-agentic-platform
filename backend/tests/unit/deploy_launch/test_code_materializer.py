@@ -13,6 +13,7 @@ from app.deploy_launch.code_materializer import (
     MaterializedCodeError,
     generate_agent_config_module,
     generate_backend_service_scaffold,
+    generate_routing_shell,
     materialize_build,
 )
 
@@ -596,6 +597,84 @@ def test_generate_agent_config_module_embeds_the_real_agent_foundry_name_mapping
     assert "AGENT_FOUNDRY_NAMES" in module_source
     assert "'Requirements Specialist': 'acme-requirements-specialist'" in module_source
     assert "'orchestrator': 'acme-orchestrator'" in module_source
+
+
+_MULTI_PAGE_OUTPUT = '''
+```python
+# agent: orchestrator
+class OrchestratorAgent:
+    async def run(self, ui_message: str, on_progress=None) -> None:
+        pass
+```
+
+```tsx
+// agent: page:Catalog Page
+export default function CatalogPage() {
+    return null;
+}
+```
+
+```tsx
+// agent: page:Dashboard Page
+export default function DashboardPage() {
+    return null;
+}
+```
+'''
+
+
+def test_materialize_build_parses_multiple_page_components():
+    build = materialize_build(_MULTI_PAGE_OUTPUT)
+
+    assert build.ui_component is None
+    assert list(build.page_components.keys()) == ["Catalog Page", "Dashboard Page"]
+    assert "CatalogPage" in build.page_components["Catalog Page"]
+    assert "DashboardPage" in build.page_components["Dashboard Page"]
+
+
+def test_materialize_build_rejects_both_single_page_and_multi_page_markers():
+    output = _MULTI_PAGE_OUTPUT + '''
+```tsx
+// agent: ui
+export default function MissionApp() {
+    return null;
+}
+```
+'''
+    with pytest.raises(MaterializedCodeError, match="never both at once"):
+        materialize_build(output)
+
+
+def test_write_to_directory_writes_pages_and_generated_routing_shell(tmp_path: Path):
+    build = materialize_build(_MULTI_PAGE_OUTPUT)
+
+    written = build.write_to_directory(tmp_path)
+
+    assert (tmp_path / "pages" / "catalog_page.tsx").exists()
+    assert (tmp_path / "pages" / "dashboard_page.tsx").exists()
+    assert (tmp_path / "orchestrator.py").exists()
+    shell_path = tmp_path / "MissionApp.tsx"
+    assert shell_path.exists()
+    shell_source = shell_path.read_text(encoding="utf-8")
+    assert "agent: generated-routing-shell" in shell_source
+    assert 'import Page0 from "./pages/catalog_page";' in shell_source
+    assert 'import Page1 from "./pages/dashboard_page";' in shell_source
+    assert '"/catalog-page"' in shell_source
+    assert '"/dashboard-page"' in shell_source
+    assert len(written) == 4
+
+
+def test_generate_routing_shell_defaults_to_the_first_declared_page():
+    shell_source = generate_routing_shell(("Catalog Page", "Dashboard Page"))
+
+    assert 'Navigate to={MISSION_PAGES[0].path}' in shell_source
+    assert 'label: "Catalog Page"' in shell_source
+    assert 'label: "Dashboard Page"' in shell_source
+
+
+def test_generate_routing_shell_rejects_empty_page_list():
+    with pytest.raises(MaterializedCodeError):
+        generate_routing_shell(())
 
 
 def test_stream_agent_response_relays_on_progress_narration_as_it_happens(monkeypatch):

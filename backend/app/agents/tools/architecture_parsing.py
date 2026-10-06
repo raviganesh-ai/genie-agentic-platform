@@ -22,6 +22,15 @@ backend component that is not an agent or a UI zone:
 - "## API Contracts" -> ``component_type == "api_contract"``
 - "## Gateway Policies" -> ``component_type == "gateway_policy"``
 - "## Identity Configuration" -> ``component_type == "identity_config"``
+- "## UI Pages" -> ``component_type == "page_view"`` - an ordered list of
+  additional, independently navigable pages (a catalog, a dashboard, an
+  audit/trace view, ...), each described with the same bullet convention
+  as a "## Single-Page UI Design" zone. When present, this REPLACES "##
+  Single-Page UI Design" for this mission (Build generates one component
+  per declared page plus a deterministic, non-LLM-authored routing shell
+  that wires them together - see ``code_materializer.generate_routing_shell``)
+  rather than the usual single input-only page. Most missions still only
+  need "## Single-Page UI Design" and never declare this section at all.
 
 Each uses the exact same "**<Name>**: <description> (fulfills REQ-XXX...)"
 bullet convention as the two baseline sections, so this module's existing
@@ -67,6 +76,7 @@ _OTHER_COMPONENT_SECTIONS: tuple[tuple[str, str], ...] = (
     ("api_contract", "API Contracts"),
     ("gateway_policy", "Gateway Policies"),
     ("identity_config", "Identity Configuration"),
+    ("page_view", "UI Pages"),
 )
 _OTHER_COMPONENT_SECTION_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
     (

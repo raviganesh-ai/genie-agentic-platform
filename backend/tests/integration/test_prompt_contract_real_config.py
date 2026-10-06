@@ -369,5 +369,38 @@ def test_architecture_prompt_shapes_an_impeccable_visual_direction_for_each_miss
     assert "shape-first method from https://impeccable.style/" in template
     assert "OPERATE (fast scanning and repeated action)" in template
     assert '"Surface mode: <OPERATE|READ|EXPERIENCE|PERSUADE>.' in template
-    assert "do not add a third top-level section" in template
+    assert "never a third top-level section" in template
+
+
+def test_architecture_prompt_offers_ui_pages_as_the_multi_page_alternative():
+    """The second top-level section is a choice between the default
+    single-page shape and "## UI Pages" (never both, never a third
+    section) - see architecture_parsing.py's typed component schema and
+    build-generation-component-v1's own "page_view" branch, which this
+    choice feeds into."""
+
+    registry = PromptRegistry.load(_REPO_CONFIG_ROOT / "prompts")
+    template = " ".join(registry.get("architecture-recommendation-v1").template.split())
+
+    assert '"## UI Pages"' in template
+    assert "Produce exactly one of these two for this response" in template
+    assert "independently navigable destinations" in template
+    assert "may use Recharts" in template
+    assert "may use React Flow" in template
+
+
+def test_build_generation_component_prompt_has_a_page_view_branch():
+    """build-generation-component-v1 must know how to generate a
+    "page_view" component - each declared "## UI Pages" page is Build-Agent
+    -generated individually, exactly like a specialist agent, then
+    deterministically stitched together (code_materializer.generate_routing_shell,
+    never LLM-authored) rather than left to an undefined branch."""
+
+    registry = PromptRegistry.load(_REPO_CONFIG_ROOT / "prompts")
+    template = " ".join(registry.get("build-generation-component-v1").template.split())
+
+    assert 'If component_kind is "page_view"' in template
+    assert "page:{component_name}" in template
+    assert "never render navigation, a page switcher, or any other page's own content" in template
+
 

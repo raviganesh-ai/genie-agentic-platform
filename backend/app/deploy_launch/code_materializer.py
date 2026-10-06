@@ -23,6 +23,7 @@ __all__ = [
     "MaterializedCodeError",
     "generate_agent_config_module",
     "generate_backend_service_scaffold",
+    "generate_routing_shell",
     "materialize_build",
 ]
 
@@ -37,6 +38,10 @@ _FENCE_PATTERN: Final = re.compile(
 )
 _AGENT_MARKER_PATTERN: Final = re.compile(r"^#\s*agent:\s*(.+)$")
 _UI_MARKER_PATTERN: Final = re.compile(r"^//\s*agent:\s*ui\s*$", re.IGNORECASE)
+# One independently generated page of a multi-page mission UI (see "## UI
+# Pages" in architecture_parsing.py) - first line ``// agent: page:<Page
+# Name>``, parallel to the single-page ``// agent: ui`` marker above.
+_PAGE_MARKER_PATTERN: Final = re.compile(r"^//\s*agent:\s*page:(.+)$", re.IGNORECASE)
 
 _ORCHESTRATOR_MARKER: Final = "orchestrator"
 
@@ -285,6 +290,12 @@ class MaterializedBuild:
     agent_modules: dict[str, str] = field(default_factory=dict)
     orchestrator_module: str | None = None
     ui_component: str | None = None
+    # One entry per declared "## UI Pages" page (see architecture_parsing.py),
+    # keyed by its own display name, in declaration order. Mutually
+    # exclusive with ``ui_component`` - a build is either the common
+    # single-page case or a multi-page one, never both (enforced by
+    # ``materialize_build``).
+    page_components: dict[str, str] = field(default_factory=dict)
 
     def write_to_directory(
         self, root: Path, *, backend_service_scaffold: dict[str, str] | None = None
@@ -314,7 +325,27 @@ class MaterializedBuild:
             )
             written.append(path)
 
-        if self.ui_component is not None:
+        if self.page_components:
+            # Multi-page mission: each generated page is its own file under
+            # pages/, and MissionApp.tsx is NOT LLM-authored at all - it is
+            # Genie's own deterministic routing shell (see
+            # generate_routing_shell), stitching the declared pages
+            # together with plain React Router navigation. The shell
+            # preserves the exact same `{ onSubmit }` entry-point contract
+            # as the single-page case, so the surrounding mission
+            # infrastructure that renders `<MissionApp onSubmit={...} />`
+            # needs no changes to support either case.
+            pages_dir = root / "pages"
+            pages_dir.mkdir(parents=True, exist_ok=True)
+            page_names = tuple(self.page_components.keys())
+            for page_name, code in self.page_components.items():
+                path = pages_dir / f"{_slugify(page_name)}.tsx"
+                path.write_text(code, encoding="utf-8")
+                written.append(path)
+            shell_path = root / "MissionApp.tsx"
+            shell_path.write_text(generate_routing_shell(page_names), encoding="utf-8")
+            written.append(shell_path)
+        elif self.ui_component is not None:
             path = root / "MissionApp.tsx"
             path.write_text(self.ui_component, encoding="utf-8")
             written.append(path)
@@ -337,6 +368,7 @@ def materialize_build(output_text: str) -> MaterializedBuild:
     agent_modules: dict[str, str] = {}
     orchestrator_module: str | None = None
     ui_component: str | None = None
+    page_components: dict[str, str] = {}
 
     for language, body in _FENCE_PATTERN.findall(output_text):
         lines = body.splitlines()
@@ -352,13 +384,29 @@ def materialize_build(output_text: str) -> MaterializedBuild:
             else:
                 agent_modules[agent_name] = body.strip("\n")
         elif language.lower() == "tsx":
-            if _UI_MARKER_PATTERN.match(first_line):
+            page_match = _PAGE_MARKER_PATTERN.match(first_line)
+            if page_match is not None:
+                page_components[page_match.group(1).strip()] = body.strip("\n")
+            elif _UI_MARKER_PATTERN.match(first_line):
                 ui_component = body.strip("\n")
 
-    if not agent_modules and orchestrator_module is None and ui_component is None:
+    if (
+        not agent_modules
+        and orchestrator_module is None
+        and ui_component is None
+        and not page_components
+    ):
         raise MaterializedCodeError(
-            "No materializable agent, orchestrator, or UI code block was found in "
-            "the build-solution step's output."
+            "No materializable agent, orchestrator, UI, or page code block was found "
+            "in the build-solution step's output."
+        )
+
+    if ui_component is not None and page_components:
+        raise MaterializedCodeError(
+            "The build-solution step's output contains both a single '// agent: ui' "
+            "block and one or more '// agent: page:<name>' blocks. A mission is "
+            "either the common single-page case or a multi-page one (see the "
+            "architecture's '## UI Pages' section), never both at once."
         )
 
     if orchestrator_module is not None and not _ORCHESTRATOR_CLASS_PATTERN.search(orchestrator_module):
@@ -380,16 +428,25 @@ def materialize_build(output_text: str) -> MaterializedBuild:
             "Python's random module for deterministic seeded randomness."
         )
 
-    if ui_component is not None and _EXACT_FILE_NAME_COMPARISON_PATTERN.search(ui_component):
-        raise MaterializedCodeError(
-            "The generated mission UI compares an uploaded file's name to an exact "
-            "literal. Generated prototypes must validate uploaded content and file "
-            "type, never an end-user-controlled filename or example filename."
-        )
+    # Every UI-like component (the single-page case, or each individually
+    # generated page) is held to the exact same generation-quality gates
+    # below - a page is just a UI component scoped to one route, not a
+    # different risk profile.
+    ui_like_components = ([ui_component] if ui_component is not None else []) + list(
+        page_components.values()
+    )
 
-    if (
-        ui_component is not None
-        and _has_strict_sample_cardinality_gate(ui_component, python_source=False)
+    for ui_like_component in ui_like_components:
+        if _EXACT_FILE_NAME_COMPARISON_PATTERN.search(ui_like_component):
+            raise MaterializedCodeError(
+                "The generated mission UI compares an uploaded file's name to an exact "
+                "literal. Generated prototypes must validate uploaded content and file "
+                "type, never an end-user-controlled filename or example filename."
+            )
+
+    if any(
+        _has_strict_sample_cardinality_gate(ui_like_component, python_source=False)
+        for ui_like_component in ui_like_components
     ) or (
         orchestrator_module is not None
         and _has_strict_sample_cardinality_gate(orchestrator_module, python_source=True)
@@ -400,7 +457,11 @@ def materialize_build(output_text: str) -> MaterializedBuild:
             "any non-empty structurally valid representative sample remains runnable."
         )
 
-    submit_payloads = _submit_payload_literals(ui_component) if ui_component is not None else []
+    submit_payloads = [
+        literal
+        for ui_like_component in ui_like_components
+        for literal in _submit_payload_literals(ui_like_component)
+    ]
     if any(_has_nested_object_value(literal) for literal in submit_payloads):
         raise MaterializedCodeError(
             "The generated mission UI's submit payload groups fields inside nested "
@@ -414,6 +475,7 @@ def materialize_build(output_text: str) -> MaterializedBuild:
         agent_modules=agent_modules,
         orchestrator_module=orchestrator_module,
         ui_component=ui_component,
+        page_components=page_components,
     )
 
 
@@ -855,6 +917,84 @@ def generate_agent_config_module(agent_foundry_names: dict[str, str]) -> str:
     a real, non-hardcoded source of truth for which Foundry agent to call."""
 
     return _AGENT_CONFIG_PY_TEMPLATE.format(agent_foundry_names=agent_foundry_names)
+
+
+_ROUTING_SHELL_TEMPLATE = '''// agent: generated-routing-shell
+// Real, deterministically generated multi-page navigation shell for one
+// deployed mission - never LLM-authored. Generated by
+// ``app.deploy_launch.code_materializer.generate_routing_shell`` whenever
+// the mission's architecture declares a "## UI Pages" section (see
+// ``architecture_parsing.py``) instead of the common single-page "##
+// Single-Page UI Design" one. Each imported page module below IS
+// individually Build-Agent-generated (one "// agent: page:<name>" block
+// per declared page); only this stitching shell - the routes and nav -
+// is deterministic boilerplate, so the riskiest part of a multi-page
+// mission (per-page content) still goes through the same generation and
+// quality gates as the single-page case, while the part that is pure
+// plumbing never needs an LLM to get right.
+import {{ BrowserRouter, Routes, Route, Navigate, NavLink }} from "react-router-dom";
+import type {{ ComponentType }} from "react";
+{page_imports}
+
+interface MissionAppProps {{
+  onSubmit: (message: string, attachments?: {{ name: string; content: string }}[]) => void;
+}}
+
+const MISSION_PAGES: {{ path: string; label: string; Component: ComponentType<MissionAppProps> }}[] = [
+{page_entries}
+];
+
+export default function MissionApp({{ onSubmit }}: MissionAppProps) {{
+  return (
+    <BrowserRouter>
+      <nav className="genie-mission-nav">
+        {{MISSION_PAGES.map((page) => (
+          <NavLink key={{page.path}} to={{page.path}} className="genie-mission-nav-link">
+            {{page.label}}
+          </NavLink>
+        ))}}
+      </nav>
+      <Routes>
+        {{MISSION_PAGES.map((page) => (
+          <Route key={{page.path}} path={{page.path}} element={{<page.Component onSubmit={{onSubmit}} />}} />
+        ))}}
+        <Route path="*" element={{<Navigate to={{MISSION_PAGES[0].path}} replace />}} />
+      </Routes>
+    </BrowserRouter>
+  );
+}}
+'''
+
+
+def generate_routing_shell(page_names: tuple[str, ...]) -> str:
+    """Returns the real, deterministic ``MissionApp.tsx`` routing shell content
+    for a multi-page mission - never LLM-authored, mirroring
+    ``generate_agent_config_module``'s own deterministic-scaffold pattern.
+
+    ``page_names`` is ``MaterializedBuild.page_components``'s own declared
+    order (which is the architecture's "## UI Pages" declaration order) -
+    the first page becomes the default/landing route. Each page's own
+    component file is expected at ``pages/{slug(page_name)}.tsx``, exactly
+    where ``MaterializedBuild.write_to_directory`` writes it.
+    """
+
+    if not page_names:
+        raise MaterializedCodeError(
+            "generate_routing_shell requires at least one page name - a "
+            "multi-page mission with zero declared pages is not a valid build."
+        )
+
+    component_identifiers = [f"Page{index}" for index in range(len(page_names))]
+    page_imports = "\n".join(
+        f'import {component_identifier} from "./pages/{_slugify(page_name)}";'
+        for component_identifier, page_name in zip(component_identifiers, page_names)
+    )
+    page_entries = ",\n".join(
+        f'  {{ path: "/{_slugify(page_name).replace("_", "-")}", '
+        f'label: "{page_name}", Component: {component_identifier} }}'
+        for component_identifier, page_name in zip(component_identifiers, page_names)
+    )
+    return _ROUTING_SHELL_TEMPLATE.format(page_imports=page_imports, page_entries=page_entries)
 
 
 def generate_backend_service_scaffold(

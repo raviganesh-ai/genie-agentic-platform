@@ -350,7 +350,16 @@ def _extract_reusable_components(previous_build_output: str) -> dict[str, str]:
         block_text = match.group(0)
         if _COMPONENT_FAILURE_MARKER in block_text:
             continue
-        reusable[match.group("name").strip().lower()] = block_text
+        name = match.group("name").strip()
+        # A page_view component's own marker is "page:<Page Name>" (see
+        # code_materializer._PAGE_MARKER_PATTERN) - strip that prefix so
+        # the stored key matches the bare page name callers look reuse up
+        # by (the same ``label_name`` every other multi-instance component
+        # kind uses), exactly like "orchestrator"/"ui" are matched by
+        # their own literal kind name.
+        if name.lower().startswith("page:"):
+            name = name[len("page:") :].strip()
+        reusable[name.lower()] = block_text
     return reusable
 
 
@@ -448,13 +457,28 @@ async def _generate_build_by_component(
             )
         return await agent_gateway.execute(request)
 
+    page_view_components = tuple(
+        (component_type, name)
+        for component_type, name in plan.other_components
+        if component_type == "page_view"
+    )
+
     components: list[tuple[str, str]] = [
         ("agent", name)
         for name in plan.specialist_agent_names
         if name.strip().lower() not in _parse_excluded_agent_names(base_variables.get("excluded_agents", ""))
     ]
     components.append(("orchestrator", plan.orchestrator_agent_name))
-    components.append(("ui", "ui"))
+    if page_view_components:
+        # A multi-page mission (architecture declared "## UI Pages")
+        # replaces the usual single "ui" component with one "page_view"
+        # component per declared page, in declaration order - see
+        # code_materializer.generate_routing_shell, which deterministically
+        # stitches these together into MissionApp.tsx once all have been
+        # generated, with no LLM call of its own.
+        components.extend(page_view_components)
+    else:
+        components.append(("ui", "ui"))
 
     requirement_assignments = parse_component_requirement_assignments(
         base_variables.get("architecture", "")
@@ -488,8 +512,11 @@ async def _generate_build_by_component(
         # "ui" (never the orchestrator's own real display name) - see that
         # prompt template - so both the reuse lookup below and any failure
         # placeholder (_component_failure_piece) must use the same literal
-        # label, not component_name, for those two kinds.
-        label_name = component_name if component_kind == "agent" else component_kind
+        # label for those two kinds. Every other kind (agent, page_view,
+        # and the Phase-3 kinds parse_architecture_build_plan already
+        # recognizes) can have more than one instance, so its own real
+        # name is the label instead.
+        label_name = component_kind if component_kind in ("orchestrator", "ui") else component_name
         reused_piece = reusable_components.get(label_name.strip().lower())
         if reused_piece is not None:
             # Already succeeded on a prior attempt at this same step - reuse
@@ -514,7 +541,7 @@ async def _generate_build_by_component(
             "component_name": component_name,
             "assigned_requirements": assigned_requirements,
             "prior_components": (
-                "\n\n".join(pieces) if component_kind == "ui" else ""
+                "\n\n".join(pieces) if component_kind in ("ui", "page_view") else ""
             ),
         }
         request = AgentExecutionRequest(
@@ -542,8 +569,9 @@ async def _generate_build_by_component(
             # still-generatable component is not silently discarded along
             # with it (the "all or nothing" behavior this replaces) - see
             # _component_failure_piece and the module docstring.
+            marker_name = f"page:{label_name}" if component_kind == "page_view" else label_name
             failure_piece = _component_failure_piece(
-                label_name, is_ui=component_kind == "ui", exc=exc
+                marker_name, is_ui=component_kind in ("ui", "page_view"), exc=exc
             )
             await _publish_delta(failure_piece)
             pieces.append(failure_piece)

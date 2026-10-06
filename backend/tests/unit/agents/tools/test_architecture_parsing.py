@@ -198,3 +198,28 @@ def test_other_component_requirement_assignments_are_extracted_per_bullet():
     # matching the Orchestrator's own established behavior above.
     assert "apim jwt policy" not in assignments
 
+
+def test_parses_ui_pages_section_as_page_view_components():
+    document = """
+## Multi-Agent Workflow
+
+- **Ticket Classifier Agent**: classifies the incoming issue by category.
+- **Support Triage Orchestrator Agent**: the single entry point.
+
+## UI Pages
+
+- **Catalog Page**: browses the product catalog (REQ-010).
+- **Dashboard Page**: shows the activation funnel (REQ-011).
+"""
+
+    plan = parse_architecture_build_plan(document)
+
+    assert plan is not None
+    assert plan.other_components == (
+        ("page_view", "Catalog Page"),
+        ("page_view", "Dashboard Page"),
+    )
+    assignments = parse_component_requirement_assignments(document)
+    assert assignments["catalog page"] == ("REQ-010",)
+    assert assignments["dashboard page"] == ("REQ-011",)
+

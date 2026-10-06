@@ -499,14 +499,24 @@ prompts:
          solve their specific business problem.
 
       RESPONSE FORMAT:
-      Respond with exactly these two top-level sections, in this order,
-      each as a markdown "## " header followed by a one-sentence summary
-      of that section, then its own items. The Single-Page UI Design
-      summary must use this exact shape before its prose: "Surface mode:
-      <OPERATE|READ|EXPERIENCE|PERSUADE>. Visual direction: <one concise,
-      domain-specific direction covering density, typography, color, and
-      interaction rhythm>." This is the design brief the Build Agent must
-      implement; do not add a third top-level section:
+      Respond with exactly two top-level sections, in this order, each as
+      a markdown "## " header followed by a one-sentence summary of that
+      section, then its own items; never a third top-level section. The
+      FIRST is always "## Multi-Agent Workflow". The SECOND is EITHER
+      "## Single-Page UI Design" (the default, standard shape - use this
+      for nearly every mission) OR "## UI Pages" (use ONLY when the
+      approved requirements genuinely describe multiple distinct,
+      independently navigable destinations a user moves between as
+      separate pages - a catalog browse page, an onboarding wizard, a
+      dashboard, an audit/trace view - rather than input fields collected
+      before one single run; having many input fields is NOT by itself a
+      reason to choose this - that still belongs on one "## Single-Page UI
+      Design" page). Produce exactly one of these two for this response,
+      never both. The Single-Page UI Design summary must use this exact
+      shape before its prose: "Surface mode: <OPERATE|READ|EXPERIENCE|PERSUADE>.
+      Visual direction: <one concise, domain-specific direction
+      covering density, typography, color, and interaction rhythm>." This
+      is the design brief the Build Agent must implement:
 
       "## Single-Page UI Design" - this section designs ONLY this
       mission's own bespoke INPUT zone(s); it never describes an
@@ -538,6 +548,23 @@ prompts:
       "**<Zone name>**: <what concrete fields/controls it has, what each
       one means for the run> (fulfills REQ-XXX[, REQ-XXX...])"
 
+      "## UI Pages" - use INSTEAD of "## Single-Page UI Design" (never
+      alongside it) only in the uncommon case described above. List each
+      distinct page as its own top-level bullet, in the order the user
+      navigates them, with the page they should land on first listed
+      first. A page's content is not limited to input zones the way the
+      single-page case is: describe what it actually shows/collects (a
+      read-only catalog or audit/trace view, a form, or a mix) - whichever
+      the requirements genuinely call for. A page that shows a dashboard,
+      funnel, or timer may use Recharts; a page that shows a diagram or
+      trace graph may use React Flow - both are already approved,
+      installed frontend dependencies, licensed for use on these pages
+      only (never relevant to the single-page input-only case above).
+      Close every bullet with the literal requirement id(s) it fulfills,
+      exactly like a Single-Page UI Design zone:
+      "**<Page name>**: <what this page shows/collects and why>
+      (fulfills REQ-XXX[, REQ-XXX...])"
+
       "## Multi-Agent Workflow" - decide how many specialist agents this
       solution needs and what each one is responsible for, based solely
       on the approved requirements and centered on what the user is
@@ -568,7 +595,7 @@ prompts:
       - user_message
       - architecture_reference_text
       - standards_reference_text
-    version: "4.7.0"
+    version: "4.8.0"
 
   - id: security-assessment-v1
     name: Security Assessment
@@ -1570,6 +1597,40 @@ prompts:
       a "## Multi-Agent Workflow" section listing ONLY the agents actually
       generated - same count and names as above.
 
+      If component_kind is "page_view": Produce one React functional
+      component (TypeScript/TSX) implementing ONLY the page named
+      "{component_name}" from the architecture's "## UI Pages" section -
+      this mission has MULTIPLE independently generated pages (one Build
+      call per page, exactly like one call per specialist agent), stitched
+      together afterward by Genie's own deterministic routing shell (never
+      LLM-authored) into one navigable app; never render navigation, a
+      page switcher, or any other page's own content yourself - render
+      ONLY this one page's own purpose and content as described in its own
+      architecture bullet. A page's content is NOT limited to input
+      zones the way the single-page case is: it may be read-only
+      (a catalog listing, an activity/audit timeline, a dashboard), may
+      combine read-only content with a form, or may be input-only - derive
+      its actual content from its own architecture bullet, not from the
+      single-page input-zone rules above. Charts/dashboards/funnels/timers
+      may use Recharts; diagrams/trace graphs may use React Flow - both
+      are already approved, installed dependencies for exactly this kind
+      of page, licensed for use here (never for the single input-only
+      page case above, which has no need for them). Every rule that
+      applies to the single-page case above also applies here unchanged:
+      FILE UPLOAD VALIDATION, REPRESENTATIVE SAMPLE EXECUTION, REQUIRED VS
+      OPTIONAL, DECLARATION ORDER, the COMPONENT CONTRACT (your
+      default-exported component still receives exactly one prop object,
+      `{{ onSubmit: (message: string, attachments?: {{ name: string,
+      content: string }}[]) => void }}` - call it only if this specific
+      page genuinely submits something; a purely read-only page may
+      accept but never call it), and the IMPECCABLE DESIGN CONTRACT below.
+      Return one fenced ```tsx code block, first line `// agent:
+      page:{component_name}` (the literal prefix `page:` followed by this
+      page's own name, never just the bare name - this is how Genie's
+      materializer tells a page component apart from the single-page "ui"
+      case), then a "## Multi-Agent Workflow" section listing ONLY the
+      agents actually generated - same count and names as above.
+
       Security rules you MUST follow: never hardcode any URL, hostname,
       port, API key, token, secret, or credential anywhere - read every
       endpoint, deployment name, and secret from configuration/environment
@@ -1629,7 +1690,7 @@ prompts:
       - user_message
       - assigned_requirements
       - prior_components
-    version: "1.24.0"
+    version: "1.25.0"
 
   - id: build-component-regeneration-v1
     name: Build Generation - Regenerate Single Component

@@ -768,3 +768,120 @@ async def test_call_build_agent_passes_each_components_own_assigned_requirement_
     # the specialists rather than implementing one itself.
     assert "None explicitly assigned" in assigned_by_component["Support Triage Orchestrator Agent"]
 
+
+_ARCHITECTURE_WITH_UI_PAGES = """
+## Multi-Agent Workflow
+
+- **Ticket Classifier Agent**: classifies the incoming issue by category.
+- **Support Triage Orchestrator Agent**: the single entry point.
+
+## UI Pages
+
+- **Catalog Page**: browses the product catalog.
+- **Dashboard Page**: shows the activation funnel.
+"""
+
+
+async def test_call_build_agent_generates_one_page_view_component_per_declared_page():
+    """When the architecture declares "## UI Pages", call_build_agent must
+    replace the single "ui" component with one "page_view" component per
+    declared page (in declaration order), never both at once."""
+
+    registry = AgentToolRegistry()
+    gateway = _StreamingAgentGateway(
+        texts_by_component={
+            "Ticket Classifier Agent": "```python\n# agent: Ticket Classifier Agent\nclassifier code\n```",
+            "Support Triage Orchestrator Agent": "```python\n# agent: orchestrator\norchestrator code\n```",
+            "Catalog Page": "```tsx\n// agent: page:Catalog Page\ncatalog code\n```",
+            "Dashboard Page": "```tsx\n// agent: page:Dashboard Page\ndashboard code\n```",
+        }
+    )
+    governance_service = _RecordingGovernanceService()
+    register_orchestrator_delegation_tools(
+        registry, agent_gateway=gateway, governance_service=governance_service
+    )
+    context = ToolCallContext(
+        agent=_orchestrator_agent(),
+        session_id="session-1",
+        trace_id="run-1:build-solution",
+    )
+
+    await registry.execute(
+        agent_id="genie-orchestrator",
+        tool_name="call_build_agent",
+        arguments={
+            "requirements": "Approved requirements text.",
+            "architecture": _ARCHITECTURE_WITH_UI_PAGES,
+            "policies": "",
+            "user_message": "",
+        },
+        context=context,
+    )
+
+    assert len(gateway.requests) == 4
+    assert [
+        (r.variables["component_kind"], r.variables["component_name"]) for r in gateway.requests
+    ] == [
+        ("agent", "Ticket Classifier Agent"),
+        ("orchestrator", "Support Triage Orchestrator Agent"),
+        ("page_view", "Catalog Page"),
+        ("page_view", "Dashboard Page"),
+    ]
+    # Each page, like the single-page "ui" case, gets every earlier
+    # component's own code as context so it can wire the same onSubmit
+    # payload shape the Orchestrator actually reads.
+    assert not gateway.requests[0].variables["prior_components"]
+    assert not gateway.requests[1].variables["prior_components"]
+    assert "orchestrator code" in gateway.requests[2].variables["prior_components"]
+    assert "catalog code" in gateway.requests[3].variables["prior_components"]
+
+
+async def test_call_build_agent_reuses_a_previously_succeeded_page_on_retry():
+    """A page_view component's own reuse key is its bare page name (no
+    "page:" prefix) - exactly like any other multi-instance component kind -
+    so a retry correctly matches it against its own prior successful output."""
+
+    registry = AgentToolRegistry()
+    gateway = _StreamingAgentGateway(
+        texts_by_component={
+            "Ticket Classifier Agent": "```python\n# agent: Ticket Classifier Agent\nclassifier code\n```",
+            "Support Triage Orchestrator Agent": "```python\n# agent: orchestrator\norchestrator code\n```",
+            "Dashboard Page": "```tsx\n// agent: page:Dashboard Page\ndashboard code\n```",
+        }
+    )
+    governance_service = _RecordingGovernanceService()
+    register_orchestrator_delegation_tools(
+        registry, agent_gateway=gateway, governance_service=governance_service
+    )
+    context = ToolCallContext(
+        agent=_orchestrator_agent(),
+        session_id="session-1",
+        trace_id="run-1:build-solution",
+    )
+    previous_build_output = (
+        "```python\n# agent: Ticket Classifier Agent\nclassifier code\n```\n\n"
+        "```python\n# agent: orchestrator\norchestrator code\n```\n\n"
+        "```tsx\n// agent: page:Catalog Page\ncatalog code\n```"
+    )
+
+    await registry.execute(
+        agent_id="genie-orchestrator",
+        tool_name="call_build_agent",
+        arguments={
+            "requirements": "Approved requirements text.",
+            "architecture": _ARCHITECTURE_WITH_UI_PAGES,
+            "policies": "",
+            "user_message": "",
+            "previous_build_output": previous_build_output,
+        },
+        context=context,
+    )
+
+    # Catalog Page was already generated successfully last time - reused
+    # verbatim, never re-called. Only Dashboard Page (not present in the
+    # prior output) triggers a real new Build Agent call.
+    called_components = [r.variables["component_name"] for r in gateway.requests]
+    assert "Catalog Page" not in called_components
+    assert "Dashboard Page" in called_components
+
+
