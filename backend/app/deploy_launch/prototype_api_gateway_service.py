@@ -39,7 +39,72 @@ def _resource_name(
     return f"{prefix}-{normalized[:stem_length].rstrip('-')}-{digest}"
 
 
-def _build_api_policy(*, frontend_origin: str) -> str:
+@dataclass(frozen=True)
+class GatewayPolicyPathRule:
+    """One path-prefix-scoped access rule within a mission's gateway
+    policy (see "## Gateway Policies" in architecture_parsing.py) -
+    policy-based denial for a specific product/operation path, distinct
+    from the mission's own default/global requirement."""
+
+    path_prefix: str
+    required_claim_values: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class GatewayPolicyConfig:
+    """Parsed, deterministic input to ``_build_api_policy``'s JWT
+    validation/entitlement rendering - never raw LLM-authored APIM policy
+    XML (see build-generation-component-v1's "gateway_policy" branch,
+    which instead has the Build Agent emit a small, structured YAML
+    configuration that this dataclass's own loader parses). Rendering the
+    actual policy XML deterministically in Python, from this narrow,
+    validated shape, keeps the security-sensitive part of the pipeline
+    (what APIM policy XML is actually applied) out of free-form LLM
+    output.
+
+    ``tenant_id_named_value``/``audience_named_value`` name APIM Named
+    Values (never a literal tenant id/audience string) - the real value
+    is configured against the provisioned APIM instance itself (backed by
+    Key Vault where appropriate), matching Genie's own no-hardcoding rule.
+    """
+
+    tenant_id_named_value: str
+    audience_named_value: str
+    required_claim_name: str = "roles"
+    required_claim_values: tuple[str, ...] = ()
+    path_rules: tuple[GatewayPolicyPathRule, ...] = ()
+
+
+def _add_validate_azure_ad_token(
+    parent: ElementTree.Element,
+    *,
+    tenant_id_named_value: str,
+    audience_named_value: str,
+    required_claim_name: str,
+    required_claim_values: tuple[str, ...],
+) -> None:
+    validate = ElementTree.SubElement(
+        parent,
+        "validate-azure-ad-token",
+        {
+            "tenant-id": f"{{{{{tenant_id_named_value}}}}}",
+            "header-name": "Authorization",
+            "failed-validation-httpcode": "401",
+            "failed-validation-error-message": "Unauthorized. Access token is missing or invalid.",
+        },
+    )
+    audiences = ElementTree.SubElement(validate, "audiences")
+    ElementTree.SubElement(audiences, "audience").text = f"{{{{{audience_named_value}}}}}"
+    if required_claim_values:
+        required_claims = ElementTree.SubElement(validate, "required-claims")
+        claim = ElementTree.SubElement(required_claims, "claim", {"name": required_claim_name, "match": "any"})
+        for value in required_claim_values:
+            ElementTree.SubElement(claim, "value").text = value
+
+
+def _build_api_policy(
+    *, frontend_origin: str, gateway_policy: GatewayPolicyConfig | None = None
+) -> str:
     policies = ElementTree.Element("policies")
     inbound = ElementTree.SubElement(policies, "inbound")
     cors = ElementTree.SubElement(
@@ -71,6 +136,47 @@ def _build_api_policy(*, frontend_origin: str) -> str:
         {"name": "X-Correlation-Id", "exists-action": "skip"},
     )
     ElementTree.SubElement(correlation_header, "value").text = "@(context.RequestId.ToString())"
+    if gateway_policy is not None:
+        if gateway_policy.path_rules:
+            # Policy-based denial per product/operation path (FR-008) -
+            # each declared path rule gets its own stricter claim
+            # requirement; any path not matched falls through to the
+            # mission's own default/global requirement.
+            choose = ElementTree.SubElement(inbound, "choose")
+            for rule in gateway_policy.path_rules:
+                when = ElementTree.SubElement(
+                    choose,
+                    "when",
+                    {
+                        "condition": (
+                            '@(context.Request.OriginalUrl.Path.StartsWith('
+                            f'"{rule.path_prefix}", StringComparison.OrdinalIgnoreCase))'
+                        )
+                    },
+                )
+                _add_validate_azure_ad_token(
+                    when,
+                    tenant_id_named_value=gateway_policy.tenant_id_named_value,
+                    audience_named_value=gateway_policy.audience_named_value,
+                    required_claim_name=gateway_policy.required_claim_name,
+                    required_claim_values=rule.required_claim_values,
+                )
+            otherwise = ElementTree.SubElement(choose, "otherwise")
+            _add_validate_azure_ad_token(
+                otherwise,
+                tenant_id_named_value=gateway_policy.tenant_id_named_value,
+                audience_named_value=gateway_policy.audience_named_value,
+                required_claim_name=gateway_policy.required_claim_name,
+                required_claim_values=gateway_policy.required_claim_values,
+            )
+        else:
+            _add_validate_azure_ad_token(
+                inbound,
+                tenant_id_named_value=gateway_policy.tenant_id_named_value,
+                audience_named_value=gateway_policy.audience_named_value,
+                required_claim_name=gateway_policy.required_claim_name,
+                required_claim_values=gateway_policy.required_claim_values,
+            )
     backend = ElementTree.SubElement(policies, "backend")
     ElementTree.SubElement(backend, "forward-request", {"timeout": "300"})
     for section_name in ("outbound", "on-error"):

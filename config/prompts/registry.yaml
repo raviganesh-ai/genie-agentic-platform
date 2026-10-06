@@ -1716,6 +1716,27 @@ prompts:
       Python/TypeScript. Return one fenced ```yaml code block, first line
       `# agent: api_contract:{component_name}`.
 
+      If component_kind is "gateway_policy": Produce ONLY a small,
+      structured YAML configuration (never raw API Management policy
+      XML - rendering the actual policy is a deterministic platform step,
+      not an LLM-generation target) describing the access rules this
+      mission's gateway policy named "{component_name}" needs, based on
+      its own architecture bullet and the approved requirements. Decide
+      which scopes/claims are required by default, and whether any
+      specific path/product needs a stricter, different requirement than
+      that default - never invent a tenant id, audience, issuer, or any
+      other identity-provider-specific value, since those are
+      deployment-time platform configuration, not something this
+      component decides. Use exactly this shape:
+      "required_scopes: [<scope-or-role-name>, ...]
+      path_rules:
+        - path_prefix: <path>
+          required_scopes: [<scope-or-role-name>, ...]"
+      `path_rules` is optional - omit it entirely when every path under
+      this policy shares the same `required_scopes`. Return one fenced
+      ```yaml code block, first line `# agent:
+      gateway_policy:{component_name}`.
+
       Security rules you MUST follow: never hardcode any URL, hostname,
       port, API key, token, secret, or credential anywhere - read every
       endpoint, deployment name, and secret from configuration/environment
@@ -1775,7 +1796,7 @@ prompts:
       - user_message
       - assigned_requirements
       - prior_components
-    version: "1.26.0"
+    version: "1.27.0"
 
   - id: build-component-regeneration-v1
     name: Build Generation - Regenerate Single Component

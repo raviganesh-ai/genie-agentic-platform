@@ -66,6 +66,14 @@ _MODEL_MARKER_PATTERN: Final = re.compile(r"^#\s*agent:\s*model:(.+)$", re.IGNOR
 _API_CONTRACT_MARKER_PATTERN: Final = re.compile(
     r"^#\s*agent:\s*api_contract:(.+)$", re.IGNORECASE
 )
+# One gateway policy's structured, declarative configuration (see "## 
+# Gateway Policies") - a YAML fence (never raw APIM policy XML; see
+# app.deploy_launch.prototype_api_gateway_service.GatewayPolicyConfig,
+# which deterministically renders the real policy from this). First line
+# ``# agent: gateway_policy:<Policy Name>``.
+_GATEWAY_POLICY_MARKER_PATTERN: Final = re.compile(
+    r"^#\s*agent:\s*gateway_policy:(.+)$", re.IGNORECASE
+)
 
 _ORCHESTRATOR_MARKER: Final = "orchestrator"
 
@@ -330,6 +338,10 @@ class MaterializedBuild:
     # One entry per declared "## API Contracts" component - an OpenAPI
     # document (YAML), never executable code.
     api_contract_documents: dict[str, str] = field(default_factory=dict)
+    # One entry per declared "## Gateway Policies" component - a small,
+    # structured YAML configuration (never raw APIM policy XML - see
+    # prototype_api_gateway_service.GatewayPolicyConfig).
+    gateway_policy_documents: dict[str, str] = field(default_factory=dict)
 
     def write_to_directory(
         self, root: Path, *, backend_service_scaffold: dict[str, str] | None = None
@@ -417,6 +429,14 @@ class MaterializedBuild:
                 path.write_text(document, encoding="utf-8")
                 written.append(path)
 
+        if self.gateway_policy_documents:
+            policies_dir = root / "gateway-policies"
+            policies_dir.mkdir(parents=True, exist_ok=True)
+            for policy_name, document in self.gateway_policy_documents.items():
+                path = policies_dir / f"{_slugify(policy_name)}.yaml"
+                path.write_text(document, encoding="utf-8")
+                written.append(path)
+
         for file_name, content in (backend_service_scaffold or {}).items():
             path = root / file_name
             path.write_text(content, encoding="utf-8")
@@ -439,6 +459,7 @@ def materialize_build(output_text: str) -> MaterializedBuild:
     service_modules: dict[str, str] = {}
     data_model_modules: dict[str, str] = {}
     api_contract_documents: dict[str, str] = {}
+    gateway_policy_documents: dict[str, str] = {}
 
     for language, body in _FENCE_PATTERN.findall(output_text):
         lines = body.splitlines()
@@ -463,8 +484,11 @@ def materialize_build(output_text: str) -> MaterializedBuild:
                 agent_modules[agent_name] = body.strip("\n")
         elif language.lower() in ("yaml", "yml"):
             contract_match = _API_CONTRACT_MARKER_PATTERN.match(first_line)
+            gateway_policy_match = _GATEWAY_POLICY_MARKER_PATTERN.match(first_line)
             if contract_match is not None:
                 api_contract_documents[contract_match.group(1).strip()] = body.strip("\n")
+            elif gateway_policy_match is not None:
+                gateway_policy_documents[gateway_policy_match.group(1).strip()] = body.strip("\n")
         elif language.lower() == "tsx":
             page_match = _PAGE_MARKER_PATTERN.match(first_line)
             if page_match is not None:
@@ -480,10 +504,12 @@ def materialize_build(output_text: str) -> MaterializedBuild:
         and not service_modules
         and not data_model_modules
         and not api_contract_documents
+        and not gateway_policy_documents
     ):
         raise MaterializedCodeError(
-            "No materializable agent, orchestrator, UI, page, service, model, or "
-            "API contract code block was found in the build-solution step's output."
+            "No materializable agent, orchestrator, UI, page, service, model, API "
+            "contract, or gateway policy code block was found in the build-solution "
+            "step's output."
         )
 
     if ui_component is not None and page_components:
@@ -564,6 +590,7 @@ def materialize_build(output_text: str) -> MaterializedBuild:
         service_modules=service_modules,
         data_model_modules=data_model_modules,
         api_contract_documents=api_contract_documents,
+        gateway_policy_documents=gateway_policy_documents,
     )
 
 

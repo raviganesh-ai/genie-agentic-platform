@@ -4,6 +4,8 @@ from types import SimpleNamespace
 from xml.etree import ElementTree
 
 from app.deploy_launch.prototype_api_gateway_service import (
+    GatewayPolicyConfig,
+    GatewayPolicyPathRule,
     PrototypeApiGatewayService,
     _build_api_policy,
 )
@@ -32,6 +34,61 @@ def test_api_policy_enforces_exact_origin_and_rate_limit_without_entra():
     assert forward_request is not None
     assert forward_request.attrib["timeout"] == "300"
     assert "mise" not in policy.lower()
+
+
+def test_api_policy_validates_azure_ad_token_against_named_values_when_gateway_policy_given():
+    gateway_policy = GatewayPolicyConfig(
+        tenant_id_named_value="genie-prototype-aad-tenant-id",
+        audience_named_value="genie-prototype-aad-audience",
+        required_claim_values=("prototype.access",),
+    )
+
+    policy = _build_api_policy(
+        frontend_origin="https://prototype.example.com", gateway_policy=gateway_policy
+    )
+    root = ElementTree.fromstring(policy)
+
+    validate = root.find("./inbound/validate-azure-ad-token")
+    assert validate is not None
+    # Named Value references, never a literal tenant id/audience string -
+    # the real value lives in APIM's own Named Values store.
+    assert validate.attrib["tenant-id"] == "{{genie-prototype-aad-tenant-id}}"
+    assert validate.findtext("./audiences/audience") == "{{genie-prototype-aad-audience}}"
+    claim = validate.find("./required-claims/claim")
+    assert claim is not None
+    assert claim.attrib == {"name": "roles", "match": "any"}
+    assert claim.findtext("value") == "prototype.access"
+    assert root.find("./inbound/choose") is None
+
+
+def test_api_policy_renders_per_path_denial_with_a_default_fallback():
+    gateway_policy = GatewayPolicyConfig(
+        tenant_id_named_value="genie-prototype-aad-tenant-id",
+        audience_named_value="genie-prototype-aad-audience",
+        required_claim_values=("prototype.access",),
+        path_rules=(
+            GatewayPolicyPathRule(path_prefix="/admin", required_claim_values=("prototype.admin",)),
+        ),
+    )
+
+    policy = _build_api_policy(
+        frontend_origin="https://prototype.example.com", gateway_policy=gateway_policy
+    )
+    root = ElementTree.fromstring(policy)
+
+    choose = root.find("./inbound/choose")
+    assert choose is not None
+    when = choose.find("./when")
+    assert when is not None
+    assert '"/admin"' in when.attrib["condition"]
+    assert when.findtext(".//value") == "prototype.admin"
+    otherwise = choose.find("./otherwise")
+    assert otherwise is not None
+    assert otherwise.findtext(".//value") == "prototype.access"
+    # The base (non-choose) validate-azure-ad-token must NOT also appear
+    # directly under inbound when path_rules are present - only inside
+    # the choose/otherwise fallback.
+    assert root.find("./inbound/validate-azure-ad-token") is None
 
 
 async def test_provision_infrastructure_creates_isolated_private_runtime(monkeypatch):

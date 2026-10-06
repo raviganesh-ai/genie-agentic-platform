@@ -1010,3 +1010,64 @@ async def test_call_build_agent_reuses_a_previously_succeeded_service_on_retry()
     assert "Payments API" in called_components
 
 
+_ARCHITECTURE_WITH_GATEWAY_POLICY = """
+## Multi-Agent Workflow
+
+- **Ticket Classifier Agent**: classifies the incoming issue by category.
+- **Support Triage Orchestrator Agent**: the single entry point.
+
+## Gateway Policies
+
+- **APIM JWT Policy**: validates bearer tokens at the gateway.
+"""
+
+
+async def test_call_build_agent_generates_gateway_policy_component():
+    """gateway_policy is wired into the Build loop (Build can generate
+    its structured config) even though architecture-recommendation-v1
+    does not yet instruct Architecture to emit "## Gateway Policies" -
+    this test exercises the mechanism directly with a hand-authored
+    architecture document, mirroring how the other Phase 3/4 kinds were
+    tested before their own sections were ever live-generated."""
+
+    registry = AgentToolRegistry()
+    gateway = _StreamingAgentGateway(
+        texts_by_component={
+            "Ticket Classifier Agent": "```python\n# agent: Ticket Classifier Agent\nclassifier code\n```",
+            "Support Triage Orchestrator Agent": "```python\n# agent: orchestrator\norchestrator code\n```",
+            "APIM JWT Policy": "```yaml\n# agent: gateway_policy:APIM JWT Policy\npolicy code\n```",
+            "ui": "```tsx\n// agent: ui\nui code\n```",
+        }
+    )
+    governance_service = _RecordingGovernanceService()
+    register_orchestrator_delegation_tools(
+        registry, agent_gateway=gateway, governance_service=governance_service
+    )
+    context = ToolCallContext(
+        agent=_orchestrator_agent(),
+        session_id="session-1",
+        trace_id="run-1:build-solution",
+    )
+
+    await registry.execute(
+        agent_id="genie-orchestrator",
+        tool_name="call_build_agent",
+        arguments={
+            "requirements": "Approved requirements text.",
+            "architecture": _ARCHITECTURE_WITH_GATEWAY_POLICY,
+            "policies": "",
+            "user_message": "",
+        },
+        context=context,
+    )
+
+    assert [
+        (r.variables["component_kind"], r.variables["component_name"]) for r in gateway.requests
+    ] == [
+        ("agent", "Ticket Classifier Agent"),
+        ("orchestrator", "Support Triage Orchestrator Agent"),
+        ("gateway_policy", "APIM JWT Policy"),
+        ("ui", "ui"),
+    ]
+
+

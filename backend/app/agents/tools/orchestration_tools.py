@@ -323,12 +323,19 @@ async def _stream_and_publish_deltas(
     return result
 
 
-_MARKER_NAME_PREFIXES: tuple[str, ...] = ("page:", "service:", "model:", "api_contract:")
+_MARKER_NAME_PREFIXES: tuple[str, ...] = (
+    "page:",
+    "service:",
+    "model:",
+    "api_contract:",
+    "gateway_policy:",
+)
 _MARKER_PREFIX_BY_COMPONENT_KIND: dict[str, str] = {
     "page_view": "page:",
     "deterministic_service": "service:",
     "data_model": "model:",
     "api_contract": "api_contract:",
+    "gateway_policy": "gateway_policy:",
 }
 
 
@@ -485,18 +492,23 @@ async def _generate_build_by_component(
         for component_type, name in plan.other_components
         if component_type == "page_view"
     )
-    # Phase 3 kinds: ordinary non-agent backend components, generated
+    # Phase 3/4 kinds: ordinary non-agent backend components, generated
     # before the UI/pages (never after) so they are the single-page "ui"
     # or each "page_view"'s own available "prior_components" context, the
     # same way every specialist agent and the Orchestrator already are.
-    # gateway_policy/identity_config are parsed (see
-    # architecture_parsing.py) but intentionally not yet wired here - that
-    # is later phases of the same roadmap, once their own Build codegen
-    # paths exist.
+    # identity_config is parsed (see architecture_parsing.py) but
+    # intentionally not yet wired here - that is a later phase of the
+    # same roadmap, once its own Build codegen path exists. gateway_policy
+    # IS wired here (Build can generate its structured config), but
+    # architecture-recommendation-v1 does not yet instruct Architecture to
+    # emit "## Gateway Policies" - the generated config is not yet read
+    # into the real deployed APIM policy at Deploy & Launch time, so
+    # activating generation first would produce an artifact with no
+    # runtime effect.
     non_agent_backend_components = tuple(
         (component_type, name)
         for component_type, name in plan.other_components
-        if component_type in ("deterministic_service", "data_model", "api_contract")
+        if component_type in ("deterministic_service", "data_model", "api_contract", "gateway_policy")
     )
 
     components: list[tuple[str, str]] = [
@@ -580,7 +592,14 @@ async def _generate_build_by_component(
             "prior_components": (
                 "\n\n".join(pieces)
                 if component_kind
-                in ("ui", "page_view", "deterministic_service", "data_model", "api_contract")
+                in (
+                    "ui",
+                    "page_view",
+                    "deterministic_service",
+                    "data_model",
+                    "api_contract",
+                    "gateway_policy",
+                )
                 else ""
             ),
         }

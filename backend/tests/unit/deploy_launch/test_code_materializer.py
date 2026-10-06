@@ -757,6 +757,38 @@ def test_generate_models_init_rejects_empty_model_list():
         generate_models_init(())
 
 
+_GATEWAY_POLICY_OUTPUT = '''
+```python
+# agent: orchestrator
+class OrchestratorAgent:
+    async def run(self, ui_message: str, on_progress=None) -> None:
+        pass
+```
+
+```yaml
+# agent: gateway_policy:APIM JWT Policy
+required_scopes: ["prototype.access"]
+path_rules:
+  - path_prefix: "/admin"
+    required_scopes: ["prototype.admin"]
+```
+'''
+
+
+def test_materialize_build_parses_gateway_policy_components():
+    build = materialize_build(_GATEWAY_POLICY_OUTPUT)
+
+    assert "required_scopes" in build.gateway_policy_documents["APIM JWT Policy"]
+
+
+def test_write_to_directory_writes_gateway_policies(tmp_path: Path):
+    build = materialize_build(_GATEWAY_POLICY_OUTPUT)
+
+    build.write_to_directory(tmp_path)
+
+    assert (tmp_path / "gateway-policies" / "apim_jwt_policy.yaml").exists()
+
+
 def test_stream_agent_response_relays_on_progress_narration_as_it_happens(monkeypatch):
     """Regression guard for the "Agent Pipeline never animates" incident: a
     real orchestrator pipeline run used to be awaited to completion before
