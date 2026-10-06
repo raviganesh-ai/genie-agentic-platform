@@ -25,13 +25,11 @@ export default defineConfig({
     // terminated due to reaching memory limit: JS heap out of memory").
     // Forks run each worker in its own child process (own OS-level heap)
     // and cap concurrency + give each fork more headroom.
+    // Vitest 4 flattened `poolOptions.forks.*` into top-level `test` options
+    // (see https://vitest.dev/guide/migration#pool-rework); `maxForks`
+    // became `maxWorkers` and there is no longer a separate `minForks`.
     pool: "forks",
-    poolOptions: {
-      forks: {
-        minForks: 1,
-        maxForks: 2,
-        execArgv: ["--max-old-space-size=4096"],
-      },
-    },
+    maxWorkers: 2,
+    execArgv: ["--max-old-space-size=4096"],
   },
 });
