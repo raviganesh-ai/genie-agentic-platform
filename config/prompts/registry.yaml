@@ -1499,6 +1499,18 @@ prompts:
       to produce usable output. Never let a silently-caught upstream
       failure surface as an apparently-successful, merely "unlucky" empty
       result.
+      JOURNEY EVENTS - if (and only if) the approved requirements name
+      specific business-domain lifecycle events this mission's own
+      activation/funnel dashboard must track (for example
+      "first_api_call_succeeded", "onboarding_completed"), call this
+      mission's own same-origin `POST /journey/events` endpoint (body:
+      `{{"event_type": "<exact_event_name>", "correlation_id":
+      <this run's own correlation id if one exists, else omit>, "detail":
+      {{...}}}}`) at the exact point in `run()` where that event
+      genuinely occurs - never invent event names the requirements never
+      mention, never call this for every run unconditionally. A
+      dashboard/audit page_view elsewhere in this mission reads these
+      back via `GET /journey/events`.
       Include a comment: "Once deployed to Azure AI Foundry, this
       Orchestrator Agent is reachable only through this mission's own
       backend service - never directly from the browser."
@@ -1661,6 +1673,12 @@ prompts:
       content: string }}[]) => void }}` - call it only if this specific
       page genuinely submits something; a purely read-only page may
       accept but never call it), and the IMPECCABLE DESIGN CONTRACT below.
+      A dashboard/audit/trace page must fetch its data from this
+      mission's own same-origin `GET /journey/events` endpoint (never a
+      separate/external telemetry service, never invented mock data) -
+      this mission's generated backend already records business-domain
+      journey events there (see the Orchestrator's own instructions
+      below) whenever any component calls `POST /journey/events`.
       Return one fenced ```tsx code block, first line `// agent:
       page:{component_name}` (the literal prefix `page:` followed by this
       page's own name, never just the bare name - this is how Genie's
@@ -1819,7 +1837,7 @@ prompts:
       - user_message
       - assigned_requirements
       - prior_components
-    version: "1.28.0"
+    version: "1.29.0"
 
   - id: build-component-regeneration-v1
     name: Build Generation - Regenerate Single Component

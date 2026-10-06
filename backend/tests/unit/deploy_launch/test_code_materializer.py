@@ -432,6 +432,30 @@ def test_backend_service_scaffold_main_py_is_valid_python_and_supports_attachmen
     assert '"--- Attached file: {attachment.name} ---\\n{attachment.content}"' in main_source
 
 
+def test_backend_service_scaffold_main_py_has_journey_event_endpoints():
+    """Every generated mission backend must expose a lightweight journey-
+    event record/list endpoint pair, backed by the same already-
+    provisioned Cosmos DB container /health/ready validates - never a
+    bespoke telemetry pipeline - so a generated dashboard/audit-trace
+    page_view has something real to call."""
+
+    scaffold = generate_backend_service_scaffold(
+        mission_title="Acme Mission",
+        orchestrator_agent_name="acme-orchestrator",
+        agent_foundry_names={"Requirements Specialist": "acme-requirements-specialist"},
+    )
+    main_source = scaffold["main.py"]
+
+    compile(main_source, "main.py", "exec")
+    assert '@app.post("/journey/events")' in main_source
+    assert '@app.get("/journey/events")' in main_source
+    assert "class JourneyEvent(BaseModel):" in main_source
+    assert '"recordType": "journey-event"' in main_source
+    # Uses the SAME data-layer env vars /health/ready already validates -
+    # never a separate telemetry endpoint/credential.
+    assert 'os.environ["MISSION_DATA_ENDPOINT"]' in main_source
+
+
 def test_backend_service_scaffold_main_py_runs_the_real_orchestrator_pipeline():
     """Regression guard for the "big miss" incident (2026-08-17): the
     deployed backend proxy must persist uploaded attachments to disk in

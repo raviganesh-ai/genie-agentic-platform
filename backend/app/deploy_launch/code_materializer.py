@@ -643,7 +643,9 @@ import json
 import logging
 import os
 from collections.abc import AsyncIterator, Awaitable, Callable
+from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 from agent_framework.foundry import FoundryAgent
 from azure.ai.projects.aio import AIProjectClient
@@ -853,6 +855,81 @@ async def ready() -> dict[str, str]:
             detail="Mission data layer is not ready.",
         ) from exc
     return {{"status": "ready", "data_access": "validated"}}
+
+
+class JourneyEvent(BaseModel):
+    event_type: str
+    correlation_id: str | None = None
+    detail: dict[str, Any] = {{}}
+
+
+@app.post("/journey/events")
+async def record_journey_event(event: JourneyEvent) -> dict[str, str]:
+    """Records one business-domain journey event (for example
+    "portal_visited", "first_api_call_succeeded") into this mission's own
+    already-provisioned data layer - the same Cosmos DB container
+    /health/ready already validates - so a generated dashboard/audit-
+    trace page can read them back via GET /journey/events without any
+    bespoke telemetry pipeline. The Orchestrator/a deterministic service
+    calls this to emit the specific business-domain event names this
+    mission's own requirements name; this endpoint itself only persists
+    whatever event_type/detail it is given."""
+    endpoint = os.environ["MISSION_DATA_ENDPOINT"]
+    database_name = os.environ["MISSION_DATA_DATABASE_NAME"]
+    container_name = os.environ["MISSION_DATA_CONTAINER_NAME"]
+    event_id = f"journey-{{os.urandom(12).hex()}}"
+    timestamp = datetime.now(timezone.utc).isoformat()
+    async with DefaultAzureCredential() as credential:
+        client = CosmosClient(endpoint, credential=credential)
+        try:
+            container = client.get_database_client(database_name).get_container_client(
+                container_name
+            )
+            await container.upsert_item(
+                {{
+                    "id": event_id,
+                    "partitionKey": "journey-event",
+                    "recordType": "journey-event",
+                    "eventType": event.event_type,
+                    "correlationId": event.correlation_id,
+                    "detail": event.detail,
+                    "timestamp": timestamp,
+                }}
+            )
+        finally:
+            await client.close()
+    return {{"id": event_id, "timestamp": timestamp}}
+
+
+@app.get("/journey/events")
+async def list_journey_events(limit: int = 100) -> list[dict[str, Any]]:
+    """Returns this mission's own recorded journey events, most recent
+    first - consumed by a generated dashboard/audit-trace page_view (see
+    build-generation-component-v1's "page_view" branch)."""
+    endpoint = os.environ["MISSION_DATA_ENDPOINT"]
+    database_name = os.environ["MISSION_DATA_DATABASE_NAME"]
+    container_name = os.environ["MISSION_DATA_CONTAINER_NAME"]
+    async with DefaultAzureCredential() as credential:
+        client = CosmosClient(endpoint, credential=credential)
+        try:
+            container = client.get_database_client(database_name).get_container_client(
+                container_name
+            )
+            query = (
+                "SELECT * FROM c WHERE c.recordType = 'journey-event' "
+                "ORDER BY c.timestamp DESC OFFSET 0 LIMIT @limit"
+            )
+            items = [
+                item
+                async for item in container.query_items(
+                    query=query,
+                    parameters=[{{"name": "@limit", "value": limit}}],
+                    partition_key="journey-event",
+                )
+            ]
+        finally:
+            await client.close()
+    return items
 
 
 @app.post("/invoke", response_model=InvokeResponse)

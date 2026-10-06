@@ -473,3 +473,20 @@ def test_build_generation_component_prompt_has_an_identity_config_branch():
     assert "identity_config:{component_name}" in template
 
 
+def test_build_generation_component_prompt_wires_journey_events_end_to_end():
+    """The Orchestrator may record named business-domain journey events
+    via POST /journey/events, and a dashboard/audit page_view must read
+    them back via GET /journey/events - the same mission-local, already-
+    provisioned data layer code_materializer's generated main.py exposes
+    (see generate_backend_service_scaffold), never a bespoke telemetry
+    pipeline or invented mock data."""
+
+    registry = PromptRegistry.load(_REPO_CONFIG_ROOT / "prompts")
+    template = " ".join(registry.get("build-generation-component-v1").template.split())
+
+    assert "JOURNEY EVENTS" in template
+    assert "POST /journey/events" in template
+    assert "GET /journey/events" in template
+    assert "never invent event names the requirements never" in template
+
+
