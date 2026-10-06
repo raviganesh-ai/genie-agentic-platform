@@ -3,7 +3,9 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
 
-__all__ = ["AuthenticatedUser"]
+__all__ = ["AuthenticatedUser", "GENIE_ADMIN_ROLE"]
+
+GENIE_ADMIN_ROLE = "Genie.Admin"
 
 
 class AuthenticatedUser(BaseModel):

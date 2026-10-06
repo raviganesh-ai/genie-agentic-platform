@@ -238,6 +238,34 @@ class Settings(BaseSettings):
     def fabric_iq_scopes_list(self) -> tuple[str, ...] | None:
         return tuple(self.fabric_iq_scopes.split()) if self.fabric_iq_scopes else None
 
+    # --- First-party platform authentication (replaces the single shared
+    # "genie-internal-user" identity) ---------------------------------------
+    # Genie-SaS itself was deliberately made anonymous in September 2026 (see
+    # README.md "Authentication"), relying on the platform APIM/network
+    # boundary alone. Once the platform became reachable beyond a fully
+    # trusted private network, that left every session readable by anyone
+    # who could reach the gateway with no credential at all (an
+    # unauthenticated IDOR). This does not reintroduce Microsoft Entra ID -
+    # it is a small, self-contained bearer-token login so real per-account
+    # ownership checks (see app.services.session_service) become meaningful
+    # again, without standing up an external identity provider.
+    #
+    # Disabled by default (dev/test keep today's single deterministic
+    # identity so the existing test suite needs no Authorization header);
+    # ProductionSafetyValidator fails startup if this is not enabled, or
+    # enabled without the two secrets below, in production.
+    auth_enabled: bool = False
+    # Name of the environment variable holding the HMAC-SHA256 signing key
+    # for issued bearer tokens (never the key value itself - see
+    # iq_oauth_client_secret_env_var for the same indirection pattern).
+    auth_token_signing_key_env_var: str | None = None
+    auth_token_ttl_seconds: float = Field(default=3600, gt=0, le=86400)
+    # Name of the environment variable holding the newline-separated
+    # "username:pbkdf2_sha256$<iterations>$<salt_hex>$<hash_hex>" user
+    # records (see app.security.password_hashing). Supports multiple real
+    # accounts without a database.
+    auth_users_env_var: str | None = None
+
     # Id of the workflow step (config/workflows/*.yaml) whose output_text
     # carries the Requirements Analyst agent's structured agentic-workflow
     # qualification verdict (see app.services.requirements_service). Mirrors

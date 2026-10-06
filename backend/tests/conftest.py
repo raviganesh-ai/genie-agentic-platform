@@ -304,5 +304,8 @@ def foundry_configured_settings(valid_config_root: Path) -> Settings:
         prototype_api_gateway_enabled=True,
         prototype_api_gateway_publisher_email="genie@example.com",
         prototype_api_gateway_publisher_name="Genie",
+        auth_enabled=True,
+        auth_token_signing_key_env_var="GENIE_AUTH_TOKEN_SIGNING_KEY",
+        auth_users_env_var="GENIE_AUTH_USERS",
         config_root=valid_config_root,
     )

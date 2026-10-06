@@ -99,6 +99,7 @@ jobs:
           [ -z "${{ vars.GENIE_PROTOTYPE_API_GATEWAY_PUBLISHER_NAME }}" ] && missing+=("GENIE_PROTOTYPE_API_GATEWAY_PUBLISHER_NAME")
           [ -z "${{ vars.GENIE_GATEWAY_ALLOWED_ORIGIN }}" ] && missing+=("GENIE_GATEWAY_ALLOWED_ORIGIN")
           [ -z "${{ secrets.GENIE_GITHUB_MCP_TOKEN }}" ] && missing+=("GENIE_GITHUB_MCP_TOKEN")
+          [ -z "${{ secrets.GENIE_APIM_SUBSCRIPTION_KEY }}" ] && missing+=("GENIE_APIM_SUBSCRIPTION_KEY")
           if [ ${#missing[@]} -ne 0 ]; then
             echo "::error::Missing required settings for prepare-gateway: ${missing[*]}. See README.md 'Continuous deployment' section."
             exit 1
@@ -122,6 +123,7 @@ jobs:
             -AllowedOrigin "${{ vars.GENIE_GATEWAY_ALLOWED_ORIGIN }}" `
             -PublisherEmail "${{ vars.GENIE_PROTOTYPE_API_GATEWAY_PUBLISHER_EMAIL }}" `
             -PublisherName "${{ vars.GENIE_PROTOTYPE_API_GATEWAY_PUBLISHER_NAME }}" `
+            -ApimSubscriptionKey "${{ secrets.GENIE_APIM_SUBSCRIPTION_KEY }}" `
             -PrepareOnly |
               ConvertFrom-Json
           "gateway-url=$($result.gatewayUrl)" | Out-File `
@@ -165,6 +167,9 @@ jobs:
           [ -z "${{ vars.GENIE_PROTOTYPE_API_GATEWAY_PUBLISHER_NAME }}" ] && missing+=("GENIE_PROTOTYPE_API_GATEWAY_PUBLISHER_NAME")
           [ -z "${{ vars.GENIE_PROTOTYPE_MAX_ACTIVE_PER_OWNER }}" ] && missing+=("GENIE_PROTOTYPE_MAX_ACTIVE_PER_OWNER")
           [ -z "${{ vars.GENIE_GATEWAY_ALLOWED_ORIGIN }}" ] && missing+=("GENIE_GATEWAY_ALLOWED_ORIGIN")
+          [ -z "${{ secrets.GENIE_APIM_SUBSCRIPTION_KEY }}" ] && missing+=("GENIE_APIM_SUBSCRIPTION_KEY")
+          [ -z "${{ secrets.GENIE_AUTH_TOKEN_SIGNING_KEY }}" ] && missing+=("GENIE_AUTH_TOKEN_SIGNING_KEY")
+          [ -z "${{ secrets.GENIE_AUTH_USERS }}" ] && missing+=("GENIE_AUTH_USERS")
           if [ ${#missing[@]} -ne 0 ]; then
             echo "::error::Missing required secrets for deploy-backend: ${missing[*]}. See README.md 'Continuous deployment' section for one-time Azure OIDC setup."
             exit 1
@@ -194,7 +199,8 @@ jobs:
             -ContainerAppName "${{ vars.AZURE_CONTAINER_APP_NAME }}" `
             -AllowedOrigin "${{ vars.GENIE_GATEWAY_ALLOWED_ORIGIN }}" `
             -PublisherEmail "${{ vars.GENIE_PROTOTYPE_API_GATEWAY_PUBLISHER_EMAIL }}" `
-            -PublisherName "${{ vars.GENIE_PROTOTYPE_API_GATEWAY_PUBLISHER_NAME }}"
+            -PublisherName "${{ vars.GENIE_PROTOTYPE_API_GATEWAY_PUBLISHER_NAME }}" `
+            -ApimSubscriptionKey "${{ secrets.GENIE_APIM_SUBSCRIPTION_KEY }}"
 
       - name: Configure GitHub MCP credential
         shell: pwsh
@@ -207,10 +213,21 @@ jobs:
             --only-show-errors `
             --output none
 
+      - name: Configure authentication secrets
+        shell: pwsh
+        run: |
+          az containerapp secret set `
+            --subscription "${{ secrets.AZURE_SUBSCRIPTION_ID }}" `
+            --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" `
+            --name "${{ vars.AZURE_CONTAINER_APP_NAME }}" `
+            --secrets "genie-auth-signing-key=${{ secrets.GENIE_AUTH_TOKEN_SIGNING_KEY }}" "genie-auth-users=${{ secrets.GENIE_AUTH_USERS }}" `
+            --only-show-errors `
+            --output none
+
       # The immutable image, retired-sidecar removal, CORS setting, probes,
       # and ingress port 8000 are applied in one ARM patch, then verified
       # through APIM because direct backend ingress is private.
-      - name: Roll out anonymous backend revision
+      - name: Roll out backend revision
         shell: pwsh
         run: |
           ./scripts/deploy_backend.ps1 `
@@ -223,6 +240,9 @@ jobs:
             -MemoryStoreEndpoint "${{ vars.GENIE_MEMORY_STORE_ENDPOINT }}" `
             -GitHubMcpEndpoint "https://api.githubcopilot.com/mcp/" `
             -GitHubMcpTokenSecretName "github-mcp-token" `
+            -ApimSubscriptionKey "${{ secrets.GENIE_APIM_SUBSCRIPTION_KEY }}" `
+            -AuthTokenSigningKeySecretName "genie-auth-signing-key" `
+            -AuthUsersSecretName "genie-auth-users" `
             -PrototypeApiGatewayPublisherEmail "${{ vars.GENIE_PROTOTYPE_API_GATEWAY_PUBLISHER_EMAIL }}" `
             -PrototypeApiGatewayPublisherName "${{ vars.GENIE_PROTOTYPE_API_GATEWAY_PUBLISHER_NAME }}" `
             -PrototypeMaxActivePerOwner ${{ vars.GENIE_PROTOTYPE_MAX_ACTIVE_PER_OWNER }} `
@@ -253,8 +273,9 @@ jobs:
       - name: Check required secrets
         run: |
           if [ -z "${{ secrets.SWA_DEPLOYMENT_TOKEN }}" ] || \
-             [ -z "${{ needs.prepare-gateway.outputs.gateway-url }}" ]; then
-            echo "::error::Missing SWA_DEPLOYMENT_TOKEN or the verified platform gateway URL. See README.md 'Continuous deployment' section."
+             [ -z "${{ needs.prepare-gateway.outputs.gateway-url }}" ] || \
+             [ -z "${{ secrets.GENIE_APIM_SUBSCRIPTION_KEY }}" ]; then
+            echo "::error::Missing SWA_DEPLOYMENT_TOKEN, GENIE_APIM_SUBSCRIPTION_KEY, or the verified platform gateway URL. See README.md 'Continuous deployment' section."
             exit 1
           fi
 
@@ -272,6 +293,7 @@ jobs:
         run: npm run build
         env:
           VITE_GENIE_API_BASE_URL: ${{ needs.prepare-gateway.outputs.gateway-url }}
+          VITE_GENIE_APIM_SUBSCRIPTION_KEY: ${{ secrets.GENIE_APIM_SUBSCRIPTION_KEY }}
 
       - name: Deploy to Azure Static Web Apps
         timeout-minutes: 5

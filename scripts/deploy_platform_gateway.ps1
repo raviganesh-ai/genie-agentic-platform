@@ -31,6 +31,9 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$PublisherName,
 
+    [Parameter(Mandatory = $true)]
+    [string]$ApimSubscriptionKey,
+
     [switch]$PrepareOnly,
 
     [int]$WaitTimeoutSeconds = 1800
@@ -51,6 +54,7 @@ function Invoke-AzJson {
 function Wait-ForGatewayReadiness {
     param(
         [Parameter(Mandatory = $true)][string]$GatewayUrl,
+        [Parameter(Mandatory = $true)][string]$ApimSubscriptionKey,
         [Parameter(Mandatory = $true)][datetime]$Deadline
     )
 
@@ -59,6 +63,7 @@ function Wait-ForGatewayReadiness {
             $health = Invoke-RestMethod `
                 -Method Get `
                 -Uri "$GatewayUrl/health/ready" `
+                -Headers @{ "Ocp-Apim-Subscription-Key" = $ApimSubscriptionKey } `
                 -TimeoutSec 30
             if ($health.status -eq "ready") {
                 return
@@ -159,6 +164,7 @@ foreach ($requiredValue in @{
     AllowedOrigin = $AllowedOrigin
     PublisherEmail = $PublisherEmail
     PublisherName = $PublisherName
+    ApimSubscriptionKey = $ApimSubscriptionKey
 }.GetEnumerator()) {
     if ([string]::IsNullOrWhiteSpace($requiredValue.Value)) {
         throw "$($requiredValue.Key) cannot be blank."
@@ -194,7 +200,8 @@ $commonParameters = @(
     "virtualNetworkName=$virtualNetworkName",
     "publisherEmail=$PublisherEmail",
     "publisherName=$PublisherName",
-    "allowedOrigin=$($AllowedOrigin.TrimEnd('/'))"
+    "allowedOrigin=$($AllowedOrigin.TrimEnd('/'))",
+    "genieApiSubscriptionKey=$ApimSubscriptionKey"
 )
 
 Write-Host "Provisioning the public API Management edge..." -ForegroundColor Cyan
@@ -228,7 +235,7 @@ if ($environment.properties.publicNetworkAccess -eq "Disabled") {
         -PrivateEndpointName $privateEndpointName `
         -Deadline $deadline
 }
-Wait-ForGatewayReadiness -GatewayUrl $gatewayUrl -Deadline $deadline
+Wait-ForGatewayReadiness -GatewayUrl $gatewayUrl -ApimSubscriptionKey $ApimSubscriptionKey -Deadline $deadline
 
 if ($PrepareOnly) {
     [pscustomobject]@{
@@ -307,7 +314,7 @@ if ($environment.properties.publicNetworkAccess -ne "Disabled") {
     throw "Container Apps environment public access is not disabled."
 }
 $deadline = (Get-Date).AddSeconds($WaitTimeoutSeconds)
-Wait-ForGatewayReadiness -GatewayUrl $gatewayUrl -Deadline $deadline
+Wait-ForGatewayReadiness -GatewayUrl $gatewayUrl -ApimSubscriptionKey $ApimSubscriptionKey -Deadline $deadline
 
 $directBackendUrl = "https://$($app.properties.configuration.ingress.fqdn)"
 $directRouteExposed = $false

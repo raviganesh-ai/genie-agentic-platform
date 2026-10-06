@@ -29,6 +29,13 @@ class ProductionSafetyValidator:
             errors.append("production_resource_group is required in production.")
         if not settings.deployment_location:
             errors.append("deployment_location is required in production.")
+        if not settings.auth_enabled:
+            errors.append("auth_enabled must be true in production.")
+        else:
+            if not settings.auth_token_signing_key_env_var:
+                errors.append("auth_token_signing_key_env_var is required when auth_enabled is true.")
+            if not settings.auth_users_env_var:
+                errors.append("auth_users_env_var is required when auth_enabled is true.")
         if errors:
             return ValidationResult.fail(self.name, errors)
         return ValidationResult.ok(self.name)

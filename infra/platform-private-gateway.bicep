@@ -30,6 +30,10 @@ param publisherName string
 @description('Exact public Static Web Apps origin allowed by the API policy.')
 param allowedOrigin string
 
+@description('Shared secret required on every call to the Genie API (Ocp-Apim-Subscription-Key header) - closes the unauthenticated-from-the-internet gap now that the gateway is publicly reachable. Not a per-user credential; see app.security.auth_service for real per-account login.')
+@secure()
+param genieApiSubscriptionKey string
+
 @description('Creates the private DNS zone and VNet link before the network cutover.')
 param enablePrivateDns bool = false
 
@@ -132,7 +136,25 @@ resource genieApi 'Microsoft.ApiManagement/service/apis@2024-05-01' = {
       'https'
     ]
     serviceUrl: 'https://${containerApp.properties.configuration.ingress.fqdn}'
-    subscriptionRequired: false
+    subscriptionRequired: true
+  }
+}
+
+// A single shared subscription (not a per-user credential - real per-user
+// identity is app.security.auth_service's job) whose key every caller must
+// present as the Ocp-Apim-Subscription-Key header. This is what actually
+// closes the "unauthenticated from the public internet" gap: without a
+// valid key, APIM rejects the request before it ever reaches the backend
+// or any custom policy/login check.
+resource genieApiSubscription 'Microsoft.ApiManagement/service/subscriptions@2024-05-01' = {
+  parent: apiManagement
+  name: 'genie-internal'
+  properties: {
+    scope: genieApi.id
+    displayName: 'Genie internal platform access'
+    state: 'active'
+    primaryKey: genieApiSubscriptionKey
+    secondaryKey: genieApiSubscriptionKey
   }
 }
 

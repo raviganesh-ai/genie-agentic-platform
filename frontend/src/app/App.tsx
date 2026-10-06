@@ -1,5 +1,7 @@
 import { createBrowserRouter, RouterProvider } from "react-router-dom";
 import { AppShell } from "@/layouts/AppShell";
+import { AuthGate } from "@/features/auth/AuthGate";
+import { LoginPage } from "@/features/auth/LoginPage";
 import { RequirementsHubPage } from "@/layouts/RequirementsHubPage";
 import { OutputsHubPage } from "@/layouts/OutputsHubPage";
 import { LandingPage } from "@/features/landing/LandingPage";
@@ -19,9 +21,14 @@ import { PlatformConfigPage } from "@/features/platform-config/PlatformConfigPag
 import { ProductionPromotionPage } from "@/features/production-promotion/ProductionPromotionPage";
 
 const router = createBrowserRouter([
+  { path: "/login", element: <LoginPage /> },
   {
     path: "/",
-    element: <AppShell />,
+    element: (
+      <AuthGate>
+        <AppShell />
+      </AuthGate>
+    ),
     children: [
       { index: true, element: <LandingPage /> },
       { path: "upload", element: <UploadPage /> },

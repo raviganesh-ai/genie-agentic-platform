@@ -43,11 +43,13 @@ from app.services.workshop_service import WorkshopService
 from app.platform_config.service import PlatformConfigService
 from app.standards.service import StandardsService
 from app.transcription.speech_service import SpeechToTextService
+from app.security.auth_service import AuthService
 
 __all__ = [
     "get_agent_orchestrator",
     "get_approval_service",
     "get_architecture_service",
+    "get_auth_service",
     "get_delegated_connection_service",
     "get_deployment_pipeline_service",
     "get_discovery_service",
@@ -83,6 +85,10 @@ __all__ = [
 
 def get_agent_orchestrator(request: Request) -> AgentOrchestrator:
     return request.app.state.agent_orchestrator
+
+
+def get_auth_service(request: Request) -> AuthService:
+    return request.app.state.auth_service
 
 
 def get_session_service(request: Request) -> SessionService:

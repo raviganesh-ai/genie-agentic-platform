@@ -1,4 +1,5 @@
 import type { SafeError } from "@/types/common";
+import { getAuthToken, setAuthToken } from "./authToken";
 
 /**
  * The Genie backend base URL. Configurable via VITE_GENIE_API_BASE_URL so
@@ -8,6 +9,36 @@ import type { SafeError } from "@/types/common";
  */
 const API_BASE_URL: string =
   (import.meta.env.VITE_GENIE_API_BASE_URL as string | undefined) ?? "http://localhost:8000";
+
+/**
+ * The platform APIM subscription key, required on every call once the
+ * gateway sets `subscriptionRequired: true` (see
+ * infra/platform-private-gateway.bicep). Unset in local dev, where the
+ * backend is called directly (no APIM in front of it) - `undefined` simply
+ * means the header is omitted, matching that APIM isn't in the path at all.
+ */
+const APIM_SUBSCRIPTION_KEY: string | undefined = import.meta.env
+  .VITE_GENIE_APIM_SUBSCRIPTION_KEY as string | undefined;
+
+/** Dispatched whenever a backend call is rejected with 401, after the
+ * stored token (if any) has already been cleared - the one place the app
+ * needs to know "the user must sign in again", regardless of which page
+ * or hook triggered the call. */
+export const UNAUTHORIZED_EVENT = "genie:unauthorized";
+
+function buildAuthHeaders(): Record<string, string> {
+  const headers: Record<string, string> = {};
+  if (APIM_SUBSCRIPTION_KEY) headers["Ocp-Apim-Subscription-Key"] = APIM_SUBSCRIPTION_KEY;
+  const token = getAuthToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
+  return headers;
+}
+
+function handleUnauthorized(): void {
+  if (!getAuthToken()) return; // already signed out - avoid a redundant event
+  setAuthToken(null);
+  if (typeof window !== "undefined") window.dispatchEvent(new Event(UNAUTHORIZED_EVENT));
+}
 
 /** Exposes the configured backend origin for building absolute links to
  * backend-rendered routes (e.g. the cx customer prototype surface) that
@@ -67,6 +98,7 @@ export async function apiFetch<TResponse>(
 
   const headers: Record<string, string> = {
     "X-Correlation-Id": correlationId,
+    ...buildAuthHeaders(),
   };
   if (!isFormData && body !== undefined) headers["Content-Type"] = "application/json";
 
@@ -85,6 +117,7 @@ export async function apiFetch<TResponse>(
     );
   }
 
+  if (response.status === 401) handleUnauthorized();
   if (response.status === 204) return undefined as TResponse;
 
   const rawText = await response.text();
@@ -115,7 +148,7 @@ export async function apiFetch<TResponse>(
  * remains centralized with every other backend request.
  */
 export async function openEventStream(path: string, signal: AbortSignal): Promise<Response> {
-  const headers: Record<string, string> = { Accept: "text/event-stream" };
+  const headers: Record<string, string> = { Accept: "text/event-stream", ...buildAuthHeaders() };
 
   let response: Response;
   try {
@@ -125,6 +158,7 @@ export async function openEventStream(path: string, signal: AbortSignal): Promis
     throw new ApiError("Unable to reach the Genie backend. Check your connection and try again.");
   }
 
+  if (response.status === 401) handleUnauthorized();
   if (!response.ok || !response.body) {
     throw new ApiError(mapStatusToMessage(response.status), response.status);
   }
@@ -139,7 +173,7 @@ export async function openEventStream(path: string, signal: AbortSignal): Promis
  * JSON, which would corrupt a binary zip archive.
  */
 export async function downloadBinary(path: string): Promise<{ blob: Blob; filename: string }> {
-  const headers: Record<string, string> = {};
+  const headers: Record<string, string> = { ...buildAuthHeaders() };
 
   let response: Response;
   try {
@@ -148,6 +182,7 @@ export async function downloadBinary(path: string): Promise<{ blob: Blob; filena
     throw new ApiError("Unable to reach the Genie backend. Check your connection and try again.");
   }
 
+  if (response.status === 401) handleUnauthorized();
   if (!response.ok) {
     throw new ApiError(mapStatusToMessage(response.status), response.status);
   }

@@ -24,6 +24,7 @@ from app.api import (
     agents,
     approvals,
     architecture,
+    auth,
     debugging,
     deploy_launch,
     discovery,
@@ -154,6 +155,7 @@ from app.services.output_service import create_output_service
 from app.services.peer_review_service import create_peer_review_service
 from app.services.requirements_service import create_requirements_service
 from app.services.session_service import create_session_service
+from app.security.auth_service import AuthService
 from app.services.workshop_service import create_workshop_service
 from app.platform_config.repository import (
     CosmosPlatformReferenceRepositoryStore,
@@ -391,6 +393,12 @@ def create_app(
             upload_repository=upload_repository,
         )
         app.state.session_service = session_service
+        app.state.auth_service = AuthService(
+            enabled=resolved_settings.auth_enabled,
+            signing_key_env_var=resolved_settings.auth_token_signing_key_env_var,
+            users_env_var=resolved_settings.auth_users_env_var,
+            token_ttl_seconds=resolved_settings.auth_token_ttl_seconds,
+        )
         github_mcp_client = None
         if resolved_settings.github_mcp_enabled:
             github_mcp_client = GitHubMcpClient(
@@ -789,6 +797,7 @@ def create_app(
     app.add_exception_handler(RuntimeError, domain_error_handler)
 
     app.include_router(health.router)
+    app.include_router(auth.router)
     app.include_router(sessions.router)
     app.include_router(uploads.router)
     app.include_router(ingestion.router)

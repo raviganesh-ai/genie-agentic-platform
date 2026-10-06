@@ -1,12 +1,14 @@
 <#
 .SYNOPSIS
-    Atomically deploys the anonymous internal Genie FastAPI backend.
+    Atomically deploys the Genie FastAPI backend.
 
 .DESCRIPTION
     Preserves the existing Container App identity, environment, scaling, and
     Azure service configuration; removes retired authentication sidecars; and
     moves ingress to FastAPI port 8000. Readiness is verified only through the
     platform API Management gateway because the backend environment is private.
+    Also wires first-party authentication (app.security.auth_service) and
+    verifies that unauthenticated requests are actually rejected.
 #>
 [CmdletBinding()]
 param(
@@ -36,6 +38,15 @@ param(
 
     [Parameter(Mandatory = $true)]
     [string]$GitHubMcpTokenSecretName,
+
+    [Parameter(Mandatory = $true)]
+    [string]$ApimSubscriptionKey,
+
+    [Parameter(Mandatory = $true)]
+    [string]$AuthTokenSigningKeySecretName,
+
+    [Parameter(Mandatory = $true)]
+    [string]$AuthUsersSecretName,
 
     [Parameter(Mandatory = $true)]
     [string]$PrototypeApiGatewayPublisherEmail,
@@ -165,6 +176,11 @@ Set-ContainerEnvironmentVariable -Container $backend -Name "GENIE_GITHUB_MCP_ENA
 Set-ContainerEnvironmentVariable -Container $backend -Name "GENIE_GITHUB_MCP_ENDPOINT" -Value $GitHubMcpEndpoint
 Set-ContainerEnvironmentVariable -Container $backend -Name "GENIE_GITHUB_MCP_TOKEN_ENV_VAR" -Value "GITHUB_MCP_TOKEN"
 Set-ContainerSecretEnvironmentVariable -Container $backend -Name "GITHUB_MCP_TOKEN" -SecretRef $GitHubMcpTokenSecretName
+Set-ContainerEnvironmentVariable -Container $backend -Name "GENIE_AUTH_ENABLED" -Value "true"
+Set-ContainerEnvironmentVariable -Container $backend -Name "GENIE_AUTH_TOKEN_SIGNING_KEY_ENV_VAR" -Value "GENIE_AUTH_TOKEN_SIGNING_KEY"
+Set-ContainerSecretEnvironmentVariable -Container $backend -Name "GENIE_AUTH_TOKEN_SIGNING_KEY" -SecretRef $AuthTokenSigningKeySecretName
+Set-ContainerEnvironmentVariable -Container $backend -Name "GENIE_AUTH_USERS_ENV_VAR" -Value "GENIE_AUTH_USERS"
+Set-ContainerSecretEnvironmentVariable -Container $backend -Name "GENIE_AUTH_USERS" -SecretRef $AuthUsersSecretName
 Set-ContainerEnvironmentVariable -Container $backend -Name "GENIE_PROTOTYPE_API_GATEWAY_ENABLED" -Value "true"
 Set-ContainerEnvironmentVariable -Container $backend -Name "GENIE_PROTOTYPE_API_GATEWAY_PUBLISHER_EMAIL" -Value $PrototypeApiGatewayPublisherEmail
 Set-ContainerEnvironmentVariable -Container $backend -Name "GENIE_PROTOTYPE_API_GATEWAY_PUBLISHER_NAME" -Value $PrototypeApiGatewayPublisherName
@@ -275,13 +291,18 @@ if ($environment.properties.publicNetworkAccess -ne "Disabled") {
 }
 
 $baseUri = $GatewayUrl.TrimEnd("/")
-$health = Invoke-RestMethod -Method Get -Uri "$baseUri/health/ready" -TimeoutSec 30
+$apimHeaders = @{ "Ocp-Apim-Subscription-Key" = $ApimSubscriptionKey }
+$health = Invoke-RestMethod -Method Get -Uri "$baseUri/health/ready" -Headers $apimHeaders -TimeoutSec 30
 if ($health.status -ne "ready") {
     throw "Backend readiness verification failed."
 }
-$sessionsResponse = Invoke-WebRequest -Method Get -Uri "$baseUri/sessions" -TimeoutSec 30
-if ($sessionsResponse.StatusCode -ne 200) {
-    throw "Anonymous API verification returned HTTP $($sessionsResponse.StatusCode)."
+# First-party authentication (app.security.auth_service) is always enabled
+# in this deployment - prove the fix for the unauthenticated-IDOR incident
+# actually took effect: a request with a valid gateway subscription key but
+# no bearer token must still be rejected, not served.
+$sessionsResponse = Invoke-WebRequest -Method Get -Uri "$baseUri/sessions" -Headers $apimHeaders -TimeoutSec 30 -SkipHttpErrorCheck
+if ($sessionsResponse.StatusCode -ne 401) {
+    throw "Expected unauthenticated '/sessions' access to be rejected with HTTP 401, got HTTP $($sessionsResponse.StatusCode)."
 }
 
 # The backend must be reachable ONLY through the platform APIM. Prove the
@@ -309,7 +330,7 @@ if (-not $directIngressDenied) {
     backendImage = $deployedBackend[0].image
     gatewayUrl = $baseUri
     publicNetworkAccess = $environment.properties.publicNetworkAccess
-    anonymousApi = "verified"
+    unauthenticatedAccessRejected = "verified"
     directIngressDenied = $directIngressDenied
     health = $health.status
 } | ConvertTo-Json -Depth 10

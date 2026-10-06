@@ -7,6 +7,7 @@ import { useAsyncResource } from "@/hooks/useAsyncResource";
 import { workflowApi } from "@/services/workflowApi";
 import { TriagePanel } from "@/features/triage/TriagePanel";
 import { isSessionExpiredError } from "@/types/common";
+import { getAuthToken, setAuthToken } from "@/services/authToken";
 
 interface NavItemConfig {
   to: string;
@@ -285,6 +286,18 @@ export function AppShell(): JSX.Element {
               Gamified live agent call traceability
             </Text>
           </div>
+          {getAuthToken() ? (
+            <Button
+              size="small"
+              appearance="subtle"
+              onClick={() => {
+                setAuthToken(null);
+                navigate("/login", { replace: true });
+              }}
+            >
+              🚪 Sign out
+            </Button>
+          ) : null}
         </div>
       </nav>
       <main
