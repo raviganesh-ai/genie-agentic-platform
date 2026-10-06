@@ -284,6 +284,23 @@ if ($sessionsResponse.StatusCode -ne 200) {
     throw "Anonymous API verification returned HTTP $($sessionsResponse.StatusCode)."
 }
 
+# The backend must be reachable ONLY through the platform APIM. Prove the
+# container app's own direct FQDN (the public default domain Container Apps
+# always assigns) is denied - this is the only automated regression check
+# for the private-endpoints subnet NSG that enforces that boundary, and it
+# catches it regardless of exactly how the isolation is implemented.
+$directFqdn = $current.properties.configuration.ingress.fqdn
+$directIngressDenied = $false
+try {
+    Invoke-WebRequest -Method Get -Uri "https://$directFqdn/health/live" -TimeoutSec 15 -ErrorAction Stop | Out-Null
+}
+catch {
+    $directIngressDenied = $true
+}
+if (-not $directIngressDenied) {
+    throw "Direct backend ingress at https://$directFqdn is reachable; only the platform APIM must be able to reach the backend."
+}
+
 [pscustomobject]@{
     containerApp = $current.name
     revision = $current.properties.latestReadyRevisionName
@@ -293,5 +310,6 @@ if ($sessionsResponse.StatusCode -ne 200) {
     gatewayUrl = $baseUri
     publicNetworkAccess = $environment.properties.publicNetworkAccess
     anonymousApi = "verified"
+    directIngressDenied = $directIngressDenied
     health = $health.status
 } | ConvertTo-Json -Depth 10

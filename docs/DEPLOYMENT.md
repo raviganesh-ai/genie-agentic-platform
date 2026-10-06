@@ -244,7 +244,7 @@ The script uses Microsoft Entra authentication, creates only missing model deplo
 
 ## Continuous deployment (GitHub Actions)
 
-`.github/workflows/ci.yml` runs on every push/PR to `main` (the repo's actual default branch - confirmed via `git branch -a`/`git remote show origin`). On a real push to `main`, once the `backend` and `frontend` CI jobs pass, two deploy jobs run the exact same steps documented above, automatically:
+`.github/workflows/ci.yml` runs on every push/PR to `master` (the repo's actual default branch - confirmed via `git branch -a`/`git remote show origin`/`gh repo view --json defaultBranchRef`). On a real push to `master`, once the `backend` and `frontend` CI jobs pass, two deploy jobs run the exact same steps documented above, automatically:
 
 - **`prepare-gateway`** — logs into Azure via OIDC federated credential (no client secret), idempotently provisions Standard v2 APIM and its delegated subnet/NSG, proves the gateway reaches the current backend, and emits the verified URL without changing Container Apps public access.
 - **`deploy-frontend`** — builds the frontend against that exact gateway job output and deploys it with `@azure/static-web-apps-cli` using a stored deployment token. It no longer trusts a separately maintained production API URL variable.

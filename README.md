@@ -512,7 +512,7 @@ Genie and every generated prototype are intentionally anonymous:
 
 ## Deploy log
 
-Every deployment to the shared Azure evaluation environment is recorded in [docs/CHANGELOG.md](docs/CHANGELOG.md): commit, what changed, and why. Update that file as part of the same commit that ships the fix/feature, before pushing to `main` triggers [Continuous deployment](docs/DEPLOYMENT.md#continuous-deployment-github-actions).
+Every deployment to the shared Azure evaluation environment is recorded in [docs/CHANGELOG.md](docs/CHANGELOG.md): commit, what changed, and why. Update that file as part of the same commit that ships the fix/feature, before pushing to `master` triggers [Continuous deployment](docs/DEPLOYMENT.md#continuous-deployment-github-actions).
 
 ---
 
