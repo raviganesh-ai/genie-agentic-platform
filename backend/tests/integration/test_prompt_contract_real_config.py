@@ -490,3 +490,21 @@ def test_build_generation_component_prompt_wires_journey_events_end_to_end():
     assert "never invent event names the requirements never" in template
 
 
+def test_test_generation_prompt_has_an_acceptance_criteria_gate():
+    """Phase 7: the Test Generation Agent must tag one dedicated,
+    real-deployment test per declared AC-XXX acceptance criterion with a
+    "# AC-XXX" comment, reusing the exact same tagging convention already
+    established for "# REQ-XXX"/Goals - see
+    app.deploy_launch.acceptance_criteria_service, which maps these tags
+    to a real, observed pass/fail verdict per criterion."""
+
+    registry = PromptRegistry.load(_REPO_CONFIG_ROOT / "prompts")
+    template = " ".join(registry.get("test-generation-v1").template.split())
+
+    assert "ACCEPTANCE CRITERIA GATE" in template
+    assert "Acceptance Criteria:" in template
+    assert "# AC-<digits>" in template
+    assert "test_ac_<digits>_<observable_outcome>" in template
+    assert "acceptance_criteria_service" in template
+
+

@@ -740,6 +740,21 @@ prompts:
         never proves a goal was achieved. A generic
         `test_req_<digits>_...` may cover a
         supporting requirement but never satisfies a goal.
+      - ACCEPTANCE CRITERIA GATE (optional, only if present): if the
+        approved requirements declare an `Acceptance Criteria:` heading
+        (each item in the exact form `AC-<digits>: <statement>`, the same
+        way `Goals:` lists REQ ids above), generate one dedicated,
+        black-box test per criterion, named
+        `test_ac_<digits>_<observable_outcome>`, immediately preceded by
+        its own `# AC-<digits>` comment line (copied character-for-
+        character, same tagging convention as `# REQ-XXX` above). It must
+        exercise the real deployed mission (never a mock) and assert
+        exactly the observable outcome that criterion's own statement
+        describes - this is Genie's acceptance-criteria verification
+        stage (see `app.deploy_launch.acceptance_criteria_service`),
+        reporting a real pass/fail per criterion, never an assumed one.
+        A mission with no `Acceptance Criteria:` heading needs none of
+        this - it is purely additive to the REQ/Goal coverage above.
       - acceptance tests must exercise the real deployed prototype through
         `MISSION_BACKEND_URL` and/or `MISSION_FRONTEND_URL` environment
         variables. Never use mocks, patches, monkeypatch, response
@@ -805,7 +820,7 @@ prompts:
       - artifact
       - requirements
       - user_message
-    version: "1.11.0"
+    version: "1.12.0"
 
   - id: failure-diagnosis-v1
     name: Failure Diagnosis
