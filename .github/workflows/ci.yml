@@ -1,14 +1,17 @@
 name: CI
 
-# The repo's actual default branch is "main" (verified with `git branch -a`
-# and `git remote show origin` - HEAD branch is "main"). A prior edit
-# mistakenly pointed this at "master", which silently prevented CI from
-# ever running on any push/PR for the entire history of this repo.
+# This repo's actual default/working branch is "master" (verified via
+# `git branch -a`, `git remote show origin`'s "HEAD branch", and
+# `gh repo view`'s defaultBranchRef - no "main" branch exists at all). A
+# prior edit incorrectly claimed "main" was the real default and pointed
+# this trigger at it, which has been silently preventing CI from running
+# on any push/PR to master since - confirmed via the GitHub Actions run
+# history showing zero runs for numerous real pushes to master.
 on:
   push:
-    branches: [main]
+    branches: [master]
   pull_request:
-    branches: [main]
+    branches: [master]
 
 jobs:
   backend:
@@ -62,14 +65,14 @@ jobs:
       - name: Test
         run: npm run test
 
-  # Deploy jobs only run on a real push to main (never on a PR from a
+  # Deploy jobs only run on a real push to master (never on a PR from a
   # fork, and never unless both CI jobs above already passed) - see
   # "Continuous deployment" in README.md for the one-time Azure setup
   # (federated OIDC credential + RBAC) required before these can succeed.
   prepare-gateway:
     name: Prepare platform gateway (API Management)
     needs: [backend, frontend]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
     environment: production
     outputs:
@@ -129,7 +132,7 @@ jobs:
   deploy-backend:
     name: Deploy backend (private Container Apps)
     needs: [backend, frontend, prepare-gateway, deploy-frontend]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
     environment: production
     # Safety net: if a step ever hangs (e.g. a CLI retrying on missing/
@@ -228,7 +231,7 @@ jobs:
   deploy-frontend:
     name: Deploy frontend (Static Web Apps)
     needs: [prepare-gateway]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
     environment: production
     # Safety net: the swa CLI has been observed to hang (rather than fail
