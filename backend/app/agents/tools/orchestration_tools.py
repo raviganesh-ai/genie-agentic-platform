@@ -69,6 +69,22 @@ _AGENT_LABEL_BLOCK_PATTERN = re.compile(
     r"[\s\S]*?^[ \t]*```[ \t]*$",
     re.MULTILINE,
 )
+_COMPONENT_OUTPUT_PATTERN = re.compile(
+    r"\A[ \t\r\n]*```(?P<language>python|tsx|ts|yaml|yml)[ \t]*\r?\n"
+    r"(?P<body>.*?)^[ \t]*```[ \t]*[ \t\r\n]*\Z",
+    re.DOTALL | re.IGNORECASE | re.MULTILINE,
+)
+_EXPECTED_LANGUAGES_BY_COMPONENT_KIND: dict[str, frozenset[str]] = {
+    "agent": frozenset({"python"}),
+    "orchestrator": frozenset({"python"}),
+    "page_view": frozenset({"tsx"}),
+    "ui": frozenset({"tsx"}),
+    "deterministic_service": frozenset({"python"}),
+    "data_model": frozenset({"python"}),
+    "api_contract": frozenset({"yaml", "yml"}),
+    "gateway_policy": frozenset({"yaml", "yml"}),
+    "identity_config": frozenset({"ts"}),
+}
 
 
 def _preview(output_text: str | None) -> str | None:
@@ -424,6 +440,38 @@ def _component_failure_piece(component_name: str, *, is_ui: bool, exc: BaseExcep
     )
 
 
+def _validate_component_output(
+    output_text: str,
+    *,
+    component_kind: str,
+    marker_name: str,
+) -> None:
+    """Rejects output that cannot be materialized as the requested component."""
+
+    match = _COMPONENT_OUTPUT_PATTERN.fullmatch(output_text)
+    if match is None:
+        raise ToolExecutionError(
+            f"Generated component '{marker_name}' was not exactly one complete fenced code block."
+        )
+
+    language = match.group("language").lower()
+    expected_languages = _EXPECTED_LANGUAGES_BY_COMPONENT_KIND[component_kind]
+    if language not in expected_languages:
+        expected = " or ".join(sorted(expected_languages))
+        raise ToolExecutionError(
+            f"Generated component '{marker_name}' used '{language}' instead of '{expected}'."
+        )
+
+    body_lines = match.group("body").splitlines()
+    first_line = body_lines[0].strip() if body_lines else ""
+    comment_prefix = "//" if component_kind in ("ui", "page_view", "identity_config") else "#"
+    expected_marker = f"{comment_prefix} agent: {marker_name}"
+    if first_line.casefold() != expected_marker.casefold():
+        raise ToolExecutionError(
+            f"Generated component '{marker_name}' did not start with '{expected_marker}'."
+        )
+
+
 async def _generate_build_by_component(
     *,
     delegation: _Delegation,
@@ -574,6 +622,8 @@ async def _generate_build_by_component(
         # recognizes) can have more than one instance, so its own real
         # name is the label instead.
         label_name = component_kind if component_kind in ("orchestrator", "ui") else component_name
+        marker_prefix = _MARKER_PREFIX_BY_COMPONENT_KIND.get(component_kind, "")
+        marker_name = f"{marker_prefix}{label_name}"
         reused_piece = reusable_components.get(label_name.strip().lower())
         if reused_piece is not None:
             # Already succeeded on a prior attempt at this same step - reuse
@@ -632,13 +682,16 @@ async def _generate_build_by_component(
                 )
             else:
                 component_result = await agent_gateway.execute(request)
+            _validate_component_output(
+                component_result.output_text,
+                component_kind=component_kind,
+                marker_name=marker_name,
+            )
         except Exception as exc:  # noqa: BLE001 - isolate this ONE component's
             # failure (a transient Foundry/tool error, ...) so every OTHER,
             # still-generatable component is not silently discarded along
             # with it (the "all or nothing" behavior this replaces) - see
             # _component_failure_piece and the module docstring.
-            marker_prefix = _MARKER_PREFIX_BY_COMPONENT_KIND.get(component_kind, "")
-            marker_name = f"{marker_prefix}{label_name}"
             failure_piece = _component_failure_piece(
                 marker_name, is_ui=component_kind in ("ui", "page_view", "identity_config"), exc=exc
             )

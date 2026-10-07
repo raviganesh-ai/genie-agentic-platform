@@ -483,10 +483,16 @@ async def test_call_build_agent_streams_each_components_own_deltas_via_the_event
     registry = AgentToolRegistry()
     gateway = _StreamingAgentGateway(
         texts_by_component={
-            "Ticket Classifier Agent": "classifier-code",
-            "Resolution Drafter Agent": "drafter-code",
-            "Support Triage Orchestrator Agent": "orchestrator-code",
-            "ui": "ui-code",
+            "Ticket Classifier Agent": (
+                "```python\n# agent: Ticket Classifier Agent\nclassifier-code\n```"
+            ),
+            "Resolution Drafter Agent": (
+                "```python\n# agent: Resolution Drafter Agent\ndrafter-code\n```"
+            ),
+            "Support Triage Orchestrator Agent": (
+                "```python\n# agent: orchestrator\norchestrator-code\n```"
+            ),
+            "ui": "```tsx\n// agent: ui\nui-code\n```",
         }
     )
     governance_service = _RecordingGovernanceService()
@@ -521,13 +527,13 @@ async def test_call_build_agent_streams_each_components_own_deltas_via_the_event
     # for 4 components) - proving each component streams independently,
     # in order, rather than one single combined stream.
     assert deltas == [
-        "classifier-code",
+        "```python\n# agent: Ticket Classifier Agent\nclassifier-code\n```",
         "\n\n",
-        "drafter-code",
+        "```python\n# agent: Resolution Drafter Agent\ndrafter-code\n```",
         "\n\n",
-        "orchestrator-code",
+        "```python\n# agent: orchestrator\norchestrator-code\n```",
         "\n\n",
-        "ui-code",
+        "```tsx\n// agent: ui\nui-code\n```",
     ]
     assert all(event.agent_id == "build-agent" for event in event_bus.events)
     assert all(event.step_id == "build-solution" for event in event_bus.events)
@@ -836,6 +842,60 @@ async def test_call_build_agent_generates_one_page_view_component_per_declared_p
     assert "catalog code" in gateway.requests[3].variables["prior_components"]
 
 
+async def test_call_build_agent_rejects_an_unfenced_page_without_losing_other_components():
+    registry = AgentToolRegistry()
+    gateway = _StreamingAgentGateway(
+        texts_by_component={
+            "Ticket Classifier Agent": (
+                "```python\n# agent: Ticket Classifier Agent\nclassifier code\n```"
+            ),
+            "Support Triage Orchestrator Agent": (
+                "```python\n# agent: orchestrator\norchestrator code\n```"
+            ),
+            "Catalog Page": (
+                "// agent: page:Catalog Page\n"
+                "export default function CatalogPage() { return null; }"
+            ),
+            "Dashboard Page": (
+                "```tsx\n// agent: page:Dashboard Page\n"
+                "export default function DashboardPage() { return null; }\n```"
+            ),
+        }
+    )
+    governance_service = _RecordingGovernanceService()
+    register_orchestrator_delegation_tools(
+        registry, agent_gateway=gateway, governance_service=governance_service
+    )
+    context = ToolCallContext(
+        agent=_orchestrator_agent(),
+        session_id="session-1",
+        trace_id="run-1:build-solution",
+    )
+
+    result = await registry.execute(
+        agent_id="genie-orchestrator",
+        tool_name="call_build_agent",
+        arguments={
+            "requirements": "Approved requirements text.",
+            "architecture": _ARCHITECTURE_WITH_UI_PAGES,
+            "policies": "",
+            "user_message": "",
+        },
+        context=context,
+    )
+
+    output_text = result["output_text"]
+    assert (
+        "```text\n"
+        "// agent: page:Catalog Page\n"
+        "// GENERATION FAILED: Generated component 'page:Catalog Page' was not exactly one "
+        "complete fenced code block.\n"
+        "```"
+    ) in output_text
+    assert "export default function CatalogPage" not in output_text
+    assert "export default function DashboardPage" in output_text
+
+
 async def test_call_build_agent_reuses_a_previously_succeeded_page_on_retry():
     """A page_view component's own reuse key is its bare page name (no
     "page:" prefix) - exactly like any other multi-instance component kind -
@@ -1129,5 +1189,4 @@ async def test_call_build_agent_generates_identity_config_component():
         ("ui", "ui"),
     ]
     assert "adapter code" in gateway.requests[3].variables["prior_components"]
-
 
