@@ -44,10 +44,11 @@ $roleDefinition = @{
         "Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers/write"
         "Microsoft.DocumentDB/databaseAccounts/sqlRoleAssignments/read"
         "Microsoft.DocumentDB/databaseAccounts/sqlRoleAssignments/write"
+        "Microsoft.DocumentDB/databaseAccounts/operationResults/read"
         "Microsoft.DocumentDB/databaseAccounts/sqlDatabases/operationResults/read"
         "Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers/operationResults/read"
-        "Microsoft.DocumentDB/databaseAccounts/sqlRoleAssignments/operationResults/read"
-        "Microsoft.DocumentDB/locations/operationResults/read"
+        "Microsoft.DocumentDB/operationResults/read"
+        "Microsoft.DocumentDB/locations/operationsStatus/read"
     )
     NotActions = @()
     DataActions = @()
