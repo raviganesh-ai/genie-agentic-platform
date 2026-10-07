@@ -25,7 +25,7 @@ $subscriptionScope = "/subscriptions/$SubscriptionId"
 $roleDefinition = @{
     Name = $RoleName
     IsCustom = $true
-    Description = "Owns isolated Genie prototype resource groups and creates their private Container Apps environments."
+    Description = "Owns isolated Genie prototype resource groups, creates their private Container Apps environments, and provisions each mission's Cosmos DB data layer."
     Actions = @(
         "Microsoft.Resources/subscriptions/resourceGroups/read"
         "Microsoft.Resources/subscriptions/resourceGroups/write"
@@ -36,6 +36,14 @@ $roleDefinition = @{
         "Microsoft.App/locations/managedEnvironmentOperationStatuses/read"
         "Microsoft.App/locations/operationResults/read"
         "Microsoft.App/locations/operationStatuses/read"
+        "Microsoft.DocumentDB/databaseAccounts/read"
+        "Microsoft.DocumentDB/databaseAccounts/write"
+        "Microsoft.DocumentDB/databaseAccounts/sqlDatabases/read"
+        "Microsoft.DocumentDB/databaseAccounts/sqlDatabases/write"
+        "Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers/read"
+        "Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers/write"
+        "Microsoft.DocumentDB/databaseAccounts/sqlRoleAssignments/read"
+        "Microsoft.DocumentDB/databaseAccounts/sqlRoleAssignments/write"
     )
     NotActions = @()
     DataActions = @()
