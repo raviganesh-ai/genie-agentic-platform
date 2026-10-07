@@ -2309,7 +2309,18 @@ class DeploymentPipelineService:
                         orchestrator_agent_name=orchestrator_foundry_name,
                         agent_foundry_names=self._agent_foundry_names[pipeline_run.id],
                     )
-                    materialized.write_to_directory(backend_root, backend_service_scaffold=scaffold)
+                    # write_to_directory is synchronous (plain file I/O over
+                    # potentially dozens of generated agent/page/service/model
+                    # files) - run it off the event loop so it can't starve
+                    # this process's own /health/live or /health/ready probes
+                    # long enough for Container Apps to consider the replica
+                    # unhealthy and restart it, which would fail every other
+                    # session's in-flight work on this shared backend too.
+                    await asyncio.to_thread(
+                        materialized.write_to_directory,
+                        backend_root,
+                        backend_service_scaffold=scaffold,
+                    )
 
                     async def _on_backend_progress(
                         message: str, *, _step_result: DeploymentStepResult = step_result

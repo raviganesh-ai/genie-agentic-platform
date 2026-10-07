@@ -10,7 +10,9 @@ no separate approval-checkpoint request/decide dance to exercise here.
 """
 from __future__ import annotations
 
+import asyncio
 import json
+import threading
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -537,6 +539,72 @@ async def test_full_pipeline_runs_every_step(tmp_path: Path):
         encoding="utf-8"
     )
     assert '__MISSION_AGENTS__ = ["Requirements Specialist"]' in runtime_config_source
+
+
+async def test_deploy_backend_service_step_does_not_block_the_event_loop(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Regression test for a real incident: materializing a build's files
+    (deploy-backend-service's first action, before the actual Azure deploy
+    call) is plain synchronous file I/O. Calling it directly on the event
+    loop blocked this process's own /health/live and /health/ready probes
+    long enough that Container Apps considered the replica unhealthy and
+    restarted it mid-deployment - failing every other session's in-flight
+    work on this shared backend too, not just the slow one. The fix runs
+    it via ``asyncio.to_thread``; this test proves a concurrent task can
+    still make progress while it runs, using a deliberately slow
+    (blocking, same as real disk I/O under load) fake write."""
+
+    from app.deploy_launch.code_materializer import MaterializedBuild
+
+    main_thread_id = threading.get_ident()
+    saw_other_thread = False
+    original_write = MaterializedBuild.write_to_directory
+
+    def _slow_write_to_directory(self, root: Path, **kwargs):
+        nonlocal saw_other_thread
+        if threading.get_ident() != main_thread_id:
+            saw_other_thread = True
+        import time
+
+        time.sleep(0.3)  # simulates writing many real generated files
+        return original_write(self, root, **kwargs)
+
+    monkeypatch.setattr(MaterializedBuild, "write_to_directory", _slow_write_to_directory)
+
+    service = _build_service(test_output_text=_PASSING_TEST_OUTPUT, tmp_path=tmp_path)
+    run = await service.start(
+        session_id="session-1",
+        requesting_user_id="user-1",
+        workflow_run_id="run-1",
+        approval_request_id="session-1:run-1",
+    )
+
+    # A canary task standing in for this process's own health-probe
+    # handler: if the event loop were blocked by the slow synchronous
+    # write above, this would starve for the same ~0.3s instead of ticking
+    # every ~10ms.
+    tick_gaps: list[float] = []
+    loop = asyncio.get_event_loop()
+
+    async def _canary() -> None:
+        last = loop.time()
+        for _ in range(40):
+            await asyncio.sleep(0.01)
+            now = loop.time()
+            tick_gaps.append(now - last)
+            last = now
+
+    canary_task = asyncio.create_task(_canary())
+    run = await service.wait_for_run(run.id)
+    await canary_task
+
+    assert run.status == "completed"
+    assert saw_other_thread, "write_to_directory must run off the event loop thread"
+    assert max(tick_gaps) < 0.15, (
+        f"A canary tick was delayed {max(tick_gaps):.3f}s - the event loop was blocked "
+        "during deploy-backend-service's file materialization."
+    )
 
 
 class _FakeProtectedBackendDeploymentService:
