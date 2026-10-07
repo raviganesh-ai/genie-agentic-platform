@@ -7,6 +7,7 @@ import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import urlparse
 from xml.etree import ElementTree
 
 from app.deploy_launch.resource_naming import prototype_resource_group_name
@@ -244,6 +245,7 @@ class PrototypeApiGatewayService:
         self,
         *,
         mission_slug: str,
+        data_endpoint: str | None = None,
         on_progress: GatewayProgressCallback | None = None,
     ) -> PrototypeGatewayInfrastructure:
         async def _report(message: str) -> None:
@@ -266,6 +268,7 @@ class PrototypeApiGatewayService:
             f"Microsoft.Network/virtualNetworks/{vnet_name}"
         )
         app_subnet_id = f"{vnet_id}/subnets/container-apps"
+        private_endpoint_subnet_id = f"{vnet_id}/subnets/private-endpoints"
         gateway_subnet_id = f"{vnet_id}/subnets/api-management"
         network_security_group_id = (
             f"/subscriptions/{self._subscription_id}/resourceGroups/{resource_group}/providers/"
@@ -284,6 +287,10 @@ class PrototypeApiGatewayService:
                 AddressSpace,
                 Delegation,
                 NetworkSecurityGroup,
+                PrivateDnsZoneConfig,
+                PrivateDnsZoneGroup,
+                PrivateEndpoint,
+                PrivateLinkServiceConnection,
                 Subnet,
                 VirtualNetwork,
             )
@@ -324,6 +331,11 @@ class PrototypeApiGatewayService:
                             ],
                         ),
                         Subnet(
+                            name="private-endpoints",
+                            address_prefix="10.0.2.0/24",
+                            private_endpoint_network_policies="Disabled",
+                        ),
+                        Subnet(
                             name="api-management",
                             address_prefix="10.0.4.0/27",
                             network_security_group=NetworkSecurityGroup(
@@ -340,6 +352,79 @@ class PrototypeApiGatewayService:
                 ),
             )
             await asyncio.to_thread(network_poller.result)
+
+            dns_client = self._private_dns_client()
+            if data_endpoint:
+                account_name = (urlparse(data_endpoint).hostname or "").split(".", maxsplit=1)[0]
+                if not account_name:
+                    raise PrototypeApiGatewayError(
+                        "Mission data endpoint does not contain a Cosmos DB account name."
+                    )
+                cosmos_account_id = (
+                    f"/subscriptions/{self._subscription_id}/resourceGroups/{resource_group}/"
+                    f"providers/Microsoft.DocumentDB/databaseAccounts/{account_name}"
+                )
+                cosmos_zone_name = "privatelink.documents.azure.com"
+                cosmos_zone_id = (
+                    f"/subscriptions/{self._subscription_id}/resourceGroups/{resource_group}/"
+                    f"providers/Microsoft.Network/privateDnsZones/{cosmos_zone_name}"
+                )
+                private_endpoint_name = _resource_name(
+                    "genie-cosmos-pe", mission_slug, maximum_length=80
+                )
+
+                await _report("Provisioning private Cosmos DB connectivity...")
+                cosmos_zone_poller = dns_client.private_zones.begin_create_or_update(
+                    resource_group,
+                    cosmos_zone_name,
+                    PrivateZone(location="global", tags=tags),
+                )
+                await asyncio.to_thread(cosmos_zone_poller.result)
+                cosmos_link_poller = dns_client.virtual_network_links.begin_create_or_update(
+                    resource_group,
+                    cosmos_zone_name,
+                    "prototype-cosmos-vnet",
+                    VirtualNetworkLink(
+                        location="global",
+                        virtual_network=SubResource(id=vnet_id),
+                        registration_enabled=False,
+                        tags=tags,
+                    ),
+                )
+                await asyncio.to_thread(cosmos_link_poller.result)
+                private_endpoint_poller = network_client.private_endpoints.begin_create_or_update(
+                    resource_group,
+                    private_endpoint_name,
+                    PrivateEndpoint(
+                        location=self._location,
+                        tags=tags,
+                        subnet=Subnet(id=private_endpoint_subnet_id),
+                        private_link_service_connections=[
+                            PrivateLinkServiceConnection(
+                                name="cosmos-sql",
+                                private_link_service_id=cosmos_account_id,
+                                group_ids=["Sql"],
+                            )
+                        ],
+                    ),
+                )
+                await asyncio.to_thread(private_endpoint_poller.result)
+                zone_group_poller = (
+                    network_client.private_dns_zone_groups.begin_create_or_update(
+                        resource_group,
+                        private_endpoint_name,
+                        "default",
+                        PrivateDnsZoneGroup(
+                            private_dns_zone_configs=[
+                                PrivateDnsZoneConfig(
+                                    name="cosmos",
+                                    private_dns_zone_id=cosmos_zone_id,
+                                )
+                            ]
+                        ),
+                    )
+                )
+                await asyncio.to_thread(zone_group_poller.result)
 
             await _report("Provisioning the prototype internal Container Apps environment...")
             environment_poller = self._container_apps_client().managed_environments.begin_create_or_update(
@@ -361,7 +446,6 @@ class PrototypeApiGatewayService:
                 )
 
             await _report("Configuring private DNS for the prototype backend...")
-            dns_client = self._private_dns_client()
             zone_poller = dns_client.private_zones.begin_create_or_update(
                 resource_group,
                 environment.default_domain,

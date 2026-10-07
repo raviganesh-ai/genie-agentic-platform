@@ -330,8 +330,11 @@ async def test_protected_backend_deploys_private_backend_without_mise_sidecar(
     gateway_calls = {}
 
     class FakeGatewayService:
-        async def provision_infrastructure(self, *, mission_slug, on_progress=None):
+        async def provision_infrastructure(
+            self, *, mission_slug, data_endpoint=None, on_progress=None
+        ):
             gateway_calls["provision"] = mission_slug
+            gateway_calls["data_endpoint"] = data_endpoint
             return SimpleNamespace(managed_environment_id="private-env-123")
 
         async def publish_api(
@@ -409,10 +412,16 @@ async def test_protected_backend_deploys_private_backend_without_mise_sidecar(
             "/subscriptions/sub-123/resourceGroups/genie-dev-rg/providers/"
             "Microsoft.ManagedIdentity/userAssignedIdentities/claims-1234"
         ),
+        data_endpoint="https://missioncosmos.documents.azure.com:443/",
+        data_database_name="mission",
+        data_container_name="records",
     )
 
     envelope = captured["envelope"]
     assert result.backend_url == "https://claims-1234.azure-api.net"
+    assert gateway_calls["data_endpoint"] == (
+        "https://missioncosmos.documents.azure.com:443/"
+    )
     assert captured["app_name"] == "genie-claims-1234-backend"
     assert envelope.managed_environment_id == "private-env-123"
     assert envelope.configuration.ingress.external is True

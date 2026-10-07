@@ -113,7 +113,20 @@ async def test_provision_infrastructure_creates_isolated_private_runtime(monkeyp
                 vnet=model,
             )
             or _poller(SimpleNamespace())
-        )
+        ),
+        private_endpoints=SimpleNamespace(
+            begin_create_or_update=lambda resource_group, name, model: captured.update(
+                private_endpoint_name=name,
+                private_endpoint=model,
+            )
+            or _poller(SimpleNamespace())
+        ),
+        private_dns_zone_groups=SimpleNamespace(
+            begin_create_or_update=lambda resource_group, endpoint_name, name, model: captured.update(
+                private_dns_zone_group=model,
+            )
+            or _poller(SimpleNamespace())
+        ),
     )
     environment = SimpleNamespace(
         id="/subscriptions/sub-123/resourceGroups/genie-proto-claims-1234/providers/"
@@ -157,17 +170,35 @@ async def test_provision_infrastructure_creates_isolated_private_runtime(monkeyp
     monkeypatch.setattr(service, "_private_dns_client", lambda: dns_client)
     monkeypatch.setattr(service, "_api_management_client", lambda: apim_client)
 
-    result = await service.provision_infrastructure(mission_slug="claims-1234")
+    result = await service.provision_infrastructure(
+        mission_slug="claims-1234",
+        data_endpoint="https://missioncosmos.documents.azure.com:443/",
+    )
 
     assert captured["resource_group"] == "genie-proto-claims-1234"
     subnet_delegations = {
         subnet.name: subnet.delegations[0].service_name
         for subnet in captured["vnet"].subnets
+        if subnet.delegations
     }
     assert subnet_delegations == {
         "container-apps": "Microsoft.App/environments",
         "api-management": "Microsoft.Web/serverFarms",
     }
+    private_endpoint_subnet = next(
+        subnet for subnet in captured["vnet"].subnets if subnet.name == "private-endpoints"
+    )
+    assert private_endpoint_subnet.private_endpoint_network_policies == "Disabled"
+    assert captured["private_endpoint"].subnet.id.endswith("/subnets/private-endpoints")
+    connection = captured["private_endpoint"].private_link_service_connections[0]
+    assert connection.private_link_service_id.endswith(
+        "/Microsoft.DocumentDB/databaseAccounts/missioncosmos"
+    )
+    assert connection.group_ids == ["Sql"]
+    zone_config = captured["private_dns_zone_group"].private_dns_zone_configs[0]
+    assert zone_config.private_dns_zone_id.endswith(
+        "/privateDnsZones/privatelink.documents.azure.com"
+    )
     gateway_subnet = next(
         subnet for subnet in captured["vnet"].subnets if subnet.name == "api-management"
     )

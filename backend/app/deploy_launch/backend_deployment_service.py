@@ -448,6 +448,7 @@ class BackendDeploymentService:
                 gateway_infrastructure = (
                     await self._prototype_api_gateway_service.provision_infrastructure(
                         mission_slug=mission_slug,
+                        data_endpoint=data_endpoint,
                         on_progress=on_progress,
                     )
                 )
