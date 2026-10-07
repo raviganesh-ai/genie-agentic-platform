@@ -36,19 +36,14 @@ $roleDefinition = @{
         "Microsoft.App/locations/managedEnvironmentOperationStatuses/read"
         "Microsoft.App/locations/operationResults/read"
         "Microsoft.App/locations/operationStatuses/read"
-        "Microsoft.DocumentDB/databaseAccounts/read"
-        "Microsoft.DocumentDB/databaseAccounts/write"
-        "Microsoft.DocumentDB/databaseAccounts/sqlDatabases/read"
-        "Microsoft.DocumentDB/databaseAccounts/sqlDatabases/write"
-        "Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers/read"
-        "Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers/write"
-        "Microsoft.DocumentDB/databaseAccounts/sqlRoleAssignments/read"
-        "Microsoft.DocumentDB/databaseAccounts/sqlRoleAssignments/write"
-        "Microsoft.DocumentDB/databaseAccounts/operationResults/read"
-        "Microsoft.DocumentDB/databaseAccounts/sqlDatabases/operationResults/read"
-        "Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers/operationResults/read"
-        "Microsoft.DocumentDB/operationResults/read"
-        "Microsoft.DocumentDB/locations/operationsStatus/read"
+        # A wildcard, not an itemized list: Cosmos DB's resource provider
+        # gates some async operations (confirmed live for
+        # sqlRoleAssignments' own operationResults polling) on an internal
+        # action that is not independently enumerable via
+        # `az provider operation show` and therefore cannot be itemized -
+        # only a matching wildcard satisfies it. Matches the built-in
+        # "DocumentDB Account Contributor" role's own scope of actions.
+        "Microsoft.DocumentDb/databaseAccounts/*"
     )
     NotActions = @()
     DataActions = @()
