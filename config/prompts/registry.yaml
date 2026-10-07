@@ -1419,6 +1419,21 @@ prompts:
       Component to generate now: a "{component_kind}" named
       "{component_name}".
 
+      OUTPUT DISCIPLINE (read this before writing anything): your entire
+      response must be exactly one fenced code block for this one
+      component and nothing else - no narrative text, no preview of what
+      a later component will contain, no second fenced block, before or
+      after it. The moment you write this component's closing triple-
+      backtick, stop. A real, previously observed failure mode: after
+      correctly finishing one component, continuing to also sketch the
+      next component's header comment (e.g. a trailing, unfenced "# agent:
+      orchestrator" line) with no opening triple-backtick around it -
+      Genie's materializer only recognizes a component whose own fence
+      independently opens and closes, so that trailing fragment is
+      silently lost and the orchestrator never gets deployed at all. If a
+      later turn asks you to generate a different component next, that is
+      a separate, independent response - never anticipate it here.
+
       Earlier generated components available as integration context
       (provided for UI generation and otherwise empty):
       {prior_components}
@@ -1878,7 +1893,7 @@ prompts:
       - user_message
       - assigned_requirements
       - prior_components
-    version: "1.29.0"
+    version: "1.30.0"
 
   - id: build-component-regeneration-v1
     name: Build Generation - Regenerate Single Component
