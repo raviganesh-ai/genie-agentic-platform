@@ -678,6 +678,103 @@ async def test_call_build_agent_reuses_previously_succeeded_components_on_retry(
     assert "GENERATION FAILED" not in output_text
 
 
+async def test_call_build_agent_regenerates_an_unsafe_reused_orchestrator():
+    previous_output = (
+        "```python\n# agent: Ticket Classifier Agent\nclassifier code\n```\n\n"
+        "```python\n# agent: Resolution Drafter Agent\ndrafter code\n```\n\n"
+        "```python\n# agent: orchestrator\n"
+        "class OrchestratorAgent:\n"
+        "    def __init__(self):\n"
+        "        asyncio.get_event_loop().run_until_complete(self._setup())\n"
+        "```\n\n"
+        "```tsx\n// agent: ui\nui code\n```"
+    )
+    registry = AgentToolRegistry()
+    gateway = _StreamingAgentGateway(
+        texts_by_component={
+            "Support Triage Orchestrator Agent": (
+                "```python\n# agent: orchestrator\n"
+                "class OrchestratorAgent:\n"
+                "    async def run(self, ui_message: str, on_progress=None):\n"
+                "        return {}\n"
+                "```"
+            )
+        }
+    )
+    governance_service = _RecordingGovernanceService()
+    register_orchestrator_delegation_tools(
+        registry, agent_gateway=gateway, governance_service=governance_service
+    )
+    context = ToolCallContext(
+        agent=_orchestrator_agent(),
+        session_id="session-1",
+        trace_id="run-1:build-solution",
+    )
+
+    result = await registry.execute(
+        agent_id="genie-orchestrator",
+        tool_name="call_build_agent",
+        arguments={
+            "requirements": "Approved requirements text.",
+            "architecture": _ARCHITECTURE_WITH_TWO_SPECIALISTS,
+            "policies": "",
+            "user_message": "",
+            "previous_build_output": previous_output,
+        },
+        context=context,
+    )
+
+    assert len(gateway.requests) == 1
+    assert gateway.requests[0].variables["component_kind"] == "orchestrator"
+    assert "run_until_complete" not in result["output_text"]
+
+
+async def test_call_build_agent_rejects_a_new_unsafe_orchestrator():
+    registry = AgentToolRegistry()
+    gateway = _StreamingAgentGateway(
+        texts_by_component={
+            "Ticket Classifier Agent": (
+                "```python\n# agent: Ticket Classifier Agent\nclassifier code\n```"
+            ),
+            "Resolution Drafter Agent": (
+                "```python\n# agent: Resolution Drafter Agent\ndrafter code\n```"
+            ),
+            "Support Triage Orchestrator Agent": (
+                "```python\n# agent: orchestrator\n"
+                "class OrchestratorAgent:\n"
+                "    def __init__(self):\n"
+                "        asyncio.get_event_loop().run_until_complete(self._setup())\n"
+                "```"
+            ),
+            "ui": "```tsx\n// agent: ui\nui code\n```",
+        }
+    )
+    governance_service = _RecordingGovernanceService()
+    register_orchestrator_delegation_tools(
+        registry, agent_gateway=gateway, governance_service=governance_service
+    )
+    context = ToolCallContext(
+        agent=_orchestrator_agent(),
+        session_id="session-1",
+        trace_id="run-1:build-solution",
+    )
+
+    result = await registry.execute(
+        agent_id="genie-orchestrator",
+        tool_name="call_build_agent",
+        arguments={
+            "requirements": "Approved requirements text.",
+            "architecture": _ARCHITECTURE_WITH_TWO_SPECIALISTS,
+            "policies": "",
+            "user_message": "",
+        },
+        context=context,
+    )
+
+    assert "# agent: orchestrator\n# GENERATION FAILED:" in result["output_text"]
+    assert "asyncio.get_event_loop().run_until_complete" not in result["output_text"]
+
+
 _ARCHITECTURE_WITH_REQUIREMENT_ASSIGNMENTS = """
 ## Single-Page UI Design
 
@@ -1189,4 +1286,3 @@ async def test_call_build_agent_generates_identity_config_component():
         ("ui", "ui"),
     ]
     assert "adapter code" in gateway.requests[3].variables["prior_components"]
-

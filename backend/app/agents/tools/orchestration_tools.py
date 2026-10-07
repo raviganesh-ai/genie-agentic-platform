@@ -55,6 +55,10 @@ _BUILD_COMPONENT_PROMPT_ID = "build-generation-component-v1"
 # genuine failure, never reusable code - _extract_reusable_components always
 # excludes a block carrying this marker, so a retry always regenerates it.
 _COMPONENT_FAILURE_MARKER = "GENERATION FAILED"
+_BLOCKING_EVENT_LOOP_PATTERN = re.compile(
+    r"\brun_until_complete\s*\(|\basyncio\.run\s*\(",
+    re.IGNORECASE,
+)
 
 # Matches one component's whole fenced code block by its own first-line
 # ``# agent: <name>``/``// agent: <name>`` label comment (the same
@@ -407,6 +411,8 @@ def _extract_reusable_components(previous_build_output: str) -> dict[str, str]:
         # component kind uses), exactly like "orchestrator"/"ui" are
         # matched by their own literal kind name.
         name = _strip_marker_prefix(match.group("name").strip())
+        if name.casefold() == "orchestrator" and _BLOCKING_EVENT_LOOP_PATTERN.search(block_text):
+            continue
         reusable[name.lower()] = block_text
     return reusable
 
@@ -469,6 +475,14 @@ def _validate_component_output(
     if first_line.casefold() != expected_marker.casefold():
         raise ToolExecutionError(
             f"Generated component '{marker_name}' did not start with '{expected_marker}'."
+        )
+    if component_kind == "orchestrator" and _BLOCKING_EVENT_LOOP_PATTERN.search(
+        match.group("body")
+    ):
+        raise ToolExecutionError(
+            "Generated orchestrator performs blocking event-loop control with "
+            "'run_until_complete' or 'asyncio.run'. Its constructor and helpers must "
+            "remain synchronous; asynchronous setup must be awaited inside run()."
         )
 
 

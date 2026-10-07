@@ -119,6 +119,25 @@ def test_materialize_build_rejects_nonexistent_asyncio_random_type():
         materialize_build(output)
 
 
+@pytest.mark.parametrize(
+    "blocking_call",
+    [
+        "asyncio.get_event_loop().run_until_complete(make_tools())",
+        "asyncio.run(make_tools())",
+    ],
+)
+def test_materialize_build_rejects_blocking_orchestrator_event_loop_control(
+    blocking_call: str,
+):
+    output = _SAMPLE_OUTPUT.replace(
+        "class OrchestratorAgent:",
+        f"class OrchestratorAgent:\n    def __init__(self):\n        self.tools = {blocking_call}",
+    )
+
+    with pytest.raises(MaterializedCodeError, match="event-loop control"):
+        materialize_build(output)
+
+
 def test_materialize_build_rejects_exact_uploaded_filename_gate():
     output = _SAMPLE_OUTPUT.replace(
         "export function MissionApp() {",

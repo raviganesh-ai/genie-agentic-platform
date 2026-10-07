@@ -1504,6 +1504,15 @@ prompts:
       `.run(payload)` call in the required `agent_framework.FunctionTool`.
       Never import or construct `agent_framework.foundry.FoundryAgent`
       directly.
+      EVENT LOOP SAFETY - `OrchestratorAgent.__init__` and every synchronous
+      helper must remain fully synchronous and must never call
+      `run_until_complete`, `asyncio.run`, or otherwise start/drive an event
+      loop. FastAPI constructs the orchestrator from inside its already-running
+      uvloop; blocking event-loop control there raises "this event loop is
+      already running" and makes `/health/ready` return 503. Construct
+      `MissionFoundryAgent` and `FunctionTool` objects synchronously when
+      possible; move any genuinely asynchronous setup into `async def run`
+      and `await` it there.
       LIVE HAND-OFF NARRATION - `on_progress` is how the mission UI's
       Agent Pipeline panel actually lights up node by node WHILE the
       pipeline runs, instead of jumping straight from all-pending to
@@ -1893,7 +1902,7 @@ prompts:
       - user_message
       - assigned_requirements
       - prior_components
-    version: "1.30.0"
+    version: "1.31.0"
 
   - id: build-component-regeneration-v1
     name: Build Generation - Regenerate Single Component

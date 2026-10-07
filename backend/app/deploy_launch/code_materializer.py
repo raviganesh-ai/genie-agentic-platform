@@ -98,6 +98,10 @@ _DIRECT_FOUNDRY_AGENT_IMPORT_PATTERN: Final = re.compile(
     re.MULTILINE,
 )
 _NONEXISTENT_ASYNCIO_RANDOM_PATTERN: Final = re.compile(r"\basyncio\.Random\b")
+_BLOCKING_EVENT_LOOP_PATTERN: Final = re.compile(
+    r"\brun_until_complete\s*\(|\basyncio\.run\s*\(",
+    re.IGNORECASE,
+)
 _EXACT_FILE_NAME_COMPARISON_PATTERN: Final = re.compile(
     r"\b[A-Za-z_$][\w$]*\.name\s*(?:===|!==|==|!=)\s*"
     r"(?P<quote>['\"`])[^'\"`\r\n]*\.[A-Za-z0-9]{1,10}(?P=quote)",
@@ -584,6 +588,16 @@ def materialize_build(output_text: str) -> MaterializedBuild:
             "The generated orchestrator references 'asyncio.Random', which does not "
             "exist and prevents the module from importing. Use 'random.Random' from "
             "Python's random module for deterministic seeded randomness."
+        )
+
+    if orchestrator_module is not None and _BLOCKING_EVENT_LOOP_PATTERN.search(
+        orchestrator_module
+    ):
+        raise MaterializedCodeError(
+            "The generated orchestrator performs blocking event-loop control with "
+            "'run_until_complete' or 'asyncio.run'. FastAPI invokes OrchestratorAgent "
+            "inside its running event loop, so constructors and synchronous helpers "
+            "must not start or drive an event loop; await asynchronous setup inside run()."
         )
 
     # Every UI-like component (the single-page case, or each individually
