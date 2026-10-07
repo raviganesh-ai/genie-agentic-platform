@@ -77,6 +77,38 @@ class FactoryOrchestratorAgent:
         materialize_build(misnamed_output)
 
 
+def test_materialize_build_raises_when_orchestrator_is_missing_entirely():
+    """Regression test for a real incident: a live mission's build-solution
+    output had specialist agents and UI pages parsed fine, but its
+    orchestrator's own fence was never recognized at all (the previous
+    agent's fence was left unclosed - no trailing '```' - immediately
+    before the '# agent: orchestrator' marker, so the parser folded the
+    orchestrator's entire body into that prior agent's own module).
+    materialize_build() silently succeeded with orchestrator_module=None,
+    which wrote a backend missing orchestrator.py entirely - it deployed
+    "successfully" at the ARM level but crash-looped forever on its own
+    /health/ready with 'ModuleNotFoundError: No module named orchestrator',
+    discovered only live in production minutes later. Agents/UI being
+    present must not be mistaken for a complete, deployable build."""
+
+    missing_orchestrator_output = '''
+```python
+# agent: Requirements Specialist
+async def run() -> None:
+    pass
+```
+
+```tsx
+// agent: ui
+export function MissionApp() {
+    return null;
+}
+```
+'''
+    with pytest.raises(MaterializedCodeError, match="orchestrator"):
+        materialize_build(missing_orchestrator_output)
+
+
 def test_materialize_build_rejects_nonexistent_asyncio_random_type():
     output = _SAMPLE_OUTPUT.replace(
         "class OrchestratorAgent:",

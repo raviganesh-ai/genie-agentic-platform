@@ -536,6 +536,29 @@ def materialize_build(output_text: str) -> MaterializedBuild:
             "the build-solution step's output."
         )
 
+    if orchestrator_module is None and (agent_modules or ui_component or page_components):
+        # Every deployed mission backend's generated main.py scaffold does
+        # 'from orchestrator import OrchestratorAgent' unconditionally (see
+        # generate_backend_service_scaffold) - a build that produced
+        # specialist agents and/or a UI but no orchestrator would otherwise
+        # silently materialize and deploy a backend that crash-loops on its
+        # own /health/ready with ModuleNotFoundError, discovered only live
+        # in production minutes later instead of failing this step closed.
+        # A common real cause: the model's previous fenced code block was
+        # never closed with a trailing ``` before the '# agent: orchestrator'
+        # marker, so the parser folds the orchestrator's entire body into
+        # the prior agent's own fence instead of recognizing it as its own
+        # component - see materialize_build's fence-based parsing above.
+        raise MaterializedCodeError(
+            "The build-solution step's output has no recognizable orchestrator "
+            "module (no fenced Python block's first line matched '# agent: "
+            "orchestrator'). Every deployed mission backend requires one - check "
+            "whether a prior agent's code fence was left unclosed (missing a "
+            "trailing '```') immediately before the orchestrator marker, which "
+            "would silently fold its body into that prior agent's own module "
+            "instead of recognizing it as a separate component."
+        )
+
     if ui_component is not None and page_components:
         raise MaterializedCodeError(
             "The build-solution step's output contains both a single '// agent: ui' "
