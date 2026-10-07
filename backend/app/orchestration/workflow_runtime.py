@@ -33,7 +33,10 @@ from app.orchestration.collaboration_service import CollaborationService
 from app.orchestration.handoff_service import HandoffService
 from app.orchestration.workflow_checkpoint_service import WorkflowCheckpointService
 from app.orchestration.workflow_state_machine import WorkflowStateMachine
-from app.orchestration.workflow_step_executor import WorkflowStepExecutor
+from app.orchestration.workflow_step_executor import (
+    FailedGeneratedBuildError,
+    WorkflowStepExecutor,
+)
 from app.workflows.models import WorkflowStep
 from app.workflows.registry import WorkflowRegistry
 
@@ -251,14 +254,26 @@ class WorkflowRuntime:
                         raise outcome
                     step_failed = True
                     now = datetime.now(UTC)
+                    partial_output = (
+                        outcome.output_text
+                        if isinstance(outcome, FailedGeneratedBuildError)
+                        else None
+                    )
+                    resolved_variables = (
+                        outcome.resolved_variables
+                        if isinstance(outcome, FailedGeneratedBuildError)
+                        else {}
+                    )
                     wave_results.append(
                         WorkflowStepResult(
                             step_id=step.id,
                             agent_id=step.agent_id,
                             status="failed",
+                            output_text=partial_output,
                             error=str(outcome),
                             started_at=now,
                             completed_at=now,
+                            resolved_variables=resolved_variables,
                         )
                     )
                 else:

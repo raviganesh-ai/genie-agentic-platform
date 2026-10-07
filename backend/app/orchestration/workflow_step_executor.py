@@ -28,7 +28,12 @@ from app.standards.architecture_reference_repository import ArchitectureReferenc
 from app.standards.repository import StandardsRepository
 from app.workflows.models import WorkflowStep
 
-__all__ = ["MissingMemoryReferenceError", "MissingPromptError", "WorkflowStepExecutor"]
+__all__ = [
+    "FailedGeneratedBuildError",
+    "MissingMemoryReferenceError",
+    "MissingPromptError",
+    "WorkflowStepExecutor",
+]
 
 _PREVIEW_MAX_LENGTH = 240
 _DELEGATED_OUTPUT_MARKER = "DELEGATED_OUTPUT_STORED"
@@ -110,13 +115,35 @@ def _display_agent_id(step: WorkflowStep, fallback_agent_id: str) -> str:
     return fallback_agent_id
 
 
-def _reject_failed_generated_build(*, step_id: str, output_text: str) -> None:
+class FailedGeneratedBuildError(FoundryUnavailableError):
+    """A fail-closed build rejection that preserves safe partial artifacts for retry."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        output_text: str,
+        resolved_variables: dict[str, str] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.output_text = output_text
+        self.resolved_variables = resolved_variables or {}
+
+
+def _reject_failed_generated_build(
+    *,
+    step_id: str,
+    output_text: str,
+    resolved_variables: dict[str, str] | None = None,
+) -> None:
     if step_id != "build-solution":
         return
     if _COMPONENT_FAILURE_MARKER in output_text:
-        raise FoundryUnavailableError(
+        raise FailedGeneratedBuildError(
             "Workflow step 'build-solution' contains a failed generated component; "
-            "partial placeholder artifacts cannot proceed to deployment."
+            "partial placeholder artifacts cannot proceed to deployment.",
+            output_text=output_text,
+            resolved_variables=resolved_variables,
         )
 
 
@@ -264,6 +291,7 @@ class WorkflowStepExecutor:
         _reject_failed_generated_build(
             step_id=step.id,
             output_text=output_text or "",
+            resolved_variables=variables,
         )
 
         return WorkflowStepResult(

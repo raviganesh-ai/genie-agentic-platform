@@ -15,7 +15,6 @@ from collections.abc import AsyncIterator
 
 import pytest
 
-from app.agents.foundry.errors import FoundryUnavailableError
 from app.agents.models import (
     AgentDefinition,
     AgentExecutionRequest,
@@ -24,6 +23,7 @@ from app.agents.models import (
 )
 from app.models.workflow_stream_models import WorkflowStreamEvent
 from app.orchestration.workflow_step_executor import (
+    FailedGeneratedBuildError,
     WorkflowStepExecutor,
     _display_agent_id,
     _reject_failed_generated_build,
@@ -73,11 +73,15 @@ def test_build_does_not_require_literal_requirement_id_repetition() -> None:
 
 
 def test_build_coverage_rejects_failed_component_placeholder() -> None:
-    with pytest.raises(FoundryUnavailableError, match="placeholder artifacts"):
+    output_text = "# requirements: REQ-001\n# GENERATION FAILED: Foundry unavailable"
+    with pytest.raises(FailedGeneratedBuildError, match="placeholder artifacts") as exc_info:
         _reject_failed_generated_build(
             step_id="build-solution",
-            output_text="# requirements: REQ-001\n# GENERATION FAILED: Foundry unavailable",
+            output_text=output_text,
+            resolved_variables={"policies": "Managed identity required."},
         )
+    assert exc_info.value.output_text == output_text
+    assert exc_info.value.resolved_variables == {"policies": "Managed identity required."}
 
 
 class _StreamingGateway:

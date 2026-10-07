@@ -20,6 +20,7 @@ from app.orchestration.collaboration_service import CollaborationService
 from app.orchestration.handoff_service import HandoffService
 from app.orchestration.workflow_checkpoint_service import WorkflowCheckpointService
 from app.orchestration.workflow_runtime import _MAX_STEP_RETRIES, WorkflowRuntime
+from app.orchestration.workflow_step_executor import FailedGeneratedBuildError
 from app.workflows.models import WorkflowDefinition, WorkflowStep
 from app.workflows.registry import WorkflowRegistry
 
@@ -117,3 +118,32 @@ async def test_step_fails_after_exhausting_the_automatic_retry_budget(
     # Exactly 1 original attempt + _MAX_STEP_RETRIES automatic retries - no
     # more, no fewer - before giving up and surfacing the failure.
     assert executor.call_counts["only-step"] == _MAX_STEP_RETRIES + 1
+
+
+async def test_failed_generated_build_preserves_partial_output_for_manual_retry(
+    tmp_path: Path,
+) -> None:
+    partial_output = (
+        "```python\n# agent: worker\nworker code\n```\n\n"
+        "```text\n// agent: page:Broken Page\n// GENERATION FAILED: malformed fence\n```"
+    )
+
+    class _PartialBuildStepExecutor:
+        async def execute_step(self, **_: Any) -> WorkflowStepResult:
+            raise FailedGeneratedBuildError(
+                "partial placeholder artifacts cannot proceed to deployment.",
+                output_text=partial_output,
+                resolved_variables={"policies": "Managed identity required."},
+            )
+
+    runtime = _build_runtime(tmp_path, _PartialBuildStepExecutor())  # type: ignore[arg-type]
+
+    result = await runtime.run_workflow(
+        workflow_id="single-step-workflow", session_id="session-1", trace_id="trace-1"
+    )
+
+    assert result.status == "failed"
+    [failed_step] = result.step_results
+    assert failed_step.status == "failed"
+    assert failed_step.output_text == partial_output
+    assert failed_step.resolved_variables == {"policies": "Managed identity required."}
