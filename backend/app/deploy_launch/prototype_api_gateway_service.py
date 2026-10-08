@@ -241,6 +241,42 @@ class PrototypeApiGatewayService:
             raise PrototypeApiGatewayError("azure-mgmt-apimanagement is not installed.") from exc
         return ApiManagementClient(self._credential(), self._subscription_id)
 
+    async def _wait_for_private_dns_zone_group(
+        self,
+        *,
+        network_client: Any,
+        resource_group: str,
+        private_endpoint_name: str,
+        zone_group_name: str,
+    ) -> None:
+        deadline = asyncio.get_running_loop().time() + 600
+        last_state = "not found"
+        while asyncio.get_running_loop().time() < deadline:
+            try:
+                zone_group = await asyncio.to_thread(
+                    network_client.private_dns_zone_groups.get,
+                    resource_group,
+                    private_endpoint_name,
+                    zone_group_name,
+                )
+                last_state = getattr(zone_group, "provisioning_state", None) or "unknown"
+                if last_state == "Succeeded":
+                    return
+                if last_state in {"Failed", "Canceled"}:
+                    raise PrototypeApiGatewayError(
+                        "Cosmos DB private DNS zone group provisioning ended with "
+                        f"state '{last_state}'."
+                    )
+            except PrototypeApiGatewayError:
+                raise
+            except Exception as exc:
+                last_state = str(exc)
+            await asyncio.sleep(5)
+        raise PrototypeApiGatewayError(
+            "Cosmos DB private DNS zone group did not become ready within "
+            f"600 seconds (last state: {last_state})."
+        )
+
     async def provision_infrastructure(
         self,
         *,
@@ -409,22 +445,25 @@ class PrototypeApiGatewayService:
                     ),
                 )
                 await asyncio.to_thread(private_endpoint_poller.result)
-                zone_group_poller = (
-                    network_client.private_dns_zone_groups.begin_create_or_update(
-                        resource_group,
-                        private_endpoint_name,
-                        "default",
-                        PrivateDnsZoneGroup(
-                            private_dns_zone_configs=[
-                                PrivateDnsZoneConfig(
-                                    name="cosmos",
-                                    private_dns_zone_id=cosmos_zone_id,
-                                )
-                            ]
-                        ),
-                    )
+                network_client.private_dns_zone_groups.begin_create_or_update(
+                    resource_group,
+                    private_endpoint_name,
+                    "default",
+                    PrivateDnsZoneGroup(
+                        private_dns_zone_configs=[
+                            PrivateDnsZoneConfig(
+                                name="cosmos",
+                                private_dns_zone_id=cosmos_zone_id,
+                            )
+                        ]
+                    ),
                 )
-                await asyncio.to_thread(zone_group_poller.result)
+                await self._wait_for_private_dns_zone_group(
+                    network_client=network_client,
+                    resource_group=resource_group,
+                    private_endpoint_name=private_endpoint_name,
+                    zone_group_name="default",
+                )
 
             await _report("Provisioning the prototype internal Container Apps environment...")
             environment_poller = self._container_apps_client().managed_environments.begin_create_or_update(

@@ -3,6 +3,8 @@ from __future__ import annotations
 from types import SimpleNamespace
 from xml.etree import ElementTree
 
+import pytest
+
 from app.deploy_launch.prototype_api_gateway_service import (
     GatewayPolicyConfig,
     GatewayPolicyPathRule,
@@ -125,7 +127,14 @@ async def test_provision_infrastructure_creates_isolated_private_runtime(monkeyp
             begin_create_or_update=lambda resource_group, endpoint_name, name, model: captured.update(
                 private_dns_zone_group=model,
             )
-            or _poller(SimpleNamespace())
+            or SimpleNamespace(
+                result=lambda: pytest.fail(
+                    "DNS zone group LRO result must not block infrastructure provisioning"
+                )
+            ),
+            get=lambda resource_group, endpoint_name, name: SimpleNamespace(
+                provisioning_state="Succeeded"
+            ),
         ),
     )
     environment = SimpleNamespace(
