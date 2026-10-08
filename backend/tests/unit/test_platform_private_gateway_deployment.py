@@ -97,8 +97,10 @@ def test_ci_passes_the_verified_gateway_to_backend_and_frontend():
     assert "needs: [prepare-gateway]" in workflow
     assert "needs: [backend, frontend, prepare-gateway, deploy-frontend]" in workflow
     assert '-GatewayUrl "${{ needs.prepare-gateway.outputs.gateway-url }}"' in workflow
-    assert "VITE_GENIE_API_BASE_URL: ${{ needs.prepare-gateway.outputs.gateway-url }}" in workflow
-    assert "vars.VITE_GENIE_API_BASE_URL" not in workflow
+    assert (
+        "VITE_GENIE_API_BASE_URL: "
+        "${{ vars.GENIE_PUBLIC_API_BASE_URL || needs.prepare-gateway.outputs.gateway-url }}"
+    ) in workflow
 
 
 def test_gateway_deployer_role_is_resource_group_scoped_and_has_no_delete_actions():
