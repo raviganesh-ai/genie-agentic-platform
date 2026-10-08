@@ -295,7 +295,11 @@ jobs:
       - name: Build
         run: npm run build
         env:
-          VITE_GENIE_API_BASE_URL: ${{ needs.prepare-gateway.outputs.gateway-url }}
+          # Prefer an explicit public entry point (e.g. an Azure Front Door
+          # profile fronting the private APIM gateway) when configured -
+          # falls back to the APIM gateway's own URL for deployments that
+          # expose it directly, preserving prior behavior.
+          VITE_GENIE_API_BASE_URL: ${{ vars.GENIE_PUBLIC_API_BASE_URL || needs.prepare-gateway.outputs.gateway-url }}
           VITE_GENIE_APIM_SUBSCRIPTION_KEY: ${{ secrets.GENIE_APIM_SUBSCRIPTION_KEY }}
 
       - name: Deploy to Azure Static Web Apps
