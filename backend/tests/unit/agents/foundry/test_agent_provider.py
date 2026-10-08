@@ -7,6 +7,7 @@ injectable ``agent_factory`` callable, so it is fully testable with fakes.
 """
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -259,6 +260,26 @@ async def test_run_wraps_unexpected_exceptions_as_foundry_unavailable():
         await provider.run(foundry_agent_id="agent-123", input_text="hello")
 
 
+async def test_run_fails_closed_when_the_agent_call_hangs_past_the_timeout():
+    api_client = _FakeApiClient()
+    project_service = _FakeProjectService(api_client=api_client)
+    fake_agent = _FakeFoundryAgent(project_client=None, agent_name="", agent_version="")
+
+    async def _hanging_run(messages: Any, *, tools: Any = None) -> _FakeAgentResponse:
+        await asyncio.sleep(10)
+        return _FakeAgentResponse(text="too late")
+
+    fake_agent.run = _hanging_run  # type: ignore[method-assign]
+    provider = FoundryAgentProvider(
+        project_service,
+        agent_factory=_agent_factory_returning(fake_agent),
+        run_timeout_seconds=0.05,
+    )
+
+    with pytest.raises(FoundryUnavailableError, match="did not complete within"):
+        await provider.run(foundry_agent_id="agent-123", input_text="hello")
+
+
 async def test_run_stream_yields_deltas_then_a_final_chunk_with_accumulated_text():
     api_client = _FakeApiClient(latest_version="7")
     project_service = _FakeProjectService(api_client=api_client)
@@ -307,6 +328,32 @@ async def test_run_stream_wraps_unexpected_exceptions_as_foundry_unavailable():
     provider = FoundryAgentProvider(_BoomProjectService())
 
     with pytest.raises(FoundryUnavailableError, match="credential expired"):
+        async for _ in provider.run_stream(foundry_agent_id="agent-123", input_text="hello"):
+            pass
+
+
+async def test_run_stream_fails_closed_when_no_update_arrives_past_the_timeout():
+    api_client = _FakeApiClient()
+    project_service = _FakeProjectService(api_client=api_client)
+    fake_agent = _FakeFoundryAgent(project_client=None, agent_name="", agent_version="")
+
+    async def _stalled_stream():
+        yield _FakeAgentUpdate(text="partial ")
+        await asyncio.sleep(10)
+        yield _FakeAgentUpdate(text="too late")  # pragma: no cover - never reached
+
+    def _run(messages: Any, *, tools: Any = None, stream: bool = False) -> Any:
+        fake_agent.run_calls.append({"messages": messages, "tools": tools, "stream": stream})
+        return _stalled_stream()
+
+    fake_agent.run = _run  # type: ignore[method-assign]
+    provider = FoundryAgentProvider(
+        project_service,
+        agent_factory=_agent_factory_returning(fake_agent),
+        run_timeout_seconds=0.05,
+    )
+
+    with pytest.raises(FoundryUnavailableError, match="produced no update"):
         async for _ in provider.run_stream(foundry_agent_id="agent-123", input_text="hello"):
             pass
 

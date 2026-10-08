@@ -121,12 +121,14 @@ class FoundryAgentProvider:
         *,
         tool_registry: AgentToolRegistry | None = None,
         agent_factory: Any = FoundryAgent,
+        run_timeout_seconds: float = 900,
     ) -> None:
         self._project_service = project_service
         self._tool_registry = tool_registry
         # Injectable so unit tests can substitute a fake agent_framework
         # Agent-like object instead of making real network calls.
         self._agent_factory = agent_factory
+        self._run_timeout_seconds = run_timeout_seconds
 
     async def run(
         self,
@@ -140,7 +142,17 @@ class FoundryAgentProvider:
             agent, agent_version, tools = await self._build_runnable_agent(
                 foundry_agent_id=foundry_agent_id, tool_context=tool_context
             )
-            response = await agent.run(input_text, tools=tools or None)
+            try:
+                response = await asyncio.wait_for(
+                    agent.run(input_text, tools=tools or None),
+                    timeout=self._run_timeout_seconds,
+                )
+            except TimeoutError as exc:
+                raise FoundryUnavailableError(
+                    f"Azure AI Foundry run for agent '{foundry_agent_id}' "
+                    f"(version '{agent_version}') did not complete within "
+                    f"{self._run_timeout_seconds:.0f} seconds."
+                ) from exc
             output_text = (getattr(response, "text", None) or "").strip()
             if not output_text:
                 raise FoundryUnavailableError(
@@ -182,8 +194,20 @@ class FoundryAgentProvider:
             agent, agent_version, tools = await self._build_runnable_agent(
                 foundry_agent_id=foundry_agent_id, tool_context=tool_context
             )
-            stream = agent.run(input_text, tools=tools or None, stream=True)
-            async for update in stream:
+            stream = agent.run(input_text, tools=tools or None, stream=True).__aiter__()
+            while True:
+                try:
+                    update = await asyncio.wait_for(
+                        stream.__anext__(), timeout=self._run_timeout_seconds
+                    )
+                except StopAsyncIteration:
+                    break
+                except TimeoutError as exc:
+                    raise FoundryUnavailableError(
+                        f"Azure AI Foundry run for agent '{foundry_agent_id}' "
+                        f"(version '{agent_version}') produced no update for "
+                        f"{self._run_timeout_seconds:.0f} seconds."
+                    ) from exc
                 delta = getattr(update, "text", None) or ""
                 if not delta:
                     continue

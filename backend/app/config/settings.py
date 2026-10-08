@@ -78,6 +78,16 @@ class Settings(BaseSettings):
     # target resource group are the same.
     azure_foundry_resource_group: str | None = None
     azure_retail_prices_endpoint: str = "https://prices.azure.com/api/retail/prices"
+    # A real Foundry agent run can legitimately take several minutes for a
+    # large generation (e.g. a Build Agent component synthesizing an
+    # orchestrator that coordinates many specialist agents), but an
+    # unbounded wait on a genuinely hung/stalled call leaves a mission
+    # stuck forever with no way to recover - FoundryAgentProvider.run/
+    # run_stream enforce this as a hard ceiling, raising
+    # FoundryUnavailableError (the existing fail-closed path, already
+    # retryable via resume_workflow) once exceeded, rather than blocking
+    # indefinitely.
+    foundry_agent_run_timeout_seconds: float = Field(default=900, gt=0, le=1800)
 
     # --- Azure Content Understanding (customer evidence ingestion) --------------
     # A dedicated account endpoint can be supplied. When omitted, production

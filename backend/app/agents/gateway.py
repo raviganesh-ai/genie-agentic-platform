@@ -178,7 +178,11 @@ def create_agent_gateway(
     return AzureAgentGateway(
         agent_registry=agent_registry,
         prompt_registry=prompt_registry,
-        foundry_client=FoundryAgentProvider(project_service, tool_registry=tool_registry),
+        foundry_client=FoundryAgentProvider(
+            project_service,
+            tool_registry=tool_registry,
+            run_timeout_seconds=settings.foundry_agent_run_timeout_seconds,
+        ),
         governance_recorder=recorder,
         session_agent_resolver=session_agent_resolver,
     )
