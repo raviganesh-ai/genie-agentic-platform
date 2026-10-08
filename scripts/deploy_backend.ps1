@@ -25,6 +25,9 @@ param(
     [string]$BackendImage,
 
     [Parameter(Mandatory = $true)]
+    [string]$AcrAgentPoolName,
+
+    [Parameter(Mandatory = $true)]
     [string]$AllowedOrigin,
 
     [Parameter(Mandatory = $true)]
@@ -115,6 +118,7 @@ function Set-ContainerSecretEnvironmentVariable {
 
 foreach ($requiredValue in @{
     BackendImage = $BackendImage
+    AcrAgentPoolName = $AcrAgentPoolName
     AllowedOrigin = $AllowedOrigin
     GatewayUrl = $GatewayUrl
     MemoryStoreEndpoint = $MemoryStoreEndpoint
@@ -185,6 +189,7 @@ Set-ContainerEnvironmentVariable -Container $backend -Name "GENIE_PROTOTYPE_API_
 Set-ContainerEnvironmentVariable -Container $backend -Name "GENIE_PROTOTYPE_API_GATEWAY_PUBLISHER_EMAIL" -Value $PrototypeApiGatewayPublisherEmail
 Set-ContainerEnvironmentVariable -Container $backend -Name "GENIE_PROTOTYPE_API_GATEWAY_PUBLISHER_NAME" -Value $PrototypeApiGatewayPublisherName
 Set-ContainerEnvironmentVariable -Container $backend -Name "GENIE_MEMORY_STORE_BACKEND" -Value "cosmos_db"
+Set-ContainerEnvironmentVariable -Container $backend -Name "GENIE_DEPLOYMENT_ACR_AGENT_POOL_NAME" -Value $AcrAgentPoolName
 Set-ContainerEnvironmentVariable -Container $backend -Name "GENIE_MEMORY_STORE_ENDPOINT" -Value $MemoryStoreEndpoint
 Set-ContainerEnvironmentVariable -Container $backend -Name "GENIE_MEMORY_STORE_DATABASE_NAME" -Value "genie"
 Set-ContainerEnvironmentVariable -Container $backend -Name "GENIE_MEMORY_STORE_CONTAINER_NAME" -Value "memory"

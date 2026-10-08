@@ -41,6 +41,9 @@ param privateEndpointSubnetPrefix string = '10.20.2.0/24'
 @description('Dedicated subnet for API Management Standard v2 outbound VNet integration; must be /27 or larger.')
 param apiManagementSubnetPrefix string = '10.20.4.0/24'
 
+@description('Dedicated subnet for the private Azure Container Registry Tasks agent pool.')
+param acrAgentPoolSubnetPrefix string = '10.20.5.0/24'
+
 @description('Short prefix applied to every resource name (lowercase letters/numbers only).')
 @minLength(2)
 @maxLength(8)
@@ -58,7 +61,7 @@ param deployContainerRegistryAndBackendApp bool = true
   'Standard'
   'Premium'
 ])
-param containerRegistrySkuName string = 'Basic'
+param containerRegistrySkuName string = 'Premium'
 
 // Deterministic, collision-resistant suffix derived from the subscription
 // and environment name - never a hardcoded/customer-specific value.
@@ -87,6 +90,7 @@ module foundationalResources 'modules/foundational-resources.bicep' = {
     containerAppsInfrastructureSubnetPrefix: containerAppsInfrastructureSubnetPrefix
     privateEndpointSubnetPrefix: privateEndpointSubnetPrefix
     apiManagementSubnetPrefix: apiManagementSubnetPrefix
+    acrAgentPoolSubnetPrefix: acrAgentPoolSubnetPrefix
     foundryModelDeployments: foundryModelDeployments
     deployContainerRegistryAndBackendApp: deployContainerRegistryAndBackendApp
     containerRegistrySkuName: containerRegistrySkuName
@@ -122,4 +126,3 @@ output containerRegistryName string = foundationalResources.outputs.containerReg
 output containerRegistryLoginServer string = foundationalResources.outputs.containerRegistryLoginServer
 output backendContainerAppName string = foundationalResources.outputs.backendContainerAppName
 output backendContainerAppFqdn string = foundationalResources.outputs.backendContainerAppFqdn
-

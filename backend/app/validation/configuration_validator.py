@@ -46,6 +46,8 @@ class ConfigurationValidator:
                 errors.append("deployment_resource_group is required in production.")
             if not settings.deployment_acr_name:
                 errors.append("deployment_acr_name is required in production.")
+            if not settings.deployment_acr_agent_pool_name:
+                errors.append("deployment_acr_agent_pool_name is required in production.")
             if not settings.deployment_container_apps_environment_id:
                 errors.append(
                     "deployment_container_apps_environment_id is required in production."

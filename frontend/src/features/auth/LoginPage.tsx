@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { Button, Input, Text } from "@fluentui/react-components";
+import { Eye24Regular, EyeOff24Regular } from "@fluentui/react-icons";
 import { authApi } from "@/services/authApi";
 import { setAuthToken } from "@/services/authToken";
 import { ApiError } from "@/services/httpClient";
@@ -18,6 +19,7 @@ export function LoginPage(): JSX.Element {
   const location = useLocation();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [passwordVisible, setPasswordVisible] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<SafeError | null>(null);
 
@@ -74,11 +76,23 @@ export function LoginPage(): JSX.Element {
           disabled={submitting}
         />
         <Input
-          type="password"
+          type={passwordVisible ? "text" : "password"}
           placeholder="Password"
           value={password}
           onChange={(_, data) => setPassword(data.value)}
           disabled={submitting}
+          contentAfter={
+            <Button
+              type="button"
+              appearance="transparent"
+              size="small"
+              icon={passwordVisible ? <EyeOff24Regular /> : <Eye24Regular />}
+              aria-label={passwordVisible ? "Hide password" : "Show password"}
+              title={passwordVisible ? "Hide password" : "Show password"}
+              onClick={() => setPasswordVisible((visible) => !visible)}
+              disabled={submitting}
+            />
+          }
         />
         {error ? <ErrorState error={error} /> : null}
         <Button

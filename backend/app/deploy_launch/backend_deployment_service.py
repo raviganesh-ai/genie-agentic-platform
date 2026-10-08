@@ -126,6 +126,7 @@ class BackendDeploymentService:
         subscription_id: str,
         resource_group: str,
         acr_name: str,
+        acr_agent_pool_name: str | None = None,
         container_apps_environment_id: str,
         location: str,
         foundry_endpoint: str,
@@ -136,6 +137,7 @@ class BackendDeploymentService:
         self._subscription_id = subscription_id
         self._resource_group = resource_group
         self._acr_name = acr_name
+        self._acr_agent_pool_name = acr_agent_pool_name
         self._container_apps_environment_id = container_apps_environment_id
         self._location = location
         self._foundry_endpoint = foundry_endpoint
@@ -363,6 +365,7 @@ class BackendDeploymentService:
             )
 
             build_request = DockerBuildRequest(
+                agent_pool_name=self._acr_agent_pool_name,
                 source_location=upload_source.relative_path,
                 platform=PlatformProperties(os="Linux"),
                 docker_file_path="Dockerfile",
@@ -664,6 +667,7 @@ def create_backend_deployment_service(
         settings.azure_subscription_id,
         settings.deployment_resource_group,
         settings.deployment_acr_name,
+        settings.deployment_acr_agent_pool_name,
         settings.deployment_container_apps_environment_id,
         settings.deployment_location,
         settings.azure_foundry_endpoint,
@@ -674,6 +678,7 @@ def create_backend_deployment_service(
         raise BackendDeploymentError(
             "azure_subscription_id, deployment_resource_group, "
             "deployment_acr_name, deployment_container_apps_environment_id, "
+            "deployment_acr_agent_pool_name, "
             "deployment_location, azure_foundry_endpoint, and "
             "azure_foundry_project_name must all be configured; local/fake "
             "backend deployment is not permitted."
@@ -682,6 +687,7 @@ def create_backend_deployment_service(
         subscription_id=settings.azure_subscription_id,  # type: ignore[arg-type]
         resource_group=settings.deployment_resource_group,  # type: ignore[arg-type]
         acr_name=settings.deployment_acr_name,  # type: ignore[arg-type]
+        acr_agent_pool_name=settings.deployment_acr_agent_pool_name,
         container_apps_environment_id=settings.deployment_container_apps_environment_id,  # type: ignore[arg-type]
         location=settings.deployment_location,  # type: ignore[arg-type]
         foundry_endpoint=settings.azure_foundry_endpoint,  # type: ignore[arg-type]

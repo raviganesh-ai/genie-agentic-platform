@@ -45,6 +45,7 @@ from app.deploy_launch.mission_agent_provisioning_service import (
 )
 from app.deploy_launch.mission_identity_service import NullMissionIdentityService
 from app.deploy_launch.pipeline_service import DeploymentPipelineService
+from app.deploy_launch.repository_checkin_service import NullRepositoryCheckinService
 from app.deploy_launch.security_scan_service import SecurityScanService
 from app.deploy_launch.test_execution_service import TestExecutionService
 from app.main import create_app
@@ -104,6 +105,7 @@ def _with_deployment_config(settings: Settings) -> Settings:
             "azure_foundry_project_name": "test-project",
             "deployment_resource_group": "test-resource-group",
             "deployment_acr_name": "testacr",
+            "deployment_acr_agent_pool_name": "test-build-pool",
             "deployment_container_apps_environment_id": "/test/container-apps-environment",
             "deployment_location": "eastus2",
         }
@@ -263,6 +265,7 @@ async def test_full_pipeline_runs_through_the_real_http_api(
             backend_deployment_service=NullBackendDeploymentService(),
             frontend_deployment_service=NullFrontendDeploymentService(),
             data_layer_provisioning_service=NullDataLayerProvisioningService(),
+            repository_checkin_service=NullRepositoryCheckinService(),
             test_execution_service=TestExecutionService(timeout_seconds=60),
             security_scan_service=SecurityScanService(timeout_seconds=60),
             build_workspace_root=tmp_path,

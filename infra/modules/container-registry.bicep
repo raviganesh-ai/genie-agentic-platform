@@ -8,6 +8,7 @@
 param location string
 param name string
 param managedIdentityPrincipalId string
+param agentPoolSubnetId string
 
 @description('Azure Container Registry SKU. "Basic" is sufficient for a single evaluation environment; use "Standard" or "Premium" for higher throughput/geo-replication.')
 @allowed([
@@ -32,11 +33,24 @@ resource containerRegistry 'Microsoft.ContainerRegistry/registries@2023-11-01-pr
   }
   properties: {
     adminUserEnabled: false
-    publicNetworkAccess: 'Enabled'
+    publicNetworkAccess: 'Disabled'
     networkRuleBypassOptions: 'AzureServices'
     networkRuleSet: {
       defaultAction: 'Deny'
     }
+  }
+}
+
+resource buildAgentPool 'Microsoft.ContainerRegistry/registries/agentPools@2025-03-01-preview' = {
+  parent: containerRegistry
+  name: 'genie-build-pool'
+  location: location
+  tags: tags
+  properties: {
+    count: 1
+    os: 'Linux'
+    tier: 'S1'
+    virtualNetworkSubnetResourceId: agentPoolSubnetId
   }
 }
 
@@ -55,3 +69,4 @@ resource acrPullRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-
 
 output name string = containerRegistry.name
 output loginServer string = containerRegistry.properties.loginServer
+output buildAgentPoolName string = buildAgentPool.name

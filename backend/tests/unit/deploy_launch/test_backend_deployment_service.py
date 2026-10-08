@@ -56,6 +56,7 @@ def test_deployment_config_without_foundry_fails_closed():
                 azure_subscription_id="sub-1",
                 deployment_resource_group="rg-1",
                 deployment_acr_name="acr1",
+                deployment_acr_agent_pool_name="build-pool",
                 deployment_container_apps_environment_id="env-1",
                 deployment_location="eastus2",
             )
@@ -204,6 +205,7 @@ def test_create_backend_deployment_service_threads_the_foundry_resource_group_se
             azure_subscription_id="sub-1",
             deployment_resource_group="genie-wiq-rg",
             deployment_acr_name="acr1",
+            deployment_acr_agent_pool_name="build-pool",
             deployment_container_apps_environment_id="env-1",
             deployment_location="eastus2",
             azure_foundry_endpoint="https://genie-i4opvs55x5qu4-foundry.services.ai.azure.com/api/projects/demo",
@@ -226,6 +228,7 @@ def test_create_backend_deployment_service_falls_back_to_deployment_resource_gro
             azure_subscription_id="sub-1",
             deployment_resource_group="genie-wiq-rg",
             deployment_acr_name="acr1",
+            deployment_acr_agent_pool_name="build-pool",
             deployment_container_apps_environment_id="env-1",
             deployment_location="eastus2",
             azure_foundry_endpoint="https://genie-demo-resource.services.ai.azure.com/api/projects/demo",

@@ -70,11 +70,13 @@ class ContainerAppFrontendDeploymentService:
         subscription_id: str,
         resource_group: str,
         acr_name: str,
+        acr_agent_pool_name: str | None = None,
         location: str,
     ) -> None:
         self._subscription_id = subscription_id
         self._resource_group = resource_group
         self._acr_name = acr_name
+        self._acr_agent_pool_name = acr_agent_pool_name
         self._location = location
 
     def _acr_client(self) -> Any:
@@ -155,6 +157,7 @@ class ContainerAppFrontendDeploymentService:
 
             await report("Building frontend container image in Azure Container Registry...")
             build = DockerBuildRequest(
+                agent_pool_name=self._acr_agent_pool_name,
                 source_location=upload_source.relative_path,
                 platform=PlatformProperties(os="Linux"),
                 docker_file_path="Dockerfile",
@@ -320,11 +323,13 @@ def create_container_app_frontend_deployment_service(
         settings.azure_subscription_id,
         settings.deployment_resource_group,
         settings.deployment_acr_name,
+        settings.deployment_acr_agent_pool_name,
         settings.deployment_location,
     )
     if not all(required):
         raise ContainerAppFrontendDeploymentError(
-            "azure_subscription_id, deployment_resource_group, deployment_acr_name, and "
+            "azure_subscription_id, deployment_resource_group, deployment_acr_name, "
+            "deployment_acr_agent_pool_name, and "
             "deployment_location must all be configured; local/fake frontend deployment "
             "is not permitted."
         )
@@ -332,5 +337,6 @@ def create_container_app_frontend_deployment_service(
         subscription_id=settings.azure_subscription_id,  # type: ignore[arg-type]
         resource_group=settings.deployment_resource_group,  # type: ignore[arg-type]
         acr_name=settings.deployment_acr_name,  # type: ignore[arg-type]
+        acr_agent_pool_name=settings.deployment_acr_agent_pool_name,
         location=settings.deployment_location,  # type: ignore[arg-type]
     )

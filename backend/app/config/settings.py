@@ -301,6 +301,7 @@ class Settings(BaseSettings):
     # run; see app.deploy_launch.pipeline_service.
     deployment_resource_group: str | None = None
     deployment_acr_name: str | None = None
+    deployment_acr_agent_pool_name: str | None = None
     deployment_container_apps_environment_id: str | None = None
     deployment_storage_account_name: str | None = None
     deployment_location: str | None = None

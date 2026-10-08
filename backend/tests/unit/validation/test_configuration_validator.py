@@ -62,6 +62,16 @@ def test_fails_closed_in_production_when_deployment_acr_name_missing(foundry_con
     assert not result.passed
 
 
+def test_fails_closed_in_production_when_deployment_acr_agent_pool_missing(
+    foundry_configured_settings,
+):
+    broken = foundry_configured_settings.model_copy(
+        update={"deployment_acr_agent_pool_name": None}
+    )
+    result = ConfigurationValidator().validate(broken)
+    assert not result.passed
+
+
 def test_fails_closed_in_production_when_deployment_container_apps_environment_id_missing(
     foundry_configured_settings,
 ):

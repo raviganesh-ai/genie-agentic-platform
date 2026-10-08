@@ -100,6 +100,7 @@ class ModernizationDeploymentService:
         subscription_id: str,
         resource_group: str,
         acr_name: str,
+        acr_agent_pool_name: str | None = None,
         container_apps_environment_id: str,
         location: str,
         plan_repository: ModernizationPlanRepository,
@@ -111,6 +112,7 @@ class ModernizationDeploymentService:
         self._subscription_id = subscription_id
         self._resource_group = resource_group
         self._acr_name = acr_name
+        self._acr_agent_pool_name = acr_agent_pool_name
         self._container_apps_environment_id = container_apps_environment_id
         self._location = location
         self._plan_repository = plan_repository
@@ -454,6 +456,7 @@ class ModernizationDeploymentService:
                 f"{plan.repository_full_name}@{plan.branch_name} (this can take a minute or two)..."
             )
             build_request = DockerBuildRequest(
+                agent_pool_name=self._acr_agent_pool_name,
                 source_location=source_location,
                 platform=PlatformProperties(os="Linux"),
                 docker_file_path="Dockerfile",
@@ -672,12 +675,14 @@ def create_modernization_deployment_service(
         settings.azure_subscription_id,
         settings.deployment_resource_group,
         settings.deployment_acr_name,
+        settings.deployment_acr_agent_pool_name,
         settings.deployment_container_apps_environment_id,
         settings.deployment_location,
     )
     if not all(required):
         raise ModernizationDeploymentError(
             "azure_subscription_id, deployment_resource_group, deployment_acr_name, "
+            "deployment_acr_agent_pool_name, "
             "deployment_container_apps_environment_id, and deployment_location must all be "
             "configured; real modernization deployment is not permitted without them."
         )
@@ -685,6 +690,7 @@ def create_modernization_deployment_service(
         subscription_id=settings.azure_subscription_id,  # type: ignore[arg-type]
         resource_group=settings.deployment_resource_group,  # type: ignore[arg-type]
         acr_name=settings.deployment_acr_name,  # type: ignore[arg-type]
+        acr_agent_pool_name=settings.deployment_acr_agent_pool_name,
         container_apps_environment_id=settings.deployment_container_apps_environment_id,  # type: ignore[arg-type]
         location=settings.deployment_location,  # type: ignore[arg-type]
         plan_repository=plan_repository,

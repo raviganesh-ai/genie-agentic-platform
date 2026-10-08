@@ -158,6 +158,7 @@ def app_local_settings(validated_local_settings: Settings) -> Settings:
         update={
             "deployment_resource_group": "test-resource-group",
             "deployment_acr_name": "testacr",
+            "deployment_acr_agent_pool_name": "test-build-pool",
             "deployment_container_apps_environment_id": "/test/container-apps-environment",
             "deployment_location": "eastus2",
             "azure_subscription_id": "test-subscription",
@@ -294,6 +295,7 @@ def foundry_configured_settings(valid_config_root: Path) -> Settings:
         azure_subscription_id="00000000-0000-0000-0000-000000000000",
         deployment_resource_group="genie-example-rg",
         deployment_acr_name="genieexampleacr",
+        deployment_acr_agent_pool_name="genie-build-pool",
         deployment_container_apps_environment_id=(
             "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/"
             "genie-example-rg/providers/Microsoft.App/managedEnvironments/genie-example-cae"

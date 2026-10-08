@@ -4,6 +4,7 @@ param addressPrefix string
 param containerAppsInfrastructureSubnetPrefix string
 param privateEndpointSubnetPrefix string
 param apiManagementSubnetPrefix string
+param acrAgentPoolSubnetPrefix string
 param tags object
 
 resource apiManagementNetworkSecurityGroup 'Microsoft.Network/networkSecurityGroups@2024-05-01' = {
@@ -114,6 +115,20 @@ resource virtualNetwork 'Microsoft.Network/virtualNetworks@2024-05-01' = {
           ]
         }
       }
+      {
+        name: 'acr-agent-pool'
+        properties: {
+          addressPrefix: acrAgentPoolSubnetPrefix
+          serviceEndpoints: [
+            {
+              service: 'Microsoft.ContainerRegistry'
+            }
+            {
+              service: 'Microsoft.Storage'
+            }
+          ]
+        }
+      }
     ]
   }
 }
@@ -122,3 +137,4 @@ output id string = virtualNetwork.id
 output containerAppsInfrastructureSubnetId string = virtualNetwork.properties.subnets[0].id
 output privateEndpointSubnetId string = virtualNetwork.properties.subnets[1].id
 output apiManagementSubnetId string = virtualNetwork.properties.subnets[2].id
+output acrAgentPoolSubnetId string = virtualNetwork.properties.subnets[3].id

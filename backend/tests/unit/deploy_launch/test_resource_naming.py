@@ -3,7 +3,10 @@ from __future__ import annotations
 
 import re
 
-from app.deploy_launch.resource_naming import prototype_container_app_name
+from app.deploy_launch.resource_naming import (
+    prototype_container_app_name,
+    prototype_repository_name,
+)
 
 
 def test_container_app_name_preserves_existing_short_names() -> None:
@@ -35,3 +38,9 @@ def test_container_app_name_hash_prevents_truncation_collisions() -> None:
     second = prototype_container_app_name("customer-workload-beta-c0d89e27", "backend")
 
     assert first != second
+
+
+def test_repository_name_is_deterministic_and_github_safe() -> None:
+    assert prototype_repository_name("aci-poc-attempt-2") == "genie-proto-aci-poc-attempt-2"
+    assert prototype_repository_name("ACI POC!") == "genie-proto-aci-poc"
+    assert prototype_repository_name("") == "genie-proto-prototype"

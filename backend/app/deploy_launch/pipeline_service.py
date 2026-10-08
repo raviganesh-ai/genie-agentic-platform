@@ -87,6 +87,10 @@ from app.deploy_launch.models import (
     DeploymentStepResult,
     ProvisionedAgentStatus,
 )
+from app.deploy_launch.repository_checkin_service import (
+    NullRepositoryCheckinService,
+    RepositoryCheckinService,
+)
 from app.deploy_launch.resource_naming import prototype_resource_group_name
 from app.deploy_launch.security_scan_service import SecurityScanService
 from app.deploy_launch.test_execution_service import (
@@ -1264,6 +1268,7 @@ class DeploymentPipelineService:
             ContainerAppFrontendDeploymentService | NullContainerAppFrontendDeploymentService
         ),
         data_layer_provisioning_service: DataLayerProvisioner,
+        repository_checkin_service: RepositoryCheckinService | NullRepositoryCheckinService,
         test_execution_service: TestExecutionService,
         security_scan_service: SecurityScanService,
         build_workspace_root: Path,
@@ -1287,6 +1292,7 @@ class DeploymentPipelineService:
         self._backend_deployment_service = backend_deployment_service
         self._frontend_deployment_service = frontend_deployment_service
         self._data_layer_provisioning_service = data_layer_provisioning_service
+        self._repository_checkin_service = repository_checkin_service
         self._test_execution_service = test_execution_service
         self._security_scan_service = security_scan_service
         self._run_repository = run_repository or InMemoryDeploymentRunRepository()
@@ -2423,6 +2429,27 @@ class DeploymentPipelineService:
                     )
                     detail = f"Frontend deployed at {frontend_result.frontend_url}."
 
+                elif step_id == "commit-generated-repository":
+                    checkin_result = await self._repository_checkin_service.checkin(
+                        mission_slug=mission_slug,
+                        mission_title=mission_title,
+                        backend_root=backend_root,
+                        frontend_root=frontend_root,
+                    )
+                    if checkin_result is None:
+                        detail = (
+                            "GitHub MCP is not configured; skipped committing the "
+                            "generated prototype to a repository."
+                        )
+                    else:
+                        pipeline_run.repository_url = checkin_result.repository_url
+                        pipeline_run.repository_commit_sha = checkin_result.commit_sha
+                        detail = (
+                            f"Committed the generated prototype to "
+                            f"{checkin_result.repository_url} "
+                            f"(commit {checkin_result.commit_sha[:12]})."
+                        )
+
                 elif step_id == "generate-test-suite":
                     # Generated for real, right here, against the approved
                     # requirements and materialized pre-deployment build.
@@ -2891,6 +2918,7 @@ def create_deployment_pipeline_service(
         ContainerAppFrontendDeploymentService | NullContainerAppFrontendDeploymentService
     ),
     data_layer_provisioning_service: DataLayerProvisioner,
+    repository_checkin_service: RepositoryCheckinService | NullRepositoryCheckinService,
     run_repository: DeploymentRunRepository | None = None,
 ) -> DeploymentPipelineService:
     """Wires a ``DeploymentPipelineService`` from already-constructed collaborators.
@@ -2911,6 +2939,7 @@ def create_deployment_pipeline_service(
         backend_deployment_service=backend_deployment_service,
         frontend_deployment_service=frontend_deployment_service,
         data_layer_provisioning_service=data_layer_provisioning_service,
+        repository_checkin_service=repository_checkin_service,
         run_repository=run_repository,
         prototype_default_ttl_days=settings.prototype_default_ttl_days,
         prototype_max_active_per_owner=settings.prototype_max_active_per_owner,

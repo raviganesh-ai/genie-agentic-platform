@@ -31,6 +31,16 @@ def prototype_resource_group_name(mission_slug: str) -> str:
     return f"genie-proto-{mission_slug}"[:90].rstrip("-._()")
 
 
+def prototype_repository_name(mission_slug: str) -> str:
+    """Return a stable, GitHub-safe repository name for one mission's
+    generated prototype code - the repository Deploy & Launch's
+    ``commit-generated-repository`` step creates and pushes the
+    materialized backend/frontend build into."""
+
+    normalized_slug = re.sub(r"-+", "-", re.sub(r"[^a-z0-9-]", "-", mission_slug.lower())).strip("-")
+    return f"genie-proto-{normalized_slug or 'prototype'}"[:100].rstrip("-")
+
+
 def prototype_frontend_environment_name(mission_slug: str) -> str:
     """Return a stable globally valid name for a prototype's public frontend environment."""
 

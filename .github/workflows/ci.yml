@@ -160,6 +160,7 @@ jobs:
           [ -z "${{ secrets.AZURE_TENANT_ID }}" ] && missing+=("AZURE_TENANT_ID")
           [ -z "${{ secrets.AZURE_SUBSCRIPTION_ID }}" ] && missing+=("AZURE_SUBSCRIPTION_ID")
           [ -z "${{ vars.AZURE_ACR_NAME }}" ] && missing+=("AZURE_ACR_NAME")
+          [ -z "${{ vars.AZURE_ACR_AGENT_POOL_NAME }}" ] && missing+=("AZURE_ACR_AGENT_POOL_NAME")
           [ -z "${{ vars.AZURE_CONTAINER_APP_NAME }}" ] && missing+=("AZURE_CONTAINER_APP_NAME")
           [ -z "${{ vars.AZURE_RESOURCE_GROUP }}" ] && missing+=("AZURE_RESOURCE_GROUP")
           [ -z "${{ vars.GENIE_MEMORY_STORE_ENDPOINT }}" ] && missing+=("GENIE_MEMORY_STORE_ENDPOINT")
@@ -186,6 +187,7 @@ jobs:
         run: |
           az acr build \
             --registry "${{ vars.AZURE_ACR_NAME }}" \
+            --agent-pool "${{ vars.AZURE_ACR_AGENT_POOL_NAME }}" \
             --image "genie-backend:${{ github.sha }}" \
             --file backend/Dockerfile \
             .
@@ -235,6 +237,7 @@ jobs:
             -ResourceGroup "${{ vars.AZURE_RESOURCE_GROUP }}" `
             -ContainerAppName "${{ vars.AZURE_CONTAINER_APP_NAME }}" `
             -BackendImage "${{ vars.AZURE_ACR_NAME }}.azurecr.io/genie-backend:${{ github.sha }}" `
+            -AcrAgentPoolName "${{ vars.AZURE_ACR_AGENT_POOL_NAME }}" `
             -AllowedOrigin "${{ vars.GENIE_GATEWAY_ALLOWED_ORIGIN }}" `
             -GatewayUrl "${{ needs.prepare-gateway.outputs.gateway-url }}" `
             -MemoryStoreEndpoint "${{ vars.GENIE_MEMORY_STORE_ENDPOINT }}" `

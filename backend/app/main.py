@@ -70,6 +70,7 @@ from app.deploy_launch.mission_agent_provisioning_service import (
 )
 from app.deploy_launch.mission_identity_service import create_mission_identity_service
 from app.deploy_launch.pipeline_service import create_deployment_pipeline_service
+from app.deploy_launch.repository_checkin_service import create_repository_checkin_service
 from app.discovery.pricing_service import AzureRetailPricingService
 from app.discovery.repository import CosmosDiscoveryCaseRepository
 from app.discovery.service import create_discovery_service
@@ -736,6 +737,9 @@ def create_app(
             data_layer_provisioning_service=create_data_layer_provisioning_service(
                 subscription_id=resolved_settings.azure_subscription_id,
                 location=resolved_settings.deployment_location,
+            ),
+            repository_checkin_service=create_repository_checkin_service(
+                github_mcp_client=github_mcp_client
             ),
             run_repository=deployment_run_repository,
         )

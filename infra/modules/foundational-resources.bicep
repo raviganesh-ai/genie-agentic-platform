@@ -10,6 +10,7 @@ param virtualNetworkAddressPrefix string
 param containerAppsInfrastructureSubnetPrefix string
 param privateEndpointSubnetPrefix string
 param apiManagementSubnetPrefix string
+param acrAgentPoolSubnetPrefix string
 @description('Model deployments to create on the Foundry account - see ai-foundry.bicep.')
 param foundryModelDeployments array = []
 @description('Deploy the Azure Container Registry and a bootstrap backend Container App as part of this same template (recommended for a first deployment into an empty subscription). Set to false to reuse an existing registry/app instead.')
@@ -19,7 +20,7 @@ param deployContainerRegistryAndBackendApp bool = true
   'Standard'
   'Premium'
 ])
-param containerRegistrySkuName string = 'Basic'
+param containerRegistrySkuName string = 'Premium'
 param tags object
 
 // Built-in role definition ids - granted to Genie's own runtime managed
@@ -52,6 +53,7 @@ module virtualNetwork 'virtual-network.bicep' = {
     containerAppsInfrastructureSubnetPrefix: containerAppsInfrastructureSubnetPrefix
     privateEndpointSubnetPrefix: privateEndpointSubnetPrefix
     apiManagementSubnetPrefix: apiManagementSubnetPrefix
+    acrAgentPoolSubnetPrefix: acrAgentPoolSubnetPrefix
     tags: tags
   }
 }
@@ -186,6 +188,7 @@ module containerRegistry 'container-registry.bicep' = if (deployContainerRegistr
     name: take(toLower('${resourcePrefix}acr${resourceToken}'), 50)
     managedIdentityPrincipalId: managedIdentity.outputs.principalId
     skuName: containerRegistrySkuName
+    agentPoolSubnetId: virtualNetwork.outputs.acrAgentPoolSubnetId
     tags: tags
   }
 }
@@ -230,6 +233,5 @@ output containerRegistryName string = deployContainerRegistryAndBackendApp ? con
 output containerRegistryLoginServer string = deployContainerRegistryAndBackendApp ? containerRegistry!.outputs.loginServer : ''
 output backendContainerAppName string = deployContainerRegistryAndBackendApp ? backendContainerApp!.outputs.name : ''
 output backendContainerAppFqdn string = deployContainerRegistryAndBackendApp ? backendContainerApp!.outputs.fqdn : ''
-
 
 

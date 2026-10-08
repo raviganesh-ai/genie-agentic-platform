@@ -48,6 +48,7 @@ DeploymentStepId = Literal[
     "deploy-backend-service",
     "sync-frontend-integration",
     "deploy-frontend-app",
+    "commit-generated-repository",
     "generate-test-suite",
     "execute-test-suite",
     "run-security-scan",
@@ -68,6 +69,7 @@ DEPLOYMENT_STEP_ORDER: tuple[DeploymentStepId, ...] = (
     "deploy-backend-service",
     "sync-frontend-integration",
     "deploy-frontend-app",
+    "commit-generated-repository",
     "generate-test-suite",
     "execute-test-suite",
     "run-security-scan",
@@ -83,6 +85,7 @@ DEPLOYMENT_STEP_NAMES: dict[DeploymentStepId, str] = {
     "deploy-backend-service": "Deploy Backend Service",
     "sync-frontend-integration": "Update Frontend Integrations",
     "deploy-frontend-app": "Deploy Frontend",
+    "commit-generated-repository": "Check In Generated Prototype to GitHub",
     "generate-test-suite": "Generate Requirement Acceptance Tests",
     "execute-test-suite": "Requirement Validation",
     "run-security-scan": "Security Scan (Backend & Frontend)",
@@ -261,6 +264,8 @@ class DeploymentPipelineRun(BaseModel):
     data_schema_version: str | None = None
     backend_url: str | None = None
     frontend_url: str | None = None
+    repository_url: str | None = None
+    repository_commit_sha: str | None = None
     launch_url: str | None = None
     test_summary: str | None = None
     fidelity_report: RequirementFidelityReport | None = None

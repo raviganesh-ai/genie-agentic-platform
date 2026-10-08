@@ -427,6 +427,7 @@ def test_factory_builds_the_real_service_when_settings_are_complete() -> None:
             azure_subscription_id="sub-1",
             deployment_resource_group="rg-1",
             deployment_acr_name="acr1",
+            deployment_acr_agent_pool_name="build-pool",
             deployment_container_apps_environment_id="env-1",
             deployment_location="eastus2",
         ),
