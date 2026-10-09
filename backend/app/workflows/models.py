@@ -67,6 +67,21 @@ class WorkflowStep(BaseModel):
             "exposes the delegation tool(s) relevant to that phase."
         ),
     )
+    agent_run_timeout_seconds: float | None = Field(
+        default=None,
+        gt=0,
+        description=(
+            "Overrides the Foundry gateway's default per-call timeout "
+            "(Settings.foundry_agent_run_timeout_seconds) for this step's "
+            "own agent call. None uses that default - appropriate for an "
+            "ordinary single agent call. A step whose agent internally "
+            "delegates to a tool that itself makes many further nested "
+            "Foundry calls (e.g. build-solution's per-component generation "
+            "loop) needs a much larger value here: the outer run's own "
+            "stream has nothing new to yield for the whole nested duration, "
+            "which is not the same as being stuck."
+        ),
+    )
     variable_sources: dict[str, str] = Field(
         default_factory=dict,
         description=(

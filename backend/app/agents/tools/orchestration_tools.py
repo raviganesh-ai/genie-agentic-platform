@@ -495,6 +495,8 @@ async def _generate_build_by_component(
     event_bus: WorkflowEventBus | None,
     workflow_run_id: str | None,
     step_id: str | None,
+    memory_service: MemoryService | None = None,
+    agent_registry: AgentRegistry | None = None,
 ) -> AgentExecutionResult:
     """Generates the ``build-solution`` step's code one component at a time
     (each specialist agent, then the Orchestrator Agent, then the UI)
@@ -617,6 +619,28 @@ async def _generate_build_by_component(
                 )
             )
 
+    async def _checkpoint_progress() -> None:
+        # Persists every component generated SO FAR - not just the final
+        # combined result once the whole loop returns - so a build that
+        # never gets to return (a genuinely stuck/killed outer Foundry run;
+        # see FoundryAgentProvider's run timeout) still leaves its
+        # already-completed components recoverable via this same step's
+        # "previous_build_output" shared-memory read on the next retry,
+        # instead of losing all prior progress and regenerating everything
+        # from scratch.
+        if memory_service is None or agent_registry is None or step_id is None:
+            return
+        target_agent = get_enabled_agent(agent_registry, delegation.target_agent_id)
+        await memory_service.shared.write(
+            agent=target_agent,
+            session_id=context.session_id,
+            trace_id=context.trace_id,
+            key=step_id,
+            classification=delegation.shared_memory_classification,
+            content={"output_text": "\n\n".join(pieces)},
+            approval_status="approved",
+        )
+
     pieces: list[str] = []
     for index, (component_kind, component_name) in enumerate(components):
         if index > 0:
@@ -711,8 +735,10 @@ async def _generate_build_by_component(
             )
             await _publish_delta(failure_piece)
             pieces.append(failure_piece)
+            await _checkpoint_progress()
             continue
         pieces.append(component_result.output_text)
+        await _checkpoint_progress()
 
     return AgentExecutionResult(
         agent_id=delegation.target_agent_id,
@@ -780,6 +806,8 @@ def _build_delegation_tool(
                 event_bus=event_bus,
                 workflow_run_id=workflow_run_id,
                 step_id=step_id,
+                memory_service=memory_service,
+                agent_registry=agent_registry,
             )
         elif event_bus is not None and workflow_run_id is not None and step_id is not None:
             result = await _stream_and_publish_deltas(

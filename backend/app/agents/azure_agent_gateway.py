@@ -63,6 +63,7 @@ class AzureAgentGateway:
                 foundry_agent_id=foundry_agent_id,
                 input_text=resolved_text,
                 tool_context=tool_context,
+                timeout_seconds=request.timeout_seconds,
             )
         except FoundryUnavailableError as exc:
             self._governance_recorder.record_unavailable(request=request, reason=str(exc))
@@ -97,6 +98,7 @@ class AzureAgentGateway:
                 foundry_agent_id=foundry_agent_id,
                 input_text=resolved_text,
                 tool_context=tool_context,
+                timeout_seconds=request.timeout_seconds,
             ):
                 if chunk.delta:
                     yield AgentExecutionStreamChunk(delta=chunk.delta)

@@ -235,6 +235,7 @@ class WorkflowStepExecutor:
             session_id=session_id,
             agent_scope_id=agent_scope_id,
             allowed_tool_names=step.allowed_tool_names,
+            timeout_seconds=step.agent_run_timeout_seconds,
         )
         # resolve_prompt_text is used only to fail fast (MissingPromptError's
         # sibling PromptResolutionError/UnknownPromptError) before handing

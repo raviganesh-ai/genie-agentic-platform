@@ -474,7 +474,13 @@ async def test_call_build_agent_generates_one_component_at_a_time_when_architect
     assert event["agent_id"] == "build-agent"
     assert event["detail"]["step_id"] == "build-solution"
 
-    [write] = memory_service.shared.writes
+    # One incremental checkpoint write per component as it completes (so a
+    # genuinely stuck/killed outer run still leaves already-generated
+    # components recoverable - see _checkpoint_progress), plus the final
+    # write after the whole loop returns; the LAST write always reflects
+    # the complete, final combined result.
+    assert len(memory_service.shared.writes) == 5
+    write = memory_service.shared.writes[-1]
     assert write["key"] == "build-solution"
     assert write["content"] == {"output_text": expected_combined}
 

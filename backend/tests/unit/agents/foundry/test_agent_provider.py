@@ -280,6 +280,30 @@ async def test_run_fails_closed_when_the_agent_call_hangs_past_the_timeout():
         await provider.run(foundry_agent_id="agent-123", input_text="hello")
 
 
+async def test_run_per_call_timeout_override_takes_priority_over_the_constructor_default():
+    api_client = _FakeApiClient()
+    project_service = _FakeProjectService(api_client=api_client)
+    fake_agent = _FakeFoundryAgent(project_client=None, agent_name="", agent_version="")
+
+    async def _hanging_run(messages: Any, *, tools: Any = None) -> _FakeAgentResponse:
+        await asyncio.sleep(10)
+        return _FakeAgentResponse(text="too late")  # pragma: no cover - never reached
+
+    fake_agent.run = _hanging_run  # type: ignore[method-assign]
+    # A generous constructor-level default (would never fire within this
+    # test's own timeout) - the call-level override below must still apply.
+    provider = FoundryAgentProvider(
+        project_service,
+        agent_factory=_agent_factory_returning(fake_agent),
+        run_timeout_seconds=30,
+    )
+
+    with pytest.raises(FoundryUnavailableError, match="did not complete within 0 seconds"):
+        await provider.run(
+            foundry_agent_id="agent-123", input_text="hello", timeout_seconds=0.05
+        )
+
+
 async def test_run_stream_yields_deltas_then_a_final_chunk_with_accumulated_text():
     api_client = _FakeApiClient(latest_version="7")
     project_service = _FakeProjectService(api_client=api_client)

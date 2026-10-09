@@ -101,6 +101,14 @@ workflows:
         requires_human_proceed: true
         allowed_tool_names:
           - call_build_agent
+        # Generous ceiling (not the ordinary per-call default) because this
+        # phase's own agent call delegates to call_build_agent, which
+        # internally runs many further nested Foundry calls (one per
+        # generated component) entirely within this single outer call - the
+        # outer run's own stream legitimately has nothing new to yield for
+        # that whole nested duration, which is not the same as being stuck.
+        # See AgentExecutionRequest.timeout_seconds's doc comment.
+        agent_run_timeout_seconds: 3600
         required_memory_references:
           - analyze-requirements
           - design-architecture
@@ -149,6 +157,10 @@ workflows:
         prompt_id: orchestrator-build-phase-v1
         allowed_tool_names:
           - call_build_agent
+        # See solution-discovery-workflow's identical build-solution step
+        # for why this needs a much larger timeout than the ordinary
+        # per-call default.
+        agent_run_timeout_seconds: 3600
         variable_sources:
           available_models: model-catalog
           previous_build_output: step:build-solution

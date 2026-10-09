@@ -87,6 +87,7 @@ class FoundryAgentClient(Protocol):
         foundry_agent_id: str,
         input_text: str,
         tool_context: ToolCallContext | None = None,
+        timeout_seconds: float | None = None,
     ) -> FoundryRunResult:
         ...
 
@@ -96,6 +97,7 @@ class FoundryAgentClient(Protocol):
         foundry_agent_id: str,
         input_text: str,
         tool_context: ToolCallContext | None = None,
+        timeout_seconds: float | None = None,
     ) -> AsyncIterator[FoundryStreamChunk]:
         ...
 
@@ -136,8 +138,10 @@ class FoundryAgentProvider:
         foundry_agent_id: str,
         input_text: str,
         tool_context: ToolCallContext | None = None,
+        timeout_seconds: float | None = None,
     ) -> FoundryRunResult:
         started = time.monotonic()
+        effective_timeout = timeout_seconds if timeout_seconds is not None else self._run_timeout_seconds
         try:
             agent, agent_version, tools = await self._build_runnable_agent(
                 foundry_agent_id=foundry_agent_id, tool_context=tool_context
@@ -145,13 +149,13 @@ class FoundryAgentProvider:
             try:
                 response = await asyncio.wait_for(
                     agent.run(input_text, tools=tools or None),
-                    timeout=self._run_timeout_seconds,
+                    timeout=effective_timeout,
                 )
             except TimeoutError as exc:
                 raise FoundryUnavailableError(
                     f"Azure AI Foundry run for agent '{foundry_agent_id}' "
                     f"(version '{agent_version}') did not complete within "
-                    f"{self._run_timeout_seconds:.0f} seconds."
+                    f"{effective_timeout:.0f} seconds."
                 ) from exc
             output_text = (getattr(response, "text", None) or "").strip()
             if not output_text:
@@ -176,6 +180,7 @@ class FoundryAgentProvider:
         foundry_agent_id: str,
         input_text: str,
         tool_context: ToolCallContext | None = None,
+        timeout_seconds: float | None = None,
     ) -> AsyncIterator[FoundryStreamChunk]:
         """Streams incremental response text as the model produces it.
 
@@ -190,6 +195,7 @@ class FoundryAgentProvider:
 
         started = time.monotonic()
         accumulated = ""
+        effective_timeout = timeout_seconds if timeout_seconds is not None else self._run_timeout_seconds
         try:
             agent, agent_version, tools = await self._build_runnable_agent(
                 foundry_agent_id=foundry_agent_id, tool_context=tool_context
@@ -198,7 +204,7 @@ class FoundryAgentProvider:
             while True:
                 try:
                     update = await asyncio.wait_for(
-                        stream.__anext__(), timeout=self._run_timeout_seconds
+                        stream.__anext__(), timeout=effective_timeout
                     )
                 except StopAsyncIteration:
                     break
@@ -206,7 +212,7 @@ class FoundryAgentProvider:
                     raise FoundryUnavailableError(
                         f"Azure AI Foundry run for agent '{foundry_agent_id}' "
                         f"(version '{agent_version}') produced no update for "
-                        f"{self._run_timeout_seconds:.0f} seconds."
+                        f"{effective_timeout:.0f} seconds."
                     ) from exc
                 delta = getattr(update, "text", None) or ""
                 if not delta:

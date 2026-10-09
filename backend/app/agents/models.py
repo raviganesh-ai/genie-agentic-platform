@@ -210,6 +210,22 @@ class AgentExecutionRequest(BaseModel):
             "a tool the agent does not already have configured."
         ),
     )
+    timeout_seconds: float | None = Field(
+        default=None,
+        gt=0,
+        description=(
+            "Overrides FoundryAgentProvider's default run/stream timeout for "
+            "this one request. None means use the provider's own configured "
+            "default (Settings.foundry_agent_run_timeout_seconds) - needed "
+            "because a genie-orchestrator phase call that delegates to a "
+            "function tool internally running many nested Foundry calls "
+            "(e.g. build-solution's per-component loop) can legitimately "
+            "take far longer in total than any single ordinary agent call "
+            "should, and the outer run's own stream has nothing new to "
+            "yield for that entire nested duration - it is not 'stuck', "
+            "just waiting on its own tool."
+        ),
+    )
 
 
 class AgentExecutionResult(BaseModel):

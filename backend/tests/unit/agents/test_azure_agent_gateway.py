@@ -85,20 +85,25 @@ class _FakeFoundryClient:
         self.calls: list[dict[str, str]] = []
         self.tool_contexts: list[object] = []
         self.stream_calls: list[dict[str, str]] = []
+        self.timeout_seconds_seen: list[object] = []
 
     async def run(
-        self, *, foundry_agent_id: str, input_text: str, tool_context=None
+        self, *, foundry_agent_id: str, input_text: str, tool_context=None, timeout_seconds=None
     ) -> FoundryRunResult:
         self.calls.append({"foundry_agent_id": foundry_agent_id, "input_text": input_text})
         self.tool_contexts.append(tool_context)
+        self.timeout_seconds_seen.append(timeout_seconds)
         if self._error is not None:
             raise self._error
         assert self._result is not None
         return self._result
 
-    async def run_stream(self, *, foundry_agent_id: str, input_text: str, tool_context=None):
+    async def run_stream(
+        self, *, foundry_agent_id: str, input_text: str, tool_context=None, timeout_seconds=None
+    ):
         self.stream_calls.append({"foundry_agent_id": foundry_agent_id, "input_text": input_text})
         self.tool_contexts.append(tool_context)
+        self.timeout_seconds_seen.append(timeout_seconds)
         if self._error is not None:
             raise self._error
         for delta in self._stream_deltas:
@@ -145,6 +150,23 @@ async def test_execute_success_calls_foundry_client_with_resolved_prompt(
     ]
     assert len(recorder.executions) == 1
     assert recorder.unavailable == []
+
+
+async def test_execute_forwards_the_request_timeout_override_to_the_foundry_client(
+    agent_registry: AgentRegistry, prompt_registry: PromptRegistry
+):
+    fake_client = _FakeFoundryClient(
+        result=FoundryRunResult(output_text="ok", raw_status="completed", latency_ms=1.0)
+    )
+    gateway = AzureAgentGateway(
+        agent_registry=agent_registry,
+        prompt_registry=prompt_registry,
+        foundry_client=fake_client,
+    )
+
+    await gateway.execute(_request(timeout_seconds=3600))
+
+    assert fake_client.timeout_seconds_seen == [3600]
 
 
 async def test_execute_raises_for_agent_without_foundry_agent_id(
