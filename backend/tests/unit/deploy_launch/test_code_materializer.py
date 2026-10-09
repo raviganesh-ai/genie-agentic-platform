@@ -813,6 +813,19 @@ def test_generate_use_genie_auth_module_exposes_the_narrow_stable_surface():
     assert 'from "@azure/msal-react"' in module_source
 
 
+def test_generate_use_genie_auth_module_mirrors_identity_for_legacy_pages():
+    """Some already-generated page components (from Build Agent runs that
+    predate useGenieAuth()) independently invented their own
+    window.__GENIE_IDENTITY__ read for sign-in state - this mirror lets
+    them keep working without a hand edit, while useGenieAuth() remains
+    the one real, documented contract for every new page going forward."""
+
+    module_source = generate_use_genie_auth_module()
+
+    assert "__GENIE_IDENTITY__" in module_source
+    assert "actor_id" in module_source
+
+
 _MULTI_COMPONENT_TYPE_OUTPUT = '''
 ```python
 # agent: orchestrator
