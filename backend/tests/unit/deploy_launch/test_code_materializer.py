@@ -14,7 +14,9 @@ from app.deploy_launch.code_materializer import (
     generate_agent_config_module,
     generate_backend_service_scaffold,
     generate_models_init,
+    generate_msal_config_module,
     generate_routing_shell,
+    generate_use_genie_auth_module,
     materialize_build,
 )
 
@@ -768,6 +770,47 @@ def test_generate_routing_shell_uses_hash_router_not_browser_router():
 def test_generate_routing_shell_rejects_empty_page_list():
     with pytest.raises(MaterializedCodeError):
         generate_routing_shell(())
+
+
+def test_generate_routing_shell_without_sign_in_never_imports_msal():
+    shell_source = generate_routing_shell(("Catalog Page",), require_sign_in=False)
+
+    assert "msal" not in shell_source.lower()
+    assert "SignInControl" not in shell_source
+
+
+def test_generate_routing_shell_with_sign_in_wraps_with_msal_provider():
+    shell_source = generate_routing_shell(("Catalog Page", "Dashboard Page"), require_sign_in=True)
+
+    assert 'import { MsalProvider } from "@azure/msal-react";' in shell_source
+    assert 'import { msalInstance } from "./auth/msalConfig";' in shell_source
+    assert 'import { useGenieAuth } from "./auth/useGenieAuth";' in shell_source
+    assert "<MsalProvider instance={msalInstance}>" in shell_source
+    assert "function SignInControl()" in shell_source
+    # Still uses HashRouter underneath, nested inside the MSAL wrapper.
+    assert "<HashRouter>" in shell_source
+
+
+def test_generate_msal_config_module_reads_from_runtime_config_not_hardcoded():
+    module_source = generate_msal_config_module()
+
+    assert "window.__MISSION_ENTRA_TENANT_ID__" in module_source
+    assert "window.__MISSION_ENTRA_CLIENT_ID__" in module_source
+    assert "window.__MISSION_ENTRA_API_SCOPE__" in module_source
+    assert "export const msalInstance" in module_source
+    # Never a literal tenant/client id - only read from the window globals.
+    assert "16b3c013" not in module_source
+
+
+def test_generate_use_genie_auth_module_exposes_the_narrow_stable_surface():
+    module_source = generate_use_genie_auth_module()
+
+    assert "export function useGenieAuth" in module_source
+    assert "isSignedIn" in module_source
+    assert "getAccessToken" in module_source
+    assert "signIn" in module_source
+    assert "signOut" in module_source
+    assert 'from "@azure/msal-react"' in module_source
 
 
 _MULTI_COMPONENT_TYPE_OUTPUT = '''

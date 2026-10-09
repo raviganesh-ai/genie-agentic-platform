@@ -107,6 +107,19 @@ export default function DashboardPage() {
 ```
 '''
 
+_MULTI_PAGE_BUILD_OUTPUT_WITH_IDENTITY = _MULTI_PAGE_BUILD_OUTPUT.rstrip() + '''
+
+```ts
+// agent: identity_config:Entra Sign-In
+export const ENTRA_SIGN_IN_PLACEHOLDER = true;
+```
+
+```yaml
+# agent: gateway_policy:Default Sign-In Policy
+required_claim_values: []
+```
+'''
+
 _ARCHITECTURE_DOCUMENT = """
 ## Multi-Agent Workflow
 
@@ -462,6 +475,9 @@ def _build_service(
     run_repository=None,
     prototype_max_active_per_owner: int = 0,
     build_output_text: str = _BUILD_OUTPUT,
+    shared_entra_tenant_id: str | None = None,
+    shared_entra_client_id: str | None = None,
+    shared_entra_audience: str | None = None,
 ) -> DeploymentPipelineService:
     return DeploymentPipelineService(
         orchestrator=_FakeOrchestrator(
@@ -483,6 +499,9 @@ def _build_service(
         build_workspace_root=tmp_path,
         run_repository=run_repository,
         prototype_max_active_per_owner=prototype_max_active_per_owner,
+        shared_entra_tenant_id=shared_entra_tenant_id,
+        shared_entra_client_id=shared_entra_client_id,
+        shared_entra_audience=shared_entra_audience,
     )
 
 
@@ -621,6 +640,95 @@ async def test_sync_frontend_integration_writes_real_pages_and_routing_shell_for
         encoding="utf-8"
     )
     assert "export default function DashboardPage" in dashboard_page_source
+
+
+async def test_sync_frontend_integration_wires_msal_sign_in_when_identity_is_declared(
+    tmp_path: Path,
+):
+    """Regression test for a real incident: identity_config/gateway_policy
+    components were parsed and written to disk by code_materializer, but
+    sync-frontend-integration never consumed them at all - a mission whose
+    Architecture stage correctly declared it needed Entra ID sign-in still
+    got a routing shell with no sign-in control and a runtime-config.js with
+    no tenant/client id, the same 'materialized but never wired' bug shape
+    as the empty-MissionApp.tsx incident above. Generic - this is driven
+    purely by the materialized build declaring identity_config/
+    gateway_policy, never an ACI-specific check."""
+
+    service = _build_service(
+        test_output_text=_PASSING_TEST_OUTPUT,
+        tmp_path=tmp_path,
+        build_output_text=_MULTI_PAGE_BUILD_OUTPUT_WITH_IDENTITY,
+        shared_entra_tenant_id="tenant-abc",
+        shared_entra_client_id="client-xyz",
+        shared_entra_audience="api://client-xyz",
+    )
+    run = await service.start(
+        session_id="session-1",
+        requesting_user_id="user-1",
+        workflow_run_id="run-1",
+        approval_request_id="session-1:run-1",
+    )
+    run = await service.wait_for_run(run.id)
+
+    assert run.status == "completed"
+    build_root = service.get_build_root(run.id)
+    assert build_root is not None
+    frontend_root = build_root.parent / "frontend"
+
+    mission_app_source = (frontend_root / "MissionApp.tsx").read_text(encoding="utf-8")
+    assert "MsalProvider" in mission_app_source
+    assert "SignInControl" in mission_app_source
+
+    msal_config_source = (frontend_root / "auth" / "msalConfig.ts").read_text(encoding="utf-8")
+    assert "export const msalInstance" in msal_config_source
+    auth_hook_source = (frontend_root / "auth" / "useGenieAuth.ts").read_text(encoding="utf-8")
+    assert "export function useGenieAuth" in auth_hook_source
+
+    runtime_config_source = (frontend_root / "public" / "runtime-config.js").read_text(
+        encoding="utf-8"
+    )
+    assert '__MISSION_ENTRA_TENANT_ID__ = "tenant-abc"' in runtime_config_source
+    assert '__MISSION_ENTRA_CLIENT_ID__ = "client-xyz"' in runtime_config_source
+    assert '__MISSION_ENTRA_API_SCOPE__ = "api://client-xyz/prototype.access"' in (
+        runtime_config_source
+    )
+
+
+async def test_sync_frontend_integration_skips_msal_when_no_identity_is_declared(tmp_path: Path):
+    """The common case (no identity provider named in this mission's
+    requirements) must get none of the sign-in scaffolding - never forced
+    onto every mission regardless of whether it needs it."""
+
+    service = _build_service(
+        test_output_text=_PASSING_TEST_OUTPUT,
+        tmp_path=tmp_path,
+        build_output_text=_MULTI_PAGE_BUILD_OUTPUT,
+        shared_entra_tenant_id="tenant-abc",
+        shared_entra_client_id="client-xyz",
+        shared_entra_audience="api://client-xyz",
+    )
+    run = await service.start(
+        session_id="session-1",
+        requesting_user_id="user-1",
+        workflow_run_id="run-1",
+        approval_request_id="session-1:run-1",
+    )
+    run = await service.wait_for_run(run.id)
+
+    assert run.status == "completed"
+    build_root = service.get_build_root(run.id)
+    assert build_root is not None
+    frontend_root = build_root.parent / "frontend"
+
+    mission_app_source = (frontend_root / "MissionApp.tsx").read_text(encoding="utf-8")
+    assert "MsalProvider" not in mission_app_source
+    assert not (frontend_root / "auth" / "msalConfig.ts").exists()
+
+    runtime_config_source = (frontend_root / "public" / "runtime-config.js").read_text(
+        encoding="utf-8"
+    )
+    assert "__MISSION_ENTRA_TENANT_ID__" not in runtime_config_source
 
 
 async def test_deploy_backend_service_step_does_not_block_the_event_loop(

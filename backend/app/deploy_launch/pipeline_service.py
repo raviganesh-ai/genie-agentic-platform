@@ -60,7 +60,9 @@ from app.deploy_launch.code_materializer import (
     MaterializedBuild,
     MaterializedCodeError,
     generate_backend_service_scaffold,
+    generate_msal_config_module,
     generate_routing_shell,
+    generate_use_genie_auth_module,
     materialize_build,
 )
 from app.deploy_launch.code_materializer import _slugify as _slugify_component_name
@@ -183,6 +185,8 @@ _FRONTEND_PACKAGE_JSON = json.dumps(
             "react": "18.3.1",
             "react-dom": "18.3.1",
             "react-router-dom": "6.28.0",
+            "@azure/msal-browser": "3.27.0",
+            "@azure/msal-react": "2.2.0",
         },
         "devDependencies": {
             "@vitejs/plugin-react": "4.3.4",
@@ -495,6 +499,40 @@ input:focus, textarea:focus, select:focus {
   background-color: rgba(47, 131, 224, 0.18);
   color: #6ba3ea;
   border-color: rgba(47, 131, 224, 0.4);
+}
+
+/* Sign-in control (see
+   app.deploy_launch.code_materializer.generate_routing_shell's
+   sign-in variant / generate_use_genie_auth_module) - rendered at the end
+   of the same nav bar above, so it reads as part of the mission shell
+   rather than a bolted-on afterthought. */
+.genie-signin-control {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: auto;
+}
+
+.genie-signin-identity {
+  font-size: 13px;
+  font-weight: 600;
+  color: #e6e9ee;
+}
+
+.genie-signin-button {
+  padding: 8px 14px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #0b0f14;
+  background-color: #6ba3ea;
+  border: 1px solid transparent;
+  cursor: pointer;
+  margin-left: auto;
+}
+
+.genie-signin-button:hover {
+  background-color: #8bb8ee;
 }
 
 @keyframes genie-indeterminate-rail {
@@ -1254,6 +1292,9 @@ _FRONTEND_ENV_D_TS = """interface Window {
     __MISSION_BACKEND_URL__?: string;
     __MISSION_TITLE__?: string;
     __MISSION_AGENTS__?: string[];
+    __MISSION_ENTRA_TENANT_ID__?: string;
+    __MISSION_ENTRA_CLIENT_ID__?: string;
+    __MISSION_ENTRA_API_SCOPE__?: string;
 }
 """
 
@@ -1326,6 +1367,10 @@ class DeploymentPipelineService:
         fidelity_min_coverage_percent: float = 90.0,
         upstream_grace_check_attempts: int = 5,
         upstream_grace_check_interval_seconds: float = 2.0,
+        shared_entra_tenant_id: str | None = None,
+        shared_entra_client_id: str | None = None,
+        shared_entra_audience: str | None = None,
+        shared_entra_api_scope: str = "prototype.access",
     ) -> None:
         self._orchestrator = orchestrator
         self._session_service = session_service
@@ -1350,6 +1395,10 @@ class DeploymentPipelineService:
         self._fidelity_min_coverage_percent = fidelity_min_coverage_percent
         self._upstream_grace_check_attempts = upstream_grace_check_attempts
         self._upstream_grace_check_interval_seconds = upstream_grace_check_interval_seconds
+        self._shared_entra_tenant_id = shared_entra_tenant_id
+        self._shared_entra_client_id = shared_entra_client_id
+        self._shared_entra_audience = shared_entra_audience
+        self._shared_entra_api_scope = shared_entra_api_scope
         self._runs: dict[str, DeploymentPipelineRun] = {}
         self._workspaces: dict[str, _RunWorkspace] = {}
         self._materialized_builds: dict[str, MaterializedBuild] = {}
@@ -2405,6 +2454,24 @@ class DeploymentPipelineService:
                 elif step_id == "sync-frontend-integration":
                     materialized = self._materialized_builds[pipeline_run.id]
                     frontend_root.mkdir(parents=True, exist_ok=True)
+                    require_sign_in = bool(
+                        materialized.identity_config_modules
+                        or materialized.gateway_policy_documents
+                    )
+                    if require_sign_in:
+                        # Generic for every mission whose own Architecture
+                        # stage declared it needs an identity provider -
+                        # never an ACI-specific branch. Always written
+                        # together: the sign-in routing shell below
+                        # unconditionally imports both.
+                        auth_dir = frontend_root / "auth"
+                        auth_dir.mkdir(parents=True, exist_ok=True)
+                        (auth_dir / "msalConfig.ts").write_text(
+                            generate_msal_config_module(), encoding="utf-8"
+                        )
+                        (auth_dir / "useGenieAuth.ts").write_text(
+                            generate_use_genie_auth_module(), encoding="utf-8"
+                        )
                     if materialized.page_components:
                         # Multi-page mission: write each declared page under
                         # pages/ and generate the real, deterministic routing
@@ -2429,9 +2496,19 @@ class DeploymentPipelineService:
                                 code, encoding="utf-8"
                             )
                         (frontend_root / "MissionApp.tsx").write_text(
-                            generate_routing_shell(page_names), encoding="utf-8"
+                            generate_routing_shell(page_names, require_sign_in=require_sign_in),
+                            encoding="utf-8",
                         )
                     else:
+                        if require_sign_in:
+                            # Known gap: single-page missions don't yet get
+                            # a sign-in-wrapped shell (only the multi-page
+                            # routing shell above does) - the generated
+                            # auth/ modules are still written, available for
+                            # a future single-page wrapper, but this page's
+                            # own "Not signed in" UX (if any) won't yet have
+                            # a real control to call.
+                            pass
                         (frontend_root / "MissionApp.tsx").write_text(
                             materialized.ui_component or "", encoding="utf-8"
                         )
@@ -2468,10 +2545,26 @@ class DeploymentPipelineService:
                         for name in self._agent_foundry_names.get(pipeline_run.id, {})
                         if name != "orchestrator"
                     ]
+                    identity_runtime_config = ""
+                    if require_sign_in:
+                        full_scope = (
+                            f"{self._shared_entra_audience}/{self._shared_entra_api_scope}"
+                            if self._shared_entra_audience
+                            else ""
+                        )
+                        identity_runtime_config = (
+                            f'window.__MISSION_ENTRA_TENANT_ID__ = '
+                            f"{json.dumps(self._shared_entra_tenant_id or '')};\n"
+                            f'window.__MISSION_ENTRA_CLIENT_ID__ = '
+                            f"{json.dumps(self._shared_entra_client_id or '')};\n"
+                            f'window.__MISSION_ENTRA_API_SCOPE__ = '
+                            f"{json.dumps(full_scope)};\n"
+                        )
                     (public_root / "runtime-config.js").write_text(
                         f'window.__MISSION_BACKEND_URL__ = "{pipeline_run.backend_url}";\n'
                         f"window.__MISSION_TITLE__ = {json.dumps(mission_title)};\n"
-                        f"window.__MISSION_AGENTS__ = {json.dumps(mission_agent_names)};\n",
+                        f"window.__MISSION_AGENTS__ = {json.dumps(mission_agent_names)};\n"
+                        f"{identity_runtime_config}",
                         encoding="utf-8",
                     )
                     detail = f"Frontend wired to real backend URL {pipeline_run.backend_url}."
@@ -3036,4 +3129,8 @@ def create_deployment_pipeline_service(
         build_workspace_root=settings.deployment_build_workspace_root,
         fidelity_max_repair_attempts=settings.deployment_fidelity_max_repair_attempts,
         fidelity_min_coverage_percent=settings.deployment_fidelity_min_coverage_percent,
+        shared_entra_tenant_id=settings.shared_entra_tenant_id,
+        shared_entra_client_id=settings.shared_entra_client_id,
+        shared_entra_audience=settings.shared_entra_audience,
+        shared_entra_api_scope=settings.shared_entra_api_scope,
     )
