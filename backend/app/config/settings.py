@@ -323,6 +323,37 @@ class Settings(BaseSettings):
     prototype_api_gateway_publisher_name: str | None = None
     prototype_api_gateway_sku_name: Literal["StandardV2", "PremiumV2"] = "StandardV2"
     prototype_api_gateway_capacity: int = Field(default=1, ge=1, le=10)
+    # Genie's own shared virtual network (holding the private-endpoint-only
+    # shared resources every mission's generated backend must reach - the
+    # shared Container Registry, the shared Azure AI Foundry account, etc.).
+    # When configured, every prototype's own isolated VNet is peered to this
+    # shared VNet and linked to the named shared private DNS zones below, so
+    # the mission's generated backend/agents can resolve and reach those
+    # shared resources over genuinely private networking - never by opening
+    # public network access on the shared resource (see a real, observed
+    # incident: a mission's Identity Context Agent failing with "(403)
+    # Public access is disabled" when calling the shared Foundry account,
+    # because the mission's own VNet had no private path to it at all).
+    # Optional and unset by default - never hardcoded to a real
+    # subscription/resource - so a deployment must explicitly configure this
+    # before Deploy & Launch peers any mission's network to it.
+    shared_vnet_resource_id: str | None = None
+    # The resource group that owns both the shared VNet above and every
+    # shared private DNS zone named below (all must live together, matching
+    # Genie's own standard shared-infrastructure resource group).
+    shared_network_resource_group: str | None = None
+    # Comma-separated shared private DNS zone names (already linked to the
+    # shared VNet above) that a mission's own VNet must also link to, so DNS
+    # resolution of each shared resource's private endpoint FQDN works from
+    # inside the mission's own, separately-peered VNet. Azure Private DNS
+    # Zones require an explicit VNet link per resolving VNet; peering alone
+    # only provides IP-level reachability, not DNS resolution.
+    shared_private_dns_zone_names: str = (
+        "privatelink.azurecr.io,"
+        "privatelink.cognitiveservices.azure.com,"
+        "privatelink.openai.azure.com,"
+        "privatelink.services.ai.azure.com"
+    )
     deployment_fidelity_max_repair_attempts: int = 3
     deployment_fidelity_min_coverage_percent: float = Field(default=90.0, gt=0, le=100)
     # How long Requirement Validation's real pytest subprocess is
@@ -405,6 +436,8 @@ class Settings(BaseSettings):
         "production_resource_group",
         "prototype_api_gateway_publisher_email",
         "prototype_api_gateway_publisher_name",
+        "shared_vnet_resource_id",
+        "shared_network_resource_group",
         mode="after",
     )
     @classmethod

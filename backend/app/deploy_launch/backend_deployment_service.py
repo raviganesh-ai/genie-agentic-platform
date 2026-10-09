@@ -701,6 +701,13 @@ def create_backend_deployment_service(
                 publisher_name=settings.prototype_api_gateway_publisher_name or "",
                 sku_name=settings.prototype_api_gateway_sku_name,
                 capacity=settings.prototype_api_gateway_capacity,
+                shared_vnet_resource_id=settings.shared_vnet_resource_id,
+                shared_network_resource_group=settings.shared_network_resource_group,
+                shared_private_dns_zone_names=tuple(
+                    name.strip()
+                    for name in settings.shared_private_dns_zone_names.split(",")
+                    if name.strip()
+                ),
             )
             if settings.prototype_api_gateway_enabled
             else None

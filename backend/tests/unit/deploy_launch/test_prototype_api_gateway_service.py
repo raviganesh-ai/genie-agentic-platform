@@ -284,3 +284,114 @@ async def test_publish_api_routes_supported_methods_to_private_backend(monkeypat
     assert "validate-azure-ad-token" not in policy
     assert "acceptance-test-key" not in policy
     assert "https://prototype.invalid" in policy
+
+
+async def test_peer_with_shared_network_is_a_no_op_when_not_configured():
+    service = PrototypeApiGatewayService(
+        subscription_id="sub-123",
+        location="eastus2",
+        publisher_email="genie@example.com",
+        publisher_name="Genie",
+    )
+    messages = []
+
+    async def _report(message: str) -> None:
+        messages.append(message)
+
+    def _fail_if_called(*_args, **_kwargs):
+        pytest.fail("peering must not be attempted when shared-network settings are unset")
+
+    network_client = SimpleNamespace(
+        virtual_network_peerings=SimpleNamespace(begin_create_or_update=_fail_if_called)
+    )
+
+    await service._peer_with_shared_network(
+        network_client=network_client,
+        resource_group="genie-proto-claims-1234",
+        vnet_name="genie-claims-1234-abc123",
+        vnet_id="/subscriptions/sub-123/resourceGroups/genie-proto-claims-1234/providers/"
+        "Microsoft.Network/virtualNetworks/genie-claims-1234-abc123",
+        report=_report,
+    )
+
+    assert any("not configured" in message for message in messages)
+
+
+async def test_peer_with_shared_network_peers_both_directions_and_links_every_zone():
+    service = PrototypeApiGatewayService(
+        subscription_id="sub-123",
+        location="eastus2",
+        publisher_email="genie@example.com",
+        publisher_name="Genie",
+        shared_vnet_resource_id=(
+            "/subscriptions/sub-123/resourceGroups/genie-dev-rg/providers/"
+            "Microsoft.Network/virtualNetworks/genie-shared-vnet"
+        ),
+        shared_network_resource_group="genie-dev-rg",
+        shared_private_dns_zone_names=(
+            "privatelink.azurecr.io",
+            "privatelink.openai.azure.com",
+        ),
+    )
+    captured_peerings = []
+    captured_links = []
+    network_client = SimpleNamespace(
+        virtual_network_peerings=SimpleNamespace(
+            begin_create_or_update=lambda resource_group, vnet_name, name, model: (
+                captured_peerings.append((resource_group, vnet_name, name, model))
+                or _poller(SimpleNamespace())
+            )
+        )
+    )
+    dns_client = SimpleNamespace(
+        virtual_network_links=SimpleNamespace(
+            begin_create_or_update=lambda resource_group, zone_name, name, model: (
+                captured_links.append((resource_group, zone_name, name, model))
+                or _poller(SimpleNamespace())
+            )
+        )
+    )
+    service._private_dns_client = lambda: dns_client  # type: ignore[method-assign]
+    messages = []
+
+    async def _report(message: str) -> None:
+        messages.append(message)
+
+    vnet_id = (
+        "/subscriptions/sub-123/resourceGroups/genie-proto-claims-1234/providers/"
+        "Microsoft.Network/virtualNetworks/genie-claims-1234-abc123"
+    )
+    await service._peer_with_shared_network(
+        network_client=network_client,
+        resource_group="genie-proto-claims-1234",
+        vnet_name="genie-claims-1234-abc123",
+        vnet_id=vnet_id,
+        report=_report,
+    )
+
+    assert len(captured_peerings) == 2
+    forward_resource_group, forward_vnet_name, _, forward_model = captured_peerings[0]
+    assert forward_resource_group == "genie-proto-claims-1234"
+    assert forward_vnet_name == "genie-claims-1234-abc123"
+    assert forward_model.remote_virtual_network.id == service._shared_vnet_resource_id
+    assert forward_model.allow_virtual_network_access is True
+
+    reverse_resource_group, reverse_vnet_name, _, reverse_model = captured_peerings[1]
+    assert reverse_resource_group == "genie-dev-rg"
+    assert reverse_vnet_name == "genie-shared-vnet"
+    assert reverse_model.remote_virtual_network.id == vnet_id
+
+    assert len(captured_links) == 2
+    linked_zone_names = {resource_group_zone[1] for resource_group_zone in captured_links}
+    assert linked_zone_names == {"privatelink.azurecr.io", "privatelink.openai.azure.com"}
+    for resource_group, _zone_name, link_name, link_model in captured_links:
+        assert resource_group == "genie-dev-rg"
+        assert link_model.virtual_network.id == vnet_id
+        assert link_model.registration_enabled is False
+        assert link_name  # a real, deterministic Azure resource name
+
+    # Each zone must get a distinct link resource name (per mission + zone),
+    # never the same name reused across zones/missions, which would silently
+    # overwrite a different mission's link.
+    link_names = [args[2] for args in captured_links]
+    assert len(set(link_names)) == len(link_names)

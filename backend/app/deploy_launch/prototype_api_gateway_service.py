@@ -198,6 +198,9 @@ class PrototypeApiGatewayService:
         publisher_name: str,
         sku_name: str = "StandardV2",
         capacity: int = 1,
+        shared_vnet_resource_id: str | None = None,
+        shared_network_resource_group: str | None = None,
+        shared_private_dns_zone_names: tuple[str, ...] = (),
     ) -> None:
         self._subscription_id = subscription_id
         self._location = location
@@ -205,6 +208,9 @@ class PrototypeApiGatewayService:
         self._publisher_name = publisher_name
         self._sku_name = sku_name
         self._capacity = capacity
+        self._shared_vnet_resource_id = shared_vnet_resource_id
+        self._shared_network_resource_group = shared_network_resource_group
+        self._shared_private_dns_zone_names = shared_private_dns_zone_names
 
     def _credential(self) -> Any:
         try:
@@ -276,6 +282,107 @@ class PrototypeApiGatewayService:
             "Cosmos DB private DNS zone group did not become ready within "
             f"600 seconds (last state: {last_state})."
         )
+
+    async def _peer_with_shared_network(
+        self,
+        *,
+        network_client: Any,
+        resource_group: str,
+        vnet_name: str,
+        vnet_id: str,
+        report: GatewayProgressCallback,
+    ) -> None:
+        """Peers this mission's own isolated VNet with Genie's shared VNet,
+        and links the mission's VNet to every shared private DNS zone named
+        in settings - the real, observed fix for missions whose generated
+        backend/agents could not reach Genie's own shared, private-endpoint-
+        only resources (the shared Container Registry, the shared Azure AI
+        Foundry account) at all, because the mission's own VNet had no
+        private network path to them.
+
+        This is deliberately the ONLY supported fix for that class of
+        failure - it must never be "solved" by disabling public network
+        access restrictions on the shared resource itself (every shared
+        resource stays exactly as private as it was before this mission
+        existed); only this mission's own VNet gains a private path in.
+
+        A no-op (with a clear progress message) when
+        ``shared_vnet_resource_id`` is not configured - matching
+        every other optional-collaborator pattern in this package - so a
+        deployment that hasn't configured shared-network peering yet does
+        not fail closed on a feature it never opted into, but also never
+        gets silent, broken connectivity.
+        """
+
+        if not self._shared_vnet_resource_id or not self._shared_network_resource_group:
+            await report(
+                "Shared-network peering is not configured "
+                "(shared_vnet_resource_id); skipping."
+            )
+            return
+
+        await report("Peering the prototype network with Genie's shared network...")
+
+        from azure.mgmt.network.models import SubResource, VirtualNetworkPeering
+
+        shared_vnet_parts = self._shared_vnet_resource_id.rstrip("/").split("/")
+        shared_vnet_name = shared_vnet_parts[-1]
+
+        # Peering is two one-directional resources, one declared on each
+        # VNet, both required before Azure reports either side "Connected".
+        forward_poller = network_client.virtual_network_peerings.begin_create_or_update(
+            resource_group,
+            vnet_name,
+            f"peer-to-{shared_vnet_name}",
+            VirtualNetworkPeering(
+                remote_virtual_network=SubResource(id=self._shared_vnet_resource_id),
+                allow_virtual_network_access=True,
+                allow_forwarded_traffic=False,
+                allow_gateway_transit=False,
+                use_remote_gateways=False,
+            ),
+        )
+        await asyncio.to_thread(forward_poller.result)
+
+        reverse_poller = network_client.virtual_network_peerings.begin_create_or_update(
+            self._shared_network_resource_group,
+            shared_vnet_name,
+            f"peer-to-{vnet_name}",
+            VirtualNetworkPeering(
+                remote_virtual_network=SubResource(id=vnet_id),
+                allow_virtual_network_access=True,
+                allow_forwarded_traffic=False,
+                allow_gateway_transit=False,
+                use_remote_gateways=False,
+            ),
+        )
+        await asyncio.to_thread(reverse_poller.result)
+
+        # Peering alone only provides IP-level reachability - Azure Private
+        # DNS Zones additionally require every resolving VNet to carry its
+        # own explicit link to the zone, so the mission's own VNet resolves
+        # each shared resource's private endpoint FQDN to its private IP.
+        dns_client = self._private_dns_client()
+        from azure.mgmt.privatedns.models import SubResource as PrivateDnsSubResource
+        from azure.mgmt.privatedns.models import VirtualNetworkLink
+
+        for zone_name in self._shared_private_dns_zone_names:
+            link_poller = dns_client.virtual_network_links.begin_create_or_update(
+                self._shared_network_resource_group,
+                zone_name,
+                _resource_name(
+                    "link",
+                    vnet_name,
+                    maximum_length=80,
+                    uniqueness_seed=f"{vnet_name}:{zone_name}",
+                ),
+                VirtualNetworkLink(
+                    location="global",
+                    virtual_network=PrivateDnsSubResource(id=vnet_id),
+                    registration_enabled=False,
+                ),
+            )
+            await asyncio.to_thread(link_poller.result)
 
     async def provision_infrastructure(
         self,
@@ -388,6 +495,14 @@ class PrototypeApiGatewayService:
                 ),
             )
             await asyncio.to_thread(network_poller.result)
+
+            await self._peer_with_shared_network(
+                network_client=network_client,
+                resource_group=resource_group,
+                vnet_name=vnet_name,
+                vnet_id=vnet_id,
+                report=_report,
+            )
 
             dns_client = self._private_dns_client()
             if data_endpoint:
