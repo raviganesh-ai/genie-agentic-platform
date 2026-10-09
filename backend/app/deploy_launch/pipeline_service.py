@@ -60,8 +60,10 @@ from app.deploy_launch.code_materializer import (
     MaterializedBuild,
     MaterializedCodeError,
     generate_backend_service_scaffold,
+    generate_routing_shell,
     materialize_build,
 )
+from app.deploy_launch.code_materializer import _slugify as _slugify_component_name
 from app.deploy_launch.container_app_frontend_deployment_service import (
     ContainerAppFrontendDeploymentService,
     NullContainerAppFrontendDeploymentService,
@@ -177,7 +179,11 @@ _FRONTEND_PACKAGE_JSON = json.dumps(
                 "build.')\""
             ),
         },
-        "dependencies": {"react": "18.3.1", "react-dom": "18.3.1"},
+        "dependencies": {
+            "react": "18.3.1",
+            "react-dom": "18.3.1",
+            "react-router-dom": "6.28.0",
+        },
         "devDependencies": {
             "@vitejs/plugin-react": "4.3.4",
             "@types/react": "18.3.18",
@@ -2357,9 +2363,36 @@ class DeploymentPipelineService:
                 elif step_id == "sync-frontend-integration":
                     materialized = self._materialized_builds[pipeline_run.id]
                     frontend_root.mkdir(parents=True, exist_ok=True)
-                    (frontend_root / "MissionApp.tsx").write_text(
-                        materialized.ui_component or "", encoding="utf-8"
-                    )
+                    if materialized.page_components:
+                        # Multi-page mission: write each declared page under
+                        # pages/ and generate the real, deterministic routing
+                        # shell (see generate_routing_shell) as MissionApp.tsx -
+                        # mirrors MaterializedBuild.write_to_directory's own
+                        # page-writing behavior, but targeting the actual
+                        # deployed frontend root instead of the backend
+                        # service's build directory. Writing only
+                        # `materialized.ui_component or ""` here (the prior
+                        # behavior) silently produced an EMPTY MissionApp.tsx
+                        # for every multi-page mission - ui_component and
+                        # page_components are mutually exclusive (see
+                        # materialize_build) - so the deployed frontend fell
+                        # back to the shell's generic single-input console
+                        # instead of ever rendering the mission's real,
+                        # Build-Agent-generated pages.
+                        pages_dir = frontend_root / "pages"
+                        pages_dir.mkdir(parents=True, exist_ok=True)
+                        page_names = tuple(materialized.page_components.keys())
+                        for page_name, code in materialized.page_components.items():
+                            (pages_dir / f"{_slugify_component_name(page_name)}.tsx").write_text(
+                                code, encoding="utf-8"
+                            )
+                        (frontend_root / "MissionApp.tsx").write_text(
+                            generate_routing_shell(page_names), encoding="utf-8"
+                        )
+                    else:
+                        (frontend_root / "MissionApp.tsx").write_text(
+                            materialized.ui_component or "", encoding="utf-8"
+                        )
                     (frontend_root / "index.html").write_text(
                         _FRONTEND_INDEX_HTML_TEMPLATE.format(
                             mission_title=html.escape(mission_title)
