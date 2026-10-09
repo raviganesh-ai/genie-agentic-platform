@@ -362,6 +362,28 @@ def test_ui_generation_and_regeneration_prompts_apply_impeccable_design_contract
     assert "pinned Impeccable detector" in regeneration
 
 
+def test_ui_generation_prompts_forbid_hardcoded_light_panels_against_the_dark_shell():
+    """Regression test for a real incident: every generated page rendered
+    inside Genie's own dark-themed shell (background #0b0f14, light text
+    #e6e9ee), but with no instruction telling the Build Agent that, it
+    defaulted to conventional light-mode card styling - a literal white/
+    near-white background with no explicit text color override - which
+    inherited the shell's light text and produced illegible light-gray-
+    on-white panels across most of a real deployed mission's pages. Both
+    the single-page and multi-page (page_view) prompts must forbid this
+    and point the Build Agent at the shell's own dark-theme utility
+    classes or an appropriately dark, low-opacity accent tint instead."""
+
+    registry = PromptRegistry.load(_REPO_CONFIG_ROOT / "prompts")
+
+    for prompt_id in ("build-generation-v1", "build-generation-component-v1"):
+        template = " ".join(registry.get(prompt_id).template.split())
+        assert "DARK SHELL, NEVER HARDCODE A LIGHT PANEL" in template
+        assert "#0b0f14" in template
+        assert "#e6e9ee" in template
+        assert "never a pale/white background with dark text" in template
+
+
 def test_architecture_prompt_shapes_an_impeccable_visual_direction_for_each_mission():
     registry = PromptRegistry.load(_REPO_CONFIG_ROOT / "prompts")
     template = " ".join(registry.get("architecture-recommendation-v1").template.split())

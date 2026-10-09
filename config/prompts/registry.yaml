@@ -1283,12 +1283,29 @@ prompts:
       pill-shaped containers for ordinary text, eyebrow chips, icon tiles
       above headings, decorative pulsing dots, and bounce/elastic motion.
       Use whitespace, alignment, contrast, typographic hierarchy, and one
-      restrained accent more than decoration. Before returning, audit the
-      component for keyboard access, visible focus, touch targets,
-      responsive reflow, text overflow, loading/disabled/error/empty
-      states, and reduced-motion compatibility. Deploy & Launch runs the
-      pinned Impeccable detector over the completed frontend and fails the
-      build when deterministic anti-patterns remain.
+      restrained accent more than decoration. DARK SHELL, NEVER HARDCODE A
+      LIGHT PANEL - the shell's own page renders on a dark background
+      (`#0b0f14`) with light text (`#e6e9ee`); every inline style you write
+      inherits that unless you override it. Never hardcode a literal
+      white/near-white background (`#fff`, `#ffffff`, `white`, or a pale
+      tint like `#fff6f6`/`#eef6ff`) for any `<div>`, `<section>`,
+      `<article>`, `<aside>`, alert box, or code/`<pre>` block - doing so
+      traps whatever text is inside against a background it was never
+      designed for and a real, observed cause of white-panel/light-gray-
+      text contrast failures that make entire sections unreadable. Prefer
+      the shell's own `genie-card` class (a dark, subtly-tinted panel) for
+      any bordered panel; if you need a distinct accent panel (e.g. a
+      success/error/warning callout), use a dark, low-opacity tint of the
+      semantic color (e.g. `rgba(63, 166, 106, 0.12)` for success,
+      `rgba(239, 127, 116, 0.12)` for error) with a light, same-hue
+      foreground color, never a pale/white background with dark text.
+      Before returning, audit the component for keyboard access, visible
+      focus, touch targets, responsive reflow, text overflow,
+      loading/disabled/error/empty states, reduced-motion compatibility,
+      and that every background/foreground color pair you introduced
+      remains legible against the shell's dark theme. Deploy & Launch runs
+      the pinned Impeccable detector over the completed frontend and fails
+      the build when deterministic anti-patterns remain.
 
       COMPONENT CONTRACT - your default-exported component receives
       exactly one prop object: `{{ onSubmit: (message: string,
@@ -1702,11 +1719,30 @@ prompts:
       rounded rectangles, pills for ordinary text, eyebrow chips, icon
       tiles above headings, decorative pulsing dots, and bounce/elastic
       motion. Prefer alignment, whitespace, contrast, typographic
-      hierarchy, and one restrained accent. Before returning, audit
-      keyboard access, visible focus, touch targets, responsive reflow,
-      text overflow, loading/disabled/error/empty states, and reduced
-      motion. Deploy & Launch runs the pinned Impeccable detector and
-      fails the frontend build when deterministic anti-patterns remain.
+      hierarchy, and one restrained accent. DARK SHELL, NEVER HARDCODE A
+      LIGHT PANEL - this page is one of several stitched into the same
+      dark-themed shell (background `#0b0f14`, text `#e6e9ee`); every
+      inline style you write inherits that unless you override it. Never
+      hardcode a literal white/near-white background (`#fff`, `#ffffff`,
+      `white`, or a pale tint like `#fff6f6`/`#eef6ff`) for any `<div>`,
+      `<section>`, `<article>`, `<aside>`, alert box, or code/`<pre>`
+      block - doing so traps whatever text is inside against a background
+      it was never designed for, a real, observed cause of white-panel/
+      light-gray-text contrast failures that make entire sections
+      unreadable, and every page must remain independently legible since
+      a developer can land on any one of them directly. Prefer the
+      shell's own `genie-card` class (a dark, subtly-tinted panel) for
+      any bordered panel; for a distinct accent panel (e.g. a success/
+      error/warning callout) use a dark, low-opacity tint of the semantic
+      color (e.g. `rgba(63, 166, 106, 0.12)` for success, `rgba(239, 127,
+      116, 0.12)` for error) with a light, same-hue foreground color,
+      never a pale/white background with dark text. Before returning,
+      audit keyboard access, visible focus, touch targets, responsive
+      reflow, text overflow, loading/disabled/error/empty states, reduced
+      motion, and that every background/foreground color pair you
+      introduced remains legible against the shell's dark theme. Deploy &
+      Launch runs the pinned Impeccable detector and fails the frontend
+      build when deterministic anti-patterns remain.
       Return one fenced ```tsx code block, first line `// agent: ui`, then
       a "## Multi-Agent Workflow" section listing ONLY the agents actually
       generated - same count and names as above.
