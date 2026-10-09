@@ -1888,28 +1888,41 @@ prompts:
       ```yaml code block, first line `# agent:
       gateway_policy:{component_name}`.
 
-      If component_kind is "identity_config": Produce ONLY one TypeScript
-      module (never a React component) implementing the identity-provider
-      adapter named "{component_name}" from the architecture's "##
-      Identity Configuration" section, against exactly this shared
-      IDENTITY_PROVIDER_INTERFACE so a future, different provider is an
-      additive adapter, never a rewrite of anything that calls it:
-      "export interface IdentityProvider {{
-        signIn(): Promise<void>;
-        signOut(): Promise<void>;
-        getAccessToken(scopes: string[]): Promise<string | null>;
-        getAccountClaims(): Record<string, unknown> | null;
-      }}"
-      Implement it for Microsoft Entra ID using `@azure/msal-browser`'s
-      `PublicClientApplication` (authorization-code + PKCE, never an
-      implicit flow, never a client secret - this is a public SPA
-      client). Read the client id, authority/tenant, and redirect URI
-      from `import.meta.env` variables (e.g.
-      `VITE_GENIE_ENTRA_CLIENT_ID`, `VITE_GENIE_ENTRA_AUTHORITY`,
-      `VITE_GENIE_ENTRA_REDIRECT_URI`) - never hardcode any of these
-      values. Export the concrete implementation as the module's default
-      export. Return one fenced ```ts code block, first line `// agent:
+      If component_kind is "identity_config": Produce ONLY a small,
+      structured YAML configuration (never actual MSAL/sign-in code - the
+      real token-acquisition logic is a deterministic platform step, not
+      an LLM-generation target, exactly like "gateway_policy" above: Deploy
+      & Launch always generates one real, tested MSAL sign-in module and
+      a `useGenieAuth()` hook for every mission that declares this section,
+      reading tenant/client id from that mission's own runtime
+      configuration - never from `import.meta.env`/build-time values,
+      and never re-implemented per mission) describing what this
+      identity adapter named "{component_name}" needs to surface, based
+      on its own architecture bullet and the approved requirements - e.g.
+      a display name/claim this mission's pages must show once signed
+      in, or a note that no extra claims are needed beyond the default
+      sign-in. Never invent a tenant id, client id, authority URL, or any
+      other identity-provider-specific value - those are deployment-time
+      platform configuration, not something this component decides. Use
+      exactly this shape:
+      "display_claim: <the account claim name pages should show, e.g. name>
+      notes: <any other per-mission detail, or 'None.' if none>"
+      Return one fenced ```yaml code block, first line `# agent:
       identity_config:{component_name}`.
+
+      Any "page_view" (or single-page UI) component for a mission that
+      declared "## Identity Configuration"/"## Gateway Policies" must gate
+      its own protected action behind real sign-in state, never render it
+      as always-enabled or always-disabled: `import {{ useGenieAuth }} from
+      "../auth/useGenieAuth"` (this deterministic hook, exposing
+      `isSignedIn`/`displayName`/`signIn()`/`signOut()`/
+      `getAccessToken()`, always exists for a mission that declared
+      these sections - never write your own sign-in/token logic, and
+      never invent a different import path or shape for it), disable the
+      protected action while `!isSignedIn`, and call `await
+      getAccessToken()` to obtain the bearer token this mission's own
+      protected backend call needs - never fabricate a token, never skip
+      the call and proceed anyway if it returns null.
 
       Security rules you MUST follow: never hardcode any URL, hostname,
       port, API key, token, secret, or credential anywhere - read every

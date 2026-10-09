@@ -497,20 +497,24 @@ def test_build_generation_component_prompt_has_a_gateway_policy_branch_that_forb
 
 
 def test_build_generation_component_prompt_has_an_identity_config_branch():
-    """identity_config must implement a shared IdentityProvider interface
-    against Entra ID via @azure/msal-browser (authorization-code + PKCE,
-    never an implicit flow or client secret), reading configuration from
-    environment variables rather than hardcoding it - so a future,
-    different provider is a pure additive adapter."""
+    """identity_config must produce only a small, structured configuration
+    (never actual MSAL/sign-in code) - the real token-acquisition module is
+    a deterministic platform step (generate_msal_config_module/
+    generate_use_genie_auth_module), never per-mission LLM output, exactly
+    like gateway_policy's own real-policy-XML split. Also asserts any
+    page_view/single-page component for an identity-requiring mission must
+    use the real, deterministic useGenieAuth() hook rather than inventing
+    its own sign-in logic."""
 
     registry = PromptRegistry.load(_REPO_CONFIG_ROOT / "prompts")
     template = " ".join(registry.get("build-generation-component-v1").template.split())
 
     assert 'If component_kind is "identity_config"' in template
-    assert "IDENTITY_PROVIDER_INTERFACE" in template
-    assert "@azure/msal-browser" in template
-    assert "never a client secret" in template
+    assert "never actual MSAL/sign-in code" in template
+    assert "Never invent a tenant id, client id, authority URL" in template
     assert "identity_config:{component_name}" in template
+    assert "useGenieAuth" in template
+    assert "never write your own sign-in/token logic" in template
 
 
 def test_build_generation_component_prompt_wires_journey_events_end_to_end():

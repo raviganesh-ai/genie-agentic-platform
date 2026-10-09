@@ -1257,7 +1257,7 @@ async def test_call_build_agent_generates_identity_config_component():
         texts_by_component={
             "Ticket Classifier Agent": "```python\n# agent: Ticket Classifier Agent\nclassifier code\n```",
             "Support Triage Orchestrator Agent": "```python\n# agent: orchestrator\norchestrator code\n```",
-            "Entra ID Adapter": "```ts\n// agent: identity_config:Entra ID Adapter\nadapter code\n```",
+            "Entra ID Adapter": "```yaml\n# agent: identity_config:Entra ID Adapter\ndisplay_claim: name\n```",
             "ui": "```tsx\n// agent: ui\nui code\n```",
         }
     )
@@ -1291,4 +1291,4 @@ async def test_call_build_agent_generates_identity_config_component():
         ("identity_config", "Entra ID Adapter"),
         ("ui", "ui"),
     ]
-    assert "adapter code" in gateway.requests[3].variables["prior_components"]
+    assert "display_claim: name" in gateway.requests[3].variables["prior_components"]

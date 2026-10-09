@@ -109,9 +109,10 @@ export default function DashboardPage() {
 
 _MULTI_PAGE_BUILD_OUTPUT_WITH_IDENTITY = _MULTI_PAGE_BUILD_OUTPUT.rstrip() + '''
 
-```ts
-// agent: identity_config:Entra Sign-In
-export const ENTRA_SIGN_IN_PLACEHOLDER = true;
+```yaml
+# agent: identity_config:Entra Sign-In
+display_claim: name
+notes: None.
 ```
 
 ```yaml

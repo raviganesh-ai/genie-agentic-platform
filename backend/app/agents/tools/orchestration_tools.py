@@ -87,7 +87,7 @@ _EXPECTED_LANGUAGES_BY_COMPONENT_KIND: dict[str, frozenset[str]] = {
     "data_model": frozenset({"python"}),
     "api_contract": frozenset({"yaml", "yml"}),
     "gateway_policy": frozenset({"yaml", "yml"}),
-    "identity_config": frozenset({"ts"}),
+    "identity_config": frozenset({"yaml", "yml"}),
 }
 
 
@@ -470,7 +470,7 @@ def _validate_component_output(
 
     body_lines = match.group("body").splitlines()
     first_line = body_lines[0].strip() if body_lines else ""
-    comment_prefix = "//" if component_kind in ("ui", "page_view", "identity_config") else "#"
+    comment_prefix = "//" if component_kind in ("ui", "page_view") else "#"
     expected_marker = f"{comment_prefix} agent: {marker_name}"
     if first_line.casefold() != expected_marker.casefold():
         raise ToolExecutionError(
@@ -731,7 +731,7 @@ async def _generate_build_by_component(
             # with it (the "all or nothing" behavior this replaces) - see
             # _component_failure_piece and the module docstring.
             failure_piece = _component_failure_piece(
-                marker_name, is_ui=component_kind in ("ui", "page_view", "identity_config"), exc=exc
+                marker_name, is_ui=component_kind in ("ui", "page_view"), exc=exc
             )
             await _publish_delta(failure_piece)
             pieces.append(failure_piece)

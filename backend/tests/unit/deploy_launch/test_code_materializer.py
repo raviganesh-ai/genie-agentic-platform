@@ -932,17 +932,17 @@ class OrchestratorAgent:
         pass
 ```
 
-```ts
-// agent: identity_config:Entra ID Adapter
-export const signIn = () => {};
+```yaml
+# agent: identity_config:Entra ID Adapter
+display_claim: name
 ```
 '''
 
 
-def test_materialize_build_parses_identity_config_as_a_ts_module():
+def test_materialize_build_parses_identity_config_as_structured_yaml():
     build = materialize_build(_IDENTITY_CONFIG_OUTPUT)
 
-    assert "signIn" in build.identity_config_modules["Entra ID Adapter"]
+    assert "display_claim" in build.identity_config_modules["Entra ID Adapter"]
 
 
 def test_write_to_directory_writes_identity_config(tmp_path: Path):
@@ -950,7 +950,7 @@ def test_write_to_directory_writes_identity_config(tmp_path: Path):
 
     build.write_to_directory(tmp_path)
 
-    assert (tmp_path / "identity" / "entra_id_adapter.ts").exists()
+    assert (tmp_path / "identity" / "entra_id_adapter.yaml").exists()
 
 
 def test_stream_agent_response_relays_on_progress_narration_as_it_happens(monkeypatch):

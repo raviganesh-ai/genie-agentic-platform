@@ -77,10 +77,15 @@ _GATEWAY_POLICY_MARKER_PATTERN: Final = re.compile(
     r"^#\s*agent:\s*gateway_policy:(.+)$", re.IGNORECASE
 )
 # One identity-provider adapter (see "## Identity Configuration") - a
-# TypeScript module (``ts`` fence), never a React component. First line
-# ``// agent: identity_config:<Adapter Name>``.
+# small, structured YAML configuration (``yaml``/``yml`` fence), never
+# actual MSAL/sign-in code (see build-generation-component-v1's own
+# "identity_config" branch - the real token-acquisition module is a
+# deterministic platform step, generated once by
+# app.deploy_launch.code_materializer.generate_msal_config_module/
+# generate_use_genie_auth_module, never per-mission LLM output). First
+# line ``# agent: identity_config:<Adapter Name>``.
 _IDENTITY_CONFIG_MARKER_PATTERN: Final = re.compile(
-    r"^//\s*agent:\s*identity_config:(.+)$", re.IGNORECASE
+    r"^#\s*agent:\s*identity_config:(.+)$", re.IGNORECASE
 )
 
 _ORCHESTRATOR_MARKER: Final = "orchestrator"
@@ -355,8 +360,9 @@ class MaterializedBuild:
     # prototype_api_gateway_service.GatewayPolicyConfig).
     gateway_policy_documents: dict[str, str] = field(default_factory=dict)
     # One entry per declared "## Identity Configuration" component - a
-    # TypeScript identity-provider adapter module (see
-    # "IDENTITY_PROVIDER_INTERFACE" in build-generation-component-v1).
+    # small, structured YAML configuration (never actual MSAL/sign-in
+    # code - see generate_msal_config_module/generate_use_genie_auth_module,
+    # which always generate the real, deterministic sign-in module).
     identity_config_modules: dict[str, str] = field(default_factory=dict)
 
     def write_to_directory(
@@ -457,7 +463,7 @@ class MaterializedBuild:
             identity_dir = root / "identity"
             identity_dir.mkdir(parents=True, exist_ok=True)
             for adapter_name, code in self.identity_config_modules.items():
-                path = identity_dir / f"{_slugify(adapter_name)}.ts"
+                path = identity_dir / f"{_slugify(adapter_name)}.yaml"
                 path.write_text(code, encoding="utf-8")
                 written.append(path)
 
@@ -510,20 +516,19 @@ def materialize_build(output_text: str) -> MaterializedBuild:
         elif language.lower() in ("yaml", "yml"):
             contract_match = _API_CONTRACT_MARKER_PATTERN.match(first_line)
             gateway_policy_match = _GATEWAY_POLICY_MARKER_PATTERN.match(first_line)
+            identity_match = _IDENTITY_CONFIG_MARKER_PATTERN.match(first_line)
             if contract_match is not None:
                 api_contract_documents[contract_match.group(1).strip()] = body.strip("\n")
             elif gateway_policy_match is not None:
                 gateway_policy_documents[gateway_policy_match.group(1).strip()] = body.strip("\n")
+            elif identity_match is not None:
+                identity_config_modules[identity_match.group(1).strip()] = body.strip("\n")
         elif language.lower() == "tsx":
             page_match = _PAGE_MARKER_PATTERN.match(first_line)
             if page_match is not None:
                 page_components[page_match.group(1).strip()] = body.strip("\n")
             elif _UI_MARKER_PATTERN.match(first_line):
                 ui_component = body.strip("\n")
-        elif language.lower() == "ts":
-            identity_match = _IDENTITY_CONFIG_MARKER_PATTERN.match(first_line)
-            if identity_match is not None:
-                identity_config_modules[identity_match.group(1).strip()] = body.strip("\n")
 
     if (
         not agent_modules
