@@ -291,6 +291,15 @@ export function AppShell(): JSX.Element {
               size="small"
               appearance="subtle"
               onClick={() => {
+                // Clears this tab's persisted mission identifiers too (see
+                // SessionContext's sessionStorage persistence) - otherwise
+                // a different user signing in on this same tab would
+                // inherit the previous user's still-active mission.
+                setSessionId(null);
+                setWorkflowRunId(null);
+                setMissionKind(null);
+                setMissionStartedAt(null);
+                setSelectedModelDeploymentRef(null);
                 setAuthToken(null);
                 navigate("/login", { replace: true });
               }}
