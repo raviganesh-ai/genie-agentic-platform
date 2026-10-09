@@ -1435,7 +1435,12 @@ const msalConfig: Configuration = {
     redirectUri: window.location.origin + window.location.pathname,
   },
   cache: {
-    cacheLocation: "sessionStorage",
+    // localStorage (not sessionStorage) so a signed-in session survives
+    // a closed tab/browser restart within the same browser profile - the
+    // standard MSAL "remember me" behavior for a SPA; sessionStorage
+    // would force a fresh sign-in on every new tab, which is unnecessary
+    // friction for a prototype a user may revisit across a session.
+    cacheLocation: "localStorage",
     storeAuthStateInCookie: false,
   },
 };
