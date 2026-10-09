@@ -1214,7 +1214,13 @@ export default function MissionApp({{ onSubmit }}: MissionAppProps) {{
     <HashRouter>
       <nav className="genie-mission-nav">
         {{MISSION_PAGES.map((page) => (
-          <NavLink key={{page.path}} to={{page.path}} className="genie-mission-nav-link">
+          <NavLink
+            key={{page.path}}
+            to={{page.path}}
+            className={{({{ isActive }}) =>
+              isActive ? "genie-mission-nav-link active" : "genie-mission-nav-link"
+            }}
+          >
             {{page.label}}
           </NavLink>
         ))}}

@@ -459,6 +459,44 @@ input:focus, textarea:focus, select:focus {
   border-radius: 12px;
 }
 
+/* Multi-page mission navigation (see
+   app.deploy_launch.code_materializer.generate_routing_shell's
+   deterministic MissionApp.tsx). Without these rules the nav rendered as
+   bare, unstyled, run-together inline anchors - a real, observed
+   readability regression found while manually verifying a deployed
+   multi-page mission. */
+.genie-mission-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 20px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid #232b35;
+}
+
+.genie-mission-nav-link {
+  padding: 8px 14px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #aab3bf;
+  background-color: #1a2028;
+  border: 1px solid transparent;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.genie-mission-nav-link:hover {
+  color: #e6e9ee;
+  border-color: #2a323d;
+}
+
+.genie-mission-nav-link.active {
+  background-color: rgba(47, 131, 224, 0.18);
+  color: #6ba3ea;
+  border-color: rgba(47, 131, 224, 0.4);
+}
+
 @keyframes genie-indeterminate-rail {
   from { transform: translateX(-100%); }
   to { transform: translateX(340%); }
