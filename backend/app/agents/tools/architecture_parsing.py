@@ -34,16 +34,26 @@ backend component that is not an agent or a UI zone:
 
 Each uses the exact same "**<Name>**: <description> (fulfills REQ-XXX...)"
 bullet convention as the two baseline sections, so this module's existing
-bullet-parsing helpers apply unchanged. This is currently a parsing-only
-capability: ``architecture-recommendation-v1`` does not yet instruct the
-Architecture Designer agent to emit these sections, and
-``call_build_agent``/``build-generation-component-v1`` do not yet generate
-or materialize code for these component types - see the Genie-SaS Build
-Alignment platform-change roadmap. Landing the schema and its parser first,
-ahead of (and decoupled from) the generation prompts that would populate
-it, avoids a mission ever being able to cite a requirement under a section
-whose component Build cannot yet produce - which would silently orphan
-that requirement.
+bullet-parsing helpers apply unchanged. ``architecture-recommendation-v1``
+instructs the Architecture Designer agent to emit "## Data Models"/"##
+Deterministic Services"/"## API Contracts"/"## UI Pages" whenever a
+mission's own requirements call for them, and - as of this module's
+``gateway_policy``/``identity_config`` reasoning guidance - "## Gateway
+Policies"/"## Identity Configuration" too, always as a matched pair, only
+when the requirements genuinely call for real end-user sign-in (never a
+blanket rule, never a fixed keyword list - the Architecture Designer
+reasons about this from the requirements text itself). ``call_build_agent``/
+``build-generation-component-v1`` generate real code for every one of
+these component types, and Deploy & Launch's own pipeline consumes
+``identity_config``/``gateway_policy`` output to wire a real MSAL sign-in
+UI and a real APIM ``validate-azure-ad-token`` policy (see
+``app.deploy_launch.pipeline_service``'s ``sync-frontend-integration``
+step and ``app.deploy_launch.prototype_api_gateway_service.publish_api``'s
+``require_sign_in``). Landing the schema and its parser ahead of (and
+decoupled from) the generation prompts that would populate it was a
+deliberate ordering choice, so a mission could never cite a requirement
+under a section whose component Build could not yet produce - which
+would have silently orphaned that requirement.
 """
 from __future__ import annotations
 

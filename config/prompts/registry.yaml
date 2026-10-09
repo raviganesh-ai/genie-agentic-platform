@@ -594,7 +594,7 @@ prompts:
       (fulfills REQ-XXX[, REQ-XXX...])"
 
       OPTIONAL ADDITIONAL SECTIONS - beyond the two baseline sections
-      above, add any of these three ONLY when the approved requirements
+      above, add any of these five ONLY when the approved requirements
       genuinely need a concern that is not itself an agent or a UI zone/
       page. Each is fully independent of the others and of the UI choice
       above - use any subset, or none, exactly as needed; most missions
@@ -628,6 +628,38 @@ prompts:
       "**<API name>**: <what it exposes>
       (fulfills REQ-XXX[, REQ-XXX...])"
 
+      "## Identity Configuration" and "## Gateway Policies" - a matched
+      pair; add BOTH together, never only one, and ONLY when the approved
+      requirements themselves genuinely call for real end-user
+      authentication before a protected action (e.g. they name a specific
+      identity provider such as Microsoft Entra ID/Azure AD, describe a
+      sign-in/login step a real end-user must complete, or require that
+      an action be restricted to an authenticated/authorized user) -
+      reason about this from what the requirements actually say, never
+      from a fixed keyword list, and never add these two sections for a
+      mission whose requirements describe no real end-user identity at
+      all (most missions). A requirement that is merely "secure" or
+      mentions API keys/rate limiting does NOT by itself call for this -
+      that is already handled by this mission's own gateway without these
+      sections. Getting this wrong in either direction is a real defect:
+      omitting it when requirements name a sign-in step leaves the
+      generated prototype with a dead-end "Sign in" reference nothing
+      ever implements; adding it when nothing in the requirements asked
+      for it forces every user through an unnecessary, unrequested
+      sign-in wall. One bullet each, describing the identity requirement
+      in your own words (never invent a tenant id, client id, or other
+      literal credential/secret - those are real, deployment-specific
+      values Deploy & Launch supplies separately, never something you
+      author):
+      "## Identity Configuration"
+      "**<Adapter name>**: <what real end-user identity this mission's
+      sign-in must establish, and which requirement(s) call for it>
+      (fulfills REQ-XXX[, REQ-XXX...])"
+      "## Gateway Policies"
+      "**<Policy name>**: <which action(s)/page(s) this mission must
+      restrict to a signed-in user, and why>
+      (fulfills REQ-XXX[, REQ-XXX...])"
+
       "## Multi-Agent Workflow" - decide how many specialist agents this
       solution needs and what each one is responsible for, based solely
       on the approved requirements and centered on what the user is
@@ -658,7 +690,7 @@ prompts:
       - user_message
       - architecture_reference_text
       - standards_reference_text
-    version: "4.10.0"
+    version: "4.11.0"
 
   - id: security-assessment-v1
     name: Security Assessment
