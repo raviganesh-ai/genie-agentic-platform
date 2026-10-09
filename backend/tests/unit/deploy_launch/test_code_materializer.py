@@ -748,6 +748,23 @@ def test_generate_routing_shell_defaults_to_the_first_declared_page():
     assert 'label: "Dashboard Page"' in shell_source
 
 
+def test_generate_routing_shell_uses_hash_router_not_browser_router():
+    """Regression test for a real incident: the deployed frontend's own
+    production image serves the SPA from a plain nginx:alpine container
+    with no SPA-fallback rewrite rule, so a BrowserRouter route 404s on
+    direct navigation, refresh, or bookmark - before React Router ever
+    runs. HashRouter keeps every route under the single "/" path nginx
+    already serves."""
+
+    shell_source = generate_routing_shell(("Catalog Page", "Dashboard Page"))
+
+    assert 'from "react-router-dom"' in shell_source
+    assert "import { HashRouter" in shell_source
+    assert "<HashRouter>" in shell_source
+    assert "<BrowserRouter>" not in shell_source
+    assert "import { BrowserRouter" not in shell_source
+
+
 def test_generate_routing_shell_rejects_empty_page_list():
     with pytest.raises(MaterializedCodeError):
         generate_routing_shell(())

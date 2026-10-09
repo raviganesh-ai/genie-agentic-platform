@@ -1186,7 +1186,18 @@ _ROUTING_SHELL_TEMPLATE = '''// agent: generated-routing-shell
 // mission (per-page content) still goes through the same generation and
 // quality gates as the single-page case, while the part that is pure
 // plumbing never needs an LLM to get right.
-import {{ BrowserRouter, Routes, Route, Navigate, NavLink }} from "react-router-dom";
+//
+// Uses HashRouter (not BrowserRouter): the deployed frontend's own
+// production image serves the SPA from a plain nginx:alpine container
+// with no SPA-fallback rewrite rule (see
+// container_app_frontend_deployment_service.py's _FRONTEND_DOCKERFILE),
+// so any direct navigation, refresh, or bookmark of a path-based
+// BrowserRouter route returns a real 404 from nginx before React Router
+// ever runs - a real, observed failure. HashRouter keeps every route
+// under the single "/" path nginx already serves, trading a "#/" segment
+// in the URL for working deep links and refreshes without requiring a
+// custom nginx rewrite config.
+import {{ HashRouter, Routes, Route, Navigate, NavLink }} from "react-router-dom";
 import type {{ ComponentType }} from "react";
 {page_imports}
 
@@ -1200,7 +1211,7 @@ const MISSION_PAGES: {{ path: string; label: string; Component: ComponentType<Mi
 
 export default function MissionApp({{ onSubmit }}: MissionAppProps) {{
   return (
-    <BrowserRouter>
+    <HashRouter>
       <nav className="genie-mission-nav">
         {{MISSION_PAGES.map((page) => (
           <NavLink key={{page.path}} to={{page.path}} className="genie-mission-nav-link">
@@ -1214,7 +1225,7 @@ export default function MissionApp({{ onSubmit }}: MissionAppProps) {{
         ))}}
         <Route path="*" element={{<Navigate to={{MISSION_PAGES[0].path}} replace />}} />
       </Routes>
-    </BrowserRouter>
+    </HashRouter>
   );
 }}
 '''
