@@ -8,6 +8,7 @@ import pytest
 from app.deploy_launch.prototype_api_gateway_service import (
     GatewayPolicyConfig,
     GatewayPolicyPathRule,
+    PrototypeApiGatewayError,
     PrototypeApiGatewayService,
     _build_api_policy,
 )
@@ -284,6 +285,180 @@ async def test_publish_api_routes_supported_methods_to_private_backend(monkeypat
     assert "validate-azure-ad-token" not in policy
     assert "acceptance-test-key" not in policy
     assert "https://prototype.invalid" in policy
+
+
+async def test_publish_api_enforces_sign_in_when_shared_entra_app_is_configured(monkeypatch):
+    service = PrototypeApiGatewayService(
+        subscription_id="sub-123",
+        location="eastus2",
+        publisher_email="genie@example.com",
+        publisher_name="Genie",
+        shared_entra_tenant_id="tenant-abc",
+        shared_entra_audience="api://shared-client-id",
+    )
+    captured = {"operations": [], "named_values": []}
+    api_client = SimpleNamespace(
+        begin_create_or_update=lambda *args: captured.update(api=args) or _poller(SimpleNamespace())
+    )
+    operation_client = SimpleNamespace(
+        create_or_update=lambda *args: captured["operations"].append(args)
+    )
+    policy_client = SimpleNamespace(create_or_update=lambda *args: captured.update(policy=args))
+    service_client = SimpleNamespace(
+        get=lambda *_: SimpleNamespace(gateway_url="https://claims.azure-api.net/")
+    )
+    named_value_client = SimpleNamespace(
+        begin_create_or_update=lambda resource_group, service_name, name, model: (
+            captured["named_values"].append((name, model.value)) or _poller(SimpleNamespace())
+        )
+    )
+    monkeypatch.setattr(
+        service,
+        "_api_management_client",
+        lambda: SimpleNamespace(
+            api=api_client,
+            api_operation=operation_client,
+            api_policy=policy_client,
+            api_management_service=service_client,
+            named_value=named_value_client,
+        ),
+    )
+
+    await service.publish_api(
+        mission_slug="claims-1234",
+        backend_url="https://claims.private.internal",
+        require_sign_in=True,
+    )
+
+    assert dict(captured["named_values"]) == {
+        "genie-shared-entra-tenant-id": "tenant-abc",
+        "genie-shared-entra-audience": "api://shared-client-id",
+    }
+    policy = captured["policy"][4].value
+    assert "validate-azure-ad-token" in policy
+    assert "{{genie-shared-entra-tenant-id}}" in policy
+    assert "{{genie-shared-entra-audience}}" in policy
+
+
+async def test_publish_api_fails_closed_when_sign_in_required_but_shared_app_unconfigured():
+    service = PrototypeApiGatewayService(
+        subscription_id="sub-123",
+        location="eastus2",
+        publisher_email="genie@example.com",
+        publisher_name="Genie",
+    )
+
+    with pytest.raises(PrototypeApiGatewayError, match="shared_entra_tenant_id"):
+        await service.publish_api(
+            mission_slug="claims-1234",
+            backend_url="https://claims.private.internal",
+            require_sign_in=True,
+        )
+
+
+class _FakeGraphToken:
+    def __init__(self, token: str) -> None:
+        self.token = token
+
+
+class _FakeGraphCredential:
+    async def __aenter__(self) -> "_FakeGraphCredential":
+        return self
+
+    async def __aexit__(self, *exc_info: object) -> None:
+        return None
+
+    async def get_token(self, *_scopes: str) -> _FakeGraphToken:
+        return _FakeGraphToken("fake-graph-token")
+
+
+class _FakeGraphResponse:
+    def __init__(self, json_body: dict) -> None:
+        self._json_body = json_body
+
+    def raise_for_status(self) -> None:
+        return None
+
+    def json(self) -> dict:
+        return self._json_body
+
+
+class _FakeGraphHttpClient:
+    def __init__(self, existing_redirect_uris: list[str]) -> None:
+        self.existing_redirect_uris = existing_redirect_uris
+        self.patched_bodies: list[dict] = []
+
+    async def __aenter__(self) -> "_FakeGraphHttpClient":
+        return self
+
+    async def __aexit__(self, *exc_info: object) -> None:
+        return None
+
+    async def get(self, _url: str, headers: dict) -> _FakeGraphResponse:
+        assert headers["Authorization"] == "Bearer fake-graph-token"
+        return _FakeGraphResponse({"spa": {"redirectUris": self.existing_redirect_uris}})
+
+    async def patch(self, _url: str, *, headers: dict, json: dict) -> _FakeGraphResponse:
+        assert headers["Authorization"] == "Bearer fake-graph-token"
+        self.patched_bodies.append(json)
+        return _FakeGraphResponse({})
+
+
+async def test_ensure_spa_redirect_uri_is_a_no_op_when_shared_app_unconfigured():
+    service = PrototypeApiGatewayService(
+        subscription_id="sub-123",
+        location="eastus2",
+        publisher_email="genie@example.com",
+        publisher_name="Genie",
+    )
+
+    # Must not raise/attempt any Graph call at all when unconfigured.
+    await service.ensure_spa_redirect_uri("https://new-mission.example.com/")
+
+
+async def test_ensure_spa_redirect_uri_adds_additively_without_dropping_other_missions(
+    monkeypatch,
+):
+    service = PrototypeApiGatewayService(
+        subscription_id="sub-123",
+        location="eastus2",
+        publisher_email="genie@example.com",
+        publisher_name="Genie",
+        shared_entra_client_id="shared-client-id",
+    )
+    http_client = _FakeGraphHttpClient(
+        existing_redirect_uris=["https://other-mission.example.com/"]
+    )
+    monkeypatch.setattr(service, "_graph_credential", lambda: _FakeGraphCredential())
+    monkeypatch.setattr(service, "_graph_http_client", lambda: http_client)
+
+    await service.ensure_spa_redirect_uri("https://new-mission.example.com/")
+
+    assert len(http_client.patched_bodies) == 1
+    patched_uris = set(http_client.patched_bodies[0]["spa"]["redirectUris"])
+    assert patched_uris == {
+        "https://other-mission.example.com/",
+        "https://new-mission.example.com/",
+    }
+
+
+async def test_ensure_spa_redirect_uri_is_idempotent_when_already_present(monkeypatch):
+    service = PrototypeApiGatewayService(
+        subscription_id="sub-123",
+        location="eastus2",
+        publisher_email="genie@example.com",
+        publisher_name="Genie",
+        shared_entra_client_id="shared-client-id",
+    )
+    http_client = _FakeGraphHttpClient(
+        existing_redirect_uris=["https://new-mission.example.com/"]
+    )
+    monkeypatch.setattr(service, "_graph_credential", lambda: _FakeGraphCredential())
+    monkeypatch.setattr(service, "_graph_http_client", lambda: http_client)
+
+    await service.ensure_spa_redirect_uri("https://new-mission.example.com/")
+
+    assert http_client.patched_bodies == []
 
 
 async def test_peer_with_shared_network_is_a_no_op_when_not_configured():

@@ -201,6 +201,10 @@ class PrototypeApiGatewayService:
         shared_vnet_resource_id: str | None = None,
         shared_network_resource_group: str | None = None,
         shared_private_dns_zone_names: tuple[str, ...] = (),
+        shared_entra_tenant_id: str | None = None,
+        shared_entra_client_id: str | None = None,
+        shared_entra_audience: str | None = None,
+        shared_entra_api_scope: str = "prototype.access",
     ) -> None:
         self._subscription_id = subscription_id
         self._location = location
@@ -211,6 +215,10 @@ class PrototypeApiGatewayService:
         self._shared_vnet_resource_id = shared_vnet_resource_id
         self._shared_network_resource_group = shared_network_resource_group
         self._shared_private_dns_zone_names = shared_private_dns_zone_names
+        self._shared_entra_tenant_id = shared_entra_tenant_id
+        self._shared_entra_client_id = shared_entra_client_id
+        self._shared_entra_audience = shared_entra_audience
+        self._shared_entra_api_scope = shared_entra_api_scope
 
     def _credential(self) -> Any:
         try:
@@ -246,6 +254,97 @@ class PrototypeApiGatewayService:
         except ImportError as exc:
             raise PrototypeApiGatewayError("azure-mgmt-apimanagement is not installed.") from exc
         return ApiManagementClient(self._credential(), self._subscription_id)
+
+    async def ensure_spa_redirect_uri(self, frontend_url: str) -> None:
+        """Adds ``frontend_url`` to Genie's one shared Entra ID App
+        Registration's SPA redirect URI list, additively - never replacing
+        another mission's own redirect URI, since many missions share this
+        one app (see ``shared_entra_client_id`` on ``Settings``).
+
+        A no-op when the shared app isn't configured, matching every other
+        optional-collaborator pattern in this package. Requires Genie's own
+        deployment identity to hold Microsoft Graph ``Application.ReadWrite.
+        OwnedBy`` (scoped to just this one, Genie-owned app) - a narrower
+        grant than tenant-wide application management, because Genie
+        deliberately never creates or owns a new app registration per
+        mission.
+        """
+
+        if not self._shared_entra_client_id:
+            return
+
+        base_url = (
+            "https://graph.microsoft.com/v1.0/applications(appId="
+            f"'{self._shared_entra_client_id}')"
+        )
+        async with self._graph_credential() as credential:
+            token = await credential.get_token("https://graph.microsoft.com/.default")
+            headers = {
+                "Authorization": f"Bearer {token.token}",
+                "Content-Type": "application/json",
+            }
+            async with self._graph_http_client() as client:
+                response = await client.get(f"{base_url}?$select=spa", headers=headers)
+                response.raise_for_status()
+                current_uris = set((response.json().get("spa") or {}).get("redirectUris") or [])
+                if frontend_url in current_uris:
+                    return
+                current_uris.add(frontend_url)
+                response = await client.patch(
+                    base_url,
+                    headers=headers,
+                    json={"spa": {"redirectUris": sorted(current_uris)}},
+                )
+                response.raise_for_status()
+
+    def _graph_credential(self) -> Any:
+        """Separated for dependency injection in tests - the real
+        implementation is just ``azure.identity.aio.DefaultAzureCredential``,
+        never mocked/faked in production code."""
+        from azure.identity.aio import DefaultAzureCredential
+
+        return DefaultAzureCredential()
+
+    def _graph_http_client(self) -> Any:
+        """Separated for dependency injection in tests - the real
+        implementation is just ``httpx.AsyncClient``, never mocked/faked
+        in production code."""
+        import httpx
+
+        return httpx.AsyncClient(timeout=30)
+
+    async def _ensure_identity_named_values(
+        self, *, api_management_client: Any, resource_group: str, service_name: str
+    ) -> GatewayPolicyConfig | None:
+        """Creates/updates the APIM Named Values ``validate-azure-ad-token``
+        reads its tenant id/audience from, and returns the
+        ``GatewayPolicyConfig`` referencing them - or ``None`` when the
+        shared Entra app isn't configured, so a mission that doesn't need
+        sign-in enforcement never gets one (a no-op, not a failure)."""
+
+        if not (self._shared_entra_tenant_id and self._shared_entra_audience):
+            return None
+
+        from azure.mgmt.apimanagement.models import NamedValueCreateContract
+
+        tenant_id_named_value = "genie-shared-entra-tenant-id"
+        audience_named_value = "genie-shared-entra-audience"
+        for name, value in (
+            (tenant_id_named_value, self._shared_entra_tenant_id),
+            (audience_named_value, self._shared_entra_audience),
+        ):
+            poller = api_management_client.named_value.begin_create_or_update(
+                resource_group,
+                service_name,
+                name,
+                NamedValueCreateContract(display_name=name, value=value, secret=False),
+            )
+            await asyncio.to_thread(poller.result)
+        return GatewayPolicyConfig(
+            tenant_id_named_value=tenant_id_named_value,
+            audience_named_value=audience_named_value,
+            required_claim_values=(),
+        )
 
     async def _wait_for_private_dns_zone_group(
         self,
@@ -667,12 +766,21 @@ class PrototypeApiGatewayService:
         mission_slug: str,
         backend_url: str,
         frontend_origin: str = "https://prototype.invalid",
+        require_sign_in: bool = False,
         on_progress: GatewayProgressCallback | None = None,
     ) -> str:
         if not backend_url.startswith("https://"):
             raise PrototypeApiGatewayError("Private prototype backend URL must use HTTPS.")
         if not frontend_origin.startswith("https://"):
             raise PrototypeApiGatewayError("Prototype gateway CORS origin must use HTTPS.")
+        if require_sign_in and not (self._shared_entra_tenant_id and self._shared_entra_audience):
+            raise PrototypeApiGatewayError(
+                "This mission's architecture requires sign-in enforcement, but "
+                "Genie's shared Entra ID app (shared_entra_tenant_id/"
+                "shared_entra_audience) is not configured. Refusing to publish "
+                "an unprotected API for a mission that declared it needs one - "
+                "configure the shared app or remove the identity requirement."
+            )
         if on_progress is not None:
             await on_progress("Publishing the prototype API through its gateway...")
 
@@ -717,6 +825,25 @@ class PrototypeApiGatewayService:
                         url_template="/*",
                     ),
                 )
+            gateway_policy = None
+            if require_sign_in:
+                # Generic for every mission whose requirements named an
+                # identity provider (see architecture-coverage enforcement,
+                # not an ACI-specific branch) - enforced here regardless of
+                # what domain the mission is in.
+                gateway_policy = await self._ensure_identity_named_values(
+                    api_management_client=client,
+                    resource_group=resource_group,
+                    service_name=service_name,
+                )
+                if gateway_policy is None:
+                    raise PrototypeApiGatewayError(
+                        "This mission's architecture requires sign-in enforcement, but "
+                        "Genie's shared Entra ID app (shared_entra_tenant_id/"
+                        "shared_entra_audience) is not configured. Refusing to publish "
+                        "an unprotected API for a mission that declared it needs one - "
+                        "configure the shared app or remove the identity requirement."
+                    )
             client.api_policy.create_or_update(
                 resource_group,
                 service_name,
@@ -724,7 +851,9 @@ class PrototypeApiGatewayService:
                 "policy",
                 PolicyContract(
                     format="rawxml",
-                    value=_build_api_policy(frontend_origin=frontend_origin),
+                    value=_build_api_policy(
+                        frontend_origin=frontend_origin, gateway_policy=gateway_policy
+                    ),
                 ),
             )
             service = client.api_management_service.get(resource_group, service_name)

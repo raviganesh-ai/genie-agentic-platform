@@ -2390,6 +2390,10 @@ class DeploymentPipelineService:
                         data_endpoint=pipeline_run.data_endpoint,
                         data_database_name=pipeline_run.data_database_name,
                         data_container_name=pipeline_run.data_container_name,
+                        require_sign_in=bool(
+                            materialized.identity_config_modules
+                            or materialized.gateway_policy_documents
+                        ),
                         on_progress=_on_backend_progress,
                     )
                     pipeline_run.backend_url = backend_result.backend_url
@@ -2498,6 +2502,17 @@ class DeploymentPipelineService:
                         mission_slug=mission_slug,
                         frontend_origin=frontend_result.frontend_url,
                     )
+                    materialized = self._materialized_builds[pipeline_run.id]
+                    if materialized.identity_config_modules or materialized.gateway_policy_documents:
+                        # This mission's own Architecture stage determined
+                        # (from its own requirements) that it needs sign-in -
+                        # register its deployed frontend URL against Genie's
+                        # one shared Entra ID app so MSAL's redirect actually
+                        # lands somewhere real. A no-op when the shared app
+                        # isn't configured (see Settings.shared_entra_client_id).
+                        await self._backend_deployment_service.ensure_gateway_spa_redirect_uri(
+                            frontend_result.frontend_url
+                        )
                     detail = f"Frontend deployed at {frontend_result.frontend_url}."
 
                 elif step_id == "commit-generated-repository":

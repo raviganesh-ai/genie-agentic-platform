@@ -313,6 +313,7 @@ class BackendDeploymentService:
         data_endpoint: str | None = None,
         data_database_name: str | None = None,
         data_container_name: str | None = None,
+        require_sign_in: bool = False,
         on_progress: DeploymentProgressCallback | None = None,
     ) -> BackendDeploymentResult:
         """Builds ``build_root`` (must contain its own ``Dockerfile``) in ACR and
@@ -323,6 +324,13 @@ class BackendDeploymentService:
         The Container App is assigned this identity so it can authenticate to Azure
         services (ACR for image pull, Key Vault, Storage, Foundry) using managed
         identity instead of hardcoded credentials.
+
+        ``require_sign_in`` is true only when this mission's own Architecture
+        stage determined (from its own requirements, not a blanket rule) that
+        it needs an identity provider - it is threaded straight through to the
+        prototype API gateway's ``publish_api``, which then fails closed
+        rather than publishing an unprotected API for a mission that declared
+        it needs sign-in enforcement.
 
         When given, ``on_progress`` is awaited with a short status message
         before each real sub-phase begins (upload, remote ACR build,
@@ -584,6 +592,7 @@ class BackendDeploymentService:
                 backend_url = await self._prototype_api_gateway_service.publish_api(
                     mission_slug=mission_slug,
                     backend_url=private_backend_url,
+                    require_sign_in=require_sign_in,
                     on_progress=on_progress,
                 )
             except Exception as exc:
@@ -617,6 +626,20 @@ class BackendDeploymentService:
                 f"Failed to configure prototype gateway CORS origin: {exc}"
             ) from exc
 
+    async def ensure_gateway_spa_redirect_uri(self, frontend_url: str) -> None:
+        """Registers ``frontend_url`` against Genie's one shared Entra ID
+        app's SPA redirect URI list - a no-op when the prototype API
+        gateway (and therefore the shared Entra app) isn't configured."""
+
+        if self._prototype_api_gateway_service is None:
+            return
+        try:
+            await self._prototype_api_gateway_service.ensure_spa_redirect_uri(frontend_url)
+        except Exception as exc:
+            raise BackendDeploymentError(
+                f"Failed to register the mission's frontend URL for sign-in: {exc}"
+            ) from exc
+
 
 class NullBackendDeploymentService:
     """Local/test double: real behavior end-to-end minus any actual Azure calls."""
@@ -630,6 +653,7 @@ class NullBackendDeploymentService:
         data_endpoint: str | None = None,
         data_database_name: str | None = None,
         data_container_name: str | None = None,
+        require_sign_in: bool = False,
         on_progress: DeploymentProgressCallback | None = None,
     ) -> BackendDeploymentResult:
         del (
@@ -638,6 +662,7 @@ class NullBackendDeploymentService:
             data_endpoint,
             data_database_name,
             data_container_name,
+            require_sign_in,
         )
         if on_progress is not None:
             await on_progress("Deploying backend service (local mode, no real Azure calls)...")
@@ -653,6 +678,9 @@ class NullBackendDeploymentService:
         frontend_origin: str,
     ) -> None:
         del mission_slug, frontend_origin
+
+    async def ensure_gateway_spa_redirect_uri(self, frontend_url: str) -> None:
+        del frontend_url
 
     async def delete(self, *, mission_slug: str) -> None:
         del mission_slug
@@ -708,6 +736,10 @@ def create_backend_deployment_service(
                     for name in settings.shared_private_dns_zone_names.split(",")
                     if name.strip()
                 ),
+                shared_entra_tenant_id=settings.shared_entra_tenant_id,
+                shared_entra_client_id=settings.shared_entra_client_id,
+                shared_entra_audience=settings.shared_entra_audience,
+                shared_entra_api_scope=settings.shared_entra_api_scope,
             )
             if settings.prototype_api_gateway_enabled
             else None

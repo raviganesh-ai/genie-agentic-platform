@@ -354,6 +354,28 @@ class Settings(BaseSettings):
         "privatelink.openai.azure.com,"
         "privatelink.services.ai.azure.com"
     )
+    # Genie's one shared Microsoft Entra ID App Registration used for every
+    # generated prototype's sign-in - deliberately a single shared app, not
+    # one per mission (a dedicated per-mission app registration would need
+    # its own elevated Microsoft Graph provisioning call for every mission;
+    # a single shared app only ever needs its existing redirect URI list
+    # extended). A mission only gets wired to this app when Architecture
+    # determined (from the mission's own requirements) that it actually
+    # needs an identity provider - see identity_config/gateway_policy
+    # component coverage. Optional and unset by default - never hardcoded
+    # to a real tenant - so a deployment must explicitly configure these
+    # before any mission's frontend/gateway is wired for sign-in.
+    shared_entra_tenant_id: str | None = None
+    shared_entra_client_id: str | None = None
+    # The Application ID URI (APIM's validate-azure-ad-token audience) that
+    # this shared app exposes itself as - normally "api://<client-id>"
+    # unless a custom identifier URI was configured.
+    shared_entra_audience: str | None = None
+    # The custom OAuth2 delegated scope name (not a literal Microsoft Graph
+    # scope) that this shared app exposes on itself, which a generated
+    # prototype's MSAL sign-in requests an access token for for its own
+    # APIM-fronted API - see "## 8. FR-005" in the ACI requirements.
+    shared_entra_api_scope: str = "prototype.access"
     deployment_fidelity_max_repair_attempts: int = 3
     deployment_fidelity_min_coverage_percent: float = Field(default=90.0, gt=0, le=100)
     # How long Requirement Validation's real pytest subprocess is
@@ -438,6 +460,9 @@ class Settings(BaseSettings):
         "prototype_api_gateway_publisher_name",
         "shared_vnet_resource_id",
         "shared_network_resource_group",
+        "shared_entra_tenant_id",
+        "shared_entra_client_id",
+        "shared_entra_audience",
         mode="after",
     )
     @classmethod

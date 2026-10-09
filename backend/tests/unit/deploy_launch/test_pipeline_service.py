@@ -709,6 +709,9 @@ class _FakeProtectedBackendDeploymentService:
         del mission_slug
         self.frontend_origin = frontend_origin
 
+    async def ensure_gateway_spa_redirect_uri(self, frontend_url: str) -> None:
+        del frontend_url
+
     async def delete(self, *, mission_slug: str, app_name: str | None = None):
         del app_name
         if self.delete_events is not None:
@@ -1650,9 +1653,10 @@ class _FakeHttpsBackendDeploymentService:
         data_endpoint: str | None = None,
         data_database_name: str | None = None,
         data_container_name: str | None = None,
+        require_sign_in: bool = False,
         on_progress=None,
     ) -> BackendDeploymentResult:
-        del data_endpoint, data_database_name, data_container_name
+        del data_endpoint, data_database_name, data_container_name, require_sign_in
         return BackendDeploymentResult(
             image_tag=f"acr/{mission_slug}:dev",
             backend_url=f"https://{mission_slug}-backend.example.com",
@@ -1662,6 +1666,9 @@ class _FakeHttpsBackendDeploymentService:
         self, *, mission_slug: str, frontend_origin: str
     ) -> None:
         del mission_slug, frontend_origin
+
+    async def ensure_gateway_spa_redirect_uri(self, frontend_url: str) -> None:
+        del frontend_url
 
 
 async def test_pipeline_retries_test_generation_when_it_uses_mocks_then_succeeds(
@@ -1836,9 +1843,10 @@ class _FailOnceThenSucceedBackendDeploymentService:
         data_endpoint: str | None = None,
         data_database_name: str | None = None,
         data_container_name: str | None = None,
+        require_sign_in: bool = False,
         on_progress=None,
     ) -> BackendDeploymentResult:
-        del data_endpoint, data_database_name, data_container_name
+        del data_endpoint, data_database_name, data_container_name, require_sign_in
         self.call_count += 1
         if self.call_count == 1:
             raise BackendDeploymentError("Simulated ACR build failure.")
@@ -1851,6 +1859,9 @@ class _FailOnceThenSucceedBackendDeploymentService:
         self, *, mission_slug: str, frontend_origin: str
     ) -> None:
         del mission_slug, frontend_origin
+
+    async def ensure_gateway_spa_redirect_uri(self, frontend_url: str) -> None:
+        del frontend_url
 
 
 async def test_retry_from_a_failed_step_reuses_the_same_run_and_its_prior_artifacts(tmp_path: Path):
