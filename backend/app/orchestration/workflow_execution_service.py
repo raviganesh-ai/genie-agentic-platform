@@ -106,6 +106,41 @@ class WorkflowExecutionService:
     async def get_run(self, workflow_run_id: str) -> WorkflowRunResult | None:
         return await self._repository.get(workflow_run_id=workflow_run_id)
 
+    async def update_step_output(
+        self, *, workflow_run_id: str, step_id: str, output_text: str
+    ) -> WorkflowRunResult:
+        """Durably persists a new ``output_text`` for one already-recorded
+        step result of an existing run (e.g. a single component's code was
+        regenerated and spliced back into ``build-solution``'s output -
+        see ``AgentOrchestrator.update_build_component``).
+
+        Every other field of the matching ``WorkflowStepResult`` (status,
+        timestamps, resolved_variables, ...) is preserved unchanged; only
+        ``output_text`` is replaced. Raises ``UnknownWorkflowRunError`` if
+        the run or the named step result does not exist, so a caller can
+        never silently no-op this.
+        """
+
+        run = await self._repository.get(workflow_run_id=workflow_run_id)
+        if run is None:
+            raise UnknownWorkflowRunError(f"No workflow run '{workflow_run_id}' found.")
+        if not any(result.step_id == step_id for result in run.step_results):
+            raise UnknownWorkflowRunError(
+                f"Workflow run '{workflow_run_id}' has no recorded result for step '{step_id}'."
+            )
+        updated_run = run.model_copy(
+            update={
+                "step_results": [
+                    result.model_copy(update={"output_text": output_text})
+                    if result.step_id == step_id
+                    else result
+                    for result in run.step_results
+                ]
+            }
+        )
+        await self._repository.put(updated_run)
+        return updated_run
+
     async def start_workflow_background(
         self,
         *,

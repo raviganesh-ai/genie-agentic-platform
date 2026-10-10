@@ -14,8 +14,13 @@ from __future__ import annotations
 
 import asyncio
 
-from app.models.workflow_models import WorkflowRunResult, WorkflowStepInput
-from app.orchestration.workflow_execution_service import WorkflowExecutionService
+import pytest
+
+from app.models.workflow_models import WorkflowRunResult, WorkflowStepInput, WorkflowStepResult
+from app.orchestration.workflow_execution_service import (
+    UnknownWorkflowRunError,
+    WorkflowExecutionService,
+)
 from app.repositories.workflow_run_repository import InMemoryWorkflowRunRepository
 
 
@@ -115,3 +120,80 @@ async def test_resume_after_prior_one_settled_is_allowed_to_run_again() -> None:
     await asyncio.wait_for(runtime.entered.wait(), timeout=1.0)
 
     assert runtime.call_count == 2
+
+
+def _step_result(**overrides: object) -> WorkflowStepResult:
+    from datetime import UTC, datetime
+
+    defaults: dict[str, object] = {
+        "step_id": "build-solution",
+        "agent_id": "build-agent",
+        "status": "completed",
+        "output_text": "original output",
+        "started_at": datetime(2026, 1, 1, tzinfo=UTC),
+        "completed_at": datetime(2026, 1, 1, tzinfo=UTC),
+    }
+    defaults.update(overrides)
+    return WorkflowStepResult.model_validate(defaults)
+
+
+async def test_update_step_output_replaces_only_the_named_steps_output_text() -> None:
+    """Regression coverage for a real incident: a Workshop "Regenerate"
+    action for a single component returned the new code to the caller but
+    never persisted it anywhere, so every subsequent Deploy & Launch kept
+    re-materializing the original, unmodified build output."""
+
+    repository = InMemoryWorkflowRunRepository()
+    await repository.put(
+        _run(
+            step_results=[
+                _step_result(step_id="analyze-requirements", output_text="requirements text"),
+                _step_result(step_id="build-solution", output_text="original build output"),
+            ]
+        )
+    )
+    service = WorkflowExecutionService(runtime=object(), repository=repository)  # type: ignore[arg-type]
+
+    updated = await service.update_step_output(
+        workflow_run_id="run-1",
+        step_id="build-solution",
+        output_text="regenerated build output",
+    )
+
+    build_result = next(r for r in updated.step_results if r.step_id == "build-solution")
+    other_result = next(r for r in updated.step_results if r.step_id == "analyze-requirements")
+    assert build_result.output_text == "regenerated build output"
+    # Every other field of the updated step result is preserved untouched.
+    assert build_result.status == "completed"
+    assert build_result.agent_id == "build-agent"
+    # A different step's result must be left completely untouched.
+    assert other_result.output_text == "requirements text"
+
+    # The change must be durably persisted, not just returned.
+    persisted = await repository.get(workflow_run_id="run-1")
+    assert persisted is not None
+    persisted_build_result = next(
+        r for r in persisted.step_results if r.step_id == "build-solution"
+    )
+    assert persisted_build_result.output_text == "regenerated build output"
+
+
+async def test_update_step_output_raises_for_unknown_run() -> None:
+    repository = InMemoryWorkflowRunRepository()
+    service = WorkflowExecutionService(runtime=object(), repository=repository)  # type: ignore[arg-type]
+
+    with pytest.raises(UnknownWorkflowRunError):
+        await service.update_step_output(
+            workflow_run_id="no-such-run", step_id="build-solution", output_text="x"
+        )
+
+
+async def test_update_step_output_raises_for_unknown_step() -> None:
+    repository = InMemoryWorkflowRunRepository()
+    await repository.put(_run(step_results=[_step_result(step_id="build-solution")]))
+    service = WorkflowExecutionService(runtime=object(), repository=repository)  # type: ignore[arg-type]
+
+    with pytest.raises(UnknownWorkflowRunError):
+        await service.update_step_output(
+            workflow_run_id="run-1", step_id="no-such-step", output_text="x"
+        )

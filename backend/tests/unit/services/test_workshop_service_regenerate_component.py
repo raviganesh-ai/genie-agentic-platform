@@ -19,10 +19,12 @@ pytestmark = pytest.mark.asyncio
 
 
 class _FakeOrchestrator:
-    """Duck-typed stand-in recording the ``execute_agent`` call it received."""
+    """Duck-typed stand-in recording the ``execute_agent``/
+    ``update_build_component`` calls it received."""
 
     def __init__(self) -> None:
         self.execute_agent_calls: list[dict] = []
+        self.update_build_component_calls: list[dict] = []
 
     async def get_workflow_run(self, workflow_run_id: str):
         return None
@@ -51,6 +53,17 @@ class _FakeOrchestrator:
             correlation_id=trace_id or "corr-1",
         )
 
+    async def update_build_component(
+        self, *, workflow_run_id: str, component_label: str, new_block_text: str
+    ) -> None:
+        self.update_build_component_calls.append(
+            {
+                "workflow_run_id": workflow_run_id,
+                "component_label": component_label,
+                "new_block_text": new_block_text,
+            }
+        )
+
 
 async def _make_service() -> tuple[WorkshopService, _FakeOrchestrator, str]:
     orchestrator = _FakeOrchestrator()
@@ -66,6 +79,7 @@ async def test_regenerate_component_calls_build_agent_directly_for_ui_label() ->
     code = await service.regenerate_component(
         session_id=session_id,
         requesting_user_id="user-1",
+        workflow_run_id="run-1",
         component_label="ui",
         existing_code="// agent: ui\nexport function App() {}",
         instructions="Make the header sticky.",
@@ -86,6 +100,15 @@ async def test_regenerate_component_calls_build_agent_directly_for_ui_label() ->
     assert call["session_id"] == session_id
     assert call["trace_id"] == "trace-1"
 
+    # The regenerated code must also be persisted back into the run's own
+    # build-solution output - otherwise a subsequent Deploy & Launch would
+    # silently keep re-materializing the original, unmodified component.
+    assert len(orchestrator.update_build_component_calls) == 1
+    persisted = orchestrator.update_build_component_calls[0]
+    assert persisted["workflow_run_id"] == "run-1"
+    assert persisted["component_label"] == "ui"
+    assert persisted["new_block_text"] == code
+
 
 async def test_regenerate_component_classifies_orchestrator_label() -> None:
     service, orchestrator, session_id = await _make_service()
@@ -93,6 +116,7 @@ async def test_regenerate_component_classifies_orchestrator_label() -> None:
     await service.regenerate_component(
         session_id=session_id,
         requesting_user_id="user-1",
+        workflow_run_id="run-1",
         component_label="Orchestrator",
         existing_code="# agent: orchestrator\n...",
         instructions="Add retry logic.",
@@ -109,6 +133,7 @@ async def test_regenerate_component_classifies_named_specialist_agent_label() ->
     await service.regenerate_component(
         session_id=session_id,
         requesting_user_id="user-1",
+        workflow_run_id="run-1",
         component_label="requirements-analyst",
         existing_code="# agent: requirements-analyst\n...",
         instructions="Log every extracted requirement.",

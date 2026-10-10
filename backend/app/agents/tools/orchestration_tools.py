@@ -45,7 +45,11 @@ from app.memory.memory_service import MemoryService
 from app.models.workflow_stream_models import WorkflowStreamEvent
 from app.orchestration.workflow_event_bus import WorkflowEventBus
 
-__all__ = ["register_orchestrator_delegation_tools", "resolve_delegate_agent_id"]
+__all__ = [
+    "register_orchestrator_delegation_tools",
+    "replace_component_block",
+    "resolve_delegate_agent_id",
+]
 
 _ORCHESTRATOR_AGENT_ID = "genie-orchestrator"
 _PREVIEW_MAX_LENGTH = 240
@@ -416,6 +420,49 @@ def _extract_reusable_components(previous_build_output: str) -> dict[str, str]:
             continue
         reusable[name.lower()] = block_text
     return reusable
+
+
+def replace_component_block(output_text: str, component_label: str, new_block_text: str) -> str:
+    """Replaces one component's whole fenced code block inside a persisted
+    ``build-solution`` step's ``output_text`` with ``new_block_text``,
+    matched by the same ``# agent: <name>``/``// agent: <name>`` label
+    convention every component already follows (see
+    ``_AGENT_LABEL_BLOCK_PATTERN``/``_extract_reusable_components``).
+
+    A real, observed production incident this fixes: ``WorkshopService.
+    regenerate_component`` used to call the Build Agent and return its new
+    code straight to the caller with no write-back into the run's own
+    persisted ``build-solution`` output - Deploy & Launch always
+    re-materializes a mission's backend straight from that same persisted
+    ``output_text`` (see ``code_materializer.materialize_build``), so a
+    "successful" single-component regeneration in the Workshop UI was
+    purely cosmetic in the browser and silently discarded at every
+    subsequent deploy attempt, which kept redeploying the original, still
+    broken component. Callers must persist the string this function
+    returns (see ``AgentOrchestrator.update_build_component``) for a
+    regeneration to ever actually reach a deployed mission.
+
+    ``component_label`` is matched against each block's own captured label
+    both as given and with any known component-kind marker prefix (e.g.
+    ``"page:"``) stripped, so it works whether a caller passes the raw
+    ``# agent: <label>`` value or just the bare component name.
+
+    Raises ``ValueError`` if no block with this label can be found, so a
+    caller never silently no-ops a regeneration request.
+    """
+
+    target_raw = component_label.strip().casefold()
+    target_stripped = _strip_marker_prefix(component_label.strip()).casefold()
+    for match in _AGENT_LABEL_BLOCK_PATTERN.finditer(output_text):
+        name = match.group("name").strip()
+        if name.casefold() in (target_raw, target_stripped) or _strip_marker_prefix(
+            name
+        ).casefold() in (target_raw, target_stripped):
+            return output_text[: match.start()] + new_block_text.strip("\n") + output_text[match.end() :]
+    raise ValueError(
+        f"No existing component labeled '{component_label}' was found in the "
+        "build output to replace."
+    )
 
 
 def _component_failure_piece(component_name: str, *, is_ui: bool, exc: BaseException) -> str:

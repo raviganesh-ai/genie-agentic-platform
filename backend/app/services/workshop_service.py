@@ -85,6 +85,7 @@ class WorkshopService:
         *,
         session_id: str,
         requesting_user_id: str,
+        workflow_run_id: str,
         component_label: str,
         existing_code: str,
         instructions: str,
@@ -97,6 +98,15 @@ class WorkshopService:
         ``build-component-regeneration-v1`` prompt, never resuming the whole
         `build-solution` workflow step (which would regenerate every other
         component too).
+
+        Also splices the newly generated code back into ``workflow_run_id``'s
+        own persisted ``build-solution`` step output (see
+        ``AgentOrchestrator.update_build_component``) - Deploy & Launch always
+        re-materializes a mission's backend straight from that same
+        persisted output, so without this write-back a "successful"
+        regeneration here was purely cosmetic in the browser and silently
+        discarded at every subsequent deploy attempt (a real, observed
+        production incident).
         """
         await self._authorize(session_id, requesting_user_id)
         component_kind, component_name = self._classify_component(component_label)
@@ -111,6 +121,11 @@ class WorkshopService:
             },
             session_id=session_id,
             trace_id=trace_id,
+        )
+        await self._orchestrator.update_build_component(
+            workflow_run_id=workflow_run_id,
+            component_label=component_label,
+            new_block_text=result.output_text,
         )
         return result.output_text
 
