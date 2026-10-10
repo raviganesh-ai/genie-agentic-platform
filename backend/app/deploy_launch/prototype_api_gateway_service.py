@@ -138,12 +138,34 @@ def _build_api_policy(
     )
     ElementTree.SubElement(correlation_header, "value").text = "@(context.RequestId.ToString())"
     if gateway_policy is not None:
+        # Health/readiness probes (this mission's own Deploy & Launch
+        # readiness check, and any future external uptime monitor) must
+        # never be required to present a bearer token - a real, observed
+        # incident: a mission whose architecture required sign-in got
+        # validate-azure-ad-token applied to every path with no exemption,
+        # so its own Deploy & Launch readiness probe got HTTP 401 against
+        # its own newly-published gateway and the deployment could never
+        # succeed. This exemption is unconditional and always first,
+        # regardless of path_rules below.
+        health_gate = ElementTree.SubElement(inbound, "choose")
+        health_when = ElementTree.SubElement(
+            health_gate,
+            "when",
+            {
+                "condition": (
+                    '@(context.Request.OriginalUrl.Path.StartsWith('
+                    '"/health", StringComparison.OrdinalIgnoreCase))'
+                )
+            },
+        )
+        ElementTree.SubElement(health_when, "base")
+        gateway_policy_branch = ElementTree.SubElement(health_gate, "otherwise")
         if gateway_policy.path_rules:
             # Policy-based denial per product/operation path (FR-008) -
             # each declared path rule gets its own stricter claim
             # requirement; any path not matched falls through to the
             # mission's own default/global requirement.
-            choose = ElementTree.SubElement(inbound, "choose")
+            choose = ElementTree.SubElement(gateway_policy_branch, "choose")
             for rule in gateway_policy.path_rules:
                 when = ElementTree.SubElement(
                     choose,
@@ -172,7 +194,7 @@ def _build_api_policy(
             )
         else:
             _add_validate_azure_ad_token(
-                inbound,
+                gateway_policy_branch,
                 tenant_id_named_value=gateway_policy.tenant_id_named_value,
                 audience_named_value=gateway_policy.audience_named_value,
                 required_claim_name=gateway_policy.required_claim_name,

@@ -51,7 +51,7 @@ def test_api_policy_validates_azure_ad_token_against_named_values_when_gateway_p
     )
     root = ElementTree.fromstring(policy)
 
-    validate = root.find("./inbound/validate-azure-ad-token")
+    validate = root.find("./inbound/choose/otherwise/validate-azure-ad-token")
     assert validate is not None
     # Named Value references, never a literal tenant id/audience string -
     # the real value lives in APIM's own Named Values store.
@@ -61,7 +61,36 @@ def test_api_policy_validates_azure_ad_token_against_named_values_when_gateway_p
     assert claim is not None
     assert claim.attrib == {"name": "roles", "match": "any"}
     assert claim.findtext("value") == "prototype.access"
-    assert root.find("./inbound/choose") is None
+    # Only the outer health-exemption choose, never a nested per-path one.
+    assert root.find("./inbound/choose/otherwise/choose") is None
+
+
+def test_api_policy_never_requires_a_bearer_token_on_health_paths():
+    """Regression test for a real incident: a mission whose architecture
+    required sign-in got validate-azure-ad-token applied to every path
+    with no exemption, so its own Deploy & Launch readiness probe got
+    HTTP 401 against its own newly-published gateway and the deployment
+    could never succeed - a sign-in-requiring mission must still be able
+    to pass its own health check."""
+
+    gateway_policy = GatewayPolicyConfig(
+        tenant_id_named_value="genie-prototype-aad-tenant-id",
+        audience_named_value="genie-prototype-aad-audience",
+        required_claim_values=(),
+    )
+
+    policy = _build_api_policy(
+        frontend_origin="https://prototype.example.com", gateway_policy=gateway_policy
+    )
+    root = ElementTree.fromstring(policy)
+
+    health_when = root.find("./inbound/choose/when")
+    assert health_when is not None
+    assert '"/health"' in health_when.attrib["condition"]
+    # The health branch must be a pure pass-through - no token validation
+    # anywhere inside it.
+    assert health_when.find(".//validate-azure-ad-token") is None
+    assert health_when.find("./base") is not None
 
 
 def test_api_policy_renders_per_path_denial_with_a_default_fallback():
@@ -79,7 +108,7 @@ def test_api_policy_renders_per_path_denial_with_a_default_fallback():
     )
     root = ElementTree.fromstring(policy)
 
-    choose = root.find("./inbound/choose")
+    choose = root.find("./inbound/choose/otherwise/choose")
     assert choose is not None
     when = choose.find("./when")
     assert when is not None
