@@ -594,7 +594,7 @@ prompts:
       (fulfills REQ-XXX[, REQ-XXX...])"
 
       OPTIONAL ADDITIONAL SECTIONS - beyond the two baseline sections
-      above, add any of these three ONLY when the approved requirements
+      above, add any of these five ONLY when the approved requirements
       genuinely need a concern that is not itself an agent or a UI zone/
       page. Each is fully independent of the others and of the UI choice
       above - use any subset, or none, exactly as needed; most missions
@@ -628,6 +628,38 @@ prompts:
       "**<API name>**: <what it exposes>
       (fulfills REQ-XXX[, REQ-XXX...])"
 
+      "## Identity Configuration" and "## Gateway Policies" - a matched
+      pair; add BOTH together, never only one, and ONLY when the approved
+      requirements themselves genuinely call for real end-user
+      authentication before a protected action (e.g. they name a specific
+      identity provider such as Microsoft Entra ID/Azure AD, describe a
+      sign-in/login step a real end-user must complete, or require that
+      an action be restricted to an authenticated/authorized user) -
+      reason about this from what the requirements actually say, never
+      from a fixed keyword list, and never add these two sections for a
+      mission whose requirements describe no real end-user identity at
+      all (most missions). A requirement that is merely "secure" or
+      mentions API keys/rate limiting does NOT by itself call for this -
+      that is already handled by this mission's own gateway without these
+      sections. Getting this wrong in either direction is a real defect:
+      omitting it when requirements name a sign-in step leaves the
+      generated prototype with a dead-end "Sign in" reference nothing
+      ever implements; adding it when nothing in the requirements asked
+      for it forces every user through an unnecessary, unrequested
+      sign-in wall. One bullet each, describing the identity requirement
+      in your own words (never invent a tenant id, client id, or other
+      literal credential/secret - those are real, deployment-specific
+      values Deploy & Launch supplies separately, never something you
+      author):
+      "## Identity Configuration"
+      "**<Adapter name>**: <what real end-user identity this mission's
+      sign-in must establish, and which requirement(s) call for it>
+      (fulfills REQ-XXX[, REQ-XXX...])"
+      "## Gateway Policies"
+      "**<Policy name>**: <which action(s)/page(s) this mission must
+      restrict to a signed-in user, and why>
+      (fulfills REQ-XXX[, REQ-XXX...])"
+
       "## Multi-Agent Workflow" - decide how many specialist agents this
       solution needs and what each one is responsible for, based solely
       on the approved requirements and centered on what the user is
@@ -658,7 +690,7 @@ prompts:
       - user_message
       - architecture_reference_text
       - standards_reference_text
-    version: "4.10.0"
+    version: "4.11.0"
 
   - id: security-assessment-v1
     name: Security Assessment
@@ -1283,12 +1315,29 @@ prompts:
       pill-shaped containers for ordinary text, eyebrow chips, icon tiles
       above headings, decorative pulsing dots, and bounce/elastic motion.
       Use whitespace, alignment, contrast, typographic hierarchy, and one
-      restrained accent more than decoration. Before returning, audit the
-      component for keyboard access, visible focus, touch targets,
-      responsive reflow, text overflow, loading/disabled/error/empty
-      states, and reduced-motion compatibility. Deploy & Launch runs the
-      pinned Impeccable detector over the completed frontend and fails the
-      build when deterministic anti-patterns remain.
+      restrained accent more than decoration. DARK SHELL, NEVER HARDCODE A
+      LIGHT PANEL - the shell's own page renders on a dark background
+      (`#0b0f14`) with light text (`#e6e9ee`); every inline style you write
+      inherits that unless you override it. Never hardcode a literal
+      white/near-white background (`#fff`, `#ffffff`, `white`, or a pale
+      tint like `#fff6f6`/`#eef6ff`) for any `<div>`, `<section>`,
+      `<article>`, `<aside>`, alert box, or code/`<pre>` block - doing so
+      traps whatever text is inside against a background it was never
+      designed for and a real, observed cause of white-panel/light-gray-
+      text contrast failures that make entire sections unreadable. Prefer
+      the shell's own `genie-card` class (a dark, subtly-tinted panel) for
+      any bordered panel; if you need a distinct accent panel (e.g. a
+      success/error/warning callout), use a dark, low-opacity tint of the
+      semantic color (e.g. `rgba(63, 166, 106, 0.12)` for success,
+      `rgba(239, 127, 116, 0.12)` for error) with a light, same-hue
+      foreground color, never a pale/white background with dark text.
+      Before returning, audit the component for keyboard access, visible
+      focus, touch targets, responsive reflow, text overflow,
+      loading/disabled/error/empty states, reduced-motion compatibility,
+      and that every background/foreground color pair you introduced
+      remains legible against the shell's dark theme. Deploy & Launch runs
+      the pinned Impeccable detector over the completed frontend and fails
+      the build when deterministic anti-patterns remain.
 
       COMPONENT CONTRACT - your default-exported component receives
       exactly one prop object: `{{ onSubmit: (message: string,
@@ -1702,11 +1751,30 @@ prompts:
       rounded rectangles, pills for ordinary text, eyebrow chips, icon
       tiles above headings, decorative pulsing dots, and bounce/elastic
       motion. Prefer alignment, whitespace, contrast, typographic
-      hierarchy, and one restrained accent. Before returning, audit
-      keyboard access, visible focus, touch targets, responsive reflow,
-      text overflow, loading/disabled/error/empty states, and reduced
-      motion. Deploy & Launch runs the pinned Impeccable detector and
-      fails the frontend build when deterministic anti-patterns remain.
+      hierarchy, and one restrained accent. DARK SHELL, NEVER HARDCODE A
+      LIGHT PANEL - this page is one of several stitched into the same
+      dark-themed shell (background `#0b0f14`, text `#e6e9ee`); every
+      inline style you write inherits that unless you override it. Never
+      hardcode a literal white/near-white background (`#fff`, `#ffffff`,
+      `white`, or a pale tint like `#fff6f6`/`#eef6ff`) for any `<div>`,
+      `<section>`, `<article>`, `<aside>`, alert box, or code/`<pre>`
+      block - doing so traps whatever text is inside against a background
+      it was never designed for, a real, observed cause of white-panel/
+      light-gray-text contrast failures that make entire sections
+      unreadable, and every page must remain independently legible since
+      a developer can land on any one of them directly. Prefer the
+      shell's own `genie-card` class (a dark, subtly-tinted panel) for
+      any bordered panel; for a distinct accent panel (e.g. a success/
+      error/warning callout) use a dark, low-opacity tint of the semantic
+      color (e.g. `rgba(63, 166, 106, 0.12)` for success, `rgba(239, 127,
+      116, 0.12)` for error) with a light, same-hue foreground color,
+      never a pale/white background with dark text. Before returning,
+      audit keyboard access, visible focus, touch targets, responsive
+      reflow, text overflow, loading/disabled/error/empty states, reduced
+      motion, and that every background/foreground color pair you
+      introduced remains legible against the shell's dark theme. Deploy &
+      Launch runs the pinned Impeccable detector and fails the frontend
+      build when deterministic anti-patterns remain.
       Return one fenced ```tsx code block, first line `// agent: ui`, then
       a "## Multi-Agent Workflow" section listing ONLY the agents actually
       generated - same count and names as above.
@@ -1820,28 +1888,41 @@ prompts:
       ```yaml code block, first line `# agent:
       gateway_policy:{component_name}`.
 
-      If component_kind is "identity_config": Produce ONLY one TypeScript
-      module (never a React component) implementing the identity-provider
-      adapter named "{component_name}" from the architecture's "##
-      Identity Configuration" section, against exactly this shared
-      IDENTITY_PROVIDER_INTERFACE so a future, different provider is an
-      additive adapter, never a rewrite of anything that calls it:
-      "export interface IdentityProvider {{
-        signIn(): Promise<void>;
-        signOut(): Promise<void>;
-        getAccessToken(scopes: string[]): Promise<string | null>;
-        getAccountClaims(): Record<string, unknown> | null;
-      }}"
-      Implement it for Microsoft Entra ID using `@azure/msal-browser`'s
-      `PublicClientApplication` (authorization-code + PKCE, never an
-      implicit flow, never a client secret - this is a public SPA
-      client). Read the client id, authority/tenant, and redirect URI
-      from `import.meta.env` variables (e.g.
-      `VITE_GENIE_ENTRA_CLIENT_ID`, `VITE_GENIE_ENTRA_AUTHORITY`,
-      `VITE_GENIE_ENTRA_REDIRECT_URI`) - never hardcode any of these
-      values. Export the concrete implementation as the module's default
-      export. Return one fenced ```ts code block, first line `// agent:
+      If component_kind is "identity_config": Produce ONLY a small,
+      structured YAML configuration (never actual MSAL/sign-in code - the
+      real token-acquisition logic is a deterministic platform step, not
+      an LLM-generation target, exactly like "gateway_policy" above: Deploy
+      & Launch always generates one real, tested MSAL sign-in module and
+      a `useGenieAuth()` hook for every mission that declares this section,
+      reading tenant/client id from that mission's own runtime
+      configuration - never from `import.meta.env`/build-time values,
+      and never re-implemented per mission) describing what this
+      identity adapter named "{component_name}" needs to surface, based
+      on its own architecture bullet and the approved requirements - e.g.
+      a display name/claim this mission's pages must show once signed
+      in, or a note that no extra claims are needed beyond the default
+      sign-in. Never invent a tenant id, client id, authority URL, or any
+      other identity-provider-specific value - those are deployment-time
+      platform configuration, not something this component decides. Use
+      exactly this shape:
+      "display_claim: <the account claim name pages should show, e.g. name>
+      notes: <any other per-mission detail, or 'None.' if none>"
+      Return one fenced ```yaml code block, first line `# agent:
       identity_config:{component_name}`.
+
+      Any "page_view" (or single-page UI) component for a mission that
+      declared "## Identity Configuration"/"## Gateway Policies" must gate
+      its own protected action behind real sign-in state, never render it
+      as always-enabled or always-disabled: `import {{ useGenieAuth }} from
+      "../auth/useGenieAuth"` (this deterministic hook, exposing
+      `isSignedIn`/`displayName`/`signIn()`/`signOut()`/
+      `getAccessToken()`, always exists for a mission that declared
+      these sections - never write your own sign-in/token logic, and
+      never invent a different import path or shape for it), disable the
+      protected action while `!isSignedIn`, and call `await
+      getAccessToken()` to obtain the bearer token this mission's own
+      protected backend call needs - never fabricate a token, never skip
+      the call and proceed anyway if it returns null.
 
       Security rules you MUST follow: never hardcode any URL, hostname,
       port, API key, token, secret, or credential anywhere - read every

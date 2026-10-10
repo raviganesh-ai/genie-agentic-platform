@@ -109,15 +109,30 @@ class RepositoryCheckinService:
                 raise RepositoryCheckinError(
                     "GitHub MCP did not return an authenticated account login."
                 )
-            await self._client.call_tool(
-                "create_repository",
-                {
-                    "name": repo_name,
-                    "description": f"Genie-generated prototype for mission '{mission_title}'.",
-                    "private": True,
-                    "autoInit": True,
-                },
-            )
+            try:
+                await self._client.call_tool(
+                    "create_repository",
+                    {
+                        "name": repo_name,
+                        "description": f"Genie-generated prototype for mission '{mission_title}'.",
+                        "private": True,
+                        "autoInit": True,
+                    },
+                )
+            except GitHubMcpError as exc:
+                # Idempotent retry: a prior attempt for this exact mission
+                # (same deterministic repo_name, see prototype_repository_name)
+                # may have already created the repository and pushed the
+                # build before a LATER pipeline step failed and the whole
+                # run was retried. Re-raising here would make every retry
+                # after that point permanently unrecoverable - GitHub never
+                # allows re-creating a repo with the same name - even though
+                # this mission's repository already exists and only needs
+                # its latest build pushed. Only this specific, recognized
+                # "already exists" condition is treated as non-fatal; any
+                # other repository-creation failure still fails the step.
+                if "name already exists on this account" not in str(exc):
+                    raise
             push_result = GitHubMcpClient.tool_json(
                 await self._client.call_tool(
                     "push_files",

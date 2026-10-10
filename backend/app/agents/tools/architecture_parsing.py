@@ -34,16 +34,26 @@ backend component that is not an agent or a UI zone:
 
 Each uses the exact same "**<Name>**: <description> (fulfills REQ-XXX...)"
 bullet convention as the two baseline sections, so this module's existing
-bullet-parsing helpers apply unchanged. This is currently a parsing-only
-capability: ``architecture-recommendation-v1`` does not yet instruct the
-Architecture Designer agent to emit these sections, and
-``call_build_agent``/``build-generation-component-v1`` do not yet generate
-or materialize code for these component types - see the Genie-SaS Build
-Alignment platform-change roadmap. Landing the schema and its parser first,
-ahead of (and decoupled from) the generation prompts that would populate
-it, avoids a mission ever being able to cite a requirement under a section
-whose component Build cannot yet produce - which would silently orphan
-that requirement.
+bullet-parsing helpers apply unchanged. ``architecture-recommendation-v1``
+instructs the Architecture Designer agent to emit "## Data Models"/"##
+Deterministic Services"/"## API Contracts"/"## UI Pages" whenever a
+mission's own requirements call for them, and - as of this module's
+``gateway_policy``/``identity_config`` reasoning guidance - "## Gateway
+Policies"/"## Identity Configuration" too, always as a matched pair, only
+when the requirements genuinely call for real end-user sign-in (never a
+blanket rule, never a fixed keyword list - the Architecture Designer
+reasons about this from the requirements text itself). ``call_build_agent``/
+``build-generation-component-v1`` generate real code for every one of
+these component types, and Deploy & Launch's own pipeline consumes
+``identity_config``/``gateway_policy`` output to wire a real MSAL sign-in
+UI and a real APIM ``validate-azure-ad-token`` policy (see
+``app.deploy_launch.pipeline_service``'s ``sync-frontend-integration``
+step and ``app.deploy_launch.prototype_api_gateway_service.publish_api``'s
+``require_sign_in``). Landing the schema and its parser ahead of (and
+decoupled from) the generation prompts that would populate it was a
+deliberate ordering choice, so a mission could never cite a requirement
+under a section whose component Build could not yet produce - which
+would have silently orphaned that requirement.
 """
 from __future__ import annotations
 
@@ -54,6 +64,7 @@ from app.services.requirement_fidelity_service import extract_requirement_ids
 
 __all__ = [
     "ArchitectureBuildPlan",
+    "check_identity_requirement_coverage",
     "parse_architecture_build_plan",
     "parse_component_requirement_assignments",
 ]
@@ -229,3 +240,75 @@ def parse_component_requirement_assignments(
                 assignments[name.strip().lower()] = requirement_ids
 
     return assignments
+
+
+# A deliberately small, literal list - real identity-provider names/
+# protocols actually named in a requirements document, never a broad
+# guess at "anything security-related" (a requirement that is merely
+# "secure" or mentions API keys/rate limiting does not call for this -
+# see architecture-recommendation-v1's own "## Identity Configuration"/
+# "## Gateway Policies" guidance, which this function backstops).
+_IDENTITY_PROVIDER_KEYWORDS: tuple[str, ...] = (
+    "entra id",
+    "azure ad",
+    "azure active directory",
+    "microsoft entra",
+    "oauth",
+    "openid connect",
+    "oidc",
+    "single sign-on",
+    "sso",
+)
+
+
+def check_identity_requirement_coverage(
+    *, approved_requirements: str, architecture_document: str
+) -> str | None:
+    """Returns a human-readable gap description when the approved
+    requirements name a real identity provider/protocol but the
+    architecture document declares neither "## Identity Configuration"
+    nor "## Gateway Policies" to satisfy it - or ``None`` when there is
+    no such gap.
+
+    A deterministic backstop for architecture-recommendation-v1's own
+    prompt-level reasoning guidance for these two sections - confirmed
+    by direct, repeated, empirical observation (identical approved
+    requirements, same model, two separate "Validate your Vision" runs)
+    that prompt guidance alone does not reliably produce these sections
+    every time a mission's requirements genuinely call for real sign-in.
+    A security-relevant gap like this one must fail closed rather than
+    silently proceed to Build with an incomplete architecture - the
+    real, observed consequence being a deployed prototype whose own
+    generated pages reference a "Sign in" control that was never built.
+
+    Never itself decides a mission needs identity from a keyword list
+    alone - only flags the specific, observed failure mode: real
+    identity-provider language already appears in the requirements, but
+    the architecture has no matching component for it at all.
+    """
+
+    requirements_lower = approved_requirements.lower()
+    if not any(keyword in requirements_lower for keyword in _IDENTITY_PROVIDER_KEYWORDS):
+        return None
+
+    architecture_lower = architecture_document.lower()
+    has_identity_config = "## identity configuration" in architecture_lower
+    has_gateway_policy = "## gateway policies" in architecture_lower
+    if has_identity_config and has_gateway_policy:
+        return None
+
+    missing = [
+        label
+        for present, label in (
+            (has_identity_config, '"## Identity Configuration"'),
+            (has_gateway_policy, '"## Gateway Policies"'),
+        )
+        if not present
+    ]
+    return (
+        "The approved requirements name a real identity provider or protocol "
+        "(Entra ID/Azure AD/OAuth/OIDC/SSO), but this architecture does not "
+        "declare " + " and ".join(missing) + " to enforce it. Re-run UI & Agent "
+        "Design, or explicitly confirm this mission genuinely needs no real "
+        "end-user sign-in, before proceeding to Build."
+    )

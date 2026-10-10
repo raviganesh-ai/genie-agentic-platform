@@ -60,8 +60,12 @@ from app.deploy_launch.code_materializer import (
     MaterializedBuild,
     MaterializedCodeError,
     generate_backend_service_scaffold,
+    generate_msal_config_module,
+    generate_routing_shell,
+    generate_use_genie_auth_module,
     materialize_build,
 )
+from app.deploy_launch.code_materializer import _slugify as _slugify_component_name
 from app.deploy_launch.container_app_frontend_deployment_service import (
     ContainerAppFrontendDeploymentService,
     NullContainerAppFrontendDeploymentService,
@@ -177,7 +181,13 @@ _FRONTEND_PACKAGE_JSON = json.dumps(
                 "build.')\""
             ),
         },
-        "dependencies": {"react": "18.3.1", "react-dom": "18.3.1"},
+        "dependencies": {
+            "react": "18.3.1",
+            "react-dom": "18.3.1",
+            "react-router-dom": "6.28.0",
+            "@azure/msal-browser": "3.27.0",
+            "@azure/msal-react": "2.2.0",
+        },
         "devDependencies": {
             "@vitejs/plugin-react": "4.3.4",
             "@types/react": "18.3.18",
@@ -451,6 +461,78 @@ input:focus, textarea:focus, select:focus {
   background-size: 200% 200%;
   animation: genie-agent-activity-glow 3.2s ease-in-out infinite;
   border-radius: 12px;
+}
+
+/* Multi-page mission navigation (see
+   app.deploy_launch.code_materializer.generate_routing_shell's
+   deterministic MissionApp.tsx). Without these rules the nav rendered as
+   bare, unstyled, run-together inline anchors - a real, observed
+   readability regression found while manually verifying a deployed
+   multi-page mission. */
+.genie-mission-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 20px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid #232b35;
+}
+
+.genie-mission-nav-link {
+  padding: 8px 14px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #aab3bf;
+  background-color: #1a2028;
+  border: 1px solid transparent;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.genie-mission-nav-link:hover {
+  color: #e6e9ee;
+  border-color: #2a323d;
+}
+
+.genie-mission-nav-link.active {
+  background-color: rgba(47, 131, 224, 0.18);
+  color: #6ba3ea;
+  border-color: rgba(47, 131, 224, 0.4);
+}
+
+/* Sign-in control (see
+   app.deploy_launch.code_materializer.generate_routing_shell's
+   sign-in variant / generate_use_genie_auth_module) - rendered at the end
+   of the same nav bar above, so it reads as part of the mission shell
+   rather than a bolted-on afterthought. */
+.genie-signin-control {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: auto;
+}
+
+.genie-signin-identity {
+  font-size: 13px;
+  font-weight: 600;
+  color: #e6e9ee;
+}
+
+.genie-signin-button {
+  padding: 8px 14px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #0b0f14;
+  background-color: #6ba3ea;
+  border: 1px solid transparent;
+  cursor: pointer;
+  margin-left: auto;
+}
+
+.genie-signin-button:hover {
+  background-color: #8bb8ee;
 }
 
 @keyframes genie-indeterminate-rail {
@@ -1210,6 +1292,9 @@ _FRONTEND_ENV_D_TS = """interface Window {
     __MISSION_BACKEND_URL__?: string;
     __MISSION_TITLE__?: string;
     __MISSION_AGENTS__?: string[];
+    __MISSION_ENTRA_TENANT_ID__?: string;
+    __MISSION_ENTRA_CLIENT_ID__?: string;
+    __MISSION_ENTRA_API_SCOPE__?: string;
 }
 """
 
@@ -1282,6 +1367,10 @@ class DeploymentPipelineService:
         fidelity_min_coverage_percent: float = 90.0,
         upstream_grace_check_attempts: int = 5,
         upstream_grace_check_interval_seconds: float = 2.0,
+        shared_entra_tenant_id: str | None = None,
+        shared_entra_client_id: str | None = None,
+        shared_entra_audience: str | None = None,
+        shared_entra_api_scope: str = "prototype.access",
     ) -> None:
         self._orchestrator = orchestrator
         self._session_service = session_service
@@ -1306,6 +1395,10 @@ class DeploymentPipelineService:
         self._fidelity_min_coverage_percent = fidelity_min_coverage_percent
         self._upstream_grace_check_attempts = upstream_grace_check_attempts
         self._upstream_grace_check_interval_seconds = upstream_grace_check_interval_seconds
+        self._shared_entra_tenant_id = shared_entra_tenant_id
+        self._shared_entra_client_id = shared_entra_client_id
+        self._shared_entra_audience = shared_entra_audience
+        self._shared_entra_api_scope = shared_entra_api_scope
         self._runs: dict[str, DeploymentPipelineRun] = {}
         self._workspaces: dict[str, _RunWorkspace] = {}
         self._materialized_builds: dict[str, MaterializedBuild] = {}
@@ -2346,6 +2439,10 @@ class DeploymentPipelineService:
                         data_endpoint=pipeline_run.data_endpoint,
                         data_database_name=pipeline_run.data_database_name,
                         data_container_name=pipeline_run.data_container_name,
+                        require_sign_in=bool(
+                            materialized.identity_config_modules
+                            or materialized.gateway_policy_documents
+                        ),
                         on_progress=_on_backend_progress,
                     )
                     pipeline_run.backend_url = backend_result.backend_url
@@ -2357,9 +2454,64 @@ class DeploymentPipelineService:
                 elif step_id == "sync-frontend-integration":
                     materialized = self._materialized_builds[pipeline_run.id]
                     frontend_root.mkdir(parents=True, exist_ok=True)
-                    (frontend_root / "MissionApp.tsx").write_text(
-                        materialized.ui_component or "", encoding="utf-8"
+                    require_sign_in = bool(
+                        materialized.identity_config_modules
+                        or materialized.gateway_policy_documents
                     )
+                    if require_sign_in:
+                        # Generic for every mission whose own Architecture
+                        # stage declared it needs an identity provider -
+                        # never an ACI-specific branch. Always written
+                        # together: the sign-in routing shell below
+                        # unconditionally imports both.
+                        auth_dir = frontend_root / "auth"
+                        auth_dir.mkdir(parents=True, exist_ok=True)
+                        (auth_dir / "msalConfig.ts").write_text(
+                            generate_msal_config_module(), encoding="utf-8"
+                        )
+                        (auth_dir / "useGenieAuth.ts").write_text(
+                            generate_use_genie_auth_module(), encoding="utf-8"
+                        )
+                    if materialized.page_components:
+                        # Multi-page mission: write each declared page under
+                        # pages/ and generate the real, deterministic routing
+                        # shell (see generate_routing_shell) as MissionApp.tsx -
+                        # mirrors MaterializedBuild.write_to_directory's own
+                        # page-writing behavior, but targeting the actual
+                        # deployed frontend root instead of the backend
+                        # service's build directory. Writing only
+                        # `materialized.ui_component or ""` here (the prior
+                        # behavior) silently produced an EMPTY MissionApp.tsx
+                        # for every multi-page mission - ui_component and
+                        # page_components are mutually exclusive (see
+                        # materialize_build) - so the deployed frontend fell
+                        # back to the shell's generic single-input console
+                        # instead of ever rendering the mission's real,
+                        # Build-Agent-generated pages.
+                        pages_dir = frontend_root / "pages"
+                        pages_dir.mkdir(parents=True, exist_ok=True)
+                        page_names = tuple(materialized.page_components.keys())
+                        for page_name, code in materialized.page_components.items():
+                            (pages_dir / f"{_slugify_component_name(page_name)}.tsx").write_text(
+                                code, encoding="utf-8"
+                            )
+                        (frontend_root / "MissionApp.tsx").write_text(
+                            generate_routing_shell(page_names, require_sign_in=require_sign_in),
+                            encoding="utf-8",
+                        )
+                    else:
+                        if require_sign_in:
+                            # Known gap: single-page missions don't yet get
+                            # a sign-in-wrapped shell (only the multi-page
+                            # routing shell above does) - the generated
+                            # auth/ modules are still written, available for
+                            # a future single-page wrapper, but this page's
+                            # own "Not signed in" UX (if any) won't yet have
+                            # a real control to call.
+                            pass
+                        (frontend_root / "MissionApp.tsx").write_text(
+                            materialized.ui_component or "", encoding="utf-8"
+                        )
                     (frontend_root / "index.html").write_text(
                         _FRONTEND_INDEX_HTML_TEMPLATE.format(
                             mission_title=html.escape(mission_title)
@@ -2393,10 +2545,26 @@ class DeploymentPipelineService:
                         for name in self._agent_foundry_names.get(pipeline_run.id, {})
                         if name != "orchestrator"
                     ]
+                    identity_runtime_config = ""
+                    if require_sign_in:
+                        full_scope = (
+                            f"{self._shared_entra_audience}/{self._shared_entra_api_scope}"
+                            if self._shared_entra_audience
+                            else ""
+                        )
+                        identity_runtime_config = (
+                            f'window.__MISSION_ENTRA_TENANT_ID__ = '
+                            f"{json.dumps(self._shared_entra_tenant_id or '')};\n"
+                            f'window.__MISSION_ENTRA_CLIENT_ID__ = '
+                            f"{json.dumps(self._shared_entra_client_id or '')};\n"
+                            f'window.__MISSION_ENTRA_API_SCOPE__ = '
+                            f"{json.dumps(full_scope)};\n"
+                        )
                     (public_root / "runtime-config.js").write_text(
                         f'window.__MISSION_BACKEND_URL__ = "{pipeline_run.backend_url}";\n'
                         f"window.__MISSION_TITLE__ = {json.dumps(mission_title)};\n"
-                        f"window.__MISSION_AGENTS__ = {json.dumps(mission_agent_names)};\n",
+                        f"window.__MISSION_AGENTS__ = {json.dumps(mission_agent_names)};\n"
+                        f"{identity_runtime_config}",
                         encoding="utf-8",
                     )
                     detail = f"Frontend wired to real backend URL {pipeline_run.backend_url}."
@@ -2427,6 +2595,17 @@ class DeploymentPipelineService:
                         mission_slug=mission_slug,
                         frontend_origin=frontend_result.frontend_url,
                     )
+                    materialized = self._materialized_builds[pipeline_run.id]
+                    if materialized.identity_config_modules or materialized.gateway_policy_documents:
+                        # This mission's own Architecture stage determined
+                        # (from its own requirements) that it needs sign-in -
+                        # register its deployed frontend URL against Genie's
+                        # one shared Entra ID app so MSAL's redirect actually
+                        # lands somewhere real. A no-op when the shared app
+                        # isn't configured (see Settings.shared_entra_client_id).
+                        await self._backend_deployment_service.ensure_gateway_spa_redirect_uri(
+                            frontend_result.frontend_url
+                        )
                     detail = f"Frontend deployed at {frontend_result.frontend_url}."
 
                 elif step_id == "commit-generated-repository":
@@ -2950,4 +3129,8 @@ def create_deployment_pipeline_service(
         build_workspace_root=settings.deployment_build_workspace_root,
         fidelity_max_repair_attempts=settings.deployment_fidelity_max_repair_attempts,
         fidelity_min_coverage_percent=settings.deployment_fidelity_min_coverage_percent,
+        shared_entra_tenant_id=settings.shared_entra_tenant_id,
+        shared_entra_client_id=settings.shared_entra_client_id,
+        shared_entra_audience=settings.shared_entra_audience,
+        shared_entra_api_scope=settings.shared_entra_api_scope,
     )

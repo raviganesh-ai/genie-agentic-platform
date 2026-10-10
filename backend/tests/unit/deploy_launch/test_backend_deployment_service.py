@@ -345,9 +345,11 @@ async def test_protected_backend_deploys_private_backend_without_mise_sidecar(
             *,
             mission_slug,
             backend_url,
+            require_sign_in=False,
             on_progress=None,
         ):
             gateway_calls["publish"] = (mission_slug, backend_url)
+            gateway_calls["require_sign_in"] = require_sign_in
             return "https://claims-1234.azure-api.net"
 
     service = BackendDeploymentService(
@@ -566,3 +568,42 @@ async def test_gateway_origin_finalization_updates_apim_policy():
             "frontend_origin": "https://prototype.example.com/",
         }
     ]
+
+
+async def test_ensure_gateway_spa_redirect_uri_delegates_to_prototype_gateway():
+    calls = []
+
+    class FakeGatewayService:
+        async def ensure_spa_redirect_uri(self, frontend_url):
+            calls.append(frontend_url)
+
+    service = BackendDeploymentService(
+        subscription_id="sub-123",
+        resource_group="genie-dev-rg",
+        acr_name="acr123",
+        container_apps_environment_id="env-123",
+        location="eastus2",
+        foundry_endpoint="https://foundry.example.com/api/projects/demo",
+        foundry_project_name="demo",
+        prototype_api_gateway_service=FakeGatewayService(),
+    )
+
+    await service.ensure_gateway_spa_redirect_uri("https://prototype.example.com/")
+
+    assert calls == ["https://prototype.example.com/"]
+
+
+async def test_ensure_gateway_spa_redirect_uri_is_a_no_op_without_a_gateway_service():
+    service = BackendDeploymentService(
+        subscription_id="sub-123",
+        resource_group="genie-dev-rg",
+        acr_name="acr123",
+        container_apps_environment_id="env-123",
+        location="eastus2",
+        foundry_endpoint="https://foundry.example.com/api/projects/demo",
+        foundry_project_name="demo",
+    )
+
+    # Must not raise even though there is no prototype_api_gateway_service.
+    await service.ensure_gateway_spa_redirect_uri("https://prototype.example.com/")
+

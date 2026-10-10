@@ -1187,11 +1187,11 @@ _ARCHITECTURE_WITH_GATEWAY_POLICY = """
 
 async def test_call_build_agent_generates_gateway_policy_component():
     """gateway_policy is wired into the Build loop (Build can generate
-    its structured config) even though architecture-recommendation-v1
-    does not yet instruct Architecture to emit "## Gateway Policies" -
-    this test exercises the mechanism directly with a hand-authored
-    architecture document, mirroring how the other Phase 3/4 kinds were
-    tested before their own sections were ever live-generated."""
+    its structured config) independent of whether Architecture actually
+    emitted "## Gateway Policies" for this particular mission - this test
+    exercises the mechanism directly with a hand-authored architecture
+    document, mirroring how the other Phase 3/4 kinds were tested before
+    their own sections were ever live-generated."""
 
     registry = AgentToolRegistry()
     gateway = _StreamingAgentGateway(
@@ -1248,8 +1248,8 @@ _ARCHITECTURE_WITH_IDENTITY_CONFIG = """
 
 async def test_call_build_agent_generates_identity_config_component():
     """identity_config is wired into the Build loop (Build can generate
-    its adapter module) even though architecture-recommendation-v1 does
-    not yet instruct Architecture to emit "## Identity Configuration" -
+    its adapter module) independent of whether Architecture actually
+    emitted "## Identity Configuration" for this particular mission -
     mirrors gateway_policy's own test above."""
 
     registry = AgentToolRegistry()
@@ -1257,7 +1257,7 @@ async def test_call_build_agent_generates_identity_config_component():
         texts_by_component={
             "Ticket Classifier Agent": "```python\n# agent: Ticket Classifier Agent\nclassifier code\n```",
             "Support Triage Orchestrator Agent": "```python\n# agent: orchestrator\norchestrator code\n```",
-            "Entra ID Adapter": "```ts\n// agent: identity_config:Entra ID Adapter\nadapter code\n```",
+            "Entra ID Adapter": "```yaml\n# agent: identity_config:Entra ID Adapter\ndisplay_claim: name\n```",
             "ui": "```tsx\n// agent: ui\nui code\n```",
         }
     )
@@ -1291,4 +1291,4 @@ async def test_call_build_agent_generates_identity_config_component():
         ("identity_config", "Entra ID Adapter"),
         ("ui", "ui"),
     ]
-    assert "adapter code" in gateway.requests[3].variables["prior_components"]
+    assert "display_claim: name" in gateway.requests[3].variables["prior_components"]

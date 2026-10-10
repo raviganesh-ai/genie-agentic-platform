@@ -8,6 +8,7 @@ import pytest
 from app.deploy_launch.prototype_api_gateway_service import (
     GatewayPolicyConfig,
     GatewayPolicyPathRule,
+    PrototypeApiGatewayError,
     PrototypeApiGatewayService,
     _build_api_policy,
 )
@@ -50,7 +51,7 @@ def test_api_policy_validates_azure_ad_token_against_named_values_when_gateway_p
     )
     root = ElementTree.fromstring(policy)
 
-    validate = root.find("./inbound/validate-azure-ad-token")
+    validate = root.find("./inbound/choose/otherwise/validate-azure-ad-token")
     assert validate is not None
     # Named Value references, never a literal tenant id/audience string -
     # the real value lives in APIM's own Named Values store.
@@ -60,7 +61,43 @@ def test_api_policy_validates_azure_ad_token_against_named_values_when_gateway_p
     assert claim is not None
     assert claim.attrib == {"name": "roles", "match": "any"}
     assert claim.findtext("value") == "prototype.access"
-    assert root.find("./inbound/choose") is None
+    # Only the outer health-exemption choose, never a nested per-path one.
+    assert root.find("./inbound/choose/otherwise/choose") is None
+
+
+def test_api_policy_never_requires_a_bearer_token_on_health_paths():
+    """Regression test for a real incident: a mission whose architecture
+    required sign-in got validate-azure-ad-token applied to every path
+    with no exemption, so its own Deploy & Launch readiness probe got
+    HTTP 401 against its own newly-published gateway and the deployment
+    could never succeed - a sign-in-requiring mission must still be able
+    to pass its own health check."""
+
+    gateway_policy = GatewayPolicyConfig(
+        tenant_id_named_value="genie-prototype-aad-tenant-id",
+        audience_named_value="genie-prototype-aad-audience",
+        required_claim_values=(),
+    )
+
+    policy = _build_api_policy(
+        frontend_origin="https://prototype.example.com", gateway_policy=gateway_policy
+    )
+    root = ElementTree.fromstring(policy)
+
+    health_when = root.find("./inbound/choose/when")
+    assert health_when is not None
+    assert '"/health"' in health_when.attrib["condition"]
+    # The health branch must be a pure pass-through - no token validation
+    # anywhere inside it. It must also stay empty (no nested <base/>):
+    # CORS, the unconditional <base/>, the rate limit, and the correlation
+    # header already ran earlier in document order within this same
+    # <inbound> section, and APIM rejects more than one <base/> per
+    # section - a real incident this exact regression test caught, where
+    # a second, nested <base/> here broke APIM policy publishing with
+    # "Only one policy statement of this type is allowed per section".
+    assert health_when.find(".//validate-azure-ad-token") is None
+    assert list(health_when) == []
+    assert len(root.findall("./inbound//base")) == 1
 
 
 def test_api_policy_renders_per_path_denial_with_a_default_fallback():
@@ -78,7 +115,7 @@ def test_api_policy_renders_per_path_denial_with_a_default_fallback():
     )
     root = ElementTree.fromstring(policy)
 
-    choose = root.find("./inbound/choose")
+    choose = root.find("./inbound/choose/otherwise/choose")
     assert choose is not None
     when = choose.find("./when")
     assert when is not None
@@ -284,3 +321,288 @@ async def test_publish_api_routes_supported_methods_to_private_backend(monkeypat
     assert "validate-azure-ad-token" not in policy
     assert "acceptance-test-key" not in policy
     assert "https://prototype.invalid" in policy
+
+
+async def test_publish_api_enforces_sign_in_when_shared_entra_app_is_configured(monkeypatch):
+    service = PrototypeApiGatewayService(
+        subscription_id="sub-123",
+        location="eastus2",
+        publisher_email="genie@example.com",
+        publisher_name="Genie",
+        shared_entra_tenant_id="tenant-abc",
+        shared_entra_audience="api://shared-client-id",
+    )
+    captured = {"operations": [], "named_values": []}
+    api_client = SimpleNamespace(
+        begin_create_or_update=lambda *args: captured.update(api=args) or _poller(SimpleNamespace())
+    )
+    operation_client = SimpleNamespace(
+        create_or_update=lambda *args: captured["operations"].append(args)
+    )
+    policy_client = SimpleNamespace(create_or_update=lambda *args: captured.update(policy=args))
+    service_client = SimpleNamespace(
+        get=lambda *_: SimpleNamespace(gateway_url="https://claims.azure-api.net/")
+    )
+    named_value_client = SimpleNamespace(
+        begin_create_or_update=lambda resource_group, service_name, name, model: (
+            captured["named_values"].append((name, model.value)) or _poller(SimpleNamespace())
+        )
+    )
+    monkeypatch.setattr(
+        service,
+        "_api_management_client",
+        lambda: SimpleNamespace(
+            api=api_client,
+            api_operation=operation_client,
+            api_policy=policy_client,
+            api_management_service=service_client,
+            named_value=named_value_client,
+        ),
+    )
+
+    await service.publish_api(
+        mission_slug="claims-1234",
+        backend_url="https://claims.private.internal",
+        require_sign_in=True,
+    )
+
+    assert dict(captured["named_values"]) == {
+        "genie-shared-entra-tenant-id": "tenant-abc",
+        "genie-shared-entra-audience": "api://shared-client-id",
+    }
+    policy = captured["policy"][4].value
+    assert "validate-azure-ad-token" in policy
+    assert "{{genie-shared-entra-tenant-id}}" in policy
+    assert "{{genie-shared-entra-audience}}" in policy
+
+
+async def test_publish_api_fails_closed_when_sign_in_required_but_shared_app_unconfigured():
+    service = PrototypeApiGatewayService(
+        subscription_id="sub-123",
+        location="eastus2",
+        publisher_email="genie@example.com",
+        publisher_name="Genie",
+    )
+
+    with pytest.raises(PrototypeApiGatewayError, match="shared_entra_tenant_id"):
+        await service.publish_api(
+            mission_slug="claims-1234",
+            backend_url="https://claims.private.internal",
+            require_sign_in=True,
+        )
+
+
+class _FakeGraphToken:
+    def __init__(self, token: str) -> None:
+        self.token = token
+
+
+class _FakeGraphCredential:
+    async def __aenter__(self) -> "_FakeGraphCredential":
+        return self
+
+    async def __aexit__(self, *exc_info: object) -> None:
+        return None
+
+    async def get_token(self, *_scopes: str) -> _FakeGraphToken:
+        return _FakeGraphToken("fake-graph-token")
+
+
+class _FakeGraphResponse:
+    def __init__(self, json_body: dict) -> None:
+        self._json_body = json_body
+
+    def raise_for_status(self) -> None:
+        return None
+
+    def json(self) -> dict:
+        return self._json_body
+
+
+class _FakeGraphHttpClient:
+    def __init__(self, existing_redirect_uris: list[str]) -> None:
+        self.existing_redirect_uris = existing_redirect_uris
+        self.patched_bodies: list[dict] = []
+
+    async def __aenter__(self) -> "_FakeGraphHttpClient":
+        return self
+
+    async def __aexit__(self, *exc_info: object) -> None:
+        return None
+
+    async def get(self, _url: str, headers: dict) -> _FakeGraphResponse:
+        assert headers["Authorization"] == "Bearer fake-graph-token"
+        return _FakeGraphResponse({"spa": {"redirectUris": self.existing_redirect_uris}})
+
+    async def patch(self, _url: str, *, headers: dict, json: dict) -> _FakeGraphResponse:
+        assert headers["Authorization"] == "Bearer fake-graph-token"
+        self.patched_bodies.append(json)
+        return _FakeGraphResponse({})
+
+
+async def test_ensure_spa_redirect_uri_is_a_no_op_when_shared_app_unconfigured():
+    service = PrototypeApiGatewayService(
+        subscription_id="sub-123",
+        location="eastus2",
+        publisher_email="genie@example.com",
+        publisher_name="Genie",
+    )
+
+    # Must not raise/attempt any Graph call at all when unconfigured.
+    await service.ensure_spa_redirect_uri("https://new-mission.example.com/")
+
+
+async def test_ensure_spa_redirect_uri_adds_additively_without_dropping_other_missions(
+    monkeypatch,
+):
+    service = PrototypeApiGatewayService(
+        subscription_id="sub-123",
+        location="eastus2",
+        publisher_email="genie@example.com",
+        publisher_name="Genie",
+        shared_entra_client_id="shared-client-id",
+    )
+    http_client = _FakeGraphHttpClient(
+        existing_redirect_uris=["https://other-mission.example.com/"]
+    )
+    monkeypatch.setattr(service, "_graph_credential", lambda: _FakeGraphCredential())
+    monkeypatch.setattr(service, "_graph_http_client", lambda: http_client)
+
+    await service.ensure_spa_redirect_uri("https://new-mission.example.com/")
+
+    assert len(http_client.patched_bodies) == 1
+    patched_uris = set(http_client.patched_bodies[0]["spa"]["redirectUris"])
+    assert patched_uris == {
+        "https://other-mission.example.com/",
+        "https://new-mission.example.com/",
+    }
+
+
+async def test_ensure_spa_redirect_uri_is_idempotent_when_already_present(monkeypatch):
+    service = PrototypeApiGatewayService(
+        subscription_id="sub-123",
+        location="eastus2",
+        publisher_email="genie@example.com",
+        publisher_name="Genie",
+        shared_entra_client_id="shared-client-id",
+    )
+    http_client = _FakeGraphHttpClient(
+        existing_redirect_uris=["https://new-mission.example.com/"]
+    )
+    monkeypatch.setattr(service, "_graph_credential", lambda: _FakeGraphCredential())
+    monkeypatch.setattr(service, "_graph_http_client", lambda: http_client)
+
+    await service.ensure_spa_redirect_uri("https://new-mission.example.com/")
+
+    assert http_client.patched_bodies == []
+
+
+async def test_peer_with_shared_network_is_a_no_op_when_not_configured():
+    service = PrototypeApiGatewayService(
+        subscription_id="sub-123",
+        location="eastus2",
+        publisher_email="genie@example.com",
+        publisher_name="Genie",
+    )
+    messages = []
+
+    async def _report(message: str) -> None:
+        messages.append(message)
+
+    def _fail_if_called(*_args, **_kwargs):
+        pytest.fail("peering must not be attempted when shared-network settings are unset")
+
+    network_client = SimpleNamespace(
+        virtual_network_peerings=SimpleNamespace(begin_create_or_update=_fail_if_called)
+    )
+
+    await service._peer_with_shared_network(
+        network_client=network_client,
+        resource_group="genie-proto-claims-1234",
+        vnet_name="genie-claims-1234-abc123",
+        vnet_id="/subscriptions/sub-123/resourceGroups/genie-proto-claims-1234/providers/"
+        "Microsoft.Network/virtualNetworks/genie-claims-1234-abc123",
+        report=_report,
+    )
+
+    assert any("not configured" in message for message in messages)
+
+
+async def test_peer_with_shared_network_peers_both_directions_and_links_every_zone():
+    service = PrototypeApiGatewayService(
+        subscription_id="sub-123",
+        location="eastus2",
+        publisher_email="genie@example.com",
+        publisher_name="Genie",
+        shared_vnet_resource_id=(
+            "/subscriptions/sub-123/resourceGroups/genie-dev-rg/providers/"
+            "Microsoft.Network/virtualNetworks/genie-shared-vnet"
+        ),
+        shared_network_resource_group="genie-dev-rg",
+        shared_private_dns_zone_names=(
+            "privatelink.azurecr.io",
+            "privatelink.openai.azure.com",
+        ),
+    )
+    captured_peerings = []
+    captured_links = []
+    network_client = SimpleNamespace(
+        virtual_network_peerings=SimpleNamespace(
+            begin_create_or_update=lambda resource_group, vnet_name, name, model: (
+                captured_peerings.append((resource_group, vnet_name, name, model))
+                or _poller(SimpleNamespace())
+            )
+        )
+    )
+    dns_client = SimpleNamespace(
+        virtual_network_links=SimpleNamespace(
+            begin_create_or_update=lambda resource_group, zone_name, name, model: (
+                captured_links.append((resource_group, zone_name, name, model))
+                or _poller(SimpleNamespace())
+            )
+        )
+    )
+    service._private_dns_client = lambda: dns_client  # type: ignore[method-assign]
+    messages = []
+
+    async def _report(message: str) -> None:
+        messages.append(message)
+
+    vnet_id = (
+        "/subscriptions/sub-123/resourceGroups/genie-proto-claims-1234/providers/"
+        "Microsoft.Network/virtualNetworks/genie-claims-1234-abc123"
+    )
+    await service._peer_with_shared_network(
+        network_client=network_client,
+        resource_group="genie-proto-claims-1234",
+        vnet_name="genie-claims-1234-abc123",
+        vnet_id=vnet_id,
+        report=_report,
+    )
+
+    assert len(captured_peerings) == 2
+    forward_resource_group, forward_vnet_name, _, forward_model = captured_peerings[0]
+    assert forward_resource_group == "genie-proto-claims-1234"
+    assert forward_vnet_name == "genie-claims-1234-abc123"
+    assert forward_model.remote_virtual_network.id == service._shared_vnet_resource_id
+    assert forward_model.allow_virtual_network_access is True
+
+    reverse_resource_group, reverse_vnet_name, _, reverse_model = captured_peerings[1]
+    assert reverse_resource_group == "genie-dev-rg"
+    assert reverse_vnet_name == "genie-shared-vnet"
+    assert reverse_model.remote_virtual_network.id == vnet_id
+
+    assert len(captured_links) == 2
+    linked_zone_names = {resource_group_zone[1] for resource_group_zone in captured_links}
+    assert linked_zone_names == {"privatelink.azurecr.io", "privatelink.openai.azure.com"}
+    for resource_group, _zone_name, link_name, link_model in captured_links:
+        assert resource_group == "genie-dev-rg"
+        assert link_model.virtual_network.id == vnet_id
+        assert link_model.registration_enabled is False
+        assert link_name  # a real, deterministic Azure resource name
+
+    # Each zone must get a distinct link resource name (per mission + zone),
+    # never the same name reused across zones/missions, which would silently
+    # overwrite a different mission's link.
+    link_names = [args[2] for args in captured_links]
+    assert len(set(link_names)) == len(link_names)

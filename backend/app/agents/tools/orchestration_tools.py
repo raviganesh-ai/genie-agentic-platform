@@ -35,6 +35,7 @@ from app.agents.models import AgentExecutionRequest, AgentExecutionResult
 from app.agents.registry import AgentRegistry
 from app.agents.tool_execution import AgentToolRegistry, ToolCallContext, ToolExecutionError
 from app.agents.tools.architecture_parsing import (
+    check_identity_requirement_coverage,
     parse_architecture_build_plan,
     parse_component_requirement_assignments,
 )
@@ -87,7 +88,7 @@ _EXPECTED_LANGUAGES_BY_COMPONENT_KIND: dict[str, frozenset[str]] = {
     "data_model": frozenset({"python"}),
     "api_contract": frozenset({"yaml", "yml"}),
     "gateway_policy": frozenset({"yaml", "yml"}),
-    "identity_config": frozenset({"ts"}),
+    "identity_config": frozenset({"yaml", "yml"}),
 }
 
 
@@ -470,7 +471,7 @@ def _validate_component_output(
 
     body_lines = match.group("body").splitlines()
     first_line = body_lines[0].strip() if body_lines else ""
-    comment_prefix = "//" if component_kind in ("ui", "page_view", "identity_config") else "#"
+    comment_prefix = "//" if component_kind in ("ui", "page_view") else "#"
     expected_marker = f"{comment_prefix} agent: {marker_name}"
     if first_line.casefold() != expected_marker.casefold():
         raise ToolExecutionError(
@@ -532,6 +533,13 @@ async def _generate_build_by_component(
     requirement and goal fidelity gates.
     """
 
+    identity_coverage_gap = check_identity_requirement_coverage(
+        approved_requirements=base_variables.get("requirements", ""),
+        architecture_document=base_variables.get("architecture", ""),
+    )
+    if identity_coverage_gap is not None:
+        raise ToolExecutionError(identity_coverage_gap)
+
     plan = parse_architecture_build_plan(base_variables.get("architecture", ""))
     if plan is None:
         request = AgentExecutionRequest(
@@ -562,14 +570,13 @@ async def _generate_build_by_component(
     # before the UI/pages (never after) so they are the single-page "ui"
     # or each "page_view"'s own available "prior_components" context, the
     # same way every specialist agent and the Orchestrator already are.
-    # gateway_policy and identity_config are both wired here (Build can
-    # generate their config), but architecture-recommendation-v1 does not
-    # yet instruct Architecture to emit "## Gateway Policies"/"## Identity
-    # Configuration" - neither the generated gateway policy config nor
-    # the generated identity adapter is read into a real running mission
-    # yet (no Deploy & Launch wiring, no @azure/msal-browser dependency,
-    # no generated page calls the adapter's signIn()), so activating
-    # generation first would produce an artifact with no runtime effect.
+    # gateway_policy and identity_config are both wired here (Build
+    # generates their real config) and all the way through Deploy &
+    # Launch (real MSAL sign-in UI, real APIM validate-azure-ad-token
+    # enforcement - see check_identity_requirement_coverage above, which
+    # already fails this step closed before reaching here if the
+    # approved requirements call for identity but Architecture somehow
+    # didn't declare these two sections).
     non_agent_backend_components = tuple(
         (component_type, name)
         for component_type, name in plan.other_components
@@ -731,7 +738,7 @@ async def _generate_build_by_component(
             # with it (the "all or nothing" behavior this replaces) - see
             # _component_failure_piece and the module docstring.
             failure_piece = _component_failure_piece(
-                marker_name, is_ui=component_kind in ("ui", "page_view", "identity_config"), exc=exc
+                marker_name, is_ui=component_kind in ("ui", "page_view"), exc=exc
             )
             await _publish_delta(failure_piece)
             pieces.append(failure_piece)

@@ -77,6 +77,50 @@ export function MissionApp() {
 ```
 '''
 
+_MULTI_PAGE_BUILD_OUTPUT = '''
+```python
+# agent: Requirements Specialist
+async def run() -> None:
+    pass
+```
+
+```python
+# agent: orchestrator
+class OrchestratorAgent:
+    async def run(self, ui_message: str, on_progress=None) -> None:
+        await on_progress("Handing off to Requirements Specialist...")
+        await on_progress("Requirements Specialist completed.")
+```
+
+```tsx
+// agent: page:Catalog Page
+export default function CatalogPage() {
+    return null;
+}
+```
+
+```tsx
+// agent: page:Dashboard Page
+export default function DashboardPage() {
+    return null;
+}
+```
+'''
+
+_MULTI_PAGE_BUILD_OUTPUT_WITH_IDENTITY = _MULTI_PAGE_BUILD_OUTPUT.rstrip() + '''
+
+```yaml
+# agent: identity_config:Entra Sign-In
+display_claim: name
+notes: None.
+```
+
+```yaml
+# agent: gateway_policy:Default Sign-In Policy
+required_claim_values: []
+```
+'''
+
 _ARCHITECTURE_DOCUMENT = """
 ## Multi-Agent Workflow
 
@@ -141,6 +185,7 @@ class _FakeOrchestrator:
         test_output_text: str,
         requirements_output: str = _REQUIREMENTS_OUTPUT,
         agent_scope_id: str | None = None,
+        build_output_text: str = _BUILD_OUTPUT,
     ) -> None:
         self._test_output_text = test_output_text
         self.execute_agent_calls: list[dict] = []
@@ -154,7 +199,7 @@ class _FakeOrchestrator:
             step_results=[
                 _completed_step("analyze-requirements", "genie-orchestrator", requirements_output),
                 _completed_step("design-architecture", "architecture-designer", _ARCHITECTURE_DOCUMENT),
-                _completed_step("build-solution", "genie-orchestrator", _BUILD_OUTPUT),
+                _completed_step("build-solution", "genie-orchestrator", build_output_text),
             ],
         )
 
@@ -430,11 +475,16 @@ def _build_service(
     requirements_output: str = _REQUIREMENTS_OUTPUT,
     run_repository=None,
     prototype_max_active_per_owner: int = 0,
+    build_output_text: str = _BUILD_OUTPUT,
+    shared_entra_tenant_id: str | None = None,
+    shared_entra_client_id: str | None = None,
+    shared_entra_audience: str | None = None,
 ) -> DeploymentPipelineService:
     return DeploymentPipelineService(
         orchestrator=_FakeOrchestrator(
             test_output_text=test_output_text,
             requirements_output=requirements_output,
+            build_output_text=build_output_text,
         ),  # type: ignore[arg-type]
         session_service=_FakeSessionService(),  # type: ignore[arg-type]
         event_bus=WorkflowEventBus(),
@@ -450,6 +500,9 @@ def _build_service(
         build_workspace_root=tmp_path,
         run_repository=run_repository,
         prototype_max_active_per_owner=prototype_max_active_per_owner,
+        shared_entra_tenant_id=shared_entra_tenant_id,
+        shared_entra_client_id=shared_entra_client_id,
+        shared_entra_audience=shared_entra_audience,
     )
 
 
@@ -543,6 +596,142 @@ async def test_full_pipeline_runs_every_step(tmp_path: Path):
     assert '__MISSION_AGENTS__ = ["Requirements Specialist"]' in runtime_config_source
 
 
+async def test_sync_frontend_integration_writes_real_pages_and_routing_shell_for_multi_page_mission(
+    tmp_path: Path,
+):
+    """Regression test for a real incident: a multi-page mission's
+    sync-frontend-integration step wrote only ``materialized.ui_component or
+    ""`` to MissionApp.tsx - but ``ui_component`` is always ``None`` for a
+    multi-page build (mutually exclusive with ``page_components``, see
+    ``materialize_build``) - so every multi-page mission's deployed frontend
+    silently got an EMPTY MissionApp.tsx and fell back to the shell's generic
+    single-input console instead of ever rendering its real, Build-Agent-
+    generated pages. This asserts the real per-page files and the real
+    deterministic routing shell (see ``generate_routing_shell``) are written
+    to the actual deployed frontend root instead."""
+
+    service = _build_service(
+        test_output_text=_PASSING_TEST_OUTPUT,
+        tmp_path=tmp_path,
+        build_output_text=_MULTI_PAGE_BUILD_OUTPUT,
+    )
+    run = await service.start(
+        session_id="session-1",
+        requesting_user_id="user-1",
+        workflow_run_id="run-1",
+        approval_request_id="session-1:run-1",
+    )
+    run = await service.wait_for_run(run.id)
+
+    assert run.status == "completed"
+    build_root = service.get_build_root(run.id)
+    assert build_root is not None
+    frontend_root = build_root.parent / "frontend"
+
+    mission_app_source = (frontend_root / "MissionApp.tsx").read_text(encoding="utf-8")
+    assert "react-router-dom" in mission_app_source
+    assert "./pages/catalog_page" in mission_app_source
+    assert "./pages/dashboard_page" in mission_app_source
+    assert "Catalog Page" in mission_app_source
+    assert "Dashboard Page" in mission_app_source
+
+    catalog_page_source = (frontend_root / "pages" / "catalog_page.tsx").read_text(encoding="utf-8")
+    assert "export default function CatalogPage" in catalog_page_source
+    dashboard_page_source = (frontend_root / "pages" / "dashboard_page.tsx").read_text(
+        encoding="utf-8"
+    )
+    assert "export default function DashboardPage" in dashboard_page_source
+
+
+async def test_sync_frontend_integration_wires_msal_sign_in_when_identity_is_declared(
+    tmp_path: Path,
+):
+    """Regression test for a real incident: identity_config/gateway_policy
+    components were parsed and written to disk by code_materializer, but
+    sync-frontend-integration never consumed them at all - a mission whose
+    Architecture stage correctly declared it needed Entra ID sign-in still
+    got a routing shell with no sign-in control and a runtime-config.js with
+    no tenant/client id, the same 'materialized but never wired' bug shape
+    as the empty-MissionApp.tsx incident above. Generic - this is driven
+    purely by the materialized build declaring identity_config/
+    gateway_policy, never an ACI-specific check."""
+
+    service = _build_service(
+        test_output_text=_PASSING_TEST_OUTPUT,
+        tmp_path=tmp_path,
+        build_output_text=_MULTI_PAGE_BUILD_OUTPUT_WITH_IDENTITY,
+        shared_entra_tenant_id="tenant-abc",
+        shared_entra_client_id="client-xyz",
+        shared_entra_audience="api://client-xyz",
+    )
+    run = await service.start(
+        session_id="session-1",
+        requesting_user_id="user-1",
+        workflow_run_id="run-1",
+        approval_request_id="session-1:run-1",
+    )
+    run = await service.wait_for_run(run.id)
+
+    assert run.status == "completed"
+    build_root = service.get_build_root(run.id)
+    assert build_root is not None
+    frontend_root = build_root.parent / "frontend"
+
+    mission_app_source = (frontend_root / "MissionApp.tsx").read_text(encoding="utf-8")
+    assert "MsalProvider" in mission_app_source
+    assert "SignInControl" in mission_app_source
+
+    msal_config_source = (frontend_root / "auth" / "msalConfig.ts").read_text(encoding="utf-8")
+    assert "export const msalInstance" in msal_config_source
+    auth_hook_source = (frontend_root / "auth" / "useGenieAuth.ts").read_text(encoding="utf-8")
+    assert "export function useGenieAuth" in auth_hook_source
+
+    runtime_config_source = (frontend_root / "public" / "runtime-config.js").read_text(
+        encoding="utf-8"
+    )
+    assert '__MISSION_ENTRA_TENANT_ID__ = "tenant-abc"' in runtime_config_source
+    assert '__MISSION_ENTRA_CLIENT_ID__ = "client-xyz"' in runtime_config_source
+    assert '__MISSION_ENTRA_API_SCOPE__ = "api://client-xyz/prototype.access"' in (
+        runtime_config_source
+    )
+
+
+async def test_sync_frontend_integration_skips_msal_when_no_identity_is_declared(tmp_path: Path):
+    """The common case (no identity provider named in this mission's
+    requirements) must get none of the sign-in scaffolding - never forced
+    onto every mission regardless of whether it needs it."""
+
+    service = _build_service(
+        test_output_text=_PASSING_TEST_OUTPUT,
+        tmp_path=tmp_path,
+        build_output_text=_MULTI_PAGE_BUILD_OUTPUT,
+        shared_entra_tenant_id="tenant-abc",
+        shared_entra_client_id="client-xyz",
+        shared_entra_audience="api://client-xyz",
+    )
+    run = await service.start(
+        session_id="session-1",
+        requesting_user_id="user-1",
+        workflow_run_id="run-1",
+        approval_request_id="session-1:run-1",
+    )
+    run = await service.wait_for_run(run.id)
+
+    assert run.status == "completed"
+    build_root = service.get_build_root(run.id)
+    assert build_root is not None
+    frontend_root = build_root.parent / "frontend"
+
+    mission_app_source = (frontend_root / "MissionApp.tsx").read_text(encoding="utf-8")
+    assert "MsalProvider" not in mission_app_source
+    assert not (frontend_root / "auth" / "msalConfig.ts").exists()
+
+    runtime_config_source = (frontend_root / "public" / "runtime-config.js").read_text(
+        encoding="utf-8"
+    )
+    assert "__MISSION_ENTRA_TENANT_ID__" not in runtime_config_source
+
+
 async def test_deploy_backend_service_step_does_not_block_the_event_loop(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
@@ -628,6 +817,9 @@ class _FakeProtectedBackendDeploymentService:
     ):
         del mission_slug
         self.frontend_origin = frontend_origin
+
+    async def ensure_gateway_spa_redirect_uri(self, frontend_url: str) -> None:
+        del frontend_url
 
     async def delete(self, *, mission_slug: str, app_name: str | None = None):
         del app_name
@@ -1570,9 +1762,10 @@ class _FakeHttpsBackendDeploymentService:
         data_endpoint: str | None = None,
         data_database_name: str | None = None,
         data_container_name: str | None = None,
+        require_sign_in: bool = False,
         on_progress=None,
     ) -> BackendDeploymentResult:
-        del data_endpoint, data_database_name, data_container_name
+        del data_endpoint, data_database_name, data_container_name, require_sign_in
         return BackendDeploymentResult(
             image_tag=f"acr/{mission_slug}:dev",
             backend_url=f"https://{mission_slug}-backend.example.com",
@@ -1582,6 +1775,9 @@ class _FakeHttpsBackendDeploymentService:
         self, *, mission_slug: str, frontend_origin: str
     ) -> None:
         del mission_slug, frontend_origin
+
+    async def ensure_gateway_spa_redirect_uri(self, frontend_url: str) -> None:
+        del frontend_url
 
 
 async def test_pipeline_retries_test_generation_when_it_uses_mocks_then_succeeds(
@@ -1756,9 +1952,10 @@ class _FailOnceThenSucceedBackendDeploymentService:
         data_endpoint: str | None = None,
         data_database_name: str | None = None,
         data_container_name: str | None = None,
+        require_sign_in: bool = False,
         on_progress=None,
     ) -> BackendDeploymentResult:
-        del data_endpoint, data_database_name, data_container_name
+        del data_endpoint, data_database_name, data_container_name, require_sign_in
         self.call_count += 1
         if self.call_count == 1:
             raise BackendDeploymentError("Simulated ACR build failure.")
@@ -1771,6 +1968,9 @@ class _FailOnceThenSucceedBackendDeploymentService:
         self, *, mission_slug: str, frontend_origin: str
     ) -> None:
         del mission_slug, frontend_origin
+
+    async def ensure_gateway_spa_redirect_uri(self, frontend_url: str) -> None:
+        del frontend_url
 
 
 async def test_retry_from_a_failed_step_reuses_the_same_run_and_its_prior_artifacts(tmp_path: Path):

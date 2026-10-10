@@ -14,7 +14,9 @@ from app.deploy_launch.code_materializer import (
     generate_agent_config_module,
     generate_backend_service_scaffold,
     generate_models_init,
+    generate_msal_config_module,
     generate_routing_shell,
+    generate_use_genie_auth_module,
     materialize_build,
 )
 
@@ -748,9 +750,99 @@ def test_generate_routing_shell_defaults_to_the_first_declared_page():
     assert 'label: "Dashboard Page"' in shell_source
 
 
+def test_generate_routing_shell_uses_hash_router_not_browser_router():
+    """Regression test for a real incident: the deployed frontend's own
+    production image serves the SPA from a plain nginx:alpine container
+    with no SPA-fallback rewrite rule, so a BrowserRouter route 404s on
+    direct navigation, refresh, or bookmark - before React Router ever
+    runs. HashRouter keeps every route under the single "/" path nginx
+    already serves."""
+
+    shell_source = generate_routing_shell(("Catalog Page", "Dashboard Page"))
+
+    assert 'from "react-router-dom"' in shell_source
+    assert "import { HashRouter" in shell_source
+    assert "<HashRouter>" in shell_source
+    assert "<BrowserRouter>" not in shell_source
+    assert "import { BrowserRouter" not in shell_source
+
+
 def test_generate_routing_shell_rejects_empty_page_list():
     with pytest.raises(MaterializedCodeError):
         generate_routing_shell(())
+
+
+def test_generate_routing_shell_without_sign_in_never_imports_msal():
+    shell_source = generate_routing_shell(("Catalog Page",), require_sign_in=False)
+
+    assert "msal" not in shell_source.lower()
+    assert "SignInControl" not in shell_source
+
+
+def test_generate_routing_shell_with_sign_in_wraps_with_msal_provider():
+    shell_source = generate_routing_shell(("Catalog Page", "Dashboard Page"), require_sign_in=True)
+
+    assert 'import { MsalProvider } from "@azure/msal-react";' in shell_source
+    assert 'import { msalInstance } from "./auth/msalConfig";' in shell_source
+    assert 'import { useGenieAuth } from "./auth/useGenieAuth";' in shell_source
+    assert "<MsalProvider instance={msalInstance}>" in shell_source
+    assert "function SignInControl()" in shell_source
+    # Still uses HashRouter underneath, nested inside the MSAL wrapper.
+    assert "<HashRouter>" in shell_source
+
+
+def test_generate_msal_config_module_reads_from_runtime_config_not_hardcoded():
+    module_source = generate_msal_config_module()
+
+    assert "window.__MISSION_ENTRA_TENANT_ID__" in module_source
+    assert "window.__MISSION_ENTRA_CLIENT_ID__" in module_source
+    assert "window.__MISSION_ENTRA_API_SCOPE__" in module_source
+    assert "export const msalInstance" in module_source
+    # Never a literal tenant/client id - only read from the window globals.
+    assert "16b3c013" not in module_source
+
+
+def test_generate_use_genie_auth_module_exposes_the_narrow_stable_surface():
+    module_source = generate_use_genie_auth_module()
+
+    assert "export function useGenieAuth" in module_source
+    assert "isSignedIn" in module_source
+    assert "getAccessToken" in module_source
+    assert "signIn" in module_source
+    assert "signOut" in module_source
+    assert 'from "@azure/msal-react"' in module_source
+
+
+def test_generate_use_genie_auth_module_uses_redirect_flow_never_popup():
+    """Regression test for a real incident: loginPopup()/logoutPopup()/
+    acquireTokenPopup() depend on window.open() succeeding and then being
+    allowed to navigate - managed/corporate browser security policies
+    routinely block this outright, leaving a blank, permanently stuck
+    popup window with no visible error on the parent page. The redirect
+    flow has no such dependency and is the robust default for an
+    enterprise-deployed prototype."""
+
+    module_source = generate_use_genie_auth_module()
+
+    assert "loginRedirect" in module_source
+    assert "logoutRedirect" in module_source
+    assert "acquireTokenRedirect" in module_source
+    assert "instance.loginPopup(" not in module_source
+    assert "instance.logoutPopup(" not in module_source
+    assert "instance.acquireTokenPopup(" not in module_source
+
+
+def test_generate_use_genie_auth_module_mirrors_identity_for_legacy_pages():
+    """Some already-generated page components (from Build Agent runs that
+    predate useGenieAuth()) independently invented their own
+    window.__GENIE_IDENTITY__ read for sign-in state - this mirror lets
+    them keep working without a hand edit, while useGenieAuth() remains
+    the one real, documented contract for every new page going forward."""
+
+    module_source = generate_use_genie_auth_module()
+
+    assert "__GENIE_IDENTITY__" in module_source
+    assert "actor_id" in module_source
 
 
 _MULTI_COMPONENT_TYPE_OUTPUT = '''
@@ -872,17 +964,17 @@ class OrchestratorAgent:
         pass
 ```
 
-```ts
-// agent: identity_config:Entra ID Adapter
-export const signIn = () => {};
+```yaml
+# agent: identity_config:Entra ID Adapter
+display_claim: name
 ```
 '''
 
 
-def test_materialize_build_parses_identity_config_as_a_ts_module():
+def test_materialize_build_parses_identity_config_as_structured_yaml():
     build = materialize_build(_IDENTITY_CONFIG_OUTPUT)
 
-    assert "signIn" in build.identity_config_modules["Entra ID Adapter"]
+    assert "display_claim" in build.identity_config_modules["Entra ID Adapter"]
 
 
 def test_write_to_directory_writes_identity_config(tmp_path: Path):
@@ -890,7 +982,7 @@ def test_write_to_directory_writes_identity_config(tmp_path: Path):
 
     build.write_to_directory(tmp_path)
 
-    assert (tmp_path / "identity" / "entra_id_adapter.ts").exists()
+    assert (tmp_path / "identity" / "entra_id_adapter.yaml").exists()
 
 
 def test_stream_agent_response_relays_on_progress_narration_as_it_happens(monkeypatch):

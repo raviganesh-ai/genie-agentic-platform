@@ -46,6 +46,28 @@ class _FailingGitHubMcpClient:
         raise GitHubMcpError(f"GitHub MCP rejected tool '{name}' with status 403.")
 
 
+class _RepositoryAlreadyExistsGitHubMcpClient:
+    """Simulates retrying a Deploy & Launch run whose repository was already
+    created (and possibly already pushed to) by an earlier attempt for the
+    same mission - this is the real, observed GitHub MCP error shape."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict[str, Any]]] = []
+
+    async def call_tool(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        self.calls.append((name, arguments))
+        if name == "get_me":
+            return _mcp_result({"login": "genie-bot"})
+        if name == "create_repository":
+            raise GitHubMcpError(
+                "failed to create repository: Repository creation failed.\n"
+                "Repository.name (custom): name already exists on this account"
+            )
+        if name == "push_files":
+            return _mcp_result({"commit": {"sha": "b" * 40}})
+        raise AssertionError(f"Unexpected tool call: {name}")
+
+
 def _write_sample_build(backend_root: Path, frontend_root: Path) -> None:
     backend_root.mkdir(parents=True, exist_ok=True)
     (backend_root / "main.py").write_text("print('backend')\n", encoding="utf-8")
@@ -105,6 +127,30 @@ async def test_checkin_fails_closed_when_github_mcp_rejects_the_push(tmp_path):
             backend_root=backend_root,
             frontend_root=frontend_root,
         )
+
+
+async def test_checkin_pushes_to_the_existing_repository_when_already_created(tmp_path):
+    """Retrying Deploy & Launch after a later step failed must not treat an
+    already-created repository (from this exact mission's earlier attempt)
+    as a fatal error - it should still push the latest build."""
+
+    backend_root = tmp_path / "backend"
+    frontend_root = tmp_path / "frontend"
+    _write_sample_build(backend_root, frontend_root)
+    client = _RepositoryAlreadyExistsGitHubMcpClient()
+    service = RepositoryCheckinService(client=client)  # type: ignore[arg-type]
+
+    result = await service.checkin(
+        mission_slug="aci-poc",
+        mission_title="ACI PoC",
+        backend_root=backend_root,
+        frontend_root=frontend_root,
+    )
+
+    assert result.repository_url == "https://github.com/genie-bot/genie-proto-aci-poc"
+    assert result.commit_sha == "b" * 40
+    push_call = next(call for name, call in client.calls if name == "push_files")
+    assert push_call["repo"] == "genie-proto-aci-poc"
 
 
 async def test_checkin_fails_closed_when_github_mcp_omits_a_commit_sha(tmp_path):
