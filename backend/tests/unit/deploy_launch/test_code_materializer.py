@@ -813,6 +813,25 @@ def test_generate_use_genie_auth_module_exposes_the_narrow_stable_surface():
     assert 'from "@azure/msal-react"' in module_source
 
 
+def test_generate_use_genie_auth_module_uses_redirect_flow_never_popup():
+    """Regression test for a real incident: loginPopup()/logoutPopup()/
+    acquireTokenPopup() depend on window.open() succeeding and then being
+    allowed to navigate - managed/corporate browser security policies
+    routinely block this outright, leaving a blank, permanently stuck
+    popup window with no visible error on the parent page. The redirect
+    flow has no such dependency and is the robust default for an
+    enterprise-deployed prototype."""
+
+    module_source = generate_use_genie_auth_module()
+
+    assert "loginRedirect" in module_source
+    assert "logoutRedirect" in module_source
+    assert "acquireTokenRedirect" in module_source
+    assert "instance.loginPopup(" not in module_source
+    assert "instance.logoutPopup(" not in module_source
+    assert "instance.acquireTokenPopup(" not in module_source
+
+
 def test_generate_use_genie_auth_module_mirrors_identity_for_legacy_pages():
     """Some already-generated page components (from Build Agent runs that
     predate useGenieAuth()) independently invented their own
