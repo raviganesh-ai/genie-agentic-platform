@@ -64,6 +64,7 @@ from app.services.requirement_fidelity_service import extract_requirement_ids
 
 __all__ = [
     "ArchitectureBuildPlan",
+    "check_identity_requirement_coverage",
     "parse_architecture_build_plan",
     "parse_component_requirement_assignments",
 ]
@@ -239,3 +240,75 @@ def parse_component_requirement_assignments(
                 assignments[name.strip().lower()] = requirement_ids
 
     return assignments
+
+
+# A deliberately small, literal list - real identity-provider names/
+# protocols actually named in a requirements document, never a broad
+# guess at "anything security-related" (a requirement that is merely
+# "secure" or mentions API keys/rate limiting does not call for this -
+# see architecture-recommendation-v1's own "## Identity Configuration"/
+# "## Gateway Policies" guidance, which this function backstops).
+_IDENTITY_PROVIDER_KEYWORDS: tuple[str, ...] = (
+    "entra id",
+    "azure ad",
+    "azure active directory",
+    "microsoft entra",
+    "oauth",
+    "openid connect",
+    "oidc",
+    "single sign-on",
+    "sso",
+)
+
+
+def check_identity_requirement_coverage(
+    *, approved_requirements: str, architecture_document: str
+) -> str | None:
+    """Returns a human-readable gap description when the approved
+    requirements name a real identity provider/protocol but the
+    architecture document declares neither "## Identity Configuration"
+    nor "## Gateway Policies" to satisfy it - or ``None`` when there is
+    no such gap.
+
+    A deterministic backstop for architecture-recommendation-v1's own
+    prompt-level reasoning guidance for these two sections - confirmed
+    by direct, repeated, empirical observation (identical approved
+    requirements, same model, two separate "Validate your Vision" runs)
+    that prompt guidance alone does not reliably produce these sections
+    every time a mission's requirements genuinely call for real sign-in.
+    A security-relevant gap like this one must fail closed rather than
+    silently proceed to Build with an incomplete architecture - the
+    real, observed consequence being a deployed prototype whose own
+    generated pages reference a "Sign in" control that was never built.
+
+    Never itself decides a mission needs identity from a keyword list
+    alone - only flags the specific, observed failure mode: real
+    identity-provider language already appears in the requirements, but
+    the architecture has no matching component for it at all.
+    """
+
+    requirements_lower = approved_requirements.lower()
+    if not any(keyword in requirements_lower for keyword in _IDENTITY_PROVIDER_KEYWORDS):
+        return None
+
+    architecture_lower = architecture_document.lower()
+    has_identity_config = "## identity configuration" in architecture_lower
+    has_gateway_policy = "## gateway policies" in architecture_lower
+    if has_identity_config and has_gateway_policy:
+        return None
+
+    missing = [
+        label
+        for present, label in (
+            (has_identity_config, '"## Identity Configuration"'),
+            (has_gateway_policy, '"## Gateway Policies"'),
+        )
+        if not present
+    ]
+    return (
+        "The approved requirements name a real identity provider or protocol "
+        "(Entra ID/Azure AD/OAuth/OIDC/SSO), but this architecture does not "
+        "declare " + " and ".join(missing) + " to enforce it. Re-run UI & Agent "
+        "Design, or explicitly confirm this mission genuinely needs no real "
+        "end-user sign-in, before proceeding to Build."
+    )

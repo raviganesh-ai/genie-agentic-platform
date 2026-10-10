@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from app.agents.tools.architecture_parsing import (
+    check_identity_requirement_coverage,
     parse_architecture_build_plan,
     parse_component_requirement_assignments,
 )
@@ -197,6 +198,71 @@ def test_other_component_requirement_assignments_are_extracted_per_bullet():
     # No requirement id was cited in this bullet - absent, not an error,
     # matching the Orchestrator's own established behavior above.
     assert "apim jwt policy" not in assignments
+
+
+def test_check_identity_requirement_coverage_is_none_when_requirements_name_no_identity_provider():
+    """Most missions never mention a real identity provider at all - this
+    must never force identity_config/gateway_policy onto them."""
+
+    gap = check_identity_requirement_coverage(
+        approved_requirements="[REQ-001] The system must be secure and log every action.",
+        architecture_document="## Multi-Agent Workflow\n\n- **Orchestrator Agent**: coordinates.\n",
+    )
+
+    assert gap is None
+
+
+def test_check_identity_requirement_coverage_flags_a_real_gap():
+    """Regression test for a real, repeatedly observed incident: the same
+    approved requirements and the same model, on two separate 'Validate
+    your Vision' runs, did not reliably produce '## Identity
+    Configuration'/'## Gateway Policies' even though the requirements
+    explicitly named Microsoft Entra ID - prompt guidance alone is not
+    sufficient for this security-relevant gap, so this deterministic
+    check must fail it closed before Build ever starts."""
+
+    gap = check_identity_requirement_coverage(
+        approved_requirements=(
+            "[REQ-006] A user authenticates through Microsoft Entra ID and the portal "
+            "surfaces that user's identity throughout the journey."
+        ),
+        architecture_document="## Multi-Agent Workflow\n\n- **Orchestrator Agent**: coordinates.\n",
+    )
+
+    assert gap is not None
+    assert "Identity Configuration" in gap
+    assert "Gateway Policies" in gap
+
+
+def test_check_identity_requirement_coverage_is_none_when_both_sections_present():
+    gap = check_identity_requirement_coverage(
+        approved_requirements="[REQ-006] A user authenticates through Microsoft Entra ID.",
+        architecture_document=(
+            "## Multi-Agent Workflow\n\n- **Orchestrator Agent**: coordinates.\n\n"
+            "## Identity Configuration\n\n- **Entra ID Adapter**: real sign-in.\n\n"
+            "## Gateway Policies\n\n- **APIM Policy**: enforces tokens.\n"
+        ),
+    )
+
+    assert gap is None
+
+
+def test_check_identity_requirement_coverage_flags_a_partial_gap():
+    """Only one of the matched pair declared - still a real gap (an
+    identity adapter with no gateway enforcement, or vice versa, is half
+    a security control)."""
+
+    gap = check_identity_requirement_coverage(
+        approved_requirements="[REQ-006] Sign in via Microsoft Entra ID is required.",
+        architecture_document=(
+            "## Multi-Agent Workflow\n\n- **Orchestrator Agent**: coordinates.\n\n"
+            "## Identity Configuration\n\n- **Entra ID Adapter**: real sign-in.\n"
+        ),
+    )
+
+    assert gap is not None
+    assert "Gateway Policies" in gap
+    assert "Identity Configuration" not in gap
 
 
 def test_parses_ui_pages_section_as_page_view_components():
