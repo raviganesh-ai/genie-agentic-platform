@@ -148,7 +148,16 @@ def _build_api_policy(
         # succeed. This exemption is unconditional and always first,
         # regardless of path_rules below.
         health_gate = ElementTree.SubElement(inbound, "choose")
-        health_when = ElementTree.SubElement(
+        # Deliberately empty: CORS, the unconditional <base/> above, the
+        # rate limit, and the correlation header have already executed
+        # earlier in this same <inbound> section (APIM runs policy
+        # statements in document order), so health paths already got
+        # everything the "base"/global policy provides. APIM rejects a
+        # second <base/> anywhere in the same section (even nested inside
+        # a <when>), so this branch must stay a true no-op: it only
+        # exists to skip the validate-azure-ad-token check in the
+        # "otherwise" branch below for health/readiness probes.
+        ElementTree.SubElement(
             health_gate,
             "when",
             {
@@ -158,7 +167,6 @@ def _build_api_policy(
                 )
             },
         )
-        ElementTree.SubElement(health_when, "base")
         gateway_policy_branch = ElementTree.SubElement(health_gate, "otherwise")
         if gateway_policy.path_rules:
             # Policy-based denial per product/operation path (FR-008) -

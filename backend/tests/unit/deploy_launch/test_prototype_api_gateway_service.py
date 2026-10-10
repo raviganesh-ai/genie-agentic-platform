@@ -88,9 +88,16 @@ def test_api_policy_never_requires_a_bearer_token_on_health_paths():
     assert health_when is not None
     assert '"/health"' in health_when.attrib["condition"]
     # The health branch must be a pure pass-through - no token validation
-    # anywhere inside it.
+    # anywhere inside it. It must also stay empty (no nested <base/>):
+    # CORS, the unconditional <base/>, the rate limit, and the correlation
+    # header already ran earlier in document order within this same
+    # <inbound> section, and APIM rejects more than one <base/> per
+    # section - a real incident this exact regression test caught, where
+    # a second, nested <base/> here broke APIM policy publishing with
+    # "Only one policy statement of this type is allowed per section".
     assert health_when.find(".//validate-azure-ad-token") is None
-    assert health_when.find("./base") is not None
+    assert list(health_when) == []
+    assert len(root.findall("./inbound//base")) == 1
 
 
 def test_api_policy_renders_per_path_denial_with_a_default_fallback():
