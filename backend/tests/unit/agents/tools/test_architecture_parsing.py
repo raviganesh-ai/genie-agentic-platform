@@ -174,6 +174,70 @@ def test_parses_optional_component_type_sections_in_declared_order():
     )
 
 
+def test_api_contract_describing_genuine_runtime_behavior_also_becomes_a_deterministic_service():
+    """Regression guard for the "mock backend never deployed" incident: a
+    real deployed mission's own "## API Contracts" bullet described itself
+    as "Fully executable backends..." yet the Architecture Designer never
+    added a matching "## Deterministic Services" bullet (confirmed across
+    two independent regenerations with the strengthened prompt guidance
+    alone) - so Build never generated real code for it and the documented
+    routes 404'd when actually called. Detecting this language
+    deterministically and emitting a matching deterministic_service entry
+    closes the gap without depending on prompt-following fidelity."""
+
+    document = """
+## Multi-Agent Workflow
+
+- **Ticket Classifier Agent**: classifies the incoming issue by category.
+- **Support Triage Orchestrator Agent**: the single entry point.
+
+## API Contracts
+
+- **ACI Mock Core Payments API**: Fully executable backends for Account-to-Account
+  Payments, with an OpenAPI spec and at least 8 named operations.
+- **Legacy Partner API**: a documentation-only reference contract for an
+  external system this mission never calls.
+"""
+
+    plan = parse_architecture_build_plan(document)
+
+    assert plan is not None
+    assert plan.other_components == (
+        ("api_contract", "ACI Mock Core Payments API"),
+        ("deterministic_service", "ACI Mock Core Payments API"),
+        ("api_contract", "Legacy Partner API"),
+    )
+
+
+def test_api_contract_is_not_duplicated_when_matching_service_already_declared():
+    """When the Architecture Designer DID correctly add a matching "##
+    Deterministic Services" bullet for an executable-sounding contract,
+    the heuristic must not add a redundant second service entry."""
+
+    document = """
+## Multi-Agent Workflow
+
+- **Ticket Classifier Agent**: classifies the incoming issue by category.
+- **Support Triage Orchestrator Agent**: the single entry point.
+
+## Deterministic Services
+
+- **ACI Mock Core Payments API**: the real, callable mock backend implementation.
+
+## API Contracts
+
+- **ACI Mock Core Payments API**: Fully executable backends with an OpenAPI spec.
+"""
+
+    plan = parse_architecture_build_plan(document)
+
+    assert plan is not None
+    assert plan.other_components == (
+        ("deterministic_service", "ACI Mock Core Payments API"),
+        ("api_contract", "ACI Mock Core Payments API"),
+    )
+
+
 def test_other_component_requirement_assignments_are_extracted_per_bullet():
     document = """
 ## Multi-Agent Workflow

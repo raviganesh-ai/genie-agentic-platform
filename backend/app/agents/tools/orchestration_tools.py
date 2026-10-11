@@ -396,8 +396,9 @@ def _strip_marker_prefix(name: str) -> str:
 
 
 def _extract_reusable_components(previous_build_output: str) -> dict[str, str]:
-    """Maps each component name (lowercased) that fully succeeded on a
-    prior ``build-solution`` attempt to its own previously generated
+    """Maps each component's own full marker-prefixed label (e.g.
+    ``"service:entitlement checker"``, lowercased) that fully succeeded on
+    a prior ``build-solution`` attempt to its own previously generated
     fenced code block.
 
     Recognizes each block the same way ``build-generation-component-v1``
@@ -407,6 +408,15 @@ def _extract_reusable_components(previous_build_output: str) -> dict[str, str]:
     ``COMPONENT_FAILURE_MARKER`` (see ``_component_failure_piece``) is
     deliberately excluded - it represents a component that failed last
     time and must always be regenerated, never mistaken for reusable code.
+
+    Keyed by the FULL marker-prefixed label (never the bare name with the
+    prefix stripped) - an "## API Contracts" bullet whose own description
+    asserts genuine runtime behavior (see
+    ``architecture_parsing._api_contract_needs_real_implementation``) is
+    deliberately also emitted as a same-named ``deterministic_service``
+    component; keying by bare name alone would let that brand-new service
+    component wrongly "reuse" the unrelated api_contract component's own
+    cached YAML from a prior attempt just because they share a name.
 
     Called with ``previous_build_output`` (see the self-referential
     ``previous_build_output: step:build-solution`` variable source in
@@ -422,18 +432,14 @@ def _extract_reusable_components(previous_build_output: str) -> dict[str, str]:
         block_text = match.group(0)
         if COMPONENT_FAILURE_MARKER in block_text:
             continue
-        # Several component kinds (page_view, deterministic_service,
-        # data_model, api_contract) nest their own kind marker inside the
-        # "agent: <value>" label (e.g. "page:<Page Name>" - see
-        # code_materializer.py's own per-kind marker patterns); strip it
-        # so the stored key matches the bare component name callers look
-        # reuse up by (the same ``label_name`` every multi-instance
-        # component kind uses), exactly like "orchestrator"/"ui" are
-        # matched by their own literal kind name.
-        name = _strip_marker_prefix(match.group("name").strip())
-        if name.casefold() == "orchestrator" and _BLOCKING_EVENT_LOOP_PATTERN.search(block_text):
+        raw_name = match.group("name").strip()
+        stripped_name = _strip_marker_prefix(raw_name)
+        if (
+            stripped_name.casefold() == "orchestrator"
+            and _BLOCKING_EVENT_LOOP_PATTERN.search(block_text)
+        ):
             continue
-        reusable[name.lower()] = block_text
+        reusable[raw_name.lower()] = block_text
     return reusable
 
 
@@ -742,7 +748,13 @@ async def _generate_build_by_component(
         label_name = component_kind if component_kind in ("orchestrator", "ui") else component_name
         marker_prefix = MARKER_PREFIX_BY_COMPONENT_KIND.get(component_kind, "")
         marker_name = f"{marker_prefix}{label_name}"
-        reused_piece = reusable_components.get(label_name.strip().lower())
+        # Keyed by the full marker-prefixed label (never the bare name) -
+        # see _extract_reusable_components - so a same-named
+        # deterministic_service generated alongside its own api_contract
+        # sibling (see architecture_parsing.py's
+        # _api_contract_needs_real_implementation) never wrongly reuses
+        # the other kind's cached code just because the names match.
+        reused_piece = reusable_components.get(marker_name.strip().lower())
         if reused_piece is not None:
             # Already succeeded on a prior attempt at this same step - reuse
             # its real code verbatim (see _extract_reusable_components)

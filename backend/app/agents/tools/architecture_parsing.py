@@ -112,6 +112,37 @@ class ArchitectureBuildPlan:
     other_components: tuple[tuple[str, str], ...] = ()
 
 
+# A "## API Contracts" bullet is normally documentation-only (an OpenAPI
+# spec with no runtime behavior of its own - see
+# ``architecture-recommendation-v1``'s own "## API Contracts" guidance).
+# Some architecture drafts nonetheless describe a contract that must be
+# genuinely callable at runtime (a mock/synthetic backend a real caller -
+# this mission's own frontend, an API explorer, an acceptance test -
+# actually invokes over HTTP, not merely reads documentation about) using
+# language like "fully executable"/"functioning"/"callable" even though
+# the Architecture Designer placed it only under "## API Contracts" and
+# never added the matching "## Deterministic Services" bullet that
+# instruction also calls for. Confirmed on a real deployed mission: an
+# OpenAPI contract describing itself as "Fully executable backends..."
+# with no matching implementation component, so Build never generated
+# real code for it and the documented routes 404'd when actually called.
+# Detecting that language here and emitting a matching
+# ``deterministic_service`` entry (same name, so Build generates a real
+# ``router``-based implementation for it - see "component_kind is
+# deterministic_service" in ``build-generation-component-v1``) closes
+# that gap deterministically, rather than depending on the Architecture
+# Designer's own prompt-following to always split these into two bullets.
+_EXECUTABLE_CONTRACT_PATTERN = re.compile(
+    r"\b(fully\s+)?(executable|functioning|callable|working)\b"
+    r"|real,?\s+(working|callable)\s+backend",
+    re.IGNORECASE,
+)
+
+
+def _api_contract_needs_real_implementation(bullet_text: str) -> bool:
+    return _EXECUTABLE_CONTRACT_PATTERN.search(bullet_text) is not None
+
+
 def parse_architecture_build_plan(architecture_document: str) -> ArchitectureBuildPlan | None:
     """Returns the ordered build plan for ``architecture_document``.
 
@@ -143,9 +174,22 @@ def parse_architecture_build_plan(architecture_document: str) -> ArchitectureBui
         return None
 
     other_components: list[tuple[str, str]] = []
+    existing_deterministic_service_names: set[str] = set()
     for component_type, pattern in _OTHER_COMPONENT_SECTION_PATTERNS:
         match = pattern.search(architecture_document)
         if match is None:
+            continue
+        if component_type == "deterministic_service":
+            for bullet_name, _ in _bullet_spans(match.group(1)):
+                existing_deterministic_service_names.add(bullet_name.strip().lower())
+        if component_type == "api_contract":
+            for bullet_name, bullet_text in _bullet_spans(match.group(1)):
+                other_components.append((component_type, bullet_name))
+                if (
+                    bullet_name.strip().lower() not in existing_deterministic_service_names
+                    and _api_contract_needs_real_implementation(bullet_text)
+                ):
+                    other_components.append(("deterministic_service", bullet_name))
             continue
         for bullet_name in (
             m.group(1).strip() for m in _BULLET_PATTERN.finditer(match.group(1))
