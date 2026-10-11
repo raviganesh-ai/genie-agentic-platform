@@ -122,6 +122,36 @@ async def test_run_tests_actually_executes_generated_pytest_module(tmp_path: Pat
     assert (tmp_path / "tests" / "test_generated_0.py").exists()
 
 
+async def test_run_tests_executes_an_unmarked_async_test_function(tmp_path: Path):
+    """Regression coverage for a real incident found deploying a fresh
+    mission end to end: every single generated requirement test "errored"
+    (0 passed, 0 failed, N errors) even though the deployed prototype
+    itself was already live and working. Root cause: the Test Generation
+    Agent routinely writes `async def test_...` functions (it is testing
+    this codebase's own async agent/service functions) with no explicit
+    `@pytest.mark.asyncio` marker - pytest cannot even collect an async
+    test function without pytest-asyncio installed and asyncio mode
+    enabled, failing the entire containing module with one collection
+    error. This must work automatically, with no marker required, since
+    the generation prompt never adds one."""
+
+    service = TestExecutionService(timeout_seconds=60)
+    unmarked_async_test = """
+```python
+async def test_async_without_explicit_marker():
+    assert 1 + 1 == 2
+```
+"""
+
+    result = await service.run_tests(build_root=tmp_path, test_output_text=unmarked_async_test)
+
+    assert result.ran is True
+    assert result.passed == 1
+    assert result.errors == 0
+    assert result.success is True
+    assert result.passed_test_names == ("test_async_without_explicit_marker",)
+
+
 async def test_run_tests_resolves_relative_production_workspace(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):

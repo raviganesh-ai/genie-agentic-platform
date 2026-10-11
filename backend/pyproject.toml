@@ -41,11 +41,25 @@ dependencies = [
     # "No module named pytest", misreported as "the generated test suite
     # has no runnable test function(s)".
     "pytest>=8.2,<9.0",
+    # Same reasoning as pytest above, and a real, observed incident of the
+    # exact same shape: the Test Generation Agent naturally writes `async
+    # def test_...` functions (it is testing this codebase's own async
+    # agent/service functions) with no explicit `@pytest.mark.asyncio`
+    # marker (the prompt never tells it to add one). Without pytest-asyncio
+    # installed, pytest cannot even collect an async test function - it
+    # fails the ENTIRE containing module with one collection error, not
+    # just that one test - which is exactly why every single generated
+    # requirement test module "errored" (0 passed, 0 failed, N errors)
+    # while the prototype's own live endpoints were already deployed,
+    # reachable, and working. See test_execution_service.py's own
+    # "--asyncio-mode=auto" pytest invocation flag, which is the other
+    # half of this fix (that flag alone cannot work without this package
+    # actually being installed).
+    "pytest-asyncio>=0.23,<1.0",
 ]
 
 [project.optional-dependencies]
 dev = [
-    "pytest-asyncio>=0.23,<1.0",
     "httpx>=0.27,<1.0",
     "ruff>=0.5,<1.0",
 ]

@@ -274,6 +274,20 @@ class TestExecutionService:
             str(tests_dir),
             "-q",
             f"--junitxml={junit_path}",
+            # Explicit, not dependent on pytest's own ini-file discovery:
+            # this subprocess's cwd is the mission's own materialized build
+            # directory, never Genie's own repository root, so Genie's own
+            # pyproject.toml ([tool.pytest.ini_options] asyncio_mode =
+            # "auto") is never found/applied here regardless of what it
+            # says. Without this flag, an `async def test_...` function
+            # (which the Test Generation Agent writes routinely, with no
+            # explicit `@pytest.mark.asyncio` marker - it is testing this
+            # codebase's own async functions) fails to collect at all,
+            # taking down its entire containing module with one collection
+            # error - a real, observed incident where every single
+            # generated requirement test errored even though the deployed
+            # prototype itself was already live and working.
+            "--asyncio-mode=auto",
             # Without this, pytest's default behavior is to run NO tests at
             # all when ANY generated module fails to collect (e.g. one
             # module imports a package that isn't installed) - silently
