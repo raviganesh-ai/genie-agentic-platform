@@ -1305,6 +1305,12 @@ prompts:
         production build (a real, observed incident). Use
         `crypto.randomUUID()` for a correlation id/unique key, native
         `Date`/`Intl.DateTimeFormat` for formatting, and plain `fetch`.
+      - never mix `??` and `||` in the same expression without explicit
+        parentheses, e.g. `a ?? b || c` - a real JavaScript/TypeScript
+        SyntaxError ("Cannot use \"||\" with \"??\" without
+        parentheses"), not a style issue, that fails the entire
+        production build (a real, observed incident chaining fallback
+        values). Always group explicitly: `(a ?? b) || c`.
       - render sections: architecture order exactly, labeled with zone
         name/purpose
       - a single submit handler that composes one JSON-encoded `message`
@@ -1749,6 +1755,16 @@ prompts:
       all. Never write a comment like "declared below to satisfy the
       dependency array" - reorder the declarations instead.
 
+      OPERATOR MIXING - `??` (nullish coalescing) and `||` (logical OR)
+      can NEVER appear in the same expression without explicit
+      parentheses, e.g. `a ?? b || c` - this is not a style preference,
+      it is an actual JavaScript/TypeScript SyntaxError the production
+      build rejects outright ("Cannot use \"||\" with \"??\" without
+      parentheses" - a real, observed incident chaining multiple
+      fallback values, e.g. `payload.a ?? payload.b ?? payload.c ||
+      null`), taking down the entire generated frontend. Always group
+      explicitly: `(a ?? b) || c` or `a ?? (b || c)`.
+
       JSX TEXT CONTENT - a bare `>` character is NEVER valid directly
       inside JSX element text (only inside a `{{...}}` JS expression, a
       tag's own markup, or a comparison/generic already wrapped in
@@ -1858,7 +1874,8 @@ prompts:
       page case above, which has no need for them). Every rule that
       applies to the single-page case above also applies here unchanged:
       FILE UPLOAD VALIDATION, REPRESENTATIVE SAMPLE EXECUTION, REQUIRED VS
-      OPTIONAL, DECLARATION ORDER, JSX TEXT CONTENT, AVAILABLE
+      OPTIONAL, DECLARATION ORDER, OPERATOR MIXING, JSX TEXT CONTENT,
+      AVAILABLE
       DEPENDENCIES, the COMPONENT
       CONTRACT (your
       default-exported component still receives exactly one prop object,
@@ -2092,7 +2109,11 @@ prompts:
       other third-party package (e.g. `uuid`, `axios`, `lodash`); use
       `crypto.randomUUID()` for a correlation id/unique key instead of
       `uuid`'s `v4()` - an unresolved import fails the entire production
-      build (a real, observed incident).
+      build (a real, observed incident). Never mix `??` and `||` in the
+      same expression without explicit parentheses, e.g. `a ?? b || c` -
+      a real JavaScript/TypeScript SyntaxError, not a style issue, that
+      fails the entire production build (a real, observed incident);
+      always group explicitly: `(a ?? b) || c`.
 
       Security rules you MUST follow: never hardcode any URL, hostname,
       port, API key, token, secret, or credential anywhere - read every
