@@ -137,9 +137,24 @@ _EXECUTABLE_CONTRACT_PATTERN = re.compile(
     r"|real,?\s+(working|callable)\s+backend",
     re.IGNORECASE,
 )
+# A bullet can still mention "executable"/"functioning" while explicitly
+# saying this specific contract is NOT yet one - confirmed on the same
+# real mission: a catalog-stub contract's own text read "executable
+# backends for these domains are deferred to later ... passes and must
+# not be presented as functional in the first generated pass", which
+# would otherwise false-positive. Any of these phrases nearby overrides
+# a positive keyword match.
+_NOT_YET_EXECUTABLE_PATTERN = re.compile(
+    r"\b(deferred|stub|documentation[\s-]only|catalog\s+entr(?:y|ies)\s+only|"
+    r"not\s+(?:yet\s+)?(?:be\s+)?(?:presented\s+as\s+)?(?:functional|executable|"
+    r"callable|implemented))\b",
+    re.IGNORECASE,
+)
 
 
 def _api_contract_needs_real_implementation(bullet_text: str) -> bool:
+    if _NOT_YET_EXECUTABLE_PATTERN.search(bullet_text) is not None:
+        return False
     return _EXECUTABLE_CONTRACT_PATTERN.search(bullet_text) is not None
 
 

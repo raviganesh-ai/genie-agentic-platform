@@ -238,6 +238,34 @@ def test_api_contract_is_not_duplicated_when_matching_service_already_declared()
     )
 
 
+def test_api_contract_deferred_to_a_later_pass_is_not_treated_as_executable():
+    """Regression guard for a real false positive: a catalog-stub
+    contract's own text explicitly said "executable backends for these
+    domains are deferred to later ... passes and must not be presented as
+    functional in the first generated pass" - the word "executable" still
+    appears, but in a negating context, so no deterministic_service
+    should be derived for it."""
+
+    document = """
+## Multi-Agent Workflow
+
+- **Ticket Classifier Agent**: classifies the incoming issue by category.
+- **Support Triage Orchestrator Agent**: the single entry point.
+
+## API Contracts
+
+- **ACI Catalog Stub APIs (Domains 4-10)**: First-pass catalog entries only-name,
+  description, documentation stub, and tags; executable backends for these
+  domains are deferred to later Genie "Modernize and deliver" governed-refinement
+  passes and must not be presented as functional in the first generated pass.
+"""
+
+    plan = parse_architecture_build_plan(document)
+
+    assert plan is not None
+    assert plan.other_components == (("api_contract", "ACI Catalog Stub APIs (Domains 4-10)"),)
+
+
 def test_other_component_requirement_assignments_are_extracted_per_bullet():
     document = """
 ## Multi-Agent Workflow
