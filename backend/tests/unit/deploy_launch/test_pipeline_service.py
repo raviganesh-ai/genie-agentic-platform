@@ -1476,6 +1476,31 @@ def test_generated_frontend_reports_impeccable_findings_without_blocking_build()
     )
 
 
+def test_generated_frontend_package_json_actually_installs_every_dependency_the_build_prompts_promise() -> (
+    None
+):
+    """Regression coverage for a real incident: the Build Agent prompts tell
+    the LLM charts (Recharts) and diagrams (React Flow) are "already
+    approved, installed dependencies" for page components, but
+    _FRONTEND_PACKAGE_JSON never actually listed them - any generated page
+    that imported either one failed the entire production ACR build with
+    Rollup's "failed to resolve import", taking down every other page too.
+    """
+    from app.deploy_launch.pipeline_service import _FRONTEND_PACKAGE_JSON
+
+    package = json.loads(_FRONTEND_PACKAGE_JSON)
+    dependencies = package["dependencies"]
+
+    assert "recharts" in dependencies
+    assert "reactflow" in dependencies
+    # Never promise a package whose name the Build Agent prompts never
+    # actually guide the LLM toward importing by that exact name - "uuid"
+    # is intentionally NOT installed; crypto.randomUUID() is a native,
+    # zero-dependency replacement (see the AVAILABLE DEPENDENCIES prompt
+    # rule), so adding it here would just mask the real fix.
+    assert "uuid" not in dependencies
+
+
 def test_generated_mission_input_does_not_nest_custom_zones_inside_a_shell_card() -> None:
     from app.deploy_launch.pipeline_service import _FRONTEND_MAIN_TSX, _FRONTEND_STYLES_CSS
 

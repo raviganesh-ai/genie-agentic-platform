@@ -1298,6 +1298,13 @@ prompts:
         production build (a real, observed incident), not just this one
         component. Use a word ("leads to", "then") or the Unicode arrow
         "→" instead.
+      - only `react`, `react-dom`, `react-router-dom`, `@azure/msal-browser`,
+        `@azure/msal-react`, `recharts`, and `reactflow` are installed -
+        never `import` any other third-party package (e.g. `uuid`,
+        `axios`, `lodash`, `dayjs`). An unresolved import fails the entire
+        production build (a real, observed incident). Use
+        `crypto.randomUUID()` for a correlation id/unique key, native
+        `Date`/`Intl.DateTimeFormat` for formatting, and plain `fetch`.
       - render sections: architecture order exactly, labeled with zone
         name/purpose
       - a single submit handler that composes one JSON-encoded `message`
@@ -1754,6 +1761,20 @@ prompts:
       Unicode arrow "→" (a normal, always-safe character), or explicitly
       escape it as `{{'>'}}` / `&gt;` if you must render a literal `>`.
 
+      AVAILABLE DEPENDENCIES - the ONLY third-party packages installed in
+      this project are `react`, `react-dom`, `react-router-dom`,
+      `@azure/msal-browser`, `@azure/msal-react`, `recharts` (for
+      charts/dashboards/funnels), and `reactflow` (for diagrams/trace
+      graphs) - never `import` anything else (e.g. `uuid`, `axios`,
+      `lodash`, `dayjs`, `date-fns`, icon packages). An unresolved import
+      fails the ENTIRE production build with "Rollup failed to resolve
+      import" - a real, observed incident (`uuid` imported for a
+      correlation id) - taking down every page, not just this one. Use
+      native Web APIs instead: `crypto.randomUUID()` for a correlation
+      id/unique key (never `uuid`'s `v4()`), the native `Date`/
+      `Intl.DateTimeFormat` for formatting (never `dayjs`/`date-fns`),
+      and plain `fetch` (never `axios`).
+
       COMPONENT CONTRACT - your default-exported component receives
       exactly one prop object: `{{ onSubmit: (message: string,
       attachments?: {{ name: string, content: string }}[]) => void }}`.
@@ -1837,7 +1858,8 @@ prompts:
       page case above, which has no need for them). Every rule that
       applies to the single-page case above also applies here unchanged:
       FILE UPLOAD VALIDATION, REPRESENTATIVE SAMPLE EXECUTION, REQUIRED VS
-      OPTIONAL, DECLARATION ORDER, JSX TEXT CONTENT, the COMPONENT
+      OPTIONAL, DECLARATION ORDER, JSX TEXT CONTENT, AVAILABLE
+      DEPENDENCIES, the COMPONENT
       CONTRACT (your
       default-exported component still receives exactly one prop object,
       `{{ onSubmit: (message: string, attachments?: {{ name: string,
@@ -2064,7 +2086,13 @@ prompts:
       JSX text is invalid syntax and fails the entire production build (a
       real, observed incident), not just this one component. Use a word
       ("leads to", "then"), the Unicode arrow "→", or escape it as
-      `{{'>'}}`/`&gt;` instead.
+      `{{'>'}}`/`&gt;` instead. Only `react`, `react-dom`,
+      `react-router-dom`, `@azure/msal-browser`, `@azure/msal-react`,
+      `recharts`, and `reactflow` are installed - never `import` any
+      other third-party package (e.g. `uuid`, `axios`, `lodash`); use
+      `crypto.randomUUID()` for a correlation id/unique key instead of
+      `uuid`'s `v4()` - an unresolved import fails the entire production
+      build (a real, observed incident).
 
       Security rules you MUST follow: never hardcode any URL, hostname,
       port, API key, token, secret, or credential anywhere - read every

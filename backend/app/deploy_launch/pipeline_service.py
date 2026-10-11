@@ -196,6 +196,8 @@ _FRONTEND_PACKAGE_JSON = json.dumps(
             "react-router-dom": "6.28.0",
             "@azure/msal-browser": "3.27.0",
             "@azure/msal-react": "2.2.0",
+            "recharts": "2.15.0",
+            "reactflow": "11.11.4",
         },
         "devDependencies": {
             "@vitejs/plugin-react": "4.3.4",
