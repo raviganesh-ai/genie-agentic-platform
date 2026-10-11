@@ -160,7 +160,16 @@ _FRONTEND_INDEX_HTML_TEMPLATE = """<!doctype html>
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>{mission_title}</title>
     <link rel="icon" href="data:,">
-  <script src="runtime-config.js"></script>
+  <!-- Must be an ABSOLUTE path (leading "/"), never a bare relative one:
+       runtime-config.js lives in this project's public/ directory (written
+       by sync-frontend-integration, see _materialize_frontend below) and is
+       meant to be copied verbatim, never bundled. A relative src (no
+       leading "/") makes Vite's HTML transform treat it as a local source
+       file that needs processing, and it fails production builds with
+       "<script src=...> can't be bundled without type='module' attribute"
+       - a real incident that failed every deploy-frontend-app ACR build
+       until this leading slash was added. -->
+  <script src="/runtime-config.js"></script>
 </head>
 <body>
   <div id="root"></div>

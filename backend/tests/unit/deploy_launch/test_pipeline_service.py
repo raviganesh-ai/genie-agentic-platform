@@ -595,6 +595,16 @@ async def test_full_pipeline_runs_every_step(tmp_path: Path):
     )
     assert '__MISSION_AGENTS__ = ["Requirements Specialist"]' in runtime_config_source
 
+    # Regression coverage for a real incident: index.html referenced
+    # runtime-config.js with a bare relative path. Vite's production build
+    # then treats it as a local source file needing bundling rather than a
+    # public/ asset to copy verbatim, and fails with "<script src=...> can't
+    # be bundled without type='module' attribute" - every deploy-frontend-app
+    # ACR build failed until this was an absolute ("/runtime-config.js") path.
+    index_html_source = (build_root.parent / "frontend" / "index.html").read_text(encoding="utf-8")
+    assert '<script src="/runtime-config.js"></script>' in index_html_source
+    assert '<script src="runtime-config.js"></script>' not in index_html_source
+
 
 async def test_sync_frontend_integration_writes_real_pages_and_routing_shell_for_multi_page_mission(
     tmp_path: Path,
