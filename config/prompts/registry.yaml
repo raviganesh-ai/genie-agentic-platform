@@ -617,14 +617,31 @@ prompts:
       requirements explicitly call for deterministic rather than
       AI-driven behavior for that specific piece. Do not use this merely
       to avoid writing a specialist agent for work that genuinely needs
-      judgment/reasoning. One bullet per service:
+      judgment/reasoning. Every such service's real routes are
+      automatically mounted onto this mission's own single deployed
+      backend (never a separate deployment), so this is also the section
+      to use for a mock/synthetic backend API a real caller (this
+      mission's own frontend, or an external test/demo client) must be
+      able to genuinely invoke over HTTP at runtime - never model that as
+      an "## API Contracts"-only entry when live callable behavior is
+      required (see below). One bullet per service:
       "**<Service name>**: <what it deterministically does>
       (fulfills REQ-XXX[, REQ-XXX...])"
 
       "## API Contracts" - add ONLY when the approved requirements name a
       specific external or mock API/product surface this mission must
       document or expose with its own contract, distinct from this
-      mission's own single backend endpoint. One bullet per API:
+      mission's own single backend endpoint. An API Contract is a
+      documentation artifact (an OpenAPI document) only - it has no
+      runtime behavior of its own. If the approved requirements also
+      require that surface to be genuinely callable at runtime (a demo
+      walkthrough, an API explorer, or an acceptance test that must
+      receive a real response, not only read documentation about one),
+      you MUST also add a matching "## Deterministic Services" bullet
+      (same name or an explicit reference to it) that implements the
+      real, callable backend for that exact contract - an API Contract
+      bullet alone never produces a reachable endpoint. One bullet per
+      API:
       "**<API name>**: <what it exposes>
       (fulfills REQ-XXX[, REQ-XXX...])"
 
@@ -690,7 +707,7 @@ prompts:
       - user_message
       - architecture_reference_text
       - standards_reference_text
-    version: "4.11.0"
+    version: "4.12.0"
 
   - id: security-assessment-v1
     name: Security Assessment
@@ -1536,6 +1553,25 @@ prompts:
       scaffold owns its keyword-only constructor, project client,
       authentication, version lookup, and response parsing. Never
       hardcode a literal Foundry name or invent a different SDK.
+
+      If this agent's own responsibility requires delegating to a
+      deterministic service already generated in this same build (see
+      "## Deterministic Services" in the architecture and that
+      component's own code above in "prior_components") - for example a
+      write-capable tool that must call the deterministic onboarding
+      workflow rather than mutate state itself - call that service's own
+      plain top-level function(s) directly via a normal Python import
+      (e.g. `from services.<module_name> import <function_name>`,
+      matching the exact module/function names you see in that
+      component's own code above) and `await`/call it in-process. Never
+      invent an HTTP request, APIM call, bearer-token acquisition, or any
+      other network round-trip to reach it - that service is never a
+      separately deployed endpoint; it runs inside this exact same
+      backend process as this agent module, so a direct in-process
+      function call is both correct and the only way it is actually
+      reachable. This still satisfies "the deterministic workflow is the
+      authority for state changes" - calling its real function in-process
+      is calling the deterministic workflow, not bypassing it.
       Return one fenced ```python code block, first line `# agent:
       {component_name}`.
 
@@ -1909,6 +1945,45 @@ prompts:
       needs a shared data model generated elsewhere in this same build
       (see "prior_components" below), import it via `from models import
       <Name>` - never redefine or duplicate that model's own fields here.
+
+      EXECUTION MODEL (read before deciding how to expose this
+      component): this module runs inside this mission's own single
+      deployed backend process - it is never a separately deployed
+      service of its own, and there is no network address, container, or
+      APIM backend pointing at it on its own. Expose its logic in
+      whichever of these two ways this component actually needs, and
+      both are normal:
+      1. If a real external caller must be able to invoke this component
+      directly over HTTP at runtime (this mission's own frontend, an API
+      explorer page, a demo script, or an acceptance test expecting a
+      real response - not merely documentation) - for example a mock
+      product/API backend named in an "## API Contracts" bullet - define
+      a module-level `router = APIRouter()` (from `fastapi`) and put
+      every real HTTP operation on it with its own full, absolute path
+      (e.g. `@router.post("/v1/transfers")`), matching the paths/methods
+      of the matching API Contract's OpenAPI document exactly where one
+      exists. Genie's deterministic backend scaffold automatically
+      discovers every `services/*.py` module's `router` attribute and
+      mounts it onto this mission's one deployed app at startup (see
+      `service_mounts.py`, never LLM-authored) - so these routes become
+      genuinely reachable through this mission's own APIM gateway with no
+      further wiring from you. Never construct your own `FastAPI()` app
+      here (a second, independent app has nothing pointing at it and is
+      never reachable).
+      2. If this component exists only to be called by a specialist
+      agent elsewhere in this same build (never by an external HTTP
+      caller directly) - for example a validation/rules engine a
+      specialist agent's tool function delegates to - expose it as one
+      or more plain top-level functions with clear names and type hints;
+      no `APIRouter`/`FastAPI` import is needed at all, since the calling
+      agent imports and calls these functions directly in-process (see
+      the "agent" instructions below).
+      A component can do both: expose `router` for real HTTP callers AND
+      keep its core logic in plain functions the route handlers
+      themselves call, so a specialist agent can also import and call
+      those same plain functions directly in-process rather than via a
+      self-referential HTTP round-trip.
+
       Return one fenced ```python code block, first line `# agent:
       service:{component_name}` (the literal prefix `service:` followed
       by this component's own name - this is how Genie's materializer
@@ -2060,7 +2135,7 @@ prompts:
       - user_message
       - assigned_requirements
       - prior_components
-    version: "1.31.0"
+    version: "1.32.0"
 
   - id: build-component-regeneration-v1
     name: Build Generation - Regenerate Single Component
@@ -2120,6 +2195,23 @@ prompts:
       endpoint, deployment name, and secret from configuration/environment
       variables, matching Genie's own no-hardcoding rule.
 
+      If component_kind is "deterministic_service", remember this module
+      runs inside this mission's own single deployed backend process - it
+      is never a separately deployed service. If a real external caller
+      (this mission's own frontend, an API explorer, a demo/acceptance
+      test) must be able to invoke it over HTTP, expose a module-level
+      `router = APIRouter()` with full absolute paths (e.g.
+      `@router.post("/v1/transfers")`) - Genie's deterministic scaffold
+      auto-mounts every `services/*.py` module's `router` attribute, so
+      no separate deployment or hand-wired URL is needed. Never construct
+      a second, independent `FastAPI()` app here - it would never be
+      reachable. If component_kind is "agent" and this change needs it to
+      call a deterministic service, call that service's own plain
+      function(s) via a normal Python import
+      (`from services.<module_name> import <function_name>`) and
+      await/call it in-process - never fabricate an HTTP/APIM round-trip
+      to reach it, since it is not a separately deployed endpoint.
+
       Return exactly one fenced code block containing the complete
       revised component (never a diff/patch, never an explanation before
       or after it) whose first line is the comment `# agent:
@@ -2141,7 +2233,7 @@ prompts:
       - component_name
       - existing_code
       - instructions
-    version: "1.2.0"
+    version: "1.3.0"
 
   - id: orchestrator-mission-v1
     name: Orchestrator Mission

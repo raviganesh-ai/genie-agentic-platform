@@ -543,7 +543,74 @@ def test_backend_service_scaffold_main_py_runs_the_real_orchestrator_pipeline():
     assert 'status_code=503' in main_source
 
 
+def test_backend_service_scaffold_mounts_deterministic_service_routes(tmp_path, monkeypatch):
+    """Regression guard for the "mock backend never deployed" incident: a
+    "## Deterministic Services" component's own real HTTP routes (an
+    ``APIRouter``) used to be written to ``services/`` and then never
+    mounted onto this mission's one deployed app - confirmed live via a
+    404 on a real deployed mission's own documented mock API path. main.py
+    must now import and call ``service_mounts.mount_deterministic_services``
+    so any generated service's ``router`` attribute is actually reachable.
+    """
+    scaffold = generate_backend_service_scaffold(
+        mission_title="Acme Mission",
+        orchestrator_agent_name="acme-orchestrator",
+        agent_foundry_names={"Requirements Specialist": "acme-requirements-specialist"},
+    )
+    assert "service_mounts.py" in scaffold
+    assert "from service_mounts import mount_deterministic_services" in scaffold["main.py"]
+    assert "mount_deterministic_services(app)" in scaffold["main.py"]
+
+    # End-to-end: a real generated service module exporting ``router`` is
+    # actually discovered and mounted, making its route genuinely reachable.
+    services_dir = tmp_path / "services"
+    services_dir.mkdir()
+    (services_dir / "__init__.py").write_text("", encoding="utf-8")
+    (services_dir / "mock_payments.py").write_text(
+        "from fastapi import APIRouter\n"
+        "router = APIRouter()\n\n"
+        "@router.get('/v1/ping')\n"
+        "def ping():\n"
+        "    return {'ok': True}\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "service_mounts.py").write_text(scaffold["service_mounts.py"], encoding="utf-8")
+
+    monkeypatch.syspath_prepend(str(tmp_path))
+    sys.modules.pop("service_mounts", None)
+    sys.modules.pop("services", None)
+    sys.modules.pop("services.mock_payments", None)
+    import importlib
+
+    import fastapi
+    from fastapi.testclient import TestClient
+
+    service_mounts = importlib.import_module("service_mounts")
+    app = fastapi.FastAPI()
+    service_mounts.mount_deterministic_services(app)
+
+    # Asserting against a real HTTP response (not app.routes - this FastAPI
+    # version wraps an included router as an opaque _IncludedRouter with no
+    # top-level .path, so inspecting app.routes directly is unreliable here)
+    # proves the mounted route is genuinely reachable end to end.
+    response = TestClient(app).get("/v1/ping")
+    assert response.status_code == 200
+    assert response.json() == {"ok": True}
+
+
+def _inject_fake_service_mounts(monkeypatch) -> None:
+    """Fakes the sibling ``service_mounts`` module main.py now always
+    imports (see ``generate_backend_service_scaffold``'s own
+    ``service_mounts.py`` output), matching how these same tests already
+    fake ``orchestrator``/``token_validation`` - these tests exec main.py's
+    source in isolation, without the real sibling file on disk."""
+    fake_module = types.ModuleType("service_mounts")
+    fake_module.mount_deterministic_services = lambda app: None
+    monkeypatch.setitem(sys.modules, "service_mounts", fake_module)
+
+
 def test_backend_scaffold_falls_back_when_generated_pipeline_glue_fails(monkeypatch):
+    _inject_fake_service_mounts(monkeypatch)
     scaffold = generate_backend_service_scaffold(
         mission_title="Acme Mission",
         orchestrator_agent_name="acme-orchestrator",
@@ -567,6 +634,7 @@ def test_backend_scaffold_falls_back_when_generated_pipeline_glue_fails(monkeypa
 
 
 def test_backend_scaffold_keeps_conversational_fallback_for_plain_text(monkeypatch):
+    _inject_fake_service_mounts(monkeypatch)
     scaffold = generate_backend_service_scaffold(
         mission_title="Acme Mission",
         orchestrator_agent_name="acme-orchestrator",
@@ -593,6 +661,7 @@ def test_backend_stream_returns_fallback_output_when_generated_pipeline_glue_fai
     tmp_path,
 ):
     monkeypatch.setenv("FACTORY_WORKING_DIR", str(tmp_path))
+    _inject_fake_service_mounts(monkeypatch)
     scaffold = generate_backend_service_scaffold(
         mission_title="Acme Mission",
         orchestrator_agent_name="acme-orchestrator",
@@ -901,6 +970,9 @@ def test_write_to_directory_writes_services_models_and_api_contracts(tmp_path: P
     build.write_to_directory(tmp_path)
 
     assert (tmp_path / "services" / "entitlement_checker.py").exists()
+    # Makes "services" a real importable package so service_mounts.py's own
+    # discovery (importlib.import_module("services.<name>")) is unambiguous.
+    assert (tmp_path / "services" / "__init__.py").exists()
     assert (tmp_path / "models" / "sandboxtenant.py").exists()
     assert (tmp_path / "models" / "entitlement.py").exists()
     assert (tmp_path / "api-contracts" / "payments_api.yaml").exists()
@@ -996,6 +1068,7 @@ def test_stream_agent_response_relays_on_progress_narration_as_it_happens(monkey
     pipeline's final structured result arriving only in the closing
     "done" event.
     """
+    _inject_fake_service_mounts(monkeypatch)
     scaffold = generate_backend_service_scaffold(
         mission_title="Acme Mission",
         orchestrator_agent_name="acme-orchestrator",
