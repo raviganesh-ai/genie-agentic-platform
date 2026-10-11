@@ -15,7 +15,7 @@ from app.agents.foundry.errors import FoundryUnavailableError
 from app.agents.gateway import AgentGateway, get_enabled_agent, resolve_prompt_text
 from app.agents.models import AgentDefinition, AgentExecutionRequest, AgentExecutionResult
 from app.agents.registry import AgentRegistry
-from app.agents.tools.orchestration_tools import resolve_delegate_agent_id
+from app.agents.tools.orchestration_tools import COMPONENT_FAILURE_MARKER, resolve_delegate_agent_id
 from app.governance.governance_service import GovernanceService
 from app.memory.memory_service import MemoryService
 from app.models.workflow_models import WorkflowStepInput, WorkflowStepResult
@@ -37,7 +37,6 @@ __all__ = [
 
 _PREVIEW_MAX_LENGTH = 240
 _DELEGATED_OUTPUT_MARKER = "DELEGATED_OUTPUT_STORED"
-_COMPONENT_FAILURE_MARKER = "GENERATION FAILED"
 _MODEL_CATALOG_SOURCE = "model-catalog"
 _ARCHITECTURE_REFERENCE_SOURCE = "architecture-reference"
 _STANDARDS_REFERENCE_SOURCE = "standards-reference"
@@ -138,7 +137,7 @@ def _reject_failed_generated_build(
 ) -> None:
     if step_id != "build-solution":
         return
-    if _COMPONENT_FAILURE_MARKER in output_text:
+    if COMPONENT_FAILURE_MARKER in output_text:
         raise FailedGeneratedBuildError(
             "Workflow step 'build-solution' contains a failed generated component; "
             "partial placeholder artifacts cannot proceed to deployment.",

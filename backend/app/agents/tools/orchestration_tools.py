@@ -46,6 +46,7 @@ from app.models.workflow_stream_models import WorkflowStreamEvent
 from app.orchestration.workflow_event_bus import WorkflowEventBus
 
 __all__ = [
+    "COMPONENT_FAILURE_MARKER",
     "register_orchestrator_delegation_tools",
     "replace_component_block",
     "resolve_delegate_agent_id",
@@ -59,7 +60,13 @@ _BUILD_COMPONENT_PROMPT_ID = "build-generation-component-v1"
 # Marks a component's placeholder piece (see _component_failure_piece) as a
 # genuine failure, never reusable code - _extract_reusable_components always
 # excludes a block carrying this marker, so a retry always regenerates it.
-_COMPONENT_FAILURE_MARKER = "GENERATION FAILED"
+# Public (not `_`-prefixed) because workflow_step_executor's
+# _reject_failed_generated_build and workflow_execution_service's
+# update_step_output both need this exact literal: the former to fail a
+# build closed when it's present, the latter to tell whether a later
+# component regeneration has actually cleared every failure so a
+# permanently-"failed" step can become "completed" again.
+COMPONENT_FAILURE_MARKER = "GENERATION FAILED"
 _BLOCKING_EVENT_LOOP_PATTERN = re.compile(
     r"\brun_until_complete\s*\(|\basyncio\.run\s*\(",
     re.IGNORECASE,
@@ -389,7 +396,7 @@ def _extract_reusable_components(previous_build_output: str) -> dict[str, str]:
     requires every component to identify itself: a fenced code block whose
     first line is a ``# agent: <name>``/``// agent: <name>`` comment (see
     ``_AGENT_LABEL_BLOCK_PATTERN``). A block carrying
-    ``_COMPONENT_FAILURE_MARKER`` (see ``_component_failure_piece``) is
+    ``COMPONENT_FAILURE_MARKER`` (see ``_component_failure_piece``) is
     deliberately excluded - it represents a component that failed last
     time and must always be regenerated, never mistaken for reusable code.
 
@@ -405,7 +412,7 @@ def _extract_reusable_components(previous_build_output: str) -> dict[str, str]:
     reusable: dict[str, str] = {}
     for match in _AGENT_LABEL_BLOCK_PATTERN.finditer(previous_build_output or ""):
         block_text = match.group(0)
-        if _COMPONENT_FAILURE_MARKER in block_text:
+        if COMPONENT_FAILURE_MARKER in block_text:
             continue
         # Several component kinds (page_view, deterministic_service,
         # data_model, api_contract) nest their own kind marker inside the
@@ -480,7 +487,7 @@ def _component_failure_piece(component_name: str, *, is_ui: bool, exc: BaseExcep
     generic "Multi-Agent Workflow Design" narrative fallback covering the
     whole response, which is what happened when the very first component
     call failed and aborted every later one. Marked with
-    ``_COMPONENT_FAILURE_MARKER`` so a later retry's
+    ``COMPONENT_FAILURE_MARKER`` so a later retry's
     ``_extract_reusable_components`` always regenerates this component
     again.
     """
@@ -489,7 +496,7 @@ def _component_failure_piece(component_name: str, *, is_ui: bool, exc: BaseExcep
     return (
         f"```text\n"
         f"{comment_prefix} agent: {component_name}\n"
-        f"{comment_prefix} {_COMPONENT_FAILURE_MARKER}: {exc}\n"
+        f"{comment_prefix} {COMPONENT_FAILURE_MARKER}: {exc}\n"
         f"```"
     )
 

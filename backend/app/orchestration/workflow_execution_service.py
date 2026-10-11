@@ -24,7 +24,8 @@ from collections.abc import Coroutine
 from typing import Any
 from uuid import uuid4
 
-from app.models.workflow_models import WorkflowRunResult, WorkflowStepInput
+from app.agents.tools.orchestration_tools import COMPONENT_FAILURE_MARKER
+from app.models.workflow_models import WorkflowRunResult, WorkflowStepInput, WorkflowStepResult
 from app.orchestration.workflow_runtime import WorkflowRuntime
 from app.repositories.workflow_run_repository import WorkflowRunRepository
 
@@ -114,11 +115,29 @@ class WorkflowExecutionService:
         regenerated and spliced back into ``build-solution``'s output -
         see ``AgentOrchestrator.update_build_component``).
 
-        Every other field of the matching ``WorkflowStepResult`` (status,
-        timestamps, resolved_variables, ...) is preserved unchanged; only
-        ``output_text`` is replaced. Raises ``UnknownWorkflowRunError`` if
-        the run or the named step result does not exist, so a caller can
-        never silently no-op this.
+        Also re-derives that step's ``status``: ``build-solution`` is
+        rejected closed to ``"failed"`` the moment any component's own
+        generation fails (see ``workflow_step_executor``'s
+        ``_reject_failed_generated_build``), and that failure is recorded
+        as a placeholder block carrying ``COMPONENT_FAILURE_MARKER``
+        inside the step's own ``output_text`` (see
+        ``orchestration_tools._component_failure_piece``). Regenerating the
+        failed component fixes that text but, without this, the step's
+        ``status`` field stayed permanently ``"failed"`` regardless -
+        Deploy & Launch gates on that status, so a mission with even one
+        originally-failed component could never reach deployment again no
+        matter how many times its broken piece was successfully fixed (a
+        real, observed gap found validating this exact path end to end).
+        A step only ever flips ``"failed"`` -> ``"completed"`` here, never
+        the reverse - a regeneration's own output is never re-validated at
+        this layer, so it is still each caller's responsibility (e.g.
+        ``WorkshopService.regenerate_component``) never to splice in text
+        that still fails.
+
+        Every other field of the matching ``WorkflowStepResult``
+        (timestamps, resolved_variables, ...) is preserved unchanged.
+        Raises ``UnknownWorkflowRunError`` if the run or the named step
+        result does not exist, so a caller can never silently no-op this.
         """
 
         run = await self._repository.get(workflow_run_id=workflow_run_id)
@@ -128,10 +147,17 @@ class WorkflowExecutionService:
             raise UnknownWorkflowRunError(
                 f"Workflow run '{workflow_run_id}' has no recorded result for step '{step_id}'."
             )
+
+        def _update_for(result: WorkflowStepResult) -> dict[str, Any]:
+            fields: dict[str, Any] = {"output_text": output_text}
+            if result.status == "failed" and COMPONENT_FAILURE_MARKER not in output_text:
+                fields["status"] = "completed"
+            return fields
+
         updated_run = run.model_copy(
             update={
                 "step_results": [
-                    result.model_copy(update={"output_text": output_text})
+                    result.model_copy(update=_update_for(result))
                     if result.step_id == step_id
                     else result
                     for result in run.step_results
