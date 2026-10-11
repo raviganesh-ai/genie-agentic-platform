@@ -51,12 +51,20 @@ export function getApiBaseUrl(): string {
 export class ApiError extends Error implements SafeError {
   status?: number;
   correlationId?: string;
+  /** True when this error came from the API gateway (APIM) itself - e.g. a
+   * missing/invalid subscription key - rather than from Genie's own
+   * backend. A gateway rejection is a deployment/configuration problem,
+   * never "wrong credentials" or "expired session": the request never
+   * reached the backend's auth check at all, so callers must not clear
+   * the stored token or imply the user did anything wrong. */
+  isGatewayError?: boolean;
 
-  constructor(message: string, status?: number, correlationId?: string) {
+  constructor(message: string, status?: number, correlationId?: string, isGatewayError?: boolean) {
     super(message);
     this.name = "ApiError";
     this.status = status;
     this.correlationId = correlationId;
+    this.isGatewayError = isGatewayError;
   }
 }
 
@@ -117,11 +125,20 @@ export async function apiFetch<TResponse>(
     );
   }
 
-  if (response.status === 401) handleUnauthorized();
   if (response.status === 204) return undefined as TResponse;
 
   const rawText = await response.text();
   const parsed = rawText ? safeJsonParse(rawText) : undefined;
+
+  if (response.status === 401 && isApimGatewayRejection(parsed)) {
+    throw new ApiError(
+      GATEWAY_REJECTION_MESSAGE,
+      response.status,
+      response.headers.get("X-Correlation-Id") ?? correlationId,
+      true,
+    );
+  }
+  if (response.status === 401) handleUnauthorized();
 
   if (!response.ok) {
     const detail =
@@ -158,7 +175,13 @@ export async function openEventStream(path: string, signal: AbortSignal): Promis
     throw new ApiError("Unable to reach the Genie backend. Check your connection and try again.");
   }
 
-  if (response.status === 401) handleUnauthorized();
+  if (response.status === 401) {
+    const parsed = safeJsonParse(await response.text().catch(() => ""));
+    if (isApimGatewayRejection(parsed)) {
+      throw new ApiError(GATEWAY_REJECTION_MESSAGE, 401, undefined, true);
+    }
+    handleUnauthorized();
+  }
   if (!response.ok || !response.body) {
     throw new ApiError(mapStatusToMessage(response.status), response.status);
   }
@@ -182,7 +205,13 @@ export async function downloadBinary(path: string): Promise<{ blob: Blob; filena
     throw new ApiError("Unable to reach the Genie backend. Check your connection and try again.");
   }
 
-  if (response.status === 401) handleUnauthorized();
+  if (response.status === 401) {
+    const parsed = safeJsonParse(await response.text().catch(() => ""));
+    if (isApimGatewayRejection(parsed)) {
+      throw new ApiError(GATEWAY_REJECTION_MESSAGE, 401, undefined, true);
+    }
+    handleUnauthorized();
+  }
   if (!response.ok) {
     throw new ApiError(mapStatusToMessage(response.status), response.status);
   }
@@ -199,6 +228,33 @@ function safeJsonParse(text: string): unknown {
   } catch {
     return undefined;
   }
+}
+
+/** The message shown for every APIM gateway rejection - identical for every
+ * caller so there's exactly one place describing what it actually means,
+ * never per-page guesses about "wrong password" or "expired session". */
+const GATEWAY_REJECTION_MESSAGE =
+  "The API gateway rejected this request (missing or invalid subscription key). " +
+  "This is a deployment configuration problem, not a sign-in problem - contact an administrator.";
+
+/**
+ * True when a 401 response body is APIM's own rejection shape
+ * (`{"statusCode": 401, "message": "..."}`, e.g. "Access denied due to
+ * missing subscription key") rather than Genie's backend auth response
+ * (`{"detail": "..."}`, see `app.security.auth_service`). APIM returns this
+ * *before the request ever reaches the backend*, so it is never a real
+ * "wrong credentials" or "expired session" outcome - conflating the two
+ * (as this app once did) silently masks a gateway misconfiguration behind
+ * a misleading "Invalid username or password" message.
+ */
+function isApimGatewayRejection(parsed: unknown): boolean {
+  return (
+    typeof parsed === "object" &&
+    parsed !== null &&
+    !("detail" in parsed) &&
+    "statusCode" in parsed &&
+    "message" in parsed
+  );
 }
 
 function mapStatusToMessage(status: number, detail?: string): string {

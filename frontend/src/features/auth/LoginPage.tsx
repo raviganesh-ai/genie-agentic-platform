@@ -36,8 +36,12 @@ export function LoginPage(): JSX.Element {
     } catch (err) {
       // httpClient's generic 401 message ("Your session has expired...")
       // is correct for an expired/invalid existing token, but wrong here -
-      // a failed login attempt never had a session to expire.
-      if (err instanceof ApiError && err.status === 401) {
+      // a failed login attempt never had a session to expire. A gateway
+      // rejection (see ApiError.isGatewayError) is also a 401 but never
+      // means "wrong credentials" - it means the request never reached
+      // Genie's own backend at all, so its own accurate message must be
+      // kept, not overwritten.
+      if (err instanceof ApiError && err.status === 401 && !err.isGatewayError) {
         setError(new ApiError("Invalid username or password.", 401, err.correlationId));
       } else {
         setError(err instanceof ApiError ? err : new ApiError("Sign-in failed."));
