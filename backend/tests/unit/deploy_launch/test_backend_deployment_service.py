@@ -607,3 +607,68 @@ async def test_ensure_gateway_spa_redirect_uri_is_a_no_op_without_a_gateway_serv
     # Must not raise even though there is no prototype_api_gateway_service.
     await service.ensure_gateway_spa_redirect_uri("https://prototype.example.com/")
 
+
+async def test_ensure_gateway_spa_redirect_uri_warns_but_does_not_fail_on_graph_403(caplog):
+    """Regression coverage for a real incident found deploying a fresh
+    mission end to end: Genie's own deployment identity lacked the
+    one-time 'Application.ReadWrite.OwnedBy' admin consent grant Microsoft
+    Graph requires to update the shared Entra app's SPA redirect URIs -
+    every other part of the mission (backend, data layer, every page) was
+    a fully working deployment, blocked only by this one best-effort
+    housekeeping call failing with a 403. A missing tenant-admin consent
+    grant is a prerequisite outside this pipeline's own control, not a
+    mission defect, so it must not fail the whole deployment."""
+
+    class _FakeResponse:
+        status_code = 403
+
+    class _FakeHttpStatusError(Exception):
+        def __init__(self) -> None:
+            super().__init__("403 Forbidden")
+            self.response = _FakeResponse()
+
+    class ForbiddenGatewayService:
+        async def ensure_spa_redirect_uri(self, frontend_url):
+            raise _FakeHttpStatusError()
+
+    service = BackendDeploymentService(
+        subscription_id="sub-123",
+        resource_group="genie-dev-rg",
+        acr_name="acr123",
+        container_apps_environment_id="env-123",
+        location="eastus2",
+        foundry_endpoint="https://foundry.example.com/api/projects/demo",
+        foundry_project_name="demo",
+        prototype_api_gateway_service=ForbiddenGatewayService(),
+    )
+
+    with caplog.at_level("WARNING"):
+        # Must not raise - a 403 here is treated as a warning, not a fatal error.
+        await service.ensure_gateway_spa_redirect_uri("https://prototype.example.com/")
+
+    assert any("admin consent" in record.message for record in caplog.records)
+
+
+async def test_ensure_gateway_spa_redirect_uri_still_raises_for_non_403_failures():
+    """A genuinely different failure (not a permission gap) must still fail
+    closed exactly as before - only the specific, known 403/consent-gap
+    shape is tolerated."""
+
+    class BrokenGatewayService:
+        async def ensure_spa_redirect_uri(self, frontend_url):
+            raise RuntimeError("network error")
+
+    service = BackendDeploymentService(
+        subscription_id="sub-123",
+        resource_group="genie-dev-rg",
+        acr_name="acr123",
+        container_apps_environment_id="env-123",
+        location="eastus2",
+        foundry_endpoint="https://foundry.example.com/api/projects/demo",
+        foundry_project_name="demo",
+        prototype_api_gateway_service=BrokenGatewayService(),
+    )
+
+    with pytest.raises(BackendDeploymentError, match="Failed to register"):
+        await service.ensure_gateway_spa_redirect_uri("https://prototype.example.com/")
+
