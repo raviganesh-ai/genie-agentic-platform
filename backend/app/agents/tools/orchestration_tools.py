@@ -47,9 +47,11 @@ from app.orchestration.workflow_event_bus import WorkflowEventBus
 
 __all__ = [
     "COMPONENT_FAILURE_MARKER",
+    "MARKER_PREFIX_BY_COMPONENT_KIND",
     "register_orchestrator_delegation_tools",
     "replace_component_block",
     "resolve_delegate_agent_id",
+    "validate_component_output",
 ]
 
 _ORCHESTRATOR_AGENT_ID = "genie-orchestrator"
@@ -363,7 +365,13 @@ _MARKER_NAME_PREFIXES: tuple[str, ...] = (
     "gateway_policy:",
     "identity_config:",
 )
-_MARKER_PREFIX_BY_COMPONENT_KIND: dict[str, str] = {
+# Public (not `_`-prefixed): WorkshopService.regenerate_component needs
+# this exact mapping, in reverse, to correctly classify a component_label
+# like "page:Landing Page" back into its real component_kind ("page_view")
+# before validating its regenerated output - a Regenerate call for any
+# prefixed component previously fell through to the generic "agent" kind,
+# which expects Python, not tsx/yaml.
+MARKER_PREFIX_BY_COMPONENT_KIND: dict[str, str] = {
     "page_view": "page:",
     "deterministic_service": "service:",
     "data_model": "model:",
@@ -501,13 +509,24 @@ def _component_failure_piece(component_name: str, *, is_ui: bool, exc: BaseExcep
     )
 
 
-def _validate_component_output(
+def validate_component_output(
     output_text: str,
     *,
     component_kind: str,
     marker_name: str,
 ) -> None:
-    """Rejects output that cannot be materialized as the requested component."""
+    """Rejects output that cannot be materialized as the requested component.
+
+    Public (not `_`-prefixed) so ``WorkshopService.regenerate_component`` can
+    run the exact same validation the original per-component build path
+    uses before persisting a Workshop "Regenerate" result - without this, a
+    truncated/malformed regeneration (e.g. the LLM call hit its own output
+    token limit mid-component) was accepted and spliced straight into the
+    build-solution step's output unchecked, a real, observed incident that
+    silently corrupted an already-passing component and failed every
+    subsequent Deploy & Launch attempt with no actionable error shown to
+    the user in Workshop itself.
+    """
 
     match = _COMPONENT_OUTPUT_PATTERN.fullmatch(output_text)
     if match is None:
@@ -721,7 +740,7 @@ async def _generate_build_by_component(
         # recognizes) can have more than one instance, so its own real
         # name is the label instead.
         label_name = component_kind if component_kind in ("orchestrator", "ui") else component_name
-        marker_prefix = _MARKER_PREFIX_BY_COMPONENT_KIND.get(component_kind, "")
+        marker_prefix = MARKER_PREFIX_BY_COMPONENT_KIND.get(component_kind, "")
         marker_name = f"{marker_prefix}{label_name}"
         reused_piece = reusable_components.get(label_name.strip().lower())
         if reused_piece is not None:
@@ -781,7 +800,7 @@ async def _generate_build_by_component(
                 )
             else:
                 component_result = await agent_gateway.execute(request)
-            _validate_component_output(
+            validate_component_output(
                 component_result.output_text,
                 component_kind=component_kind,
                 marker_name=marker_name,

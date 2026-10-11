@@ -2124,15 +2124,24 @@ prompts:
       revised component (never a diff/patch, never an explanation before
       or after it) whose first line is the comment `# agent:
       {component_name}` if component_kind is "agent", `# agent:
-      orchestrator` if component_kind is "orchestrator", or `// agent:
-      ui` if component_kind is "ui" - matching the original component's
-      own header exactly.
+      orchestrator` if component_kind is "orchestrator", `// agent: ui`
+      if component_kind is "ui", `// agent: page:{component_name}` (TSX
+      fence) if component_kind is "page_view", `# agent:
+      service:{component_name}` (python fence) if component_kind is
+      "deterministic_service", `# agent: model:{component_name}` (python
+      fence) if component_kind is "data_model", or `# agent:
+      api_contract:{component_name}` / `# agent:
+      gateway_policy:{component_name}` / `# agent:
+      identity_config:{component_name}` (yaml fence) if component_kind is
+      "api_contract" / "gateway_policy" / "identity_config" respectively -
+      matching the original component's own header and fence language
+      exactly in every case.
     variables:
       - component_kind
       - component_name
       - existing_code
       - instructions
-    version: "1.1.0"
+    version: "1.2.0"
 
   - id: orchestrator-mission-v1
     name: Orchestrator Mission
