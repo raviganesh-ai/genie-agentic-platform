@@ -169,6 +169,36 @@ async def test_checkin_fails_closed_when_github_mcp_omits_a_commit_sha(tmp_path)
         )
 
 
+async def test_checkin_extracts_commit_sha_from_the_real_push_files_ref_update_shape(tmp_path):
+    """Regression coverage for a real incident found deploying a fresh
+    mission end to end: the live GitHub MCP ``push_files`` tool's real,
+    confirmed response is a git-reference-update object -
+    ``{"object": {"sha": "...", "type": "commit"}, "ref": "refs/heads/main"}``
+    (push_files updates the branch ref directly via the Git Data API,
+    unlike the single-file create/delete tools, which return the commit
+    under a top-level ``commit`` object instead) - not the ``commit.sha``/
+    bare ``sha`` shapes this parser previously only recognized. A fully
+    successful push (repository and commit both genuinely existed on
+    GitHub) was rejected as a failure solely because of this parsing gap."""
+
+    backend_root = tmp_path / "backend"
+    frontend_root = tmp_path / "frontend"
+    _write_sample_build(backend_root, frontend_root)
+    client = _FakeGitHubMcpClient(
+        push_result={"object": {"sha": "c" * 40, "type": "commit"}, "ref": "refs/heads/main"}
+    )
+    service = RepositoryCheckinService(client=client)  # type: ignore[arg-type]
+
+    result = await service.checkin(
+        mission_slug="aci-poc",
+        mission_title="ACI PoC",
+        backend_root=backend_root,
+        frontend_root=frontend_root,
+    )
+
+    assert result.commit_sha == "c" * 40
+
+
 async def test_null_service_skips_checkin_without_fabricating_a_result(tmp_path):
     service = NullRepositoryCheckinService()
 

@@ -61,13 +61,30 @@ def _collect_files(*roots: tuple[str, Path]) -> list[dict[str, str]]:
 
 def _find_commit_sha(push_result: Any) -> str | None:
     """Extracts the real commit SHA from the GitHub MCP ``push_files``
-    result - never fabricated. ``push_files`` responses observed from the
-    GitHub MCP server carry the new commit under a top-level ``commit``
-    object; tolerate a bare top-level ``sha`` too rather than assume one
-    exact shape, but never invent a value when neither is present."""
+    result - never fabricated.
+
+    The real, confirmed response shape (verified directly against the
+    live GitHub MCP ``push_files`` tool - a real, observed production
+    incident where this parser rejected a genuinely successful push with
+    "GitHub MCP did not return a commit SHA", even though the repository
+    and commit both existed on GitHub) is a git-reference-update object:
+    ``{"object": {"sha": "<commit sha>", "type": "commit"}, "ref": "refs/heads/<branch>"}``
+    - ``push_files`` updates a branch ref directly via the Git Data API,
+    unlike the single-file ``create_or_update_file``/``delete_file`` tools,
+    which return the commit under a top-level ``commit`` object instead.
+    Checks the confirmed ``object.sha`` shape first, then tolerates the
+    single-file tools' ``commit.sha`` shape and a bare top-level ``sha``
+    for robustness, but never invents a value when none of these are
+    present.
+    """
 
     if not isinstance(push_result, dict):
         return None
+    ref_object = push_result.get("object")
+    if isinstance(ref_object, dict):
+        sha = ref_object.get("sha")
+        if isinstance(sha, str) and sha:
+            return sha
     commit = push_result.get("commit")
     if isinstance(commit, dict):
         sha = commit.get("sha")
