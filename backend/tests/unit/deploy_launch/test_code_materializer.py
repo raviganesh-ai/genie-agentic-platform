@@ -315,9 +315,10 @@ def test_write_to_directory_creates_expected_files(tmp_path: Path):
     written = build.write_to_directory(tmp_path)
 
     assert (tmp_path / "agents" / "requirements_specialist.py").exists()
+    assert (tmp_path / "agents" / "__init__.py").exists()
     assert (tmp_path / "orchestrator.py").exists()
     assert (tmp_path / "MissionApp.tsx").exists()
-    assert len(written) == 3
+    assert len(written) == 4
 
 
 def test_write_to_directory_includes_backend_service_scaffold(tmp_path: Path):
@@ -800,6 +801,7 @@ def test_write_to_directory_writes_pages_and_generated_routing_shell(tmp_path: P
     assert (tmp_path / "pages" / "catalog_page.tsx").exists()
     assert (tmp_path / "pages" / "dashboard_page.tsx").exists()
     assert (tmp_path / "orchestrator.py").exists()
+    assert (tmp_path / "agents" / "__init__.py").exists()
     shell_path = tmp_path / "MissionApp.tsx"
     assert shell_path.exists()
     shell_source = shell_path.read_text(encoding="utf-8")
@@ -808,7 +810,7 @@ def test_write_to_directory_writes_pages_and_generated_routing_shell(tmp_path: P
     assert 'import Page1 from "./pages/dashboard_page";' in shell_source
     assert '"/catalog-page"' in shell_source
     assert '"/dashboard-page"' in shell_source
-    assert len(written) == 4
+    assert len(written) == 5
 
 
 def test_generate_routing_shell_defaults_to_the_first_declared_page():

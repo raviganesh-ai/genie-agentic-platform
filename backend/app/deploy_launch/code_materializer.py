@@ -379,8 +379,21 @@ class MaterializedBuild:
         root.mkdir(parents=True, exist_ok=True)
         agents_dir = root / "agents"
         agents_dir.mkdir(parents=True, exist_ok=True)
+        # Real, observed incident: without this file, "agents" was an implicit
+        # PEP 420 namespace package, and a transitive dependency of
+        # agent-framework installs its own unrelated, regular "agents" package
+        # (the OpenAI Agents SDK) into site-packages. Python's import
+        # resolution lets a regular package found anywhere on sys.path win
+        # outright over a namespace package portion found elsewhere, so every
+        # "from agents.<module> import <name>" in orchestrator.py resolved to
+        # the third-party SDK instead of this mission's own specialist agent
+        # modules, raising ModuleNotFoundError for the submodule even though
+        # the real file was present in the image. Mirrors the same fix
+        # already applied to services/ below for the identical reason.
+        init_path = agents_dir / "__init__.py"
+        init_path.write_text("", encoding="utf-8")
 
-        written: list[Path] = []
+        written: list[Path] = [init_path]
         for agent_name, code in self.agent_modules.items():
             path = agents_dir / f"{_slugify(agent_name)}.py"
             path.write_text(_use_mission_foundry_runtime(code), encoding="utf-8")
