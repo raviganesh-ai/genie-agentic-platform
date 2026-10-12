@@ -860,6 +860,30 @@ def test_generate_routing_shell_with_sign_in_wraps_with_msal_provider():
     assert "<HashRouter>" in shell_source
 
 
+def test_generate_routing_shell_with_sign_in_awaits_redirect_promise_before_routing_mounts():
+    """Regression test for a real, observed incident: MSAL's redirect-flow
+    auth response arrives via a URL fragment (response_mode=fragment) -
+    the exact same place HashRouter reads its own route path from. A user
+    who completes a real, successful sign-in was bounced back to a
+    "not signed in" app with no visible error, because the unmatched
+    "#code=...&state=..." auth response never matches any declared route,
+    so the catch-all `<Route path="*"><Navigate replace /></Route>` fired
+    (its effect runs child-before-parent, ahead of MsalProvider's own
+    internal handleRedirectPromise() call) and rewrote the hash away
+    before MSAL ever read it. The shell must call
+    msalInstance.handleRedirectPromise() itself, and HashRouter must only
+    ever mount (gated by msalReady) after that settles - never before."""
+
+    shell_source = generate_routing_shell(("Catalog Page", "Dashboard Page"), require_sign_in=True)
+
+    assert "msalInstance.handleRedirectPromise()" in shell_source
+    mission_app_start = shell_source.index("export default function MissionApp")
+    initialize_call = shell_source.index(".initialize()", mission_app_start)
+    redirect_call = shell_source.index("msalInstance.handleRedirectPromise()", mission_app_start)
+    hash_router_mount = shell_source.index("<HashRouter>", mission_app_start)
+    assert initialize_call < redirect_call < hash_router_mount
+
+
 def test_generate_msal_config_module_reads_from_runtime_config_not_hardcoded():
     module_source = generate_msal_config_module()
 

@@ -1415,9 +1415,32 @@ export default function MissionApp({{ onSubmit }}: MissionAppProps) {{
   // throws. A short, real loading state (never a fake instant success) is
   // the deterministic way to sequence this without touching main.tsx's own
   // synchronous render() call.
+  //
+  // Also explicitly awaits handleRedirectPromise() here, BEFORE HashRouter
+  // ever mounts - a real, observed incident: MSAL returns its auth
+  // response via a URL fragment (response_mode=fragment), the exact same
+  // place HashRouter reads its own route path from. Relying on
+  // MsalProvider's own internal handleRedirectPromise() call (which runs
+  // in an effect AFTER HashRouter/Routes have already mounted as its
+  // child) loses a real race: the unmatched "#code=...&state=..." auth
+  // response never matches any declared route, so the catch-all
+  // `<Route path="*"><Navigate replace /></Route>` below fires first (its
+  // effect runs child-before-parent, ahead of MsalProvider's own) and
+  // rewrites the hash to the first page's path - permanently discarding
+  // the auth code before MSAL ever reads it. The user completes a real,
+  // successful sign-in with their identity provider and is bounced right
+  // back to a "not signed in" app with no visible error. Calling
+  // handleRedirectPromise() here first consumes and clears that hash (or
+  // resolves to null on an ordinary, non-redirect load) before any route
+  // is ever evaluated; MsalProvider's own later call is a documented safe
+  // no-op once the response has already been consumed.
   const [msalReady, setMsalReady] = useState(false);
   useEffect(() => {{
-    msalInstance.initialize().then(() => setMsalReady(true));
+    msalInstance
+      .initialize()
+      .then(() => msalInstance.handleRedirectPromise())
+      .catch(() => undefined)
+      .then(() => setMsalReady(true));
   }}, []);
   if (!msalReady) {{
     return <p className="genie-loading">Preparing sign-in...</p>;
@@ -1540,10 +1563,11 @@ def generate_use_genie_auth_module() -> str:
 // window.open() succeeding and then being allowed to navigate, which
 // managed/corporate browser security policies routinely block outright,
 // silently leaving a blank, stuck popup window with no visible error on
-// the parent page. A full-page redirect has no such dependency. MsalProvider
-// (wrapping this mission's shell - see generate_routing_shell) already
-// calls handleRedirectPromise() internally on load to process the
-// returned authentication response, so no extra wiring is needed here.
+// the parent page. A full-page redirect has no such dependency. The
+// mission shell (see generate_routing_shell) already awaits
+// handleRedirectPromise() itself, before HashRouter ever mounts, so the
+// auth response fragment is consumed before any route is evaluated - no
+// extra wiring is needed here.
 import { useCallback, useEffect } from "react";
 import { useMsal, useIsAuthenticated } from "@azure/msal-react";
 import { MISSION_API_SCOPE } from "./msalConfig";
