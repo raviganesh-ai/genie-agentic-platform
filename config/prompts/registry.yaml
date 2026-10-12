@@ -1919,12 +1919,20 @@ prompts:
       content: string }}[]) => void }}` - call it only if this specific
       page genuinely submits something; a purely read-only page may
       accept but never call it), and the IMPECCABLE DESIGN CONTRACT below.
-      A dashboard/audit/trace page must fetch its data from this
-      mission's own same-origin `GET /journey/events` endpoint (never a
-      separate/external telemetry service, never invented mock data) -
-      this mission's generated backend already records business-domain
-      journey events there (see the Orchestrator's own instructions
-      below) whenever any component calls `POST /journey/events`.
+      A dashboard/audit/trace page must fetch its data from
+      `${{window.__MISSION_BACKEND_URL__}}/journey/events` (never a bare
+      `/journey/events` relative path, never a separate/external telemetry
+      service, never invented mock data) - the deployed frontend and
+      backend are two separate Container Apps on two different origins,
+      so a same-origin/relative fetch from the browser 404s against the
+      frontend's own static file server instead of ever reaching the
+      backend; `window.__MISSION_BACKEND_URL__` is the one already-wired
+      global every generated page must use for any live backend call (see
+      its `Window` interface augmentation already provided), exactly like
+      the deterministic shell's own chat/invoke calls do. This mission's
+      generated backend already records business-domain journey events
+      there (see the Orchestrator's own instructions below) whenever any
+      component calls `POST /journey/events`.
       Return one fenced ```tsx code block, first line `// agent:
       page:{component_name}` (the literal prefix `page:` followed by this
       page's own name, never just the bare name - this is how Genie's
@@ -2135,7 +2143,7 @@ prompts:
       - user_message
       - assigned_requirements
       - prior_components
-    version: "1.32.0"
+    version: "1.33.0"
 
   - id: build-component-regeneration-v1
     name: Build Generation - Regenerate Single Component
@@ -2195,6 +2203,16 @@ prompts:
       endpoint, deployment name, and secret from configuration/environment
       variables, matching Genie's own no-hardcoding rule.
 
+      If component_kind is "ui" or "page_view" and this component needs
+      to call this mission's own deployed backend (e.g. a dashboard
+      reading `GET /journey/events`), always use
+      `${{window.__MISSION_BACKEND_URL__}}/<path>` - never a bare/relative
+      path - since the deployed frontend and backend are two separate
+      Container Apps on two different origins; a same-origin/relative
+      fetch from the browser 404s against the frontend's own static file
+      server instead of ever reaching the backend (a real, observed
+      incident).
+
       If component_kind is "deterministic_service", remember this module
       runs inside this mission's own single deployed backend process - it
       is never a separately deployed service. If a real external caller
@@ -2233,7 +2251,7 @@ prompts:
       - component_name
       - existing_code
       - instructions
-    version: "1.3.0"
+    version: "1.4.0"
 
   - id: orchestrator-mission-v1
     name: Orchestrator Mission
