@@ -138,12 +138,42 @@ def _build_api_policy(
     )
     ElementTree.SubElement(correlation_header, "value").text = "@(context.RequestId.ToString())"
     if gateway_policy is not None:
+        # Health/readiness probes (this mission's own Deploy & Launch
+        # readiness check, and any future external uptime monitor) must
+        # never be required to present a bearer token - a real, observed
+        # incident: a mission whose architecture required sign-in got
+        # validate-azure-ad-token applied to every path with no exemption,
+        # so its own Deploy & Launch readiness probe got HTTP 401 against
+        # its own newly-published gateway and the deployment could never
+        # succeed. This exemption is unconditional and always first,
+        # regardless of path_rules below.
+        health_gate = ElementTree.SubElement(inbound, "choose")
+        # Deliberately empty: CORS, the unconditional <base/> above, the
+        # rate limit, and the correlation header have already executed
+        # earlier in this same <inbound> section (APIM runs policy
+        # statements in document order), so health paths already got
+        # everything the "base"/global policy provides. APIM rejects a
+        # second <base/> anywhere in the same section (even nested inside
+        # a <when>), so this branch must stay a true no-op: it only
+        # exists to skip the validate-azure-ad-token check in the
+        # "otherwise" branch below for health/readiness probes.
+        ElementTree.SubElement(
+            health_gate,
+            "when",
+            {
+                "condition": (
+                    '@(context.Request.OriginalUrl.Path.StartsWith('
+                    '"/health", StringComparison.OrdinalIgnoreCase))'
+                )
+            },
+        )
+        gateway_policy_branch = ElementTree.SubElement(health_gate, "otherwise")
         if gateway_policy.path_rules:
             # Policy-based denial per product/operation path (FR-008) -
             # each declared path rule gets its own stricter claim
             # requirement; any path not matched falls through to the
             # mission's own default/global requirement.
-            choose = ElementTree.SubElement(inbound, "choose")
+            choose = ElementTree.SubElement(gateway_policy_branch, "choose")
             for rule in gateway_policy.path_rules:
                 when = ElementTree.SubElement(
                     choose,
@@ -172,7 +202,7 @@ def _build_api_policy(
             )
         else:
             _add_validate_azure_ad_token(
-                inbound,
+                gateway_policy_branch,
                 tenant_id_named_value=gateway_policy.tenant_id_named_value,
                 audience_named_value=gateway_policy.audience_named_value,
                 required_claim_name=gateway_policy.required_claim_name,
@@ -198,6 +228,13 @@ class PrototypeApiGatewayService:
         publisher_name: str,
         sku_name: str = "StandardV2",
         capacity: int = 1,
+        shared_vnet_resource_id: str | None = None,
+        shared_network_resource_group: str | None = None,
+        shared_private_dns_zone_names: tuple[str, ...] = (),
+        shared_entra_tenant_id: str | None = None,
+        shared_entra_client_id: str | None = None,
+        shared_entra_audience: str | None = None,
+        shared_entra_api_scope: str = "prototype.access",
     ) -> None:
         self._subscription_id = subscription_id
         self._location = location
@@ -205,6 +242,13 @@ class PrototypeApiGatewayService:
         self._publisher_name = publisher_name
         self._sku_name = sku_name
         self._capacity = capacity
+        self._shared_vnet_resource_id = shared_vnet_resource_id
+        self._shared_network_resource_group = shared_network_resource_group
+        self._shared_private_dns_zone_names = shared_private_dns_zone_names
+        self._shared_entra_tenant_id = shared_entra_tenant_id
+        self._shared_entra_client_id = shared_entra_client_id
+        self._shared_entra_audience = shared_entra_audience
+        self._shared_entra_api_scope = shared_entra_api_scope
 
     def _credential(self) -> Any:
         try:
@@ -241,6 +285,97 @@ class PrototypeApiGatewayService:
             raise PrototypeApiGatewayError("azure-mgmt-apimanagement is not installed.") from exc
         return ApiManagementClient(self._credential(), self._subscription_id)
 
+    async def ensure_spa_redirect_uri(self, frontend_url: str) -> None:
+        """Adds ``frontend_url`` to Genie's one shared Entra ID App
+        Registration's SPA redirect URI list, additively - never replacing
+        another mission's own redirect URI, since many missions share this
+        one app (see ``shared_entra_client_id`` on ``Settings``).
+
+        A no-op when the shared app isn't configured, matching every other
+        optional-collaborator pattern in this package. Requires Genie's own
+        deployment identity to hold Microsoft Graph ``Application.ReadWrite.
+        OwnedBy`` (scoped to just this one, Genie-owned app) - a narrower
+        grant than tenant-wide application management, because Genie
+        deliberately never creates or owns a new app registration per
+        mission.
+        """
+
+        if not self._shared_entra_client_id:
+            return
+
+        base_url = (
+            "https://graph.microsoft.com/v1.0/applications(appId="
+            f"'{self._shared_entra_client_id}')"
+        )
+        async with self._graph_credential() as credential:
+            token = await credential.get_token("https://graph.microsoft.com/.default")
+            headers = {
+                "Authorization": f"Bearer {token.token}",
+                "Content-Type": "application/json",
+            }
+            async with self._graph_http_client() as client:
+                response = await client.get(f"{base_url}?$select=spa", headers=headers)
+                response.raise_for_status()
+                current_uris = set((response.json().get("spa") or {}).get("redirectUris") or [])
+                if frontend_url in current_uris:
+                    return
+                current_uris.add(frontend_url)
+                response = await client.patch(
+                    base_url,
+                    headers=headers,
+                    json={"spa": {"redirectUris": sorted(current_uris)}},
+                )
+                response.raise_for_status()
+
+    def _graph_credential(self) -> Any:
+        """Separated for dependency injection in tests - the real
+        implementation is just ``azure.identity.aio.DefaultAzureCredential``,
+        never mocked/faked in production code."""
+        from azure.identity.aio import DefaultAzureCredential
+
+        return DefaultAzureCredential()
+
+    def _graph_http_client(self) -> Any:
+        """Separated for dependency injection in tests - the real
+        implementation is just ``httpx.AsyncClient``, never mocked/faked
+        in production code."""
+        import httpx
+
+        return httpx.AsyncClient(timeout=30)
+
+    async def _ensure_identity_named_values(
+        self, *, api_management_client: Any, resource_group: str, service_name: str
+    ) -> GatewayPolicyConfig | None:
+        """Creates/updates the APIM Named Values ``validate-azure-ad-token``
+        reads its tenant id/audience from, and returns the
+        ``GatewayPolicyConfig`` referencing them - or ``None`` when the
+        shared Entra app isn't configured, so a mission that doesn't need
+        sign-in enforcement never gets one (a no-op, not a failure)."""
+
+        if not (self._shared_entra_tenant_id and self._shared_entra_audience):
+            return None
+
+        from azure.mgmt.apimanagement.models import NamedValueCreateContract
+
+        tenant_id_named_value = "genie-shared-entra-tenant-id"
+        audience_named_value = "genie-shared-entra-audience"
+        for name, value in (
+            (tenant_id_named_value, self._shared_entra_tenant_id),
+            (audience_named_value, self._shared_entra_audience),
+        ):
+            poller = api_management_client.named_value.begin_create_or_update(
+                resource_group,
+                service_name,
+                name,
+                NamedValueCreateContract(display_name=name, value=value, secret=False),
+            )
+            await asyncio.to_thread(poller.result)
+        return GatewayPolicyConfig(
+            tenant_id_named_value=tenant_id_named_value,
+            audience_named_value=audience_named_value,
+            required_claim_values=(),
+        )
+
     async def _wait_for_private_dns_zone_group(
         self,
         *,
@@ -276,6 +411,107 @@ class PrototypeApiGatewayService:
             "Cosmos DB private DNS zone group did not become ready within "
             f"600 seconds (last state: {last_state})."
         )
+
+    async def _peer_with_shared_network(
+        self,
+        *,
+        network_client: Any,
+        resource_group: str,
+        vnet_name: str,
+        vnet_id: str,
+        report: GatewayProgressCallback,
+    ) -> None:
+        """Peers this mission's own isolated VNet with Genie's shared VNet,
+        and links the mission's VNet to every shared private DNS zone named
+        in settings - the real, observed fix for missions whose generated
+        backend/agents could not reach Genie's own shared, private-endpoint-
+        only resources (the shared Container Registry, the shared Azure AI
+        Foundry account) at all, because the mission's own VNet had no
+        private network path to them.
+
+        This is deliberately the ONLY supported fix for that class of
+        failure - it must never be "solved" by disabling public network
+        access restrictions on the shared resource itself (every shared
+        resource stays exactly as private as it was before this mission
+        existed); only this mission's own VNet gains a private path in.
+
+        A no-op (with a clear progress message) when
+        ``shared_vnet_resource_id`` is not configured - matching
+        every other optional-collaborator pattern in this package - so a
+        deployment that hasn't configured shared-network peering yet does
+        not fail closed on a feature it never opted into, but also never
+        gets silent, broken connectivity.
+        """
+
+        if not self._shared_vnet_resource_id or not self._shared_network_resource_group:
+            await report(
+                "Shared-network peering is not configured "
+                "(shared_vnet_resource_id); skipping."
+            )
+            return
+
+        await report("Peering the prototype network with Genie's shared network...")
+
+        from azure.mgmt.network.models import SubResource, VirtualNetworkPeering
+
+        shared_vnet_parts = self._shared_vnet_resource_id.rstrip("/").split("/")
+        shared_vnet_name = shared_vnet_parts[-1]
+
+        # Peering is two one-directional resources, one declared on each
+        # VNet, both required before Azure reports either side "Connected".
+        forward_poller = network_client.virtual_network_peerings.begin_create_or_update(
+            resource_group,
+            vnet_name,
+            f"peer-to-{shared_vnet_name}",
+            VirtualNetworkPeering(
+                remote_virtual_network=SubResource(id=self._shared_vnet_resource_id),
+                allow_virtual_network_access=True,
+                allow_forwarded_traffic=False,
+                allow_gateway_transit=False,
+                use_remote_gateways=False,
+            ),
+        )
+        await asyncio.to_thread(forward_poller.result)
+
+        reverse_poller = network_client.virtual_network_peerings.begin_create_or_update(
+            self._shared_network_resource_group,
+            shared_vnet_name,
+            f"peer-to-{vnet_name}",
+            VirtualNetworkPeering(
+                remote_virtual_network=SubResource(id=vnet_id),
+                allow_virtual_network_access=True,
+                allow_forwarded_traffic=False,
+                allow_gateway_transit=False,
+                use_remote_gateways=False,
+            ),
+        )
+        await asyncio.to_thread(reverse_poller.result)
+
+        # Peering alone only provides IP-level reachability - Azure Private
+        # DNS Zones additionally require every resolving VNet to carry its
+        # own explicit link to the zone, so the mission's own VNet resolves
+        # each shared resource's private endpoint FQDN to its private IP.
+        dns_client = self._private_dns_client()
+        from azure.mgmt.privatedns.models import SubResource as PrivateDnsSubResource
+        from azure.mgmt.privatedns.models import VirtualNetworkLink
+
+        for zone_name in self._shared_private_dns_zone_names:
+            link_poller = dns_client.virtual_network_links.begin_create_or_update(
+                self._shared_network_resource_group,
+                zone_name,
+                _resource_name(
+                    "link",
+                    vnet_name,
+                    maximum_length=80,
+                    uniqueness_seed=f"{vnet_name}:{zone_name}",
+                ),
+                VirtualNetworkLink(
+                    location="global",
+                    virtual_network=PrivateDnsSubResource(id=vnet_id),
+                    registration_enabled=False,
+                ),
+            )
+            await asyncio.to_thread(link_poller.result)
 
     async def provision_infrastructure(
         self,
@@ -388,6 +624,14 @@ class PrototypeApiGatewayService:
                 ),
             )
             await asyncio.to_thread(network_poller.result)
+
+            await self._peer_with_shared_network(
+                network_client=network_client,
+                resource_group=resource_group,
+                vnet_name=vnet_name,
+                vnet_id=vnet_id,
+                report=_report,
+            )
 
             dns_client = self._private_dns_client()
             if data_endpoint:
@@ -552,12 +796,21 @@ class PrototypeApiGatewayService:
         mission_slug: str,
         backend_url: str,
         frontend_origin: str = "https://prototype.invalid",
+        require_sign_in: bool = False,
         on_progress: GatewayProgressCallback | None = None,
     ) -> str:
         if not backend_url.startswith("https://"):
             raise PrototypeApiGatewayError("Private prototype backend URL must use HTTPS.")
         if not frontend_origin.startswith("https://"):
             raise PrototypeApiGatewayError("Prototype gateway CORS origin must use HTTPS.")
+        if require_sign_in and not (self._shared_entra_tenant_id and self._shared_entra_audience):
+            raise PrototypeApiGatewayError(
+                "This mission's architecture requires sign-in enforcement, but "
+                "Genie's shared Entra ID app (shared_entra_tenant_id/"
+                "shared_entra_audience) is not configured. Refusing to publish "
+                "an unprotected API for a mission that declared it needs one - "
+                "configure the shared app or remove the identity requirement."
+            )
         if on_progress is not None:
             await on_progress("Publishing the prototype API through its gateway...")
 
@@ -602,6 +855,25 @@ class PrototypeApiGatewayService:
                         url_template="/*",
                     ),
                 )
+            gateway_policy = None
+            if require_sign_in:
+                # Generic for every mission whose requirements named an
+                # identity provider (see architecture-coverage enforcement,
+                # not an ACI-specific branch) - enforced here regardless of
+                # what domain the mission is in.
+                gateway_policy = await self._ensure_identity_named_values(
+                    api_management_client=client,
+                    resource_group=resource_group,
+                    service_name=service_name,
+                )
+                if gateway_policy is None:
+                    raise PrototypeApiGatewayError(
+                        "This mission's architecture requires sign-in enforcement, but "
+                        "Genie's shared Entra ID app (shared_entra_tenant_id/"
+                        "shared_entra_audience) is not configured. Refusing to publish "
+                        "an unprotected API for a mission that declared it needs one - "
+                        "configure the shared app or remove the identity requirement."
+                    )
             client.api_policy.create_or_update(
                 resource_group,
                 service_name,
@@ -609,7 +881,9 @@ class PrototypeApiGatewayService:
                 "policy",
                 PolicyContract(
                     format="rawxml",
-                    value=_build_api_policy(frontend_origin=frontend_origin),
+                    value=_build_api_policy(
+                        frontend_origin=frontend_origin, gateway_policy=gateway_policy
+                    ),
                 ),
             )
             service = client.api_management_service.get(resource_group, service_name)

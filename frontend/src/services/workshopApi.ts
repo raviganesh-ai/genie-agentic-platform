@@ -68,7 +68,13 @@ export const workshopApi = {
   },
   regenerateComponent(
     sessionId: string,
-    body: { component_label: string; existing_code: string; instructions: string; trace_id?: string },
+    body: {
+      workflow_run_id: string;
+      component_label: string;
+      existing_code: string;
+      instructions: string;
+      trace_id?: string;
+    },
   ): Promise<{ component_label: string; code: string }> {
     return apiFetch<{ component_label: string; code: string }>(
       `/sessions/${sessionId}/workshop/regenerate-component`,

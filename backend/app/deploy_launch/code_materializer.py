@@ -24,7 +24,9 @@ __all__ = [
     "generate_agent_config_module",
     "generate_backend_service_scaffold",
     "generate_models_init",
+    "generate_msal_config_module",
     "generate_routing_shell",
+    "generate_use_genie_auth_module",
     "materialize_build",
 ]
 
@@ -75,10 +77,15 @@ _GATEWAY_POLICY_MARKER_PATTERN: Final = re.compile(
     r"^#\s*agent:\s*gateway_policy:(.+)$", re.IGNORECASE
 )
 # One identity-provider adapter (see "## Identity Configuration") - a
-# TypeScript module (``ts`` fence), never a React component. First line
-# ``// agent: identity_config:<Adapter Name>``.
+# small, structured YAML configuration (``yaml``/``yml`` fence), never
+# actual MSAL/sign-in code (see build-generation-component-v1's own
+# "identity_config" branch - the real token-acquisition module is a
+# deterministic platform step, generated once by
+# app.deploy_launch.code_materializer.generate_msal_config_module/
+# generate_use_genie_auth_module, never per-mission LLM output). First
+# line ``# agent: identity_config:<Adapter Name>``.
 _IDENTITY_CONFIG_MARKER_PATTERN: Final = re.compile(
-    r"^//\s*agent:\s*identity_config:(.+)$", re.IGNORECASE
+    r"^#\s*agent:\s*identity_config:(.+)$", re.IGNORECASE
 )
 
 _ORCHESTRATOR_MARKER: Final = "orchestrator"
@@ -353,8 +360,9 @@ class MaterializedBuild:
     # prototype_api_gateway_service.GatewayPolicyConfig).
     gateway_policy_documents: dict[str, str] = field(default_factory=dict)
     # One entry per declared "## Identity Configuration" component - a
-    # TypeScript identity-provider adapter module (see
-    # "IDENTITY_PROVIDER_INTERFACE" in build-generation-component-v1).
+    # small, structured YAML configuration (never actual MSAL/sign-in
+    # code - see generate_msal_config_module/generate_use_genie_auth_module,
+    # which always generate the real, deterministic sign-in module).
     identity_config_modules: dict[str, str] = field(default_factory=dict)
 
     def write_to_directory(
@@ -371,8 +379,21 @@ class MaterializedBuild:
         root.mkdir(parents=True, exist_ok=True)
         agents_dir = root / "agents"
         agents_dir.mkdir(parents=True, exist_ok=True)
+        # Real, observed incident: without this file, "agents" was an implicit
+        # PEP 420 namespace package, and a transitive dependency of
+        # agent-framework installs its own unrelated, regular "agents" package
+        # (the OpenAI Agents SDK) into site-packages. Python's import
+        # resolution lets a regular package found anywhere on sys.path win
+        # outright over a namespace package portion found elsewhere, so every
+        # "from agents.<module> import <name>" in orchestrator.py resolved to
+        # the third-party SDK instead of this mission's own specialist agent
+        # modules, raising ModuleNotFoundError for the submodule even though
+        # the real file was present in the image. Mirrors the same fix
+        # already applied to services/ below for the identical reason.
+        init_path = agents_dir / "__init__.py"
+        init_path.write_text("", encoding="utf-8")
 
-        written: list[Path] = []
+        written: list[Path] = [init_path]
         for agent_name, code in self.agent_modules.items():
             path = agents_dir / f"{_slugify(agent_name)}.py"
             path.write_text(_use_mission_foundry_runtime(code), encoding="utf-8")
@@ -413,6 +434,13 @@ class MaterializedBuild:
         if self.service_modules:
             services_dir = root / "services"
             services_dir.mkdir(parents=True, exist_ok=True)
+            # Makes ``services`` a real importable package (never relies on
+            # implicit PEP 420 namespace-package resolution), so
+            # ``service_mounts.py``'s own ``importlib.import_module`` /
+            # ``pkgutil.iter_modules`` discovery is unambiguous.
+            init_path = services_dir / "__init__.py"
+            init_path.write_text("", encoding="utf-8")
+            written.append(init_path)
             for service_name, code in self.service_modules.items():
                 path = services_dir / f"{_slugify(service_name)}.py"
                 path.write_text(_use_mission_foundry_runtime(code), encoding="utf-8")
@@ -455,7 +483,7 @@ class MaterializedBuild:
             identity_dir = root / "identity"
             identity_dir.mkdir(parents=True, exist_ok=True)
             for adapter_name, code in self.identity_config_modules.items():
-                path = identity_dir / f"{_slugify(adapter_name)}.ts"
+                path = identity_dir / f"{_slugify(adapter_name)}.yaml"
                 path.write_text(code, encoding="utf-8")
                 written.append(path)
 
@@ -508,20 +536,19 @@ def materialize_build(output_text: str) -> MaterializedBuild:
         elif language.lower() in ("yaml", "yml"):
             contract_match = _API_CONTRACT_MARKER_PATTERN.match(first_line)
             gateway_policy_match = _GATEWAY_POLICY_MARKER_PATTERN.match(first_line)
+            identity_match = _IDENTITY_CONFIG_MARKER_PATTERN.match(first_line)
             if contract_match is not None:
                 api_contract_documents[contract_match.group(1).strip()] = body.strip("\n")
             elif gateway_policy_match is not None:
                 gateway_policy_documents[gateway_policy_match.group(1).strip()] = body.strip("\n")
+            elif identity_match is not None:
+                identity_config_modules[identity_match.group(1).strip()] = body.strip("\n")
         elif language.lower() == "tsx":
             page_match = _PAGE_MARKER_PATTERN.match(first_line)
             if page_match is not None:
                 page_components[page_match.group(1).strip()] = body.strip("\n")
             elif _UI_MARKER_PATTERN.match(first_line):
                 ui_component = body.strip("\n")
-        elif language.lower() == "ts":
-            identity_match = _IDENTITY_CONFIG_MARKER_PATTERN.match(first_line)
-            if identity_match is not None:
-                identity_config_modules[identity_match.group(1).strip()] = body.strip("\n")
 
     if (
         not agent_modules
@@ -694,6 +721,15 @@ from pydantic import BaseModel
 
 app = FastAPI(title={mission_title!r})
 {authentication_middleware}
+
+# Mounts every "## Deterministic Services" component's own real routes
+# (see service_mounts.py, never LLM-authored) onto this exact app - a
+# deterministic service is never a separately deployed service of its
+# own, so this is the only thing that makes its routes genuinely
+# reachable through this mission's APIM gateway.
+from service_mounts import mount_deterministic_services  # noqa: E402
+
+mount_deterministic_services(app)
 
 _logger = logging.getLogger("mission.backend")
 
@@ -1143,6 +1179,62 @@ class MissionFoundryAgent:
         return MissionAgentResult(raw_text=raw_text, value=value)
 '''
 
+_SERVICE_MOUNTS_PY = '''"""Mounts every "## Deterministic Services" component's own real routes
+onto this mission's single deployed FastAPI app.
+
+Never LLM-authored: this file is generated by
+``app.deploy_launch.code_materializer.generate_backend_service_scaffold``
+every time a mission is deployed. A deterministic service is never a
+separately deployed service of its own - it ships as one module under this
+mission's own ``services/`` directory. For each such module that exports a
+module-level ``router`` (a ``fastapi.APIRouter``), this discovers it at
+runtime (never a hardcoded list, so it never needs regenerating when this
+mission's own deterministic-service component set changes) and includes it
+on this mission's one real app, making its routes genuinely reachable
+through this mission's own APIM gateway. A module that only exposes plain
+functions (for in-process use by a specialist agent's own tool code) is
+left alone here - there is nothing to mount for it.
+"""
+from __future__ import annotations
+
+import importlib
+import logging
+import pkgutil
+from pathlib import Path
+
+from fastapi import FastAPI
+
+_logger = logging.getLogger("mission.backend.service_mounts")
+
+
+def mount_deterministic_services(app: FastAPI) -> None:
+    services_dir = Path(__file__).resolve().parent / "services"
+    if not services_dir.is_dir():
+        return
+    for module_info in pkgutil.iter_modules([str(services_dir)]):
+        module_name = f"services.{module_info.name}"
+        try:
+            module = importlib.import_module(module_name)
+        except Exception:
+            _logger.exception(
+                "Deterministic service module %r failed to import; its "
+                "routes will not be reachable.",
+                module_name,
+            )
+            continue
+        router = getattr(module, "router", None)
+        if router is None:
+            _logger.info(
+                "Deterministic service module %r has no 'router' attribute; "
+                "nothing to mount (it may only expose plain importable "
+                "functions for in-process use by a specialist agent).",
+                module_name,
+            )
+            continue
+        app.include_router(router)
+        _logger.info("Mounted deterministic service routes from %r.", module_name)
+'''
+
 _REQUIREMENTS_TXT = """fastapi>=0.115,<1.0
 uvicorn>=0.32,<1.0
 azure-ai-projects>=2.3,<3.0
@@ -1186,7 +1278,18 @@ _ROUTING_SHELL_TEMPLATE = '''// agent: generated-routing-shell
 // mission (per-page content) still goes through the same generation and
 // quality gates as the single-page case, while the part that is pure
 // plumbing never needs an LLM to get right.
-import {{ BrowserRouter, Routes, Route, Navigate, NavLink }} from "react-router-dom";
+//
+// Uses HashRouter (not BrowserRouter): the deployed frontend's own
+// production image serves the SPA from a plain nginx:alpine container
+// with no SPA-fallback rewrite rule (see
+// container_app_frontend_deployment_service.py's _FRONTEND_DOCKERFILE),
+// so any direct navigation, refresh, or bookmark of a path-based
+// BrowserRouter route returns a real 404 from nginx before React Router
+// ever runs - a real, observed failure. HashRouter keeps every route
+// under the single "/" path nginx already serves, trading a "#/" segment
+// in the URL for working deep links and refreshes without requiring a
+// custom nginx rewrite config.
+import {{ HashRouter, Routes, Route, Navigate, NavLink }} from "react-router-dom";
 import type {{ ComponentType }} from "react";
 {page_imports}
 
@@ -1200,10 +1303,16 @@ const MISSION_PAGES: {{ path: string; label: string; Component: ComponentType<Mi
 
 export default function MissionApp({{ onSubmit }}: MissionAppProps) {{
   return (
-    <BrowserRouter>
+    <HashRouter>
       <nav className="genie-mission-nav">
         {{MISSION_PAGES.map((page) => (
-          <NavLink key={{page.path}} to={{page.path}} className="genie-mission-nav-link">
+          <NavLink
+            key={{page.path}}
+            to={{page.path}}
+            className={{({{ isActive }}) =>
+              isActive ? "genie-mission-nav-link active" : "genie-mission-nav-link"
+            }}
+          >
             {{page.label}}
           </NavLink>
         ))}}
@@ -1214,13 +1323,153 @@ export default function MissionApp({{ onSubmit }}: MissionAppProps) {{
         ))}}
         <Route path="*" element={{<Navigate to={{MISSION_PAGES[0].path}} replace />}} />
       </Routes>
-    </BrowserRouter>
+    </HashRouter>
   );
 }}
 '''
 
 
-def generate_routing_shell(page_names: tuple[str, ...]) -> str:
+_ROUTING_SHELL_TEMPLATE_WITH_SIGN_IN = '''// agent: generated-routing-shell
+// Real, deterministically generated multi-page navigation shell for one
+// deployed mission - never LLM-authored. Generated by
+// ``app.deploy_launch.code_materializer.generate_routing_shell`` whenever
+// the mission's architecture declares a "## UI Pages" section (see
+// ``architecture_parsing.py``) instead of the common single-page "##
+// Single-Page UI Design" one. Each imported page module below IS
+// individually Build-Agent-generated (one "// agent: page:<name>" block
+// per declared page); only this stitching shell - the routes, nav, and
+// sign-in control - is deterministic boilerplate, so the riskiest part of
+// a multi-page mission (per-page content) still goes through the same
+// generation and quality gates as the single-page case, while the part
+// that is pure plumbing never needs an LLM to get right.
+//
+// This variant additionally wraps the mission in MSAL's MsalProvider and
+// renders a real Sign in/Sign out control, because this mission's own
+// Architecture stage determined (from its own requirements) that it needs
+// an identity provider - see Settings.shared_entra_client_id and
+// ``generate_msal_config_module``/``generate_use_genie_auth_module``,
+// which this shell always imports alongside the page components below.
+//
+// Uses HashRouter (not BrowserRouter): the deployed frontend's own
+// production image serves the SPA from a plain nginx:alpine container
+// with no SPA-fallback rewrite rule (see
+// container_app_frontend_deployment_service.py's _FRONTEND_DOCKERFILE),
+// so any direct navigation, refresh, or bookmark of a path-based
+// BrowserRouter route returns a real 404 from nginx before React Router
+// ever runs - a real, observed failure. HashRouter keeps every route
+// under the single "/" path nginx already serves, trading a "#/" segment
+// in the URL for working deep links and refreshes without requiring a
+// custom nginx rewrite config.
+import {{ useEffect, useState }} from "react";
+import {{ HashRouter, Routes, Route, Navigate, NavLink }} from "react-router-dom";
+import type {{ ComponentType }} from "react";
+import {{ MsalProvider }} from "@azure/msal-react";
+import {{ msalInstance }} from "./auth/msalConfig";
+import {{ useGenieAuth }} from "./auth/useGenieAuth";
+{page_imports}
+
+interface MissionAppProps {{
+  onSubmit: (message: string, attachments?: {{ name: string; content: string }}[]) => void;
+}}
+
+const MISSION_PAGES: {{ path: string; label: string; Component: ComponentType<MissionAppProps> }}[] = [
+{page_entries}
+];
+
+function SignInControl() {{
+  const {{ isSignedIn, displayName, signIn, signOut }} = useGenieAuth();
+  if (isSignedIn) {{
+    return (
+      <div className="genie-signin-control">
+        <span className="genie-signin-identity">{{displayName ?? "Signed in"}}</span>
+        <button type="button" className="genie-signin-button" onClick={{() => signOut()}}>
+          Sign out
+        </button>
+      </div>
+    );
+  }}
+  return (
+    <button type="button" className="genie-signin-button" onClick={{() => signIn()}}>
+      Sign in
+    </button>
+  );
+}}
+
+function MissionAppRoutes({{ onSubmit }}: MissionAppProps) {{
+  return (
+    <>
+      <nav className="genie-mission-nav">
+        {{MISSION_PAGES.map((page) => (
+          <NavLink
+            key={{page.path}}
+            to={{page.path}}
+            className={{({{ isActive }}) =>
+              isActive ? "genie-mission-nav-link active" : "genie-mission-nav-link"
+            }}
+          >
+            {{page.label}}
+          </NavLink>
+        ))}}
+        <SignInControl />
+      </nav>
+      <Routes>
+        {{MISSION_PAGES.map((page) => (
+          <Route key={{page.path}} path={{page.path}} element={{<page.Component onSubmit={{onSubmit}} />}} />
+        ))}}
+        <Route path="*" element={{<Navigate to={{MISSION_PAGES[0].path}} replace />}} />
+      </Routes>
+    </>
+  );
+}}
+
+export default function MissionApp({{ onSubmit }}: MissionAppProps) {{
+  // msal-browser requires one awaited initialize() call before any other
+  // MSAL API is used - rendering MsalProvider/useMsal before that resolves
+  // throws. A short, real loading state (never a fake instant success) is
+  // the deterministic way to sequence this without touching main.tsx's own
+  // synchronous render() call.
+  //
+  // Also explicitly awaits handleRedirectPromise() here, BEFORE HashRouter
+  // ever mounts - a real, observed incident: MSAL returns its auth
+  // response via a URL fragment (response_mode=fragment), the exact same
+  // place HashRouter reads its own route path from. Relying on
+  // MsalProvider's own internal handleRedirectPromise() call (which runs
+  // in an effect AFTER HashRouter/Routes have already mounted as its
+  // child) loses a real race: the unmatched "#code=...&state=..." auth
+  // response never matches any declared route, so the catch-all
+  // `<Route path="*"><Navigate replace /></Route>` below fires first (its
+  // effect runs child-before-parent, ahead of MsalProvider's own) and
+  // rewrites the hash to the first page's path - permanently discarding
+  // the auth code before MSAL ever reads it. The user completes a real,
+  // successful sign-in with their identity provider and is bounced right
+  // back to a "not signed in" app with no visible error. Calling
+  // handleRedirectPromise() here first consumes and clears that hash (or
+  // resolves to null on an ordinary, non-redirect load) before any route
+  // is ever evaluated; MsalProvider's own later call is a documented safe
+  // no-op once the response has already been consumed.
+  const [msalReady, setMsalReady] = useState(false);
+  useEffect(() => {{
+    msalInstance
+      .initialize()
+      .then(() => msalInstance.handleRedirectPromise())
+      .catch(() => undefined)
+      .then(() => setMsalReady(true));
+  }}, []);
+  if (!msalReady) {{
+    return <p className="genie-loading">Preparing sign-in...</p>;
+  }}
+  return (
+    <MsalProvider instance={{msalInstance}}>
+      <HashRouter>
+        <MissionAppRoutes onSubmit={{onSubmit}} />
+      </HashRouter>
+    </MsalProvider>
+  );
+}}
+'''
+
+
+def generate_routing_shell(page_names: tuple[str, ...], *, require_sign_in: bool = False) -> str:
     """Returns the real, deterministic ``MissionApp.tsx`` routing shell content
     for a multi-page mission - never LLM-authored, mirroring
     ``generate_agent_config_module``'s own deterministic-scaffold pattern.
@@ -1230,6 +1479,14 @@ def generate_routing_shell(page_names: tuple[str, ...]) -> str:
     the first page becomes the default/landing route. Each page's own
     component file is expected at ``pages/{slug(page_name)}.tsx``, exactly
     where ``MaterializedBuild.write_to_directory`` writes it.
+
+    ``require_sign_in`` is true only when this mission's own Architecture
+    stage determined (from its own requirements) that it needs an identity
+    provider - generic for every mission, never an ACI-specific branch. The
+    caller is responsible for also writing ``auth/msalConfig.ts`` and
+    ``auth/useGenieAuth.ts`` (see ``generate_msal_config_module``/
+    ``generate_use_genie_auth_module``) whenever this is true, since this
+    shell always imports them unconditionally in that case.
     """
 
     if not page_names:
@@ -1248,7 +1505,160 @@ def generate_routing_shell(page_names: tuple[str, ...]) -> str:
         f'label: "{page_name}", Component: {component_identifier} }}'
         for component_identifier, page_name in zip(component_identifiers, page_names)
     )
-    return _ROUTING_SHELL_TEMPLATE.format(page_imports=page_imports, page_entries=page_entries)
+    template = _ROUTING_SHELL_TEMPLATE_WITH_SIGN_IN if require_sign_in else _ROUTING_SHELL_TEMPLATE
+    return template.format(page_imports=page_imports, page_entries=page_entries)
+
+
+def generate_msal_config_module() -> str:
+    """Returns the real, deterministic ``auth/msalConfig.ts`` content - never
+    LLM-authored, because Entra ID tenant/client IDs and the token audience
+    are real, deployment-specific values that must never be hardcoded or
+    guessed by an LLM. Reads them from this mission's own ``runtime-config.js``
+    (written by Deploy & Launch at deploy time), mirroring how the rest of
+    this frontend shell already reads ``window.__MISSION_BACKEND_URL__``."""
+
+    return '''// agent: generated-msal-config
+// Real, deterministically generated MSAL configuration for this mission's
+// sign-in - never LLM-authored. Generated by
+// app.deploy_launch.code_materializer.generate_msal_config_module.
+// Values come from this mission's own runtime-config.js (written by
+// Deploy & Launch at deploy time) - never hardcoded here, since every
+// mission gets wired to the same shared Entra ID app with a different
+// redirect URI (see Settings.shared_entra_client_id).
+import { PublicClientApplication } from "@azure/msal-browser";
+import type { Configuration } from "@azure/msal-browser";
+
+const tenantId = window.__MISSION_ENTRA_TENANT_ID__ || "";
+const clientId = window.__MISSION_ENTRA_CLIENT_ID__ || "";
+
+// The full scope URI (e.g. "api://<client-id>/prototype.access") the
+// deployed APIM gateway's validate-azure-ad-token policy checks the
+// access token's audience against - never just the bare scope name.
+export const MISSION_API_SCOPE: string = window.__MISSION_ENTRA_API_SCOPE__ || "";
+
+const msalConfig: Configuration = {
+  auth: {
+    clientId,
+    authority: tenantId ? `https://login.microsoftonline.com/${tenantId}` : undefined,
+    redirectUri: window.location.origin + window.location.pathname,
+  },
+  cache: {
+    // localStorage (not sessionStorage) so a signed-in session survives
+    // a closed tab/browser restart within the same browser profile - the
+    // standard MSAL "remember me" behavior for a SPA; sessionStorage
+    // would force a fresh sign-in on every new tab, which is unnecessary
+    // friction for a prototype a user may revisit across a session.
+    cacheLocation: "localStorage",
+    storeAuthStateInCookie: false,
+  },
+};
+
+export const msalInstance = new PublicClientApplication(msalConfig);
+'''
+
+
+def generate_use_genie_auth_module() -> str:
+    """Returns the real, deterministic ``auth/useGenieAuth.ts`` content -
+    never LLM-authored. Wraps ``@azure/msal-react``'s own
+    ``useMsal()``/``useIsAuthenticated()`` behind one narrow, stable hook
+    so Build-Agent-generated page components only ever depend on this
+    surface, never the raw MSAL SDK - isolating a vendor SDK that changes
+    across versions behind an abstraction layer, per Genie's own coding
+    standards."""
+
+    return '''// agent: generated-genie-auth-hook
+// Real, deterministically generated sign-in hook for every mission page
+// that needs an authenticated action - never LLM-authored. Generated by
+// app.deploy_launch.code_materializer.generate_use_genie_auth_module.
+//
+// Uses MSAL's REDIRECT flow (never loginPopup/logoutPopup/
+// acquireTokenPopup) - a real, observed failure: loginPopup() depends on
+// window.open() succeeding and then being allowed to navigate, which
+// managed/corporate browser security policies routinely block outright,
+// silently leaving a blank, stuck popup window with no visible error on
+// the parent page. A full-page redirect has no such dependency. The
+// mission shell (see generate_routing_shell) already awaits
+// handleRedirectPromise() itself, before HashRouter ever mounts, so the
+// auth response fragment is consumed before any route is evaluated - no
+// extra wiring is needed here.
+import { useCallback, useEffect } from "react";
+import { useMsal, useIsAuthenticated } from "@azure/msal-react";
+import { MISSION_API_SCOPE } from "./msalConfig";
+
+export interface GenieAuth {
+  isSignedIn: boolean;
+  displayName: string | null;
+  signIn: () => Promise<void>;
+  signOut: () => Promise<void>;
+  // Returns a bearer access token scoped to this mission's own protected
+  // API, or null if the user is not signed in / a token could not be
+  // acquired silently - callers must treat null as "cannot call the
+  // protected endpoint right now", never substitute a fake/empty token.
+  // When silent acquisition fails and interaction is required, this
+  // initiates a full-page redirect (the page navigates away) rather than
+  // returning a token - there is no synchronous token available in that
+  // case, by design of the redirect flow.
+  getAccessToken: () => Promise<string | null>;
+}
+
+export function useGenieAuth(): GenieAuth {
+  const { instance, accounts } = useMsal();
+  const isSignedIn = useIsAuthenticated();
+  const account = accounts[0] ?? null;
+  const scopes = MISSION_API_SCOPE ? [MISSION_API_SCOPE] : [];
+
+  // Mirrors the signed-in account onto window.__GENIE_IDENTITY__ - a
+  // compatibility bridge for any already-generated page component that
+  // independently reads that global directly (several earlier missions'
+  // Build Agent runs guessed at an identity-injection shape before this
+  // hook existed); useGenieAuth() above remains the one real, documented
+  // contract going forward, this is only a mirror for backward
+  // compatibility, never the other way around.
+  useEffect(() => {
+    const win = window as unknown as { __GENIE_IDENTITY__?: unknown };
+    if (account) {
+      win.__GENIE_IDENTITY__ = { actor: account.name ?? account.username, actor_id: account.homeAccountId };
+    } else {
+      win.__GENIE_IDENTITY__ = null;
+    }
+  }, [account]);
+
+  const signIn = useCallback(async () => {
+    await instance.loginRedirect({ scopes });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [instance]);
+
+  const signOut = useCallback(async () => {
+    await instance.logoutRedirect();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [instance]);
+
+  const getAccessToken = useCallback(async (): Promise<string | null> => {
+    if (!account) {
+      return null;
+    }
+    try {
+      const result = await instance.acquireTokenSilent({ account, scopes });
+      return result.accessToken;
+    } catch {
+      // Interaction is required (e.g. consent, or a refresh token that can
+      // no longer be silently renewed) - redirect, never a popup. The page
+      // navigates away here; there is no token to return synchronously.
+      await instance.acquireTokenRedirect({ scopes });
+      return null;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [instance, account]);
+
+  return {
+    isSignedIn,
+    displayName: account?.name ?? account?.username ?? null,
+    signIn,
+    signOut,
+    getAccessToken,
+  };
+}
+'''
 
 
 def _pascal_case_identifier(name: str) -> str:
@@ -1323,4 +1733,5 @@ def generate_backend_service_scaffold(
         "Dockerfile": _DOCKERFILE,
         "agent_config.py": generate_agent_config_module(agent_foundry_names),
         "mission_foundry_runtime.py": _MISSION_FOUNDRY_RUNTIME_PY,
+        "service_mounts.py": _SERVICE_MOUNTS_PY,
     }

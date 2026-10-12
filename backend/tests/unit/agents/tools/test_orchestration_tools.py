@@ -1124,8 +1124,9 @@ async def test_call_build_agent_generates_deterministic_service_data_model_and_a
 
 
 async def test_call_build_agent_reuses_a_previously_succeeded_service_on_retry():
-    """A deterministic_service component's reuse key is its bare name (no
-    "service:" prefix), exactly mirroring page_view's own fix."""
+    """A deterministic_service component's reuse key is its own full
+    "service:<name>" marker-prefixed label, matched against the identical
+    label a prior successful attempt's own code block carries."""
 
     registry = AgentToolRegistry()
     gateway = _StreamingAgentGateway(
@@ -1173,6 +1174,85 @@ async def test_call_build_agent_reuses_a_previously_succeeded_service_on_retry()
     assert "Payments API" in called_components
 
 
+_ARCHITECTURE_WITH_SAME_NAMED_CONTRACT_AND_SERVICE = """
+## Multi-Agent Workflow
+
+- **Ticket Classifier Agent**: classifies the incoming issue by category.
+- **Support Triage Orchestrator Agent**: the single entry point.
+
+## Deterministic Services
+
+- **Mock Payments API**: the real, callable mock backend implementation.
+
+## API Contracts
+
+- **Mock Payments API**: Fully executable backends with an OpenAPI spec.
+"""
+
+
+async def test_call_build_agent_never_cross_reuses_same_named_contract_and_service():
+    """Regression guard: a deterministic_service and an api_contract that
+    happen to share the same component name (see
+    architecture_parsing._api_contract_needs_real_implementation) must
+    never reuse each other's cached code on a retry just because their
+    bare names match - each kind has its own full marker-prefixed reuse
+    key (see _extract_reusable_components)."""
+
+    registry = AgentToolRegistry()
+    gateway = _StreamingAgentGateway(
+        texts_by_component={
+            "Ticket Classifier Agent": "```python\n# agent: Ticket Classifier Agent\nclassifier code\n```",
+            "Support Triage Orchestrator Agent": "```python\n# agent: orchestrator\norchestrator code\n```",
+            "Mock Payments API": "```python\n# agent: service:Mock Payments API\nbrand new service code\n```",
+            "ui": "```tsx\n// agent: ui\nui code\n```",
+        }
+    )
+    governance_service = _RecordingGovernanceService()
+    register_orchestrator_delegation_tools(
+        registry, agent_gateway=gateway, governance_service=governance_service
+    )
+    context = ToolCallContext(
+        agent=_orchestrator_agent(),
+        session_id="session-1",
+        trace_id="run-1:build-solution",
+    )
+    # A prior attempt only ever generated the api_contract (YAML docs) -
+    # never the deterministic_service - for this exact name.
+    previous_build_output = (
+        "```python\n# agent: Ticket Classifier Agent\nclassifier code\n```\n\n"
+        "```python\n# agent: orchestrator\norchestrator code\n```\n\n"
+        "```yaml\n# agent: api_contract:Mock Payments API\nold api docs\n```"
+    )
+
+    await registry.execute(
+        agent_id="genie-orchestrator",
+        tool_name="call_build_agent",
+        arguments={
+            "requirements": "Approved requirements text.",
+            "architecture": _ARCHITECTURE_WITH_SAME_NAMED_CONTRACT_AND_SERVICE,
+            "policies": "",
+            "user_message": "",
+            "previous_build_output": previous_build_output,
+        },
+        context=context,
+    )
+
+    # The api_contract was reused verbatim (same kind, same name, cached
+    # last time) - the deterministic_service was NOT found in the cache
+    # under its own kind-specific key, so it was freshly generated via a
+    # real Build Agent call rather than wrongly inheriting the cached
+    # api_contract's own YAML text.
+    called_components = [r.variables["component_name"] for r in gateway.requests]
+    assert called_components == [
+        "Mock Payments API",
+        "ui",
+    ]
+    service_call = next(
+        r for r in gateway.requests if r.variables["component_kind"] == "deterministic_service"
+    )
+    assert service_call.variables["component_name"] == "Mock Payments API"
+
+
 _ARCHITECTURE_WITH_GATEWAY_POLICY = """
 ## Multi-Agent Workflow
 
@@ -1187,11 +1267,11 @@ _ARCHITECTURE_WITH_GATEWAY_POLICY = """
 
 async def test_call_build_agent_generates_gateway_policy_component():
     """gateway_policy is wired into the Build loop (Build can generate
-    its structured config) even though architecture-recommendation-v1
-    does not yet instruct Architecture to emit "## Gateway Policies" -
-    this test exercises the mechanism directly with a hand-authored
-    architecture document, mirroring how the other Phase 3/4 kinds were
-    tested before their own sections were ever live-generated."""
+    its structured config) independent of whether Architecture actually
+    emitted "## Gateway Policies" for this particular mission - this test
+    exercises the mechanism directly with a hand-authored architecture
+    document, mirroring how the other Phase 3/4 kinds were tested before
+    their own sections were ever live-generated."""
 
     registry = AgentToolRegistry()
     gateway = _StreamingAgentGateway(
@@ -1248,8 +1328,8 @@ _ARCHITECTURE_WITH_IDENTITY_CONFIG = """
 
 async def test_call_build_agent_generates_identity_config_component():
     """identity_config is wired into the Build loop (Build can generate
-    its adapter module) even though architecture-recommendation-v1 does
-    not yet instruct Architecture to emit "## Identity Configuration" -
+    its adapter module) independent of whether Architecture actually
+    emitted "## Identity Configuration" for this particular mission -
     mirrors gateway_policy's own test above."""
 
     registry = AgentToolRegistry()
@@ -1257,7 +1337,7 @@ async def test_call_build_agent_generates_identity_config_component():
         texts_by_component={
             "Ticket Classifier Agent": "```python\n# agent: Ticket Classifier Agent\nclassifier code\n```",
             "Support Triage Orchestrator Agent": "```python\n# agent: orchestrator\norchestrator code\n```",
-            "Entra ID Adapter": "```ts\n// agent: identity_config:Entra ID Adapter\nadapter code\n```",
+            "Entra ID Adapter": "```yaml\n# agent: identity_config:Entra ID Adapter\ndisplay_claim: name\n```",
             "ui": "```tsx\n// agent: ui\nui code\n```",
         }
     )
@@ -1291,4 +1371,4 @@ async def test_call_build_agent_generates_identity_config_component():
         ("identity_config", "Entra ID Adapter"),
         ("ui", "ui"),
     ]
-    assert "adapter code" in gateway.requests[3].variables["prior_components"]
+    assert "display_claim: name" in gateway.requests[3].variables["prior_components"]

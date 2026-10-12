@@ -14,6 +14,10 @@ resumed run - never synthesized here.
 """
 from __future__ import annotations
 
+from app.agents.tools.orchestration_tools import (
+    MARKER_PREFIX_BY_COMPONENT_KIND,
+    validate_component_output,
+)
 from app.models.reanalysis_models import ReanalysisRequestType, ReanalysisResult
 from app.models.workflow_models import WorkflowRunResult, WorkflowStepInput
 from app.orchestration.agent_orchestrator import AgentOrchestrator
@@ -85,6 +89,7 @@ class WorkshopService:
         *,
         session_id: str,
         requesting_user_id: str,
+        workflow_run_id: str,
         component_label: str,
         existing_code: str,
         instructions: str,
@@ -97,6 +102,15 @@ class WorkshopService:
         ``build-component-regeneration-v1`` prompt, never resuming the whole
         `build-solution` workflow step (which would regenerate every other
         component too).
+
+        Also splices the newly generated code back into ``workflow_run_id``'s
+        own persisted ``build-solution`` step output (see
+        ``AgentOrchestrator.update_build_component``) - Deploy & Launch always
+        re-materializes a mission's backend straight from that same
+        persisted output, so without this write-back a "successful"
+        regeneration here was purely cosmetic in the browser and silently
+        discarded at every subsequent deploy attempt (a real, observed
+        production incident).
         """
         await self._authorize(session_id, requesting_user_id)
         component_kind, component_name = self._classify_component(component_label)
@@ -112,6 +126,23 @@ class WorkshopService:
             session_id=session_id,
             trace_id=trace_id,
         )
+        # Reject a truncated/malformed regeneration here, BEFORE it is ever
+        # spliced into the persisted build-solution output - see
+        # validate_component_output's own docstring for the real incident
+        # this prevents (a regeneration that silently corrupted an
+        # already-passing component with no actionable error surfaced in
+        # Workshop). Runs the exact same check the original per-component
+        # build path already uses for every other component.
+        validate_component_output(
+            result.output_text,
+            component_kind=component_kind,
+            marker_name=component_label,
+        )
+        await self._orchestrator.update_build_component(
+            workflow_run_id=workflow_run_id,
+            component_label=component_label,
+            new_block_text=result.output_text,
+        )
         return result.output_text
 
     @staticmethod
@@ -121,6 +152,13 @@ class WorkshopService:
             return "ui", "ui"
         if normalized == "orchestrator":
             return "orchestrator", "orchestrator"
+        for component_kind, prefix in MARKER_PREFIX_BY_COMPONENT_KIND.items():
+            if normalized.startswith(prefix):
+                # Preserve the ORIGINAL (non-lowercased) remainder as the
+                # component's real display name - the bare name a page/
+                # service/model/etc. component's own first-line marker
+                # comment uses, e.g. "page:Landing Page" -> "Landing Page".
+                return component_kind, component_label[len(prefix) :].strip()
         return "agent", component_label
 
     async def challenge_recommendation(

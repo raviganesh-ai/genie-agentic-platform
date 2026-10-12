@@ -14,7 +14,9 @@ from app.deploy_launch.code_materializer import (
     generate_agent_config_module,
     generate_backend_service_scaffold,
     generate_models_init,
+    generate_msal_config_module,
     generate_routing_shell,
+    generate_use_genie_auth_module,
     materialize_build,
 )
 
@@ -313,9 +315,10 @@ def test_write_to_directory_creates_expected_files(tmp_path: Path):
     written = build.write_to_directory(tmp_path)
 
     assert (tmp_path / "agents" / "requirements_specialist.py").exists()
+    assert (tmp_path / "agents" / "__init__.py").exists()
     assert (tmp_path / "orchestrator.py").exists()
     assert (tmp_path / "MissionApp.tsx").exists()
-    assert len(written) == 3
+    assert len(written) == 4
 
 
 def test_write_to_directory_includes_backend_service_scaffold(tmp_path: Path):
@@ -541,7 +544,74 @@ def test_backend_service_scaffold_main_py_runs_the_real_orchestrator_pipeline():
     assert 'status_code=503' in main_source
 
 
+def test_backend_service_scaffold_mounts_deterministic_service_routes(tmp_path, monkeypatch):
+    """Regression guard for the "mock backend never deployed" incident: a
+    "## Deterministic Services" component's own real HTTP routes (an
+    ``APIRouter``) used to be written to ``services/`` and then never
+    mounted onto this mission's one deployed app - confirmed live via a
+    404 on a real deployed mission's own documented mock API path. main.py
+    must now import and call ``service_mounts.mount_deterministic_services``
+    so any generated service's ``router`` attribute is actually reachable.
+    """
+    scaffold = generate_backend_service_scaffold(
+        mission_title="Acme Mission",
+        orchestrator_agent_name="acme-orchestrator",
+        agent_foundry_names={"Requirements Specialist": "acme-requirements-specialist"},
+    )
+    assert "service_mounts.py" in scaffold
+    assert "from service_mounts import mount_deterministic_services" in scaffold["main.py"]
+    assert "mount_deterministic_services(app)" in scaffold["main.py"]
+
+    # End-to-end: a real generated service module exporting ``router`` is
+    # actually discovered and mounted, making its route genuinely reachable.
+    services_dir = tmp_path / "services"
+    services_dir.mkdir()
+    (services_dir / "__init__.py").write_text("", encoding="utf-8")
+    (services_dir / "mock_payments.py").write_text(
+        "from fastapi import APIRouter\n"
+        "router = APIRouter()\n\n"
+        "@router.get('/v1/ping')\n"
+        "def ping():\n"
+        "    return {'ok': True}\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "service_mounts.py").write_text(scaffold["service_mounts.py"], encoding="utf-8")
+
+    monkeypatch.syspath_prepend(str(tmp_path))
+    sys.modules.pop("service_mounts", None)
+    sys.modules.pop("services", None)
+    sys.modules.pop("services.mock_payments", None)
+    import importlib
+
+    import fastapi
+    from fastapi.testclient import TestClient
+
+    service_mounts = importlib.import_module("service_mounts")
+    app = fastapi.FastAPI()
+    service_mounts.mount_deterministic_services(app)
+
+    # Asserting against a real HTTP response (not app.routes - this FastAPI
+    # version wraps an included router as an opaque _IncludedRouter with no
+    # top-level .path, so inspecting app.routes directly is unreliable here)
+    # proves the mounted route is genuinely reachable end to end.
+    response = TestClient(app).get("/v1/ping")
+    assert response.status_code == 200
+    assert response.json() == {"ok": True}
+
+
+def _inject_fake_service_mounts(monkeypatch) -> None:
+    """Fakes the sibling ``service_mounts`` module main.py now always
+    imports (see ``generate_backend_service_scaffold``'s own
+    ``service_mounts.py`` output), matching how these same tests already
+    fake ``orchestrator``/``token_validation`` - these tests exec main.py's
+    source in isolation, without the real sibling file on disk."""
+    fake_module = types.ModuleType("service_mounts")
+    fake_module.mount_deterministic_services = lambda app: None
+    monkeypatch.setitem(sys.modules, "service_mounts", fake_module)
+
+
 def test_backend_scaffold_falls_back_when_generated_pipeline_glue_fails(monkeypatch):
+    _inject_fake_service_mounts(monkeypatch)
     scaffold = generate_backend_service_scaffold(
         mission_title="Acme Mission",
         orchestrator_agent_name="acme-orchestrator",
@@ -565,6 +635,7 @@ def test_backend_scaffold_falls_back_when_generated_pipeline_glue_fails(monkeypa
 
 
 def test_backend_scaffold_keeps_conversational_fallback_for_plain_text(monkeypatch):
+    _inject_fake_service_mounts(monkeypatch)
     scaffold = generate_backend_service_scaffold(
         mission_title="Acme Mission",
         orchestrator_agent_name="acme-orchestrator",
@@ -591,6 +662,7 @@ def test_backend_stream_returns_fallback_output_when_generated_pipeline_glue_fai
     tmp_path,
 ):
     monkeypatch.setenv("FACTORY_WORKING_DIR", str(tmp_path))
+    _inject_fake_service_mounts(monkeypatch)
     scaffold = generate_backend_service_scaffold(
         mission_title="Acme Mission",
         orchestrator_agent_name="acme-orchestrator",
@@ -729,6 +801,7 @@ def test_write_to_directory_writes_pages_and_generated_routing_shell(tmp_path: P
     assert (tmp_path / "pages" / "catalog_page.tsx").exists()
     assert (tmp_path / "pages" / "dashboard_page.tsx").exists()
     assert (tmp_path / "orchestrator.py").exists()
+    assert (tmp_path / "agents" / "__init__.py").exists()
     shell_path = tmp_path / "MissionApp.tsx"
     assert shell_path.exists()
     shell_source = shell_path.read_text(encoding="utf-8")
@@ -737,7 +810,7 @@ def test_write_to_directory_writes_pages_and_generated_routing_shell(tmp_path: P
     assert 'import Page1 from "./pages/dashboard_page";' in shell_source
     assert '"/catalog-page"' in shell_source
     assert '"/dashboard-page"' in shell_source
-    assert len(written) == 4
+    assert len(written) == 5
 
 
 def test_generate_routing_shell_defaults_to_the_first_declared_page():
@@ -748,9 +821,123 @@ def test_generate_routing_shell_defaults_to_the_first_declared_page():
     assert 'label: "Dashboard Page"' in shell_source
 
 
+def test_generate_routing_shell_uses_hash_router_not_browser_router():
+    """Regression test for a real incident: the deployed frontend's own
+    production image serves the SPA from a plain nginx:alpine container
+    with no SPA-fallback rewrite rule, so a BrowserRouter route 404s on
+    direct navigation, refresh, or bookmark - before React Router ever
+    runs. HashRouter keeps every route under the single "/" path nginx
+    already serves."""
+
+    shell_source = generate_routing_shell(("Catalog Page", "Dashboard Page"))
+
+    assert 'from "react-router-dom"' in shell_source
+    assert "import { HashRouter" in shell_source
+    assert "<HashRouter>" in shell_source
+    assert "<BrowserRouter>" not in shell_source
+    assert "import { BrowserRouter" not in shell_source
+
+
 def test_generate_routing_shell_rejects_empty_page_list():
     with pytest.raises(MaterializedCodeError):
         generate_routing_shell(())
+
+
+def test_generate_routing_shell_without_sign_in_never_imports_msal():
+    shell_source = generate_routing_shell(("Catalog Page",), require_sign_in=False)
+
+    assert "msal" not in shell_source.lower()
+    assert "SignInControl" not in shell_source
+
+
+def test_generate_routing_shell_with_sign_in_wraps_with_msal_provider():
+    shell_source = generate_routing_shell(("Catalog Page", "Dashboard Page"), require_sign_in=True)
+
+    assert 'import { MsalProvider } from "@azure/msal-react";' in shell_source
+    assert 'import { msalInstance } from "./auth/msalConfig";' in shell_source
+    assert 'import { useGenieAuth } from "./auth/useGenieAuth";' in shell_source
+    assert "<MsalProvider instance={msalInstance}>" in shell_source
+    assert "function SignInControl()" in shell_source
+    # Still uses HashRouter underneath, nested inside the MSAL wrapper.
+    assert "<HashRouter>" in shell_source
+
+
+def test_generate_routing_shell_with_sign_in_awaits_redirect_promise_before_routing_mounts():
+    """Regression test for a real, observed incident: MSAL's redirect-flow
+    auth response arrives via a URL fragment (response_mode=fragment) -
+    the exact same place HashRouter reads its own route path from. A user
+    who completes a real, successful sign-in was bounced back to a
+    "not signed in" app with no visible error, because the unmatched
+    "#code=...&state=..." auth response never matches any declared route,
+    so the catch-all `<Route path="*"><Navigate replace /></Route>` fired
+    (its effect runs child-before-parent, ahead of MsalProvider's own
+    internal handleRedirectPromise() call) and rewrote the hash away
+    before MSAL ever read it. The shell must call
+    msalInstance.handleRedirectPromise() itself, and HashRouter must only
+    ever mount (gated by msalReady) after that settles - never before."""
+
+    shell_source = generate_routing_shell(("Catalog Page", "Dashboard Page"), require_sign_in=True)
+
+    assert "msalInstance.handleRedirectPromise()" in shell_source
+    mission_app_start = shell_source.index("export default function MissionApp")
+    initialize_call = shell_source.index(".initialize()", mission_app_start)
+    redirect_call = shell_source.index("msalInstance.handleRedirectPromise()", mission_app_start)
+    hash_router_mount = shell_source.index("<HashRouter>", mission_app_start)
+    assert initialize_call < redirect_call < hash_router_mount
+
+
+def test_generate_msal_config_module_reads_from_runtime_config_not_hardcoded():
+    module_source = generate_msal_config_module()
+
+    assert "window.__MISSION_ENTRA_TENANT_ID__" in module_source
+    assert "window.__MISSION_ENTRA_CLIENT_ID__" in module_source
+    assert "window.__MISSION_ENTRA_API_SCOPE__" in module_source
+    assert "export const msalInstance" in module_source
+    # Never a literal tenant/client id - only read from the window globals.
+    assert "16b3c013" not in module_source
+
+
+def test_generate_use_genie_auth_module_exposes_the_narrow_stable_surface():
+    module_source = generate_use_genie_auth_module()
+
+    assert "export function useGenieAuth" in module_source
+    assert "isSignedIn" in module_source
+    assert "getAccessToken" in module_source
+    assert "signIn" in module_source
+    assert "signOut" in module_source
+    assert 'from "@azure/msal-react"' in module_source
+
+
+def test_generate_use_genie_auth_module_uses_redirect_flow_never_popup():
+    """Regression test for a real incident: loginPopup()/logoutPopup()/
+    acquireTokenPopup() depend on window.open() succeeding and then being
+    allowed to navigate - managed/corporate browser security policies
+    routinely block this outright, leaving a blank, permanently stuck
+    popup window with no visible error on the parent page. The redirect
+    flow has no such dependency and is the robust default for an
+    enterprise-deployed prototype."""
+
+    module_source = generate_use_genie_auth_module()
+
+    assert "loginRedirect" in module_source
+    assert "logoutRedirect" in module_source
+    assert "acquireTokenRedirect" in module_source
+    assert "instance.loginPopup(" not in module_source
+    assert "instance.logoutPopup(" not in module_source
+    assert "instance.acquireTokenPopup(" not in module_source
+
+
+def test_generate_use_genie_auth_module_mirrors_identity_for_legacy_pages():
+    """Some already-generated page components (from Build Agent runs that
+    predate useGenieAuth()) independently invented their own
+    window.__GENIE_IDENTITY__ read for sign-in state - this mirror lets
+    them keep working without a hand edit, while useGenieAuth() remains
+    the one real, documented contract for every new page going forward."""
+
+    module_source = generate_use_genie_auth_module()
+
+    assert "__GENIE_IDENTITY__" in module_source
+    assert "actor_id" in module_source
 
 
 _MULTI_COMPONENT_TYPE_OUTPUT = '''
@@ -809,6 +996,9 @@ def test_write_to_directory_writes_services_models_and_api_contracts(tmp_path: P
     build.write_to_directory(tmp_path)
 
     assert (tmp_path / "services" / "entitlement_checker.py").exists()
+    # Makes "services" a real importable package so service_mounts.py's own
+    # discovery (importlib.import_module("services.<name>")) is unambiguous.
+    assert (tmp_path / "services" / "__init__.py").exists()
     assert (tmp_path / "models" / "sandboxtenant.py").exists()
     assert (tmp_path / "models" / "entitlement.py").exists()
     assert (tmp_path / "api-contracts" / "payments_api.yaml").exists()
@@ -872,17 +1062,17 @@ class OrchestratorAgent:
         pass
 ```
 
-```ts
-// agent: identity_config:Entra ID Adapter
-export const signIn = () => {};
+```yaml
+# agent: identity_config:Entra ID Adapter
+display_claim: name
 ```
 '''
 
 
-def test_materialize_build_parses_identity_config_as_a_ts_module():
+def test_materialize_build_parses_identity_config_as_structured_yaml():
     build = materialize_build(_IDENTITY_CONFIG_OUTPUT)
 
-    assert "signIn" in build.identity_config_modules["Entra ID Adapter"]
+    assert "display_claim" in build.identity_config_modules["Entra ID Adapter"]
 
 
 def test_write_to_directory_writes_identity_config(tmp_path: Path):
@@ -890,7 +1080,7 @@ def test_write_to_directory_writes_identity_config(tmp_path: Path):
 
     build.write_to_directory(tmp_path)
 
-    assert (tmp_path / "identity" / "entra_id_adapter.ts").exists()
+    assert (tmp_path / "identity" / "entra_id_adapter.yaml").exists()
 
 
 def test_stream_agent_response_relays_on_progress_narration_as_it_happens(monkeypatch):
@@ -904,6 +1094,7 @@ def test_stream_agent_response_relays_on_progress_narration_as_it_happens(monkey
     pipeline's final structured result arriving only in the closing
     "done" event.
     """
+    _inject_fake_service_mounts(monkeypatch)
     scaffold = generate_backend_service_scaffold(
         mission_title="Acme Mission",
         orchestrator_agent_name="acme-orchestrator",

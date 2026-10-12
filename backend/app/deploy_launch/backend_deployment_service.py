@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import asyncio
 import io
+import logging
 import tarfile
 import time
 from collections.abc import Awaitable, Callable
@@ -51,6 +52,8 @@ from app.deploy_launch.resource_naming import (
     prototype_container_app_name,
     prototype_resource_group_name,
 )
+
+logger = logging.getLogger(__name__)
 
 # Invoked with a short human-readable message right before each real,
 # potentially slow sub-phase of ``deploy()`` (source upload, remote ACR
@@ -76,6 +79,23 @@ __all__ = [
 
 class BackendDeploymentError(RuntimeError):
     """Raised when building or deploying the mission's backend service fails."""
+
+
+def _is_graph_permission_denied(exc: BaseException) -> bool:
+    """True when ``exc`` is an ``httpx.HTTPStatusError`` for a 403 response -
+    the exact shape ``PrototypeApiGatewayService.ensure_spa_redirect_uri``
+    raises when Genie's own deployment identity lacks the
+    ``Application.ReadWrite.OwnedBy`` admin consent grant Microsoft Graph
+    requires (see ``ensure_gateway_spa_redirect_uri``'s own docstring for
+    why this is treated as a warning, not a fatal deployment error).
+    Matched narrowly by attribute shape (never a broad except-all) so a
+    genuinely different failure (network error, malformed response, ...)
+    still fails closed as before.
+    """
+
+    response = getattr(exc, "response", None)
+    status_code = getattr(response, "status_code", None)
+    return status_code == 403
 
 
 @dataclass(frozen=True)
@@ -313,6 +333,7 @@ class BackendDeploymentService:
         data_endpoint: str | None = None,
         data_database_name: str | None = None,
         data_container_name: str | None = None,
+        require_sign_in: bool = False,
         on_progress: DeploymentProgressCallback | None = None,
     ) -> BackendDeploymentResult:
         """Builds ``build_root`` (must contain its own ``Dockerfile``) in ACR and
@@ -323,6 +344,13 @@ class BackendDeploymentService:
         The Container App is assigned this identity so it can authenticate to Azure
         services (ACR for image pull, Key Vault, Storage, Foundry) using managed
         identity instead of hardcoded credentials.
+
+        ``require_sign_in`` is true only when this mission's own Architecture
+        stage determined (from its own requirements, not a blanket rule) that
+        it needs an identity provider - it is threaded straight through to the
+        prototype API gateway's ``publish_api``, which then fails closed
+        rather than publishing an unprotected API for a mission that declared
+        it needs sign-in enforcement.
 
         When given, ``on_progress`` is awaited with a short status message
         before each real sub-phase begins (upload, remote ACR build,
@@ -584,6 +612,7 @@ class BackendDeploymentService:
                 backend_url = await self._prototype_api_gateway_service.publish_api(
                     mission_slug=mission_slug,
                     backend_url=private_backend_url,
+                    require_sign_in=require_sign_in,
                     on_progress=on_progress,
                 )
             except Exception as exc:
@@ -617,6 +646,48 @@ class BackendDeploymentService:
                 f"Failed to configure prototype gateway CORS origin: {exc}"
             ) from exc
 
+    async def ensure_gateway_spa_redirect_uri(self, frontend_url: str) -> None:
+        """Registers ``frontend_url`` against Genie's one shared Entra ID
+        app's SPA redirect URI list - a no-op when the prototype API
+        gateway (and therefore the shared Entra app) isn't configured.
+
+        A Microsoft Graph 403 here is deliberately treated as a warning,
+        not a fatal deployment error - Genie's own deployment identity
+        needs a one-time tenant-admin consent grant
+        (``Application.ReadWrite.OwnedBy`` on just this one Genie-owned
+        app) that is a tenant prerequisite entirely outside this
+        pipeline's own control, not a defect in the generated mission
+        itself (a real, observed incident: every other part of a mission -
+        backend, data layer, every other page - was a fully working
+        deployment, blocked only by this one best-effort housekeeping call
+        against a shared resource). The mission's sign-in may not work
+        until an administrator grants that consent or registers the URL
+        manually, but the rest of the deployment must not be discarded
+        over a tenant-level permission gap outside Genie's control.
+        """
+
+        if self._prototype_api_gateway_service is None:
+            return
+        try:
+            await self._prototype_api_gateway_service.ensure_spa_redirect_uri(frontend_url)
+        except Exception as exc:
+            if _is_graph_permission_denied(exc):
+                logger.warning(
+                    "Could not register frontend URL %s for Entra ID sign-in on the "
+                    "shared app registration - Genie's deployment identity lacks the "
+                    "one-time 'Application.ReadWrite.OwnedBy' admin consent grant on "
+                    "that app (a tenant prerequisite, not a mission defect). "
+                    "Continuing the deployment; an administrator must grant that "
+                    "consent, or register the URL manually, before this mission's "
+                    "sign-in will work: %s",
+                    frontend_url,
+                    exc,
+                )
+                return
+            raise BackendDeploymentError(
+                f"Failed to register the mission's frontend URL for sign-in: {exc}"
+            ) from exc
+
 
 class NullBackendDeploymentService:
     """Local/test double: real behavior end-to-end minus any actual Azure calls."""
@@ -630,6 +701,7 @@ class NullBackendDeploymentService:
         data_endpoint: str | None = None,
         data_database_name: str | None = None,
         data_container_name: str | None = None,
+        require_sign_in: bool = False,
         on_progress: DeploymentProgressCallback | None = None,
     ) -> BackendDeploymentResult:
         del (
@@ -638,6 +710,7 @@ class NullBackendDeploymentService:
             data_endpoint,
             data_database_name,
             data_container_name,
+            require_sign_in,
         )
         if on_progress is not None:
             await on_progress("Deploying backend service (local mode, no real Azure calls)...")
@@ -653,6 +726,9 @@ class NullBackendDeploymentService:
         frontend_origin: str,
     ) -> None:
         del mission_slug, frontend_origin
+
+    async def ensure_gateway_spa_redirect_uri(self, frontend_url: str) -> None:
+        del frontend_url
 
     async def delete(self, *, mission_slug: str) -> None:
         del mission_slug
@@ -701,6 +777,17 @@ def create_backend_deployment_service(
                 publisher_name=settings.prototype_api_gateway_publisher_name or "",
                 sku_name=settings.prototype_api_gateway_sku_name,
                 capacity=settings.prototype_api_gateway_capacity,
+                shared_vnet_resource_id=settings.shared_vnet_resource_id,
+                shared_network_resource_group=settings.shared_network_resource_group,
+                shared_private_dns_zone_names=tuple(
+                    name.strip()
+                    for name in settings.shared_private_dns_zone_names.split(",")
+                    if name.strip()
+                ),
+                shared_entra_tenant_id=settings.shared_entra_tenant_id,
+                shared_entra_client_id=settings.shared_entra_client_id,
+                shared_entra_audience=settings.shared_entra_audience,
+                shared_entra_api_scope=settings.shared_entra_api_scope,
             )
             if settings.prototype_api_gateway_enabled
             else None

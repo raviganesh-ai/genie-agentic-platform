@@ -44,6 +44,7 @@ class SubmitReanalysisRequest(ReanalysisActionRequest):
 class RegenerateComponentRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    workflow_run_id: str = Field(min_length=1)
     component_label: str = Field(min_length=1)
     existing_code: str = Field(min_length=1)
     instructions: str = Field(min_length=1)
@@ -190,6 +191,7 @@ async def regenerate_component(
     code = await workshop_service.regenerate_component(
         session_id=session_id,
         requesting_user_id=user.user_id,
+        workflow_run_id=body.workflow_run_id,
         component_label=body.component_label,
         existing_code=body.existing_code,
         instructions=body.instructions,

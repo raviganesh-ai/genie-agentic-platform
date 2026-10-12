@@ -251,10 +251,12 @@ function buildArtifacts(outputText: string): Artifact[] {
  */
 export function GeneratedArtifacts({
   sessionId,
+  workflowRunId,
   outputText,
   revealImmediately = false,
 }: {
   sessionId: string;
+  workflowRunId: string;
   outputText: string;
   /**
    * Skips the staggered reveal-one-at-a-time animation and shows every
@@ -323,6 +325,7 @@ export function GeneratedArtifacts({
     try {
       const agentLabel = extractAgentLabel(currentContent) ?? artifact.title;
       const { code } = await workshopApi.regenerateComponent(sessionId, {
+        workflow_run_id: workflowRunId,
         component_label: agentLabel,
         existing_code: currentContent,
         instructions: regeneratePrompt,

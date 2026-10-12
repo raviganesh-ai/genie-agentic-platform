@@ -8,6 +8,7 @@ import pytest
 
 from app.deploy_launch.test_execution_service import (
     TestExecutionService,
+    count_test_functions,
     extract_test_modules,
     has_pytest_discoverable_tests,
     validate_goal_outcome_tests,
@@ -122,6 +123,36 @@ async def test_run_tests_actually_executes_generated_pytest_module(tmp_path: Pat
     assert (tmp_path / "tests" / "test_generated_0.py").exists()
 
 
+async def test_run_tests_executes_an_unmarked_async_test_function(tmp_path: Path):
+    """Regression coverage for a real incident found deploying a fresh
+    mission end to end: every single generated requirement test "errored"
+    (0 passed, 0 failed, N errors) even though the deployed prototype
+    itself was already live and working. Root cause: the Test Generation
+    Agent routinely writes `async def test_...` functions (it is testing
+    this codebase's own async agent/service functions) with no explicit
+    `@pytest.mark.asyncio` marker - pytest cannot even collect an async
+    test function without pytest-asyncio installed and asyncio mode
+    enabled, failing the entire containing module with one collection
+    error. This must work automatically, with no marker required, since
+    the generation prompt never adds one."""
+
+    service = TestExecutionService(timeout_seconds=60)
+    unmarked_async_test = """
+```python
+async def test_async_without_explicit_marker():
+    assert 1 + 1 == 2
+```
+"""
+
+    result = await service.run_tests(build_root=tmp_path, test_output_text=unmarked_async_test)
+
+    assert result.ran is True
+    assert result.passed == 1
+    assert result.errors == 0
+    assert result.success is True
+    assert result.passed_test_names == ("test_async_without_explicit_marker",)
+
+
 async def test_run_tests_resolves_relative_production_workspace(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
@@ -194,7 +225,9 @@ async def test_run_tests_reports_a_generated_syntax_error_as_a_real_failure(tmp_
 
 
 async def test_run_tests_times_out_on_a_hanging_generated_test(tmp_path: Path):
-    service = TestExecutionService(timeout_seconds=1)
+    # seconds_per_test=0 isolates this from the test-count scaling added by
+    # effective_timeout_seconds, so this exercises the raw floor timeout.
+    service = TestExecutionService(timeout_seconds=1, seconds_per_test=0)
 
     result = await service.run_tests(build_root=tmp_path, test_output_text=_SLOW_TEST)
 
@@ -202,6 +235,59 @@ async def test_run_tests_times_out_on_a_hanging_generated_test(tmp_path: Path):
     assert result.success is False
     assert result.timed_out is True
     assert "timed out" in result.summary
+
+
+def test_count_test_functions_counts_across_modules():
+    modules = [
+        "def test_one():\n    assert True\n",
+        "def test_two():\n    assert True\n\n\ndef test_three():\n    assert True\n",
+        "def helper_not_a_test():\n    return 1\n",
+    ]
+
+    assert count_test_functions(modules) == 3
+
+
+def test_effective_timeout_seconds_scales_with_discovered_test_count():
+    service = TestExecutionService(
+        timeout_seconds=300, seconds_per_test=20, max_timeout_seconds=1800
+    )
+
+    # 45 real acceptance tests (the ACI PoC's own observed size) must get a
+    # much bigger budget than the floor alone - this is the real, previously
+    # missing behavior the settings.py docstring already claimed existed.
+    modules = [f"def test_req_{i:03d}():\n    assert True\n" for i in range(45)]
+
+    assert service.effective_timeout_seconds(modules) == 300 + 20 * 45
+
+
+def test_effective_timeout_seconds_never_drops_below_the_floor():
+    service = TestExecutionService(timeout_seconds=300, seconds_per_test=20)
+
+    assert service.effective_timeout_seconds([]) == 300
+
+
+def test_effective_timeout_seconds_is_capped_at_the_maximum():
+    service = TestExecutionService(
+        timeout_seconds=300, seconds_per_test=20, max_timeout_seconds=1800
+    )
+    modules = [f"def test_req_{i:03d}():\n    assert True\n" for i in range(1000)]
+
+    assert service.effective_timeout_seconds(modules) == 1800
+
+
+async def test_run_tests_uses_the_scaled_timeout_not_just_the_floor(tmp_path: Path):
+    # A suite whose single test sleeps longer than the floor timeout alone
+    # would allow, but well within the scaled timeout once its own test
+    # count is accounted for, must be allowed to actually finish - this is
+    # the real, previously-missing behavior: a 45-test suite was being
+    # killed by a flat 300s budget before even one real HTTP acceptance
+    # test could report its own pass/fail outcome.
+    service = TestExecutionService(timeout_seconds=1, seconds_per_test=10)
+
+    result = await service.run_tests(build_root=tmp_path, test_output_text=_SLOW_TEST)
+
+    assert result.timed_out is False
+    assert result.success is True
 
 
 def test_summarize_reports_pytest_never_launching_distinctly_from_zero_collected(tmp_path: Path):

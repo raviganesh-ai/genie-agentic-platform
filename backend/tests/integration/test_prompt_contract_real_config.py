@@ -362,6 +362,28 @@ def test_ui_generation_and_regeneration_prompts_apply_impeccable_design_contract
     assert "pinned Impeccable detector" in regeneration
 
 
+def test_ui_generation_prompts_forbid_hardcoded_light_panels_against_the_dark_shell():
+    """Regression test for a real incident: every generated page rendered
+    inside Genie's own dark-themed shell (background #0b0f14, light text
+    #e6e9ee), but with no instruction telling the Build Agent that, it
+    defaulted to conventional light-mode card styling - a literal white/
+    near-white background with no explicit text color override - which
+    inherited the shell's light text and produced illegible light-gray-
+    on-white panels across most of a real deployed mission's pages. Both
+    the single-page and multi-page (page_view) prompts must forbid this
+    and point the Build Agent at the shell's own dark-theme utility
+    classes or an appropriately dark, low-opacity accent tint instead."""
+
+    registry = PromptRegistry.load(_REPO_CONFIG_ROOT / "prompts")
+
+    for prompt_id in ("build-generation-v1", "build-generation-component-v1"):
+        template = " ".join(registry.get(prompt_id).template.split())
+        assert "DARK SHELL, NEVER HARDCODE A LIGHT PANEL" in template
+        assert "#0b0f14" in template
+        assert "#e6e9ee" in template
+        assert "never a pale/white background with dark text" in template
+
+
 def test_architecture_prompt_shapes_an_impeccable_visual_direction_for_each_mission():
     registry = PromptRegistry.load(_REPO_CONFIG_ROOT / "prompts")
     template = " ".join(registry.get("architecture-recommendation-v1").template.split())
@@ -475,20 +497,24 @@ def test_build_generation_component_prompt_has_a_gateway_policy_branch_that_forb
 
 
 def test_build_generation_component_prompt_has_an_identity_config_branch():
-    """identity_config must implement a shared IdentityProvider interface
-    against Entra ID via @azure/msal-browser (authorization-code + PKCE,
-    never an implicit flow or client secret), reading configuration from
-    environment variables rather than hardcoding it - so a future,
-    different provider is a pure additive adapter."""
+    """identity_config must produce only a small, structured configuration
+    (never actual MSAL/sign-in code) - the real token-acquisition module is
+    a deterministic platform step (generate_msal_config_module/
+    generate_use_genie_auth_module), never per-mission LLM output, exactly
+    like gateway_policy's own real-policy-XML split. Also asserts any
+    page_view/single-page component for an identity-requiring mission must
+    use the real, deterministic useGenieAuth() hook rather than inventing
+    its own sign-in logic."""
 
     registry = PromptRegistry.load(_REPO_CONFIG_ROOT / "prompts")
     template = " ".join(registry.get("build-generation-component-v1").template.split())
 
     assert 'If component_kind is "identity_config"' in template
-    assert "IDENTITY_PROVIDER_INTERFACE" in template
-    assert "@azure/msal-browser" in template
-    assert "never a client secret" in template
+    assert "never actual MSAL/sign-in code" in template
+    assert "Never invent a tenant id, client id, authority URL" in template
     assert "identity_config:{component_name}" in template
+    assert "useGenieAuth" in template
+    assert "never write your own sign-in/token logic" in template
 
 
 def test_build_generation_component_prompt_wires_journey_events_end_to_end():

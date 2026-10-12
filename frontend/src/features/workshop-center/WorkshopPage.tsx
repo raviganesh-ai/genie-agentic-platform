@@ -264,6 +264,7 @@ export function WorkshopPage(): JSX.Element {
         {displayedBuildText ? (
           <GeneratedArtifacts
             sessionId={sessionId}
+            workflowRunId={workflowRunId}
             outputText={displayedBuildText}
             // Still a growing live buffer - either the very first
             // generation, or a "Re-run" retry rebuilding from its own

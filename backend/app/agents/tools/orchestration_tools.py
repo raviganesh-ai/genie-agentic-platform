@@ -35,6 +35,7 @@ from app.agents.models import AgentExecutionRequest, AgentExecutionResult
 from app.agents.registry import AgentRegistry
 from app.agents.tool_execution import AgentToolRegistry, ToolCallContext, ToolExecutionError
 from app.agents.tools.architecture_parsing import (
+    check_identity_requirement_coverage,
     parse_architecture_build_plan,
     parse_component_requirement_assignments,
 )
@@ -44,7 +45,14 @@ from app.memory.memory_service import MemoryService
 from app.models.workflow_stream_models import WorkflowStreamEvent
 from app.orchestration.workflow_event_bus import WorkflowEventBus
 
-__all__ = ["register_orchestrator_delegation_tools", "resolve_delegate_agent_id"]
+__all__ = [
+    "COMPONENT_FAILURE_MARKER",
+    "MARKER_PREFIX_BY_COMPONENT_KIND",
+    "register_orchestrator_delegation_tools",
+    "replace_component_block",
+    "resolve_delegate_agent_id",
+    "validate_component_output",
+]
 
 _ORCHESTRATOR_AGENT_ID = "genie-orchestrator"
 _PREVIEW_MAX_LENGTH = 240
@@ -54,10 +62,35 @@ _BUILD_COMPONENT_PROMPT_ID = "build-generation-component-v1"
 # Marks a component's placeholder piece (see _component_failure_piece) as a
 # genuine failure, never reusable code - _extract_reusable_components always
 # excludes a block carrying this marker, so a retry always regenerates it.
-_COMPONENT_FAILURE_MARKER = "GENERATION FAILED"
+# Public (not `_`-prefixed) because workflow_step_executor's
+# _reject_failed_generated_build and workflow_execution_service's
+# update_step_output both need this exact literal: the former to fail a
+# build closed when it's present, the latter to tell whether a later
+# component regeneration has actually cleared every failure so a
+# permanently-"failed" step can become "completed" again.
+COMPONENT_FAILURE_MARKER = "GENERATION FAILED"
 _BLOCKING_EVENT_LOOP_PATTERN = re.compile(
     r"\brun_until_complete\s*\(|\basyncio\.run\s*\(",
     re.IGNORECASE,
+)
+# A real, observed incident: a deterministic_service needing both a
+# filesystem path (pathlib.Path) and a route path parameter (FastAPI's
+# Path) imported both unaliased - the later `from fastapi import` silently
+# shadowed `pathlib.Path` for the rest of the module, so every later
+# `Path(...)` call (even ones clearly meant as pathlib.Path, e.g.
+# `Path(os.getenv("DATA_DIR", "/data"))`) raised at import time. The
+# module's router then failed to import - service_mounts.py only logs
+# that failure, never raises - so every one of its HTTP routes silently
+# 404s with no startup error anywhere. Each pattern only matches a bare
+# (non-aliased) `Path` in the respective import statement - `Path as
+# Something` does not match, since that's the correct fix.
+_PATHLIB_PATH_IMPORT_PATTERN = re.compile(
+    r"^[ \t]*from\s+pathlib\s+import\s+[^\n]*\bPath\b(?!\s+as\s+\w+)",
+    re.MULTILINE,
+)
+_FASTAPI_PATH_IMPORT_PATTERN = re.compile(
+    r"^[ \t]*from\s+fastapi\s+import\s+[^\n]*\bPath\b(?!\s+as\s+\w+)",
+    re.MULTILINE,
 )
 
 # Matches one component's whole fenced code block by its own first-line
@@ -87,7 +120,7 @@ _EXPECTED_LANGUAGES_BY_COMPONENT_KIND: dict[str, frozenset[str]] = {
     "data_model": frozenset({"python"}),
     "api_contract": frozenset({"yaml", "yml"}),
     "gateway_policy": frozenset({"yaml", "yml"}),
-    "identity_config": frozenset({"ts"}),
+    "identity_config": frozenset({"yaml", "yml"}),
 }
 
 
@@ -351,7 +384,13 @@ _MARKER_NAME_PREFIXES: tuple[str, ...] = (
     "gateway_policy:",
     "identity_config:",
 )
-_MARKER_PREFIX_BY_COMPONENT_KIND: dict[str, str] = {
+# Public (not `_`-prefixed): WorkshopService.regenerate_component needs
+# this exact mapping, in reverse, to correctly classify a component_label
+# like "page:Landing Page" back into its real component_kind ("page_view")
+# before validating its regenerated output - a Regenerate call for any
+# prefixed component previously fell through to the generic "agent" kind,
+# which expects Python, not tsx/yaml.
+MARKER_PREFIX_BY_COMPONENT_KIND: dict[str, str] = {
     "page_view": "page:",
     "deterministic_service": "service:",
     "data_model": "model:",
@@ -376,17 +415,27 @@ def _strip_marker_prefix(name: str) -> str:
 
 
 def _extract_reusable_components(previous_build_output: str) -> dict[str, str]:
-    """Maps each component name (lowercased) that fully succeeded on a
-    prior ``build-solution`` attempt to its own previously generated
+    """Maps each component's own full marker-prefixed label (e.g.
+    ``"service:entitlement checker"``, lowercased) that fully succeeded on
+    a prior ``build-solution`` attempt to its own previously generated
     fenced code block.
 
     Recognizes each block the same way ``build-generation-component-v1``
     requires every component to identify itself: a fenced code block whose
     first line is a ``# agent: <name>``/``// agent: <name>`` comment (see
     ``_AGENT_LABEL_BLOCK_PATTERN``). A block carrying
-    ``_COMPONENT_FAILURE_MARKER`` (see ``_component_failure_piece``) is
+    ``COMPONENT_FAILURE_MARKER`` (see ``_component_failure_piece``) is
     deliberately excluded - it represents a component that failed last
     time and must always be regenerated, never mistaken for reusable code.
+
+    Keyed by the FULL marker-prefixed label (never the bare name with the
+    prefix stripped) - an "## API Contracts" bullet whose own description
+    asserts genuine runtime behavior (see
+    ``architecture_parsing._api_contract_needs_real_implementation``) is
+    deliberately also emitted as a same-named ``deterministic_service``
+    component; keying by bare name alone would let that brand-new service
+    component wrongly "reuse" the unrelated api_contract component's own
+    cached YAML from a prior attempt just because they share a name.
 
     Called with ``previous_build_output`` (see the self-referential
     ``previous_build_output: step:build-solution`` variable source in
@@ -400,21 +449,60 @@ def _extract_reusable_components(previous_build_output: str) -> dict[str, str]:
     reusable: dict[str, str] = {}
     for match in _AGENT_LABEL_BLOCK_PATTERN.finditer(previous_build_output or ""):
         block_text = match.group(0)
-        if _COMPONENT_FAILURE_MARKER in block_text:
+        if COMPONENT_FAILURE_MARKER in block_text:
             continue
-        # Several component kinds (page_view, deterministic_service,
-        # data_model, api_contract) nest their own kind marker inside the
-        # "agent: <value>" label (e.g. "page:<Page Name>" - see
-        # code_materializer.py's own per-kind marker patterns); strip it
-        # so the stored key matches the bare component name callers look
-        # reuse up by (the same ``label_name`` every multi-instance
-        # component kind uses), exactly like "orchestrator"/"ui" are
-        # matched by their own literal kind name.
-        name = _strip_marker_prefix(match.group("name").strip())
-        if name.casefold() == "orchestrator" and _BLOCKING_EVENT_LOOP_PATTERN.search(block_text):
+        raw_name = match.group("name").strip()
+        stripped_name = _strip_marker_prefix(raw_name)
+        if (
+            stripped_name.casefold() == "orchestrator"
+            and _BLOCKING_EVENT_LOOP_PATTERN.search(block_text)
+        ):
             continue
-        reusable[name.lower()] = block_text
+        reusable[raw_name.lower()] = block_text
     return reusable
+
+
+def replace_component_block(output_text: str, component_label: str, new_block_text: str) -> str:
+    """Replaces one component's whole fenced code block inside a persisted
+    ``build-solution`` step's ``output_text`` with ``new_block_text``,
+    matched by the same ``# agent: <name>``/``// agent: <name>`` label
+    convention every component already follows (see
+    ``_AGENT_LABEL_BLOCK_PATTERN``/``_extract_reusable_components``).
+
+    A real, observed production incident this fixes: ``WorkshopService.
+    regenerate_component`` used to call the Build Agent and return its new
+    code straight to the caller with no write-back into the run's own
+    persisted ``build-solution`` output - Deploy & Launch always
+    re-materializes a mission's backend straight from that same persisted
+    ``output_text`` (see ``code_materializer.materialize_build``), so a
+    "successful" single-component regeneration in the Workshop UI was
+    purely cosmetic in the browser and silently discarded at every
+    subsequent deploy attempt, which kept redeploying the original, still
+    broken component. Callers must persist the string this function
+    returns (see ``AgentOrchestrator.update_build_component``) for a
+    regeneration to ever actually reach a deployed mission.
+
+    ``component_label`` is matched against each block's own captured label
+    both as given and with any known component-kind marker prefix (e.g.
+    ``"page:"``) stripped, so it works whether a caller passes the raw
+    ``# agent: <label>`` value or just the bare component name.
+
+    Raises ``ValueError`` if no block with this label can be found, so a
+    caller never silently no-ops a regeneration request.
+    """
+
+    target_raw = component_label.strip().casefold()
+    target_stripped = _strip_marker_prefix(component_label.strip()).casefold()
+    for match in _AGENT_LABEL_BLOCK_PATTERN.finditer(output_text):
+        name = match.group("name").strip()
+        if name.casefold() in (target_raw, target_stripped) or _strip_marker_prefix(
+            name
+        ).casefold() in (target_raw, target_stripped):
+            return output_text[: match.start()] + new_block_text.strip("\n") + output_text[match.end() :]
+    raise ValueError(
+        f"No existing component labeled '{component_label}' was found in the "
+        "build output to replace."
+    )
 
 
 def _component_failure_piece(component_name: str, *, is_ui: bool, exc: BaseException) -> str:
@@ -432,7 +520,7 @@ def _component_failure_piece(component_name: str, *, is_ui: bool, exc: BaseExcep
     generic "Multi-Agent Workflow Design" narrative fallback covering the
     whole response, which is what happened when the very first component
     call failed and aborted every later one. Marked with
-    ``_COMPONENT_FAILURE_MARKER`` so a later retry's
+    ``COMPONENT_FAILURE_MARKER`` so a later retry's
     ``_extract_reusable_components`` always regenerates this component
     again.
     """
@@ -441,18 +529,29 @@ def _component_failure_piece(component_name: str, *, is_ui: bool, exc: BaseExcep
     return (
         f"```text\n"
         f"{comment_prefix} agent: {component_name}\n"
-        f"{comment_prefix} {_COMPONENT_FAILURE_MARKER}: {exc}\n"
+        f"{comment_prefix} {COMPONENT_FAILURE_MARKER}: {exc}\n"
         f"```"
     )
 
 
-def _validate_component_output(
+def validate_component_output(
     output_text: str,
     *,
     component_kind: str,
     marker_name: str,
 ) -> None:
-    """Rejects output that cannot be materialized as the requested component."""
+    """Rejects output that cannot be materialized as the requested component.
+
+    Public (not `_`-prefixed) so ``WorkshopService.regenerate_component`` can
+    run the exact same validation the original per-component build path
+    uses before persisting a Workshop "Regenerate" result - without this, a
+    truncated/malformed regeneration (e.g. the LLM call hit its own output
+    token limit mid-component) was accepted and spliced straight into the
+    build-solution step's output unchecked, a real, observed incident that
+    silently corrupted an already-passing component and failed every
+    subsequent Deploy & Launch attempt with no actionable error shown to
+    the user in Workshop itself.
+    """
 
     match = _COMPONENT_OUTPUT_PATTERN.fullmatch(output_text)
     if match is None:
@@ -470,7 +569,7 @@ def _validate_component_output(
 
     body_lines = match.group("body").splitlines()
     first_line = body_lines[0].strip() if body_lines else ""
-    comment_prefix = "//" if component_kind in ("ui", "page_view", "identity_config") else "#"
+    comment_prefix = "//" if component_kind in ("ui", "page_view") else "#"
     expected_marker = f"{comment_prefix} agent: {marker_name}"
     if first_line.casefold() != expected_marker.casefold():
         raise ToolExecutionError(
@@ -483,6 +582,19 @@ def _validate_component_output(
             "Generated orchestrator performs blocking event-loop control with "
             "'run_until_complete' or 'asyncio.run'. Its constructor and helpers must "
             "remain synchronous; asynchronous setup must be awaited inside run()."
+        )
+    if (
+        component_kind == "deterministic_service"
+        and _PATHLIB_PATH_IMPORT_PATTERN.search(match.group("body"))
+        and _FASTAPI_PATH_IMPORT_PATTERN.search(match.group("body"))
+    ):
+        raise ToolExecutionError(
+            f"Generated component '{marker_name}' imports 'Path' unaliased from both "
+            "'pathlib' and 'fastapi' - the second import silently shadows the first, so "
+            "any later pathlib.Path(...) call (e.g. a DATA_DIR constant) actually calls "
+            "FastAPI's route-parameter function instead and raises at import time, "
+            "making this service's entire router fail to mount with no startup error. "
+            "Alias one of them, e.g. 'from fastapi import Path as ApiPath'."
         )
 
 
@@ -532,6 +644,13 @@ async def _generate_build_by_component(
     requirement and goal fidelity gates.
     """
 
+    identity_coverage_gap = check_identity_requirement_coverage(
+        approved_requirements=base_variables.get("requirements", ""),
+        architecture_document=base_variables.get("architecture", ""),
+    )
+    if identity_coverage_gap is not None:
+        raise ToolExecutionError(identity_coverage_gap)
+
     plan = parse_architecture_build_plan(base_variables.get("architecture", ""))
     if plan is None:
         request = AgentExecutionRequest(
@@ -562,14 +681,13 @@ async def _generate_build_by_component(
     # before the UI/pages (never after) so they are the single-page "ui"
     # or each "page_view"'s own available "prior_components" context, the
     # same way every specialist agent and the Orchestrator already are.
-    # gateway_policy and identity_config are both wired here (Build can
-    # generate their config), but architecture-recommendation-v1 does not
-    # yet instruct Architecture to emit "## Gateway Policies"/"## Identity
-    # Configuration" - neither the generated gateway policy config nor
-    # the generated identity adapter is read into a real running mission
-    # yet (no Deploy & Launch wiring, no @azure/msal-browser dependency,
-    # no generated page calls the adapter's signIn()), so activating
-    # generation first would produce an artifact with no runtime effect.
+    # gateway_policy and identity_config are both wired here (Build
+    # generates their real config) and all the way through Deploy &
+    # Launch (real MSAL sign-in UI, real APIM validate-azure-ad-token
+    # enforcement - see check_identity_requirement_coverage above, which
+    # already fails this step closed before reaching here if the
+    # approved requirements call for identity but Architecture somehow
+    # didn't declare these two sections).
     non_agent_backend_components = tuple(
         (component_type, name)
         for component_type, name in plan.other_components
@@ -660,9 +778,15 @@ async def _generate_build_by_component(
         # recognizes) can have more than one instance, so its own real
         # name is the label instead.
         label_name = component_kind if component_kind in ("orchestrator", "ui") else component_name
-        marker_prefix = _MARKER_PREFIX_BY_COMPONENT_KIND.get(component_kind, "")
+        marker_prefix = MARKER_PREFIX_BY_COMPONENT_KIND.get(component_kind, "")
         marker_name = f"{marker_prefix}{label_name}"
-        reused_piece = reusable_components.get(label_name.strip().lower())
+        # Keyed by the full marker-prefixed label (never the bare name) -
+        # see _extract_reusable_components - so a same-named
+        # deterministic_service generated alongside its own api_contract
+        # sibling (see architecture_parsing.py's
+        # _api_contract_needs_real_implementation) never wrongly reuses
+        # the other kind's cached code just because the names match.
+        reused_piece = reusable_components.get(marker_name.strip().lower())
         if reused_piece is not None:
             # Already succeeded on a prior attempt at this same step - reuse
             # its real code verbatim (see _extract_reusable_components)
@@ -720,7 +844,7 @@ async def _generate_build_by_component(
                 )
             else:
                 component_result = await agent_gateway.execute(request)
-            _validate_component_output(
+            validate_component_output(
                 component_result.output_text,
                 component_kind=component_kind,
                 marker_name=marker_name,
@@ -731,7 +855,7 @@ async def _generate_build_by_component(
             # with it (the "all or nothing" behavior this replaces) - see
             # _component_failure_piece and the module docstring.
             failure_piece = _component_failure_piece(
-                marker_name, is_ui=component_kind in ("ui", "page_view", "identity_config"), exc=exc
+                marker_name, is_ui=component_kind in ("ui", "page_view"), exc=exc
             )
             await _publish_delta(failure_piece)
             pieces.append(failure_piece)

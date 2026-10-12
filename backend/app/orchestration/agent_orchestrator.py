@@ -16,7 +16,10 @@ from uuid import uuid4
 from app.agents.gateway import AgentGateway, create_agent_gateway
 from app.agents.models import AgentExecutionRequest, AgentExecutionResult
 from app.agents.registry import AgentRegistry
-from app.agents.tools.orchestration_tools import register_orchestrator_delegation_tools
+from app.agents.tools.orchestration_tools import (
+    register_orchestrator_delegation_tools,
+    replace_component_block,
+)
 from app.agents.tools.registration import build_default_tool_registry
 from app.config.settings import Settings
 from app.governance.approval_service import ApprovalService, create_approval_service
@@ -41,7 +44,10 @@ from app.orchestration.handoff_service import HandoffService
 from app.orchestration.reanalysis_service import ReanalysisService
 from app.orchestration.workflow_checkpoint_service import WorkflowCheckpointService
 from app.orchestration.workflow_event_bus import WorkflowEventBus
-from app.orchestration.workflow_execution_service import WorkflowExecutionService
+from app.orchestration.workflow_execution_service import (
+    UnknownWorkflowRunError,
+    WorkflowExecutionService,
+)
 from app.orchestration.workflow_runtime import WorkflowRuntime
 from app.orchestration.workflow_step_executor import WorkflowStepExecutor
 from app.platform_config.repository import PlatformReferenceRepositoryStore
@@ -136,6 +142,43 @@ class AgentOrchestrator:
         from its last known-good stage.
         """
         return await self._execution_service.get_run(workflow_run_id)
+
+    async def update_build_component(
+        self, *, workflow_run_id: str, component_label: str, new_block_text: str
+    ) -> WorkflowRunResult:
+        """Splices one freshly regenerated component's fenced code block
+        back into this run's own persisted ``build-solution`` step output
+        (see ``orchestration_tools.replace_component_block`` for the exact
+        matching/replacement rule), then durably persists the result.
+
+        Deploy & Launch always re-materializes a mission's backend straight
+        from this same persisted output (see ``code_materializer.
+        materialize_build``), so calling this is what makes a Workshop
+        "Regenerate" action for a single component actually reach a
+        subsequent deploy - without it, the fix only ever existed in the
+        browser and every redeploy kept using the original, still-broken
+        component (a real, observed production incident).
+        """
+
+        run = await self._execution_service.get_run(workflow_run_id)
+        if run is None:
+            raise UnknownWorkflowRunError(f"No workflow run '{workflow_run_id}' found.")
+        build_step = next(
+            (result for result in run.step_results if result.step_id == "build-solution"),
+            None,
+        )
+        if build_step is None:
+            raise UnknownWorkflowRunError(
+                f"Workflow run '{workflow_run_id}' has no recorded 'build-solution' step result."
+            )
+        updated_output_text = replace_component_block(
+            build_step.output_text or "", component_label, new_block_text
+        )
+        return await self._execution_service.update_step_output(
+            workflow_run_id=workflow_run_id,
+            step_id="build-solution",
+            output_text=updated_output_text,
+        )
 
     async def list_workflow_runs(self, session_id: str) -> list[WorkflowRunResult]:
         return await self._execution_service.list_runs_for_session(session_id)

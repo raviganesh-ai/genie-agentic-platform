@@ -31,6 +31,7 @@ from typing import Final
 __all__ = [
     "TestExecutionResult",
     "TestExecutionService",
+    "count_test_functions",
     "extract_test_modules",
     "validate_goal_outcome_tests",
 ]
@@ -60,6 +61,8 @@ _TEST_FUNCTION_NAME_PATTERN: Final = re.compile(
 # that file was supposed to contain.
 _MODULE_COLLECTION_ERROR_NAME: Final = re.compile(r"(?:^|\.)test_generated_(\d+)$")
 _DEFAULT_TIMEOUT_SECONDS: Final = 120
+_DEFAULT_SECONDS_PER_TEST: Final = 20
+_DEFAULT_MAX_TIMEOUT_SECONDS: Final = 1800
 _TEST_DOUBLE_PATTERN: Final = re.compile(
     r"\b(?:unittest\.mock|MagicMock|Mock\s*\(|patch\s*\(|monkeypatch\b|respx\b|responses\b)"
 )
@@ -84,6 +87,21 @@ def has_pytest_discoverable_tests(modules: list[str]) -> bool:
         _PYTEST_FUNCTION_PATTERN.search(module) or _PYTEST_CLASS_PATTERN.search(module)
         for module in modules
     )
+
+
+def count_test_functions(modules: list[str]) -> int:
+    """Returns the total number of ``test_*`` function declarations across ``modules``.
+
+    Used to scale the pytest subprocess timeout with the real size of the
+    generated suite: these are real black-box HTTP acceptance tests against a
+    live deployed mission (one test per approved requirement, not fast
+    in-process unit tests), so a suite covering dozens of requirements
+    genuinely needs more wall-clock time than a suite covering a handful -
+    a single flat timeout silently kills every requirement's test at once
+    (see ``TestExecutionService.effective_timeout_seconds``).
+    """
+
+    return sum(len(_PYTEST_FUNCTION_PATTERN.findall(module)) for module in modules)
 
 
 def validate_real_action_tests(modules: list[str]) -> tuple[str, ...]:
@@ -228,12 +246,42 @@ class TestExecutionService:
 
     __test__ = False
 
-    def __init__(self, *, timeout_seconds: int = _DEFAULT_TIMEOUT_SECONDS) -> None:
+    def __init__(
+        self,
+        *,
+        timeout_seconds: int = _DEFAULT_TIMEOUT_SECONDS,
+        seconds_per_test: int = _DEFAULT_SECONDS_PER_TEST,
+        max_timeout_seconds: int = _DEFAULT_MAX_TIMEOUT_SECONDS,
+    ) -> None:
         self._timeout_seconds = timeout_seconds
+        self._seconds_per_test = seconds_per_test
+        self._max_timeout_seconds = max_timeout_seconds
 
     @property
     def timeout_seconds(self) -> int:
+        """The base/floor timeout - use :meth:`effective_timeout_seconds` for the
+        real per-run budget, which scales with the generated suite's size."""
+
         return self._timeout_seconds
+
+    def effective_timeout_seconds(self, modules: list[str]) -> int:
+        """Returns the real timeout for a suite of ``modules``, scaled by test count.
+
+        These are real black-box HTTP acceptance tests against a live
+        deployed mission prototype (one test per approved requirement) -
+        not fast in-process unit tests - so a suite covering dozens of
+        requirements genuinely needs more wall-clock time than
+        ``_DEFAULT_TIMEOUT_SECONDS`` alone budgets for a handful. Scales
+        linearly with the number of discovered ``test_*`` functions, with
+        ``timeout_seconds`` as the floor (covers process startup/collection
+        overhead even for a tiny suite) and ``max_timeout_seconds`` as a
+        hard cap (a pipeline step must still fail, not hang forever, if the
+        suite is pathologically large or genuinely stuck).
+        """
+
+        test_count = count_test_functions(modules)
+        scaled = self._timeout_seconds + self._seconds_per_test * test_count
+        return min(self._max_timeout_seconds, max(self._timeout_seconds, scaled))
 
     async def run_tests(
         self,
@@ -274,6 +322,20 @@ class TestExecutionService:
             str(tests_dir),
             "-q",
             f"--junitxml={junit_path}",
+            # Explicit, not dependent on pytest's own ini-file discovery:
+            # this subprocess's cwd is the mission's own materialized build
+            # directory, never Genie's own repository root, so Genie's own
+            # pyproject.toml ([tool.pytest.ini_options] asyncio_mode =
+            # "auto") is never found/applied here regardless of what it
+            # says. Without this flag, an `async def test_...` function
+            # (which the Test Generation Agent writes routinely, with no
+            # explicit `@pytest.mark.asyncio` marker - it is testing this
+            # codebase's own async functions) fails to collect at all,
+            # taking down its entire containing module with one collection
+            # error - a real, observed incident where every single
+            # generated requirement test errored even though the deployed
+            # prototype itself was already live and working.
+            "--asyncio-mode=auto",
             # Without this, pytest's default behavior is to run NO tests at
             # all when ANY generated module fails to collect (e.g. one
             # module imports a package that isn't installed) - silently
@@ -285,9 +347,10 @@ class TestExecutionService:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
         )
+        effective_timeout = self.effective_timeout_seconds(modules)
         try:
             stdout, _ = await asyncio.wait_for(
-                process.communicate(), timeout=self._timeout_seconds
+                process.communicate(), timeout=effective_timeout
             )
         except TimeoutError:
             # A hanging generated test must never be left running as an
@@ -297,7 +360,7 @@ class TestExecutionService:
             return TestExecutionResult(
                 ran=True,
                 timed_out=True,
-                summary=f"Test execution timed out after {self._timeout_seconds}s.",
+                summary=f"Test execution timed out after {effective_timeout}s.",
             )
 
         raw_output = stdout.decode("utf-8", errors="replace")

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from app.agents.tools.architecture_parsing import (
+    check_identity_requirement_coverage,
     parse_architecture_build_plan,
     parse_component_requirement_assignments,
 )
@@ -173,6 +174,98 @@ def test_parses_optional_component_type_sections_in_declared_order():
     )
 
 
+def test_api_contract_describing_genuine_runtime_behavior_also_becomes_a_deterministic_service():
+    """Regression guard for the "mock backend never deployed" incident: a
+    real deployed mission's own "## API Contracts" bullet described itself
+    as "Fully executable backends..." yet the Architecture Designer never
+    added a matching "## Deterministic Services" bullet (confirmed across
+    two independent regenerations with the strengthened prompt guidance
+    alone) - so Build never generated real code for it and the documented
+    routes 404'd when actually called. Detecting this language
+    deterministically and emitting a matching deterministic_service entry
+    closes the gap without depending on prompt-following fidelity."""
+
+    document = """
+## Multi-Agent Workflow
+
+- **Ticket Classifier Agent**: classifies the incoming issue by category.
+- **Support Triage Orchestrator Agent**: the single entry point.
+
+## API Contracts
+
+- **ACI Mock Core Payments API**: Fully executable backends for Account-to-Account
+  Payments, with an OpenAPI spec and at least 8 named operations.
+- **Legacy Partner API**: a documentation-only reference contract for an
+  external system this mission never calls.
+"""
+
+    plan = parse_architecture_build_plan(document)
+
+    assert plan is not None
+    assert plan.other_components == (
+        ("api_contract", "ACI Mock Core Payments API"),
+        ("deterministic_service", "ACI Mock Core Payments API"),
+        ("api_contract", "Legacy Partner API"),
+    )
+
+
+def test_api_contract_is_not_duplicated_when_matching_service_already_declared():
+    """When the Architecture Designer DID correctly add a matching "##
+    Deterministic Services" bullet for an executable-sounding contract,
+    the heuristic must not add a redundant second service entry."""
+
+    document = """
+## Multi-Agent Workflow
+
+- **Ticket Classifier Agent**: classifies the incoming issue by category.
+- **Support Triage Orchestrator Agent**: the single entry point.
+
+## Deterministic Services
+
+- **ACI Mock Core Payments API**: the real, callable mock backend implementation.
+
+## API Contracts
+
+- **ACI Mock Core Payments API**: Fully executable backends with an OpenAPI spec.
+"""
+
+    plan = parse_architecture_build_plan(document)
+
+    assert plan is not None
+    assert plan.other_components == (
+        ("deterministic_service", "ACI Mock Core Payments API"),
+        ("api_contract", "ACI Mock Core Payments API"),
+    )
+
+
+def test_api_contract_deferred_to_a_later_pass_is_not_treated_as_executable():
+    """Regression guard for a real false positive: a catalog-stub
+    contract's own text explicitly said "executable backends for these
+    domains are deferred to later ... passes and must not be presented as
+    functional in the first generated pass" - the word "executable" still
+    appears, but in a negating context, so no deterministic_service
+    should be derived for it."""
+
+    document = """
+## Multi-Agent Workflow
+
+- **Ticket Classifier Agent**: classifies the incoming issue by category.
+- **Support Triage Orchestrator Agent**: the single entry point.
+
+## API Contracts
+
+- **ACI Catalog Stub APIs (Domains 4-10)**: First-pass catalog entries only-name,
+  description, documentation stub, and tags; executable backends for these
+  domains are deferred to later Genie "Modernize and deliver" governed-refinement
+  passes and must not be presented as functional in the first generated pass.
+"""
+
+    plan = parse_architecture_build_plan(document)
+
+    assert plan is not None
+    assert plan.other_components == (("api_contract", "ACI Catalog Stub APIs (Domains 4-10)"),)
+
+
 def test_other_component_requirement_assignments_are_extracted_per_bullet():
     document = """
 ## Multi-Agent Workflow
@@ -197,6 +290,71 @@ def test_other_component_requirement_assignments_are_extracted_per_bullet():
     # No requirement id was cited in this bullet - absent, not an error,
     # matching the Orchestrator's own established behavior above.
     assert "apim jwt policy" not in assignments
+
+
+def test_check_identity_requirement_coverage_is_none_when_requirements_name_no_identity_provider():
+    """Most missions never mention a real identity provider at all - this
+    must never force identity_config/gateway_policy onto them."""
+
+    gap = check_identity_requirement_coverage(
+        approved_requirements="[REQ-001] The system must be secure and log every action.",
+        architecture_document="## Multi-Agent Workflow\n\n- **Orchestrator Agent**: coordinates.\n",
+    )
+
+    assert gap is None
+
+
+def test_check_identity_requirement_coverage_flags_a_real_gap():
+    """Regression test for a real, repeatedly observed incident: the same
+    approved requirements and the same model, on two separate 'Validate
+    your Vision' runs, did not reliably produce '## Identity
+    Configuration'/'## Gateway Policies' even though the requirements
+    explicitly named Microsoft Entra ID - prompt guidance alone is not
+    sufficient for this security-relevant gap, so this deterministic
+    check must fail it closed before Build ever starts."""
+
+    gap = check_identity_requirement_coverage(
+        approved_requirements=(
+            "[REQ-006] A user authenticates through Microsoft Entra ID and the portal "
+            "surfaces that user's identity throughout the journey."
+        ),
+        architecture_document="## Multi-Agent Workflow\n\n- **Orchestrator Agent**: coordinates.\n",
+    )
+
+    assert gap is not None
+    assert "Identity Configuration" in gap
+    assert "Gateway Policies" in gap
+
+
+def test_check_identity_requirement_coverage_is_none_when_both_sections_present():
+    gap = check_identity_requirement_coverage(
+        approved_requirements="[REQ-006] A user authenticates through Microsoft Entra ID.",
+        architecture_document=(
+            "## Multi-Agent Workflow\n\n- **Orchestrator Agent**: coordinates.\n\n"
+            "## Identity Configuration\n\n- **Entra ID Adapter**: real sign-in.\n\n"
+            "## Gateway Policies\n\n- **APIM Policy**: enforces tokens.\n"
+        ),
+    )
+
+    assert gap is None
+
+
+def test_check_identity_requirement_coverage_flags_a_partial_gap():
+    """Only one of the matched pair declared - still a real gap (an
+    identity adapter with no gateway enforcement, or vice versa, is half
+    a security control)."""
+
+    gap = check_identity_requirement_coverage(
+        approved_requirements="[REQ-006] Sign in via Microsoft Entra ID is required.",
+        architecture_document=(
+            "## Multi-Agent Workflow\n\n- **Orchestrator Agent**: coordinates.\n\n"
+            "## Identity Configuration\n\n- **Entra ID Adapter**: real sign-in.\n"
+        ),
+    )
+
+    assert gap is not None
+    assert "Gateway Policies" in gap
+    assert "Identity Configuration" not in gap
 
 
 def test_parses_ui_pages_section_as_page_view_components():

@@ -34,16 +34,26 @@ backend component that is not an agent or a UI zone:
 
 Each uses the exact same "**<Name>**: <description> (fulfills REQ-XXX...)"
 bullet convention as the two baseline sections, so this module's existing
-bullet-parsing helpers apply unchanged. This is currently a parsing-only
-capability: ``architecture-recommendation-v1`` does not yet instruct the
-Architecture Designer agent to emit these sections, and
-``call_build_agent``/``build-generation-component-v1`` do not yet generate
-or materialize code for these component types - see the Genie-SaS Build
-Alignment platform-change roadmap. Landing the schema and its parser first,
-ahead of (and decoupled from) the generation prompts that would populate
-it, avoids a mission ever being able to cite a requirement under a section
-whose component Build cannot yet produce - which would silently orphan
-that requirement.
+bullet-parsing helpers apply unchanged. ``architecture-recommendation-v1``
+instructs the Architecture Designer agent to emit "## Data Models"/"##
+Deterministic Services"/"## API Contracts"/"## UI Pages" whenever a
+mission's own requirements call for them, and - as of this module's
+``gateway_policy``/``identity_config`` reasoning guidance - "## Gateway
+Policies"/"## Identity Configuration" too, always as a matched pair, only
+when the requirements genuinely call for real end-user sign-in (never a
+blanket rule, never a fixed keyword list - the Architecture Designer
+reasons about this from the requirements text itself). ``call_build_agent``/
+``build-generation-component-v1`` generate real code for every one of
+these component types, and Deploy & Launch's own pipeline consumes
+``identity_config``/``gateway_policy`` output to wire a real MSAL sign-in
+UI and a real APIM ``validate-azure-ad-token`` policy (see
+``app.deploy_launch.pipeline_service``'s ``sync-frontend-integration``
+step and ``app.deploy_launch.prototype_api_gateway_service.publish_api``'s
+``require_sign_in``). Landing the schema and its parser ahead of (and
+decoupled from) the generation prompts that would populate it was a
+deliberate ordering choice, so a mission could never cite a requirement
+under a section whose component Build could not yet produce - which
+would have silently orphaned that requirement.
 """
 from __future__ import annotations
 
@@ -54,6 +64,7 @@ from app.services.requirement_fidelity_service import extract_requirement_ids
 
 __all__ = [
     "ArchitectureBuildPlan",
+    "check_identity_requirement_coverage",
     "parse_architecture_build_plan",
     "parse_component_requirement_assignments",
 ]
@@ -101,6 +112,52 @@ class ArchitectureBuildPlan:
     other_components: tuple[tuple[str, str], ...] = ()
 
 
+# A "## API Contracts" bullet is normally documentation-only (an OpenAPI
+# spec with no runtime behavior of its own - see
+# ``architecture-recommendation-v1``'s own "## API Contracts" guidance).
+# Some architecture drafts nonetheless describe a contract that must be
+# genuinely callable at runtime (a mock/synthetic backend a real caller -
+# this mission's own frontend, an API explorer, an acceptance test -
+# actually invokes over HTTP, not merely reads documentation about) using
+# language like "fully executable"/"functioning"/"callable" even though
+# the Architecture Designer placed it only under "## API Contracts" and
+# never added the matching "## Deterministic Services" bullet that
+# instruction also calls for. Confirmed on a real deployed mission: an
+# OpenAPI contract describing itself as "Fully executable backends..."
+# with no matching implementation component, so Build never generated
+# real code for it and the documented routes 404'd when actually called.
+# Detecting that language here and emitting a matching
+# ``deterministic_service`` entry (same name, so Build generates a real
+# ``router``-based implementation for it - see "component_kind is
+# deterministic_service" in ``build-generation-component-v1``) closes
+# that gap deterministically, rather than depending on the Architecture
+# Designer's own prompt-following to always split these into two bullets.
+_EXECUTABLE_CONTRACT_PATTERN = re.compile(
+    r"\b(fully\s+)?(executable|functioning|callable|working)\b"
+    r"|real,?\s+(working|callable)\s+backend",
+    re.IGNORECASE,
+)
+# A bullet can still mention "executable"/"functioning" while explicitly
+# saying this specific contract is NOT yet one - confirmed on the same
+# real mission: a catalog-stub contract's own text read "executable
+# backends for these domains are deferred to later ... passes and must
+# not be presented as functional in the first generated pass", which
+# would otherwise false-positive. Any of these phrases nearby overrides
+# a positive keyword match.
+_NOT_YET_EXECUTABLE_PATTERN = re.compile(
+    r"\b(deferred|stub|documentation[\s-]only|catalog\s+entr(?:y|ies)\s+only|"
+    r"not\s+(?:yet\s+)?(?:be\s+)?(?:presented\s+as\s+)?(?:functional|executable|"
+    r"callable|implemented))\b",
+    re.IGNORECASE,
+)
+
+
+def _api_contract_needs_real_implementation(bullet_text: str) -> bool:
+    if _NOT_YET_EXECUTABLE_PATTERN.search(bullet_text) is not None:
+        return False
+    return _EXECUTABLE_CONTRACT_PATTERN.search(bullet_text) is not None
+
+
 def parse_architecture_build_plan(architecture_document: str) -> ArchitectureBuildPlan | None:
     """Returns the ordered build plan for ``architecture_document``.
 
@@ -132,9 +189,22 @@ def parse_architecture_build_plan(architecture_document: str) -> ArchitectureBui
         return None
 
     other_components: list[tuple[str, str]] = []
+    existing_deterministic_service_names: set[str] = set()
     for component_type, pattern in _OTHER_COMPONENT_SECTION_PATTERNS:
         match = pattern.search(architecture_document)
         if match is None:
+            continue
+        if component_type == "deterministic_service":
+            for bullet_name, _ in _bullet_spans(match.group(1)):
+                existing_deterministic_service_names.add(bullet_name.strip().lower())
+        if component_type == "api_contract":
+            for bullet_name, bullet_text in _bullet_spans(match.group(1)):
+                other_components.append((component_type, bullet_name))
+                if (
+                    bullet_name.strip().lower() not in existing_deterministic_service_names
+                    and _api_contract_needs_real_implementation(bullet_text)
+                ):
+                    other_components.append(("deterministic_service", bullet_name))
             continue
         for bullet_name in (
             m.group(1).strip() for m in _BULLET_PATTERN.finditer(match.group(1))
@@ -229,3 +299,75 @@ def parse_component_requirement_assignments(
                 assignments[name.strip().lower()] = requirement_ids
 
     return assignments
+
+
+# A deliberately small, literal list - real identity-provider names/
+# protocols actually named in a requirements document, never a broad
+# guess at "anything security-related" (a requirement that is merely
+# "secure" or mentions API keys/rate limiting does not call for this -
+# see architecture-recommendation-v1's own "## Identity Configuration"/
+# "## Gateway Policies" guidance, which this function backstops).
+_IDENTITY_PROVIDER_KEYWORDS: tuple[str, ...] = (
+    "entra id",
+    "azure ad",
+    "azure active directory",
+    "microsoft entra",
+    "oauth",
+    "openid connect",
+    "oidc",
+    "single sign-on",
+    "sso",
+)
+
+
+def check_identity_requirement_coverage(
+    *, approved_requirements: str, architecture_document: str
+) -> str | None:
+    """Returns a human-readable gap description when the approved
+    requirements name a real identity provider/protocol but the
+    architecture document declares neither "## Identity Configuration"
+    nor "## Gateway Policies" to satisfy it - or ``None`` when there is
+    no such gap.
+
+    A deterministic backstop for architecture-recommendation-v1's own
+    prompt-level reasoning guidance for these two sections - confirmed
+    by direct, repeated, empirical observation (identical approved
+    requirements, same model, two separate "Validate your Vision" runs)
+    that prompt guidance alone does not reliably produce these sections
+    every time a mission's requirements genuinely call for real sign-in.
+    A security-relevant gap like this one must fail closed rather than
+    silently proceed to Build with an incomplete architecture - the
+    real, observed consequence being a deployed prototype whose own
+    generated pages reference a "Sign in" control that was never built.
+
+    Never itself decides a mission needs identity from a keyword list
+    alone - only flags the specific, observed failure mode: real
+    identity-provider language already appears in the requirements, but
+    the architecture has no matching component for it at all.
+    """
+
+    requirements_lower = approved_requirements.lower()
+    if not any(keyword in requirements_lower for keyword in _IDENTITY_PROVIDER_KEYWORDS):
+        return None
+
+    architecture_lower = architecture_document.lower()
+    has_identity_config = "## identity configuration" in architecture_lower
+    has_gateway_policy = "## gateway policies" in architecture_lower
+    if has_identity_config and has_gateway_policy:
+        return None
+
+    missing = [
+        label
+        for present, label in (
+            (has_identity_config, '"## Identity Configuration"'),
+            (has_gateway_policy, '"## Gateway Policies"'),
+        )
+        if not present
+    ]
+    return (
+        "The approved requirements name a real identity provider or protocol "
+        "(Entra ID/Azure AD/OAuth/OIDC/SSO), but this architecture does not "
+        "declare " + " and ".join(missing) + " to enforce it. Re-run UI & Agent "
+        "Design, or explicitly confirm this mission genuinely needs no real "
+        "end-user sign-in, before proceeding to Build."
+    )

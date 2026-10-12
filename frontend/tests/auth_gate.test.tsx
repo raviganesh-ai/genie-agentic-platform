@@ -112,4 +112,48 @@ describe("AuthGate", () => {
     await waitFor(() => expect(screen.getByText(/Invalid username or password/i)).toBeInTheDocument());
     expect(getAuthToken()).toBeNull();
   });
+
+  it("fails closed with a retryable error when the status check itself is rejected by the API gateway", async () => {
+    // Mirrors APIM's own 401 body shape (no `detail` field) for a missing/
+    // invalid subscription key - must never be guessed as "auth disabled"
+    // and must never render the protected page ungated.
+    mockFetchSequence([
+      {
+        match: "/auth/status",
+        status: 401,
+        response: { statusCode: 401, message: "Access denied due to missing subscription key." },
+      },
+    ]);
+    renderGated();
+
+    await waitFor(() =>
+      expect(screen.getByText(/API gateway rejected this request/i)).toBeInTheDocument(),
+    );
+    expect(screen.queryByText(/Protected page marker/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Sign in to continue/i)).not.toBeInTheDocument();
+  });
+
+  it("shows a gateway-rejection message (not 'Invalid username or password') when login itself is rejected by the API gateway", async () => {
+    mockFetchSequence([
+      { match: "/auth/status", response: { auth_enabled: true } },
+      {
+        match: "/auth/login",
+        status: 401,
+        response: { statusCode: 401, message: "Access denied due to missing subscription key." },
+      },
+    ]);
+    renderGated();
+
+    await waitFor(() => expect(screen.getByText(/Sign in to continue/i)).toBeInTheDocument());
+
+    await userEvent.type(screen.getByPlaceholderText(/username/i), "alice");
+    await userEvent.type(screen.getByPlaceholderText(/password/i), "alice-password");
+    await userEvent.click(screen.getByRole("button", { name: /sign in/i }));
+
+    await waitFor(() =>
+      expect(screen.getByText(/API gateway rejected this request/i)).toBeInTheDocument(),
+    );
+    expect(screen.queryByText(/Invalid username or password/i)).not.toBeInTheDocument();
+    expect(getAuthToken()).toBeNull();
+  });
 });

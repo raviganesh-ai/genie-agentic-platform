@@ -713,12 +713,23 @@ def create_app(
                     subscription_id=resolved_settings.azure_subscription_id or "unknown",
                     resource_group_name=resolved_settings.deployment_resource_group or "unknown",
                 ),
+                # AcrPull must be granted whenever a mission's backend Container
+                # App will pull its image from Genie's shared ACR - this is
+                # unconditional for every deployed mission, independent of
+                # whether the (unrelated) prototype API gateway/APIM feature
+                # flag is enabled. Gating this behind that flag left every
+                # mission's Container App identity without AcrPull whenever
+                # the APIM feature flag was off, causing a real, observed
+                # "unable to pull image using Managed identity" deployment
+                # failure even though the ACR itself was correctly configured.
                 acr_id=(
                     f"/subscriptions/{resolved_settings.azure_subscription_id}/resourceGroups/"
                     f"{resolved_settings.deployment_resource_group}/providers/"
                     f"Microsoft.ContainerRegistry/registries/"
                     f"{resolved_settings.deployment_acr_name}"
-                    if resolved_settings.prototype_api_gateway_enabled
+                    if resolved_settings.azure_subscription_id
+                    and resolved_settings.deployment_resource_group
+                    and resolved_settings.deployment_acr_name
                     else None
                 ),
             ),
