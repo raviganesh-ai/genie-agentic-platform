@@ -1572,6 +1572,18 @@ prompts:
       reachable. This still satisfies "the deterministic workflow is the
       authority for state changes" - calling its real function in-process
       is calling the deterministic workflow, not bypassing it.
+      If this agent's own responsibility requires emitting a journey/
+      funnel event itself (e.g. "first_api_call_succeeded") rather than
+      leaving that to the Orchestrator, call this mission's own `POST
+      /journey/events` the same way - default to
+      `http://127.0.0.1:8000/journey/events` (this agent runs inside the
+      exact same backend process/container that always serves that
+      route), never a bare relative path (valid only in a browser, not
+      from server-side Python) and never gated behind an invented,
+      never-configured environment variable as the only way to reach it
+      - a real, observed incident where exactly this pattern silently
+      dropped every one of this agent's own events with no visible
+      failure anywhere.
       Return one fenced ```python code block, first line `# agent:
       {component_name}`.
 
@@ -1691,7 +1703,7 @@ prompts:
       specific business-domain lifecycle events this mission's own
       activation/funnel dashboard must track (for example
       "first_api_call_succeeded", "onboarding_completed"), call this
-      mission's own same-origin `POST /journey/events` endpoint (body:
+      mission's own `POST /journey/events` endpoint (body:
       `{{"event_type": "<exact_event_name>", "correlation_id":
       <this run's own correlation id if one exists, else omit>, "detail":
       {{...}}}}`) at the exact point in `run()` where that event
@@ -1699,6 +1711,25 @@ prompts:
       mention, never call this for every run unconditionally. A
       dashboard/audit page_view elsewhere in this mission reads these
       back via `GET /journey/events`.
+      THIS IS SERVER-SIDE PYTHON CODE, NOT A BROWSER - a real, observed
+      incident: generated code defaulted to a bare relative path
+      ("/journey/events") on the mistaken assumption that "the backend
+      proxy will ensure routing" the way a browser resolves a relative
+      `fetch()` against the current page origin; an HTTP client library
+      (aiohttp/requests/httpx) has no such notion and raises an invalid-
+      URL error every time, silently caught and logged (never raised),
+      so every event this code ever tried to record was dropped with no
+      visible failure anywhere - the dashboard/audit page always showed
+      zero real evidence even when the underlying action genuinely
+      succeeded. This mission's own backend always serves
+      `/journey/events` on this exact same process/container (this
+      Orchestrator Agent's own `run()` executes inside that same backend
+      service - see the comment below), so default directly to
+      `http://127.0.0.1:8000/journey/events` - never a bare relative
+      path, and never gate this call behind an invented environment
+      variable (e.g. "JOURNEY_EVENTS_ENDPOINT"/"JOURNEY_EVENTS_URL") as
+      the only way to reach it, since Genie's deployment never sets such
+      a variable and the call would then silently never fire at all.
       Include a comment: "Once deployed to Azure AI Foundry, this
       Orchestrator Agent is reachable only through this mission's own
       backend service - never directly from the browser."
@@ -2160,7 +2191,7 @@ prompts:
       - user_message
       - assigned_requirements
       - prior_components
-    version: "1.33.0"
+    version: "1.35.0"
 
   - id: build-component-regeneration-v1
     name: Build Generation - Regenerate Single Component
@@ -2276,7 +2307,7 @@ prompts:
       - component_name
       - existing_code
       - instructions
-    version: "1.4.0"
+    version: "1.5.0"
 
   - id: orchestrator-mission-v1
     name: Orchestrator Mission
