@@ -2882,7 +2882,12 @@ class DeploymentPipelineService:
                             "Generated acceptance evidence remains unverified; preserving its "
                             "validation gaps instead of treating that suite as proof."
                         )
-                    timeout_minutes = max(1, round(self._test_execution_service.timeout_seconds / 60))
+                    timeout_minutes = max(
+                        1,
+                        round(
+                            self._test_execution_service.effective_timeout_seconds(modules) / 60
+                        ),
+                    )
                     step_result.detail = (
                         f"Running {len(modules)} generated test module(s) with pytest against the "
                         f"real deployed prototype (up to {timeout_minutes} minute(s))..."
@@ -3134,7 +3139,9 @@ def create_deployment_pipeline_service(
         prototype_default_ttl_days=settings.prototype_default_ttl_days,
         prototype_max_active_per_owner=settings.prototype_max_active_per_owner,
         test_execution_service=TestExecutionService(
-            timeout_seconds=settings.deployment_test_execution_timeout_seconds
+            timeout_seconds=settings.deployment_test_execution_timeout_seconds,
+            seconds_per_test=settings.deployment_test_execution_seconds_per_test,
+            max_timeout_seconds=settings.deployment_test_execution_max_timeout_seconds,
         ),
         security_scan_service=SecurityScanService(),
         build_workspace_root=settings.deployment_build_workspace_root,

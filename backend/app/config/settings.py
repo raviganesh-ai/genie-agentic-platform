@@ -388,6 +388,16 @@ class Settings(BaseSettings):
     # single requirement as if its test didn't exist, rather than surfacing
     # the real "the suite didn't finish in time" cause.
     deployment_test_execution_timeout_seconds: int = 300
+    # Additional per-discovered-test-function seconds added on top of the
+    # floor above, and a hard cap on the resulting total - see
+    # ``TestExecutionService.effective_timeout_seconds``. These real
+    # acceptance tests make real HTTP calls against a live deployed mission
+    # (auth round-trips, cold container starts, etc.), so a suite covering
+    # dozens of approved requirements needs materially more wall-clock time
+    # than a handful - the cap still bounds worst case so a pathological or
+    # genuinely stuck suite fails the step instead of hanging forever.
+    deployment_test_execution_seconds_per_test: int = 20
+    deployment_test_execution_max_timeout_seconds: int = 1800
     prototype_default_ttl_days: int = Field(default=7, ge=1, le=90)
     prototype_max_active_per_owner: int = Field(default=0, ge=0, le=20)
     prototype_cleanup_interval_seconds: int = Field(default=3600, ge=60, le=86400)

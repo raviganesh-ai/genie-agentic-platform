@@ -8,6 +8,7 @@ import pytest
 
 from app.deploy_launch.test_execution_service import (
     TestExecutionService,
+    count_test_functions,
     extract_test_modules,
     has_pytest_discoverable_tests,
     validate_goal_outcome_tests,
@@ -224,7 +225,9 @@ async def test_run_tests_reports_a_generated_syntax_error_as_a_real_failure(tmp_
 
 
 async def test_run_tests_times_out_on_a_hanging_generated_test(tmp_path: Path):
-    service = TestExecutionService(timeout_seconds=1)
+    # seconds_per_test=0 isolates this from the test-count scaling added by
+    # effective_timeout_seconds, so this exercises the raw floor timeout.
+    service = TestExecutionService(timeout_seconds=1, seconds_per_test=0)
 
     result = await service.run_tests(build_root=tmp_path, test_output_text=_SLOW_TEST)
 
@@ -232,6 +235,59 @@ async def test_run_tests_times_out_on_a_hanging_generated_test(tmp_path: Path):
     assert result.success is False
     assert result.timed_out is True
     assert "timed out" in result.summary
+
+
+def test_count_test_functions_counts_across_modules():
+    modules = [
+        "def test_one():\n    assert True\n",
+        "def test_two():\n    assert True\n\n\ndef test_three():\n    assert True\n",
+        "def helper_not_a_test():\n    return 1\n",
+    ]
+
+    assert count_test_functions(modules) == 3
+
+
+def test_effective_timeout_seconds_scales_with_discovered_test_count():
+    service = TestExecutionService(
+        timeout_seconds=300, seconds_per_test=20, max_timeout_seconds=1800
+    )
+
+    # 45 real acceptance tests (the ACI PoC's own observed size) must get a
+    # much bigger budget than the floor alone - this is the real, previously
+    # missing behavior the settings.py docstring already claimed existed.
+    modules = [f"def test_req_{i:03d}():\n    assert True\n" for i in range(45)]
+
+    assert service.effective_timeout_seconds(modules) == 300 + 20 * 45
+
+
+def test_effective_timeout_seconds_never_drops_below_the_floor():
+    service = TestExecutionService(timeout_seconds=300, seconds_per_test=20)
+
+    assert service.effective_timeout_seconds([]) == 300
+
+
+def test_effective_timeout_seconds_is_capped_at_the_maximum():
+    service = TestExecutionService(
+        timeout_seconds=300, seconds_per_test=20, max_timeout_seconds=1800
+    )
+    modules = [f"def test_req_{i:03d}():\n    assert True\n" for i in range(1000)]
+
+    assert service.effective_timeout_seconds(modules) == 1800
+
+
+async def test_run_tests_uses_the_scaled_timeout_not_just_the_floor(tmp_path: Path):
+    # A suite whose single test sleeps longer than the floor timeout alone
+    # would allow, but well within the scaled timeout once its own test
+    # count is accounted for, must be allowed to actually finish - this is
+    # the real, previously-missing behavior: a 45-test suite was being
+    # killed by a flat 300s budget before even one real HTTP acceptance
+    # test could report its own pass/fail outcome.
+    service = TestExecutionService(timeout_seconds=1, seconds_per_test=10)
+
+    result = await service.run_tests(build_root=tmp_path, test_output_text=_SLOW_TEST)
+
+    assert result.timed_out is False
+    assert result.success is True
 
 
 def test_summarize_reports_pytest_never_launching_distinctly_from_zero_collected(tmp_path: Path):
