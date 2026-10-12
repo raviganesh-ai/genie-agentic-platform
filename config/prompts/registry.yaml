@@ -1992,6 +1992,23 @@ prompts:
       those same plain functions directly in-process rather than via a
       self-referential HTTP round-trip.
 
+      IMPORT NAME COLLISION - `pathlib.Path` vs FastAPI's `Path` - a
+      real, observed incident: a component that needs both a filesystem
+      path (e.g. a `DATA_DIR` constant) and a route path parameter
+      (`tenant_id: str = Path(...)`) wrote `from pathlib import Path`
+      followed later by `from fastapi import ..., Path, ...` - the second
+      import silently shadows the first throughout the whole module, so
+      every later `Path(...)` call (even ones clearly meant as
+      `pathlib.Path`, like `Path(os.getenv("DATA_DIR", "/data"))`) is
+      actually FastAPI's route-parameter-declaration function instead,
+      which raises at import time - this module's router then fails to
+      import, silently making every one of its routes 404 with no
+      startup error (service_mounts.py only logs the failure). If a
+      deterministic service needs both, alias one of them explicitly,
+      e.g. `from fastapi import Path as ApiPath` (keep `from pathlib
+      import Path` unaliased) or the reverse - never let the same bare
+      name resolve to two different things in one module.
+
       Return one fenced ```python code block, first line `# agent:
       service:{component_name}` (the literal prefix `service:` followed
       by this component's own name - this is how Genie's materializer
@@ -2223,9 +2240,17 @@ prompts:
       auto-mounts every `services/*.py` module's `router` attribute, so
       no separate deployment or hand-wired URL is needed. Never construct
       a second, independent `FastAPI()` app here - it would never be
-      reachable. If component_kind is "agent" and this change needs it to
-      call a deterministic service, call that service's own plain
-      function(s) via a normal Python import
+      reachable. If this component needs both a filesystem path (e.g. a
+      `DATA_DIR` constant) and a route path parameter, never write both
+      `from pathlib import Path` and `from fastapi import ..., Path, ...`
+      unaliased in the same module - the second import silently shadows
+      the first, so every later `Path(...)` call resolves to the wrong
+      one; this made an entire deterministic service fail to import and
+      every one of its routes 404 with no startup error (a real, observed
+      incident). Alias one of them explicitly instead, e.g. `from fastapi
+      import Path as ApiPath`. If component_kind is "agent" and this
+      change needs it to call a deterministic service, call that
+      service's own plain function(s) via a normal Python import
       (`from services.<module_name> import <function_name>`) and
       await/call it in-process - never fabricate an HTTP/APIM round-trip
       to reach it, since it is not a separately deployed endpoint.

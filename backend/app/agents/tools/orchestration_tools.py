@@ -73,6 +73,25 @@ _BLOCKING_EVENT_LOOP_PATTERN = re.compile(
     r"\brun_until_complete\s*\(|\basyncio\.run\s*\(",
     re.IGNORECASE,
 )
+# A real, observed incident: a deterministic_service needing both a
+# filesystem path (pathlib.Path) and a route path parameter (FastAPI's
+# Path) imported both unaliased - the later `from fastapi import` silently
+# shadowed `pathlib.Path` for the rest of the module, so every later
+# `Path(...)` call (even ones clearly meant as pathlib.Path, e.g.
+# `Path(os.getenv("DATA_DIR", "/data"))`) raised at import time. The
+# module's router then failed to import - service_mounts.py only logs
+# that failure, never raises - so every one of its HTTP routes silently
+# 404s with no startup error anywhere. Each pattern only matches a bare
+# (non-aliased) `Path` in the respective import statement - `Path as
+# Something` does not match, since that's the correct fix.
+_PATHLIB_PATH_IMPORT_PATTERN = re.compile(
+    r"^[ \t]*from\s+pathlib\s+import\s+[^\n]*\bPath\b(?!\s+as\s+\w+)",
+    re.MULTILINE,
+)
+_FASTAPI_PATH_IMPORT_PATTERN = re.compile(
+    r"^[ \t]*from\s+fastapi\s+import\s+[^\n]*\bPath\b(?!\s+as\s+\w+)",
+    re.MULTILINE,
+)
 
 # Matches one component's whole fenced code block by its own first-line
 # ``# agent: <name>``/``// agent: <name>`` label comment (the same
@@ -563,6 +582,19 @@ def validate_component_output(
             "Generated orchestrator performs blocking event-loop control with "
             "'run_until_complete' or 'asyncio.run'. Its constructor and helpers must "
             "remain synchronous; asynchronous setup must be awaited inside run()."
+        )
+    if (
+        component_kind == "deterministic_service"
+        and _PATHLIB_PATH_IMPORT_PATTERN.search(match.group("body"))
+        and _FASTAPI_PATH_IMPORT_PATTERN.search(match.group("body"))
+    ):
+        raise ToolExecutionError(
+            f"Generated component '{marker_name}' imports 'Path' unaliased from both "
+            "'pathlib' and 'fastapi' - the second import silently shadows the first, so "
+            "any later pathlib.Path(...) call (e.g. a DATA_DIR constant) actually calls "
+            "FastAPI's route-parameter function instead and raises at import time, "
+            "making this service's entire router fail to mount with no startup error. "
+            "Alias one of them, e.g. 'from fastapi import Path as ApiPath'."
         )
 
 
