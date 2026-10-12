@@ -26,6 +26,16 @@ DeploymentProgressCallback = Callable[[str], Awaitable[None]]
 _ACR_RUN_FAILURE_STATUSES = frozenset({"failed", "canceled", "cancelled", "error", "timeout"})
 _FRONTEND_DOCKERFILE = """FROM node:22-alpine AS build
 WORKDIR /app
+# Real, observed incident: impeccable (devDependency, used only by the
+# design:check pre-build gate) pulls in puppeteer, whose postinstall step
+# tries to download a full Chromium binary - this reliably hung for 20+
+# minutes inside this Alpine-based build stage in a real mission's CI
+# pipeline (puppeteer's bundled Chromium has known compatibility/
+# availability issues on musl-libc/Alpine specifically). design:check
+# already has a graceful fallback (`|| node -e "console.warn(...)"`) if
+# impeccable itself fails, so skipping Chromium entirely here is safe -
+# nothing in this build needs a real browser.
+ENV PUPPETEER_SKIP_DOWNLOAD=true
 COPY package.json ./
 RUN npm install
 COPY . .
