@@ -2106,6 +2106,20 @@ prompts:
       generated backend already records business-domain journey events
       there (see the Orchestrator's own instructions below) whenever any
       component calls `POST /journey/events`.
+      JOURNEY EVENT WIRE SHAPE - a real, observed production incident:
+      every event this endpoint returns nests that event's own business
+      fields (tenantId, developerId, eventPayload, etc.) under a
+      top-level "detail" key - {eventType, correlationId, detail:
+      {tenantId, eventPayload, ...}, timestamp, ...} - never at the
+      event object's own top level. Generated pages that read
+      `ev.tenantId` or `ev.eventPayload?.tenantId` directly (skipping
+      `ev.detail`) always get null/undefined even for an event that
+      genuinely carries that field, silently breaking any "detected
+      tenant" auto-fill, activity-timeline tenant column, or
+      provisioning-success handoff that depends on it. Always check
+      `ev.detail?.<field>` (and `ev.detail?.eventPayload?.<field>`) as
+      part of any such field's extraction, not only the event's own top
+      level.
       Return one fenced ```tsx code block, first line `// agent:
       page:{component_name}` (the literal prefix `page:` followed by this
       page's own name, never just the bare name - this is how Genie's
@@ -2333,7 +2347,7 @@ prompts:
       - user_message
       - assigned_requirements
       - prior_components
-    version: "1.37.0"
+    version: "1.38.0"
 
   - id: build-component-regeneration-v1
     name: Build Generation - Regenerate Single Component
