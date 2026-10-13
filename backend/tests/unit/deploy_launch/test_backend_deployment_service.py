@@ -399,7 +399,7 @@ async def test_protected_backend_deploys_private_backend_without_mise_sidecar(
     monkeypatch.setattr(service, "_configure_mission_identity", lambda *_: "mission-client")
     readiness_urls = []
 
-    async def wait_for_readiness(backend_url):
+    async def wait_for_readiness(backend_url, *, pre_deploy_reachable=None):
         readiness_urls.append(backend_url)
 
     monkeypatch.setattr(service, "_wait_for_readiness", wait_for_readiness)
@@ -665,7 +665,7 @@ async def test_backend_deploy_proceeds_past_a_clean_dependency_preflight_check(
     )
     monkeypatch.setattr(service, "_configure_mission_identity", lambda *_: "mission-client")
 
-    async def _skip_readiness_check(_backend_url: str) -> None:
+    async def _skip_readiness_check(_backend_url: str, *, pre_deploy_reachable=None) -> None:
         return None
 
     monkeypatch.setattr(service, "_wait_for_readiness", _skip_readiness_check)

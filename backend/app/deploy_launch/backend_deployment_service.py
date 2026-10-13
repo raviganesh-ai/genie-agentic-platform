@@ -48,6 +48,7 @@ from uuid import NAMESPACE_URL, uuid5
 from app.config.settings import Settings
 from app.deploy_launch.dependency_preflight_service import DependencyPreflightService
 from app.deploy_launch.prototype_api_gateway_service import PrototypeApiGatewayService
+from app.deploy_launch.reachability_preflight import probe_reachability
 from app.deploy_launch.resource_naming import (
     prototype_container_app_name,
     prototype_resource_group_name,
@@ -212,7 +213,43 @@ class BackendDeploymentService:
         except Exception as exc:
             raise BackendDeploymentError(f"Failed to construct Container Apps client: {exc}") from exc
 
-    async def _wait_for_readiness(self, backend_url: str) -> None:
+    async def _probe_existing_backend_reachability(self, mission_slug: str) -> bool | None:
+        """Snapshots whether this mission's backend Container App already
+        existed and was reachable right before a deploy mutates it (Phase
+        E - see ``app.deploy_launch.reachability_preflight``).
+
+        Returns ``True``/``False`` when an existing Container App was
+        found (reachable or not), or ``None`` when no such Container App
+        exists yet (a first deploy - nothing to lose) or its state could
+        not be read at all (fails closed to "unknown", never guesses
+        "it was fine"). Never raises: a failure to read prior state must
+        never itself block a real deploy.
+        """
+
+        app_name = prototype_container_app_name(mission_slug, "backend")
+        try:
+            client = self._container_apps_client()
+        except BackendDeploymentError:
+            return None
+        for resource_group in (
+            prototype_resource_group_name(mission_slug),
+            self._resource_group,
+        ):
+            try:
+                existing = client.container_apps.get(resource_group, app_name)
+            except Exception as exc:
+                if getattr(exc, "status_code", None) == 404:
+                    continue
+                return None
+            fqdn = getattr(getattr(existing.configuration, "ingress", None), "fqdn", None)
+            if not fqdn:
+                return None
+            return await probe_reachability(f"https://{fqdn}")
+        return None
+
+    async def _wait_for_readiness(
+        self, backend_url: str, *, pre_deploy_reachable: bool | None = None
+    ) -> None:
         """Wait until the deployed generated orchestrator can be constructed."""
 
         import httpx
@@ -232,6 +269,21 @@ class BackendDeploymentService:
                 except (httpx.HTTPError, ValueError) as exc:
                     last_error = str(exc)
                 await asyncio.sleep(5)
+        # Phase E: distinguish "a brand-new mission's first deploy never
+        # came up" (pre_deploy_reachable is None - nothing was lost) from
+        # "this mission was serving healthy traffic moments ago and this
+        # deploy may have just taken it down" (pre_deploy_reachable is
+        # True) - the same generic timeout looked identical before this
+        # check existed, hiding a real outage's severity from whoever
+        # reads this error.
+        if pre_deploy_reachable is True:
+            raise BackendDeploymentError(
+                "Generated mission backend did not become ready through its API gateway "
+                f"within 300 seconds ({last_error}). This mission was serving healthy "
+                "traffic immediately before this deploy - verify whether the prior "
+                "Container App revision is still reachable, as this deploy may have just "
+                "taken a live mission offline."
+            )
         raise BackendDeploymentError(
             "Generated mission backend did not become ready through its API gateway "
             f"within 300 seconds ({last_error})."
@@ -371,6 +423,11 @@ class BackendDeploymentService:
                         f"Dependency pre-flight check was inconclusive ({preflight.summary}); "
                         "proceeding to the remote build."
                     )
+
+        # Phase E: snapshot whether this mission already had a reachable
+        # backend before this deploy mutates its Container App revision -
+        # see _wait_for_readiness's use of this below.
+        pre_deploy_reachable = await self._probe_existing_backend_reachability(mission_slug)
 
         private_gateway_enabled = self._prototype_api_gateway_service is not None
         if private_gateway_enabled and not mission_identity_resource_id:
@@ -624,7 +681,7 @@ class BackendDeploymentService:
                     f"Failed to publish protected prototype API: {exc}"
                 ) from exc
         await _report("Validating the generated orchestrator through the prototype API gateway...")
-        await self._wait_for_readiness(backend_url)
+        await self._wait_for_readiness(backend_url, pre_deploy_reachable=pre_deploy_reachable)
         return BackendDeploymentResult(
             image_tag=image_tag,
             backend_url=backend_url,
