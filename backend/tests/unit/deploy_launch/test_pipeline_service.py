@@ -49,6 +49,7 @@ from app.deploy_launch.security_scan_service import (
     SecurityScanService,
 )
 from app.deploy_launch.test_execution_service import TestExecutionService
+from app.deploy_launch.ui_test_execution_service import UiTestExecutionService
 from app.models.approval_models import ApprovalRequest
 from app.models.workflow_models import WorkflowRunResult, WorkflowStepInput, WorkflowStepResult
 from app.orchestration.workflow_event_bus import WorkflowEventBus
@@ -446,6 +447,7 @@ def _build_service(
         data_layer_provisioning_service=NullDataLayerProvisioningService(),
         repository_checkin_service=NullRepositoryCheckinService(),
         test_execution_service=TestExecutionService(timeout_seconds=60),
+        ui_test_execution_service=UiTestExecutionService(),
         security_scan_service=SecurityScanService(timeout_seconds=60),
         build_workspace_root=tmp_path,
         run_repository=run_repository,
@@ -676,6 +678,7 @@ def test_req_001_uses_public_gateway():
         data_layer_provisioning_service=NullDataLayerProvisioningService(),
         repository_checkin_service=NullRepositoryCheckinService(),
         test_execution_service=TestExecutionService(timeout_seconds=60),
+        ui_test_execution_service=UiTestExecutionService(),
         security_scan_service=SecurityScanService(timeout_seconds=60),
         build_workspace_root=tmp_path,
     )
@@ -748,6 +751,7 @@ def test_req_001_uses_live_prototype():
         data_layer_provisioning_service=NullDataLayerProvisioningService(),
         repository_checkin_service=NullRepositoryCheckinService(),
         test_execution_service=TestExecutionService(timeout_seconds=60),
+        ui_test_execution_service=UiTestExecutionService(),
         security_scan_service=security_scan_service,  # type: ignore[arg-type]
         build_workspace_root=tmp_path,
     )
@@ -811,6 +815,7 @@ async def test_provisioning_uses_the_landing_page_approved_model(tmp_path: Path)
         data_layer_provisioning_service=NullDataLayerProvisioningService(),
         repository_checkin_service=NullRepositoryCheckinService(),
         test_execution_service=TestExecutionService(timeout_seconds=60),
+        ui_test_execution_service=UiTestExecutionService(),
         security_scan_service=SecurityScanService(timeout_seconds=60),
         build_workspace_root=tmp_path,
     )
@@ -841,6 +846,7 @@ async def test_provisioning_falls_back_to_default_model_when_no_scope_was_select
         data_layer_provisioning_service=NullDataLayerProvisioningService(),
         repository_checkin_service=NullRepositoryCheckinService(),
         test_execution_service=TestExecutionService(timeout_seconds=60),
+        ui_test_execution_service=UiTestExecutionService(),
         security_scan_service=SecurityScanService(timeout_seconds=60),
         build_workspace_root=tmp_path,
     )
@@ -904,6 +910,7 @@ def test_req_001_uses_live_prototype():
         data_layer_provisioning_service=NullDataLayerProvisioningService(),
         repository_checkin_service=NullRepositoryCheckinService(),
         test_execution_service=TestExecutionService(timeout_seconds=60),
+        ui_test_execution_service=UiTestExecutionService(),
         security_scan_service=SecurityScanService(timeout_seconds=60),
         build_workspace_root=tmp_path,
     )
@@ -951,6 +958,7 @@ async def test_start_self_heals_incomplete_build_solution_with_safe_policy_defau
         data_layer_provisioning_service=NullDataLayerProvisioningService(),
         repository_checkin_service=NullRepositoryCheckinService(),
         test_execution_service=TestExecutionService(timeout_seconds=60),
+        ui_test_execution_service=UiTestExecutionService(),
         security_scan_service=SecurityScanService(timeout_seconds=60),
         build_workspace_root=tmp_path,
     )
@@ -1026,6 +1034,7 @@ async def test_start_uses_shared_memory_output_without_waiting_for_official_step
         data_layer_provisioning_service=NullDataLayerProvisioningService(),
         repository_checkin_service=NullRepositoryCheckinService(),
         test_execution_service=TestExecutionService(timeout_seconds=60),
+        ui_test_execution_service=UiTestExecutionService(),
         security_scan_service=SecurityScanService(timeout_seconds=60),
         build_workspace_root=tmp_path,
     )
@@ -1062,6 +1071,7 @@ async def test_start_fails_closed_with_actionable_error_when_stuck_on_earlier_ga
         data_layer_provisioning_service=NullDataLayerProvisioningService(),
         repository_checkin_service=NullRepositoryCheckinService(),
         test_execution_service=TestExecutionService(timeout_seconds=60),
+        ui_test_execution_service=UiTestExecutionService(),
         security_scan_service=SecurityScanService(timeout_seconds=60),
         build_workspace_root=tmp_path,
     )
@@ -1162,6 +1172,7 @@ async def test_pipeline_launches_at_ninety_percent_and_preserves_requirement_gap
         data_layer_provisioning_service=NullDataLayerProvisioningService(),
         repository_checkin_service=NullRepositoryCheckinService(),
         test_execution_service=TestExecutionService(timeout_seconds=60),
+        ui_test_execution_service=UiTestExecutionService(),
         security_scan_service=SecurityScanService(timeout_seconds=60),
         build_workspace_root=tmp_path,
         fidelity_max_repair_attempts=1,
@@ -1234,6 +1245,7 @@ def test_goal_req_001_delivers_approved_outcome():
         data_layer_provisioning_service=NullDataLayerProvisioningService(),
         repository_checkin_service=NullRepositoryCheckinService(),
         test_execution_service=TestExecutionService(timeout_seconds=60),
+        ui_test_execution_service=UiTestExecutionService(),
         security_scan_service=SecurityScanService(timeout_seconds=60),
         build_workspace_root=tmp_path,
         fidelity_max_repair_attempts=1,
@@ -1321,6 +1333,7 @@ def test_req_002_exports_a_report():
         data_layer_provisioning_service=NullDataLayerProvisioningService(),
         repository_checkin_service=NullRepositoryCheckinService(),
         test_execution_service=TestExecutionService(timeout_seconds=60),
+        ui_test_execution_service=UiTestExecutionService(),
         security_scan_service=SecurityScanService(timeout_seconds=60),
         build_workspace_root=tmp_path,
         fidelity_max_repair_attempts=3,
@@ -1389,6 +1402,7 @@ def test_req_001_processes_every_document():
         data_layer_provisioning_service=NullDataLayerProvisioningService(),
         repository_checkin_service=NullRepositoryCheckinService(),
         test_execution_service=TestExecutionService(timeout_seconds=60),
+        ui_test_execution_service=UiTestExecutionService(),
         security_scan_service=SecurityScanService(timeout_seconds=60),
         build_workspace_root=tmp_path,
         fidelity_max_repair_attempts=3,
@@ -1436,6 +1450,7 @@ async def test_pipeline_repairs_invalid_generated_ui_before_provisioning(
         data_layer_provisioning_service=NullDataLayerProvisioningService(),
         repository_checkin_service=NullRepositoryCheckinService(),
         test_execution_service=TestExecutionService(timeout_seconds=60),
+        ui_test_execution_service=UiTestExecutionService(),
         security_scan_service=SecurityScanService(timeout_seconds=60),
         build_workspace_root=tmp_path,
         fidelity_max_repair_attempts=3,
@@ -1483,6 +1498,7 @@ def test_req_001_processes_every_document():
         data_layer_provisioning_service=NullDataLayerProvisioningService(),
         repository_checkin_service=NullRepositoryCheckinService(),
         test_execution_service=TestExecutionService(timeout_seconds=60),
+        ui_test_execution_service=UiTestExecutionService(),
         security_scan_service=SecurityScanService(timeout_seconds=60),
         build_workspace_root=tmp_path,
         fidelity_max_repair_attempts=1,
@@ -1534,6 +1550,7 @@ def test_req_001_processes_every_document():
         data_layer_provisioning_service=NullDataLayerProvisioningService(),
         repository_checkin_service=NullRepositoryCheckinService(),
         test_execution_service=TestExecutionService(timeout_seconds=60),
+        ui_test_execution_service=UiTestExecutionService(),
         security_scan_service=SecurityScanService(timeout_seconds=60),
         build_workspace_root=tmp_path,
         fidelity_max_repair_attempts=1,
@@ -1624,6 +1641,7 @@ def test_req_001_processes_every_document():
         data_layer_provisioning_service=NullDataLayerProvisioningService(),
         repository_checkin_service=NullRepositoryCheckinService(),
         test_execution_service=TestExecutionService(timeout_seconds=60),
+        ui_test_execution_service=UiTestExecutionService(),
         security_scan_service=SecurityScanService(timeout_seconds=60),
         build_workspace_root=tmp_path,
         fidelity_max_repair_attempts=3,
@@ -1675,6 +1693,7 @@ def test_req_001_processes_every_document():
         data_layer_provisioning_service=NullDataLayerProvisioningService(),
         repository_checkin_service=NullRepositoryCheckinService(),
         test_execution_service=TestExecutionService(timeout_seconds=60),
+        ui_test_execution_service=UiTestExecutionService(),
         security_scan_service=SecurityScanService(timeout_seconds=60),
         build_workspace_root=tmp_path,
         fidelity_max_repair_attempts=1,

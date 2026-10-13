@@ -100,6 +100,7 @@ from app.deploy_launch.test_execution_service import (
     validate_goal_outcome_tests,
     validate_real_action_tests,
 )
+from app.deploy_launch.ui_test_execution_service import UiTestExecutionService
 from app.models.workflow_models import WorkflowRunResult, WorkflowStepInput
 from app.models.workflow_stream_models import WorkflowStreamEvent, WorkflowStreamEventType
 from app.orchestration.agent_orchestrator import AgentOrchestrator
@@ -176,6 +177,24 @@ _FRONTEND_PACKAGE_JSON = json.dumps(
                 "node -e \"console.warn('Impeccable findings recorded; continuing prototype "
                 "build.')\""
             ),
+            # Real, observed incident (Genie platform-change Phase A): the Test
+            # Generation Agent already generated Vitest/React Testing Library UI
+            # tests and a Playwright end-to-end smoke test for every mission, but
+            # nothing in the generated frontend could actually run them - there
+            # was no test runner dependency, no config, and no script. The
+            # generated suites were reviewed by humans at best, never executed by
+            # the pipeline. These two scripts are what
+            # app.deploy_launch.ui_test_execution_service.UiTestExecutionService
+            # actually invokes against the real materialized build.
+            "test:unit": "vitest run --reporter=junit --outputFile=vitest-results.xml",
+            # Real, observed incident (Genie platform-change Phase A): passing
+            # --reporter=junit on the CLI overrides playwright.config.ts's own
+            # reporter array (which specifies outputFile) with a bare junit
+            # reporter that has no output path - it then prints the XML to
+            # stdout instead of writing playwright-results.xml, which
+            # UiTestExecutionService's JUnit parser never finds. Relying only
+            # on the config file's own reporter setting fixes this.
+            "test:e2e": "playwright test",
         },
         "dependencies": {"react": "18.3.1", "react-dom": "18.3.1"},
         "devDependencies": {
@@ -185,6 +204,11 @@ _FRONTEND_PACKAGE_JSON = json.dumps(
             "impeccable": "3.6.0",
             "typescript": "5.7.2",
             "vite": "6.4.3",
+            "vitest": "2.1.8",
+            "@testing-library/react": "16.1.0",
+            "@testing-library/jest-dom": "6.6.3",
+            "jsdom": "25.0.1",
+            "@playwright/test": "1.49.1",
         },
     },
     indent=4,
@@ -1213,6 +1237,55 @@ _FRONTEND_ENV_D_TS = """interface Window {
 }
 """
 
+# Real, observed incident (Genie platform-change Phase A): the generated UI
+# tests (Vitest/React Testing Library, one fenced ```tsx block per screen -
+# see test-generation-v1 in config/prompts/registry.yaml) were never runnable
+# at all - vitest wasn't even a dependency. jsdom is the DOM environment
+# vitest needs to render React components without a real browser; the setup
+# file registers jest-dom's matchers (toBeInTheDocument, etc.) globally so
+# every generated test can use them without its own import boilerplate.
+_FRONTEND_VITEST_CONFIG = """import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+
+export default defineConfig({
+  plugins: [react()],
+  test: {
+    environment: "jsdom",
+    setupFiles: ["./src/test-setup.ts"],
+    // Only the UI unit tests materialized by UiTestExecutionService live
+    // here - the Playwright end-to-end suite under tests/e2e is a
+    // deliberately separate runner (a real browser, not jsdom) and must
+    // never be picked up by vitest's own test discovery.
+    exclude: ["**/node_modules/**", "**/tests/e2e/**"],
+  },
+});
+"""
+
+_FRONTEND_VITEST_SETUP = """import "@testing-library/jest-dom/vitest";
+"""
+
+# Real, observed incident (Genie platform-change Phase A): "the primary user
+# journey should be validated end-to-end" was previously just an aspiration -
+# nothing generated or ran a real browser against the real deployed mission.
+# This config is intentionally minimal: baseURL comes from
+# MISSION_FRONTEND_URL (the same real, deployed URL the Python acceptance
+# tests already use - see test-generation-v1's own "never a mock" rule),
+# so the one generated Playwright spec under tests/e2e drives the actual
+# live prototype, not a local dev server.
+_FRONTEND_PLAYWRIGHT_CONFIG = """import { defineConfig } from "@playwright/test";
+
+export default defineConfig({
+  testDir: "./tests/e2e",
+  timeout: 60_000,
+  retries: 0,
+  reporter: [["junit", { outputFile: "playwright-results.xml" }], ["list"]],
+  use: {
+    baseURL: process.env.MISSION_FRONTEND_URL,
+    trace: "retain-on-failure",
+  },
+});
+"""
+
 
 class DeploymentPipelineStepFailedError(RuntimeError):
     """Raised when a pipeline step's own real result (test run, security scan) fails."""
@@ -1270,6 +1343,7 @@ class DeploymentPipelineService:
         data_layer_provisioning_service: DataLayerProvisioner,
         repository_checkin_service: RepositoryCheckinService | NullRepositoryCheckinService,
         test_execution_service: TestExecutionService,
+        ui_test_execution_service: UiTestExecutionService,
         security_scan_service: SecurityScanService,
         build_workspace_root: Path,
         run_repository: DeploymentRunRepository | None = None,
@@ -1294,6 +1368,7 @@ class DeploymentPipelineService:
         self._data_layer_provisioning_service = data_layer_provisioning_service
         self._repository_checkin_service = repository_checkin_service
         self._test_execution_service = test_execution_service
+        self._ui_test_execution_service = ui_test_execution_service
         self._security_scan_service = security_scan_service
         self._run_repository = run_repository or InMemoryDeploymentRunRepository()
         self._prototype_default_ttl_days = prototype_default_ttl_days
@@ -2375,10 +2450,23 @@ class DeploymentPipelineService:
                     (frontend_root / "vite.config.ts").write_text(
                         _FRONTEND_VITE_CONFIG, encoding="utf-8"
                     )
+                    # vitest prefers vitest.config.* over vite.config.* when both
+                    # exist, so the generated UI unit tests get their own jsdom/
+                    # setupFiles configuration without touching the production
+                    # vite.config.ts the real build step above already uses.
+                    (frontend_root / "vitest.config.ts").write_text(
+                        _FRONTEND_VITEST_CONFIG, encoding="utf-8"
+                    )
+                    (frontend_root / "playwright.config.ts").write_text(
+                        _FRONTEND_PLAYWRIGHT_CONFIG, encoding="utf-8"
+                    )
                     src_root = frontend_root / "src"
                     src_root.mkdir(parents=True, exist_ok=True)
                     (src_root / "main.tsx").write_text(_FRONTEND_MAIN_TSX, encoding="utf-8")
                     (src_root / "env.d.ts").write_text(_FRONTEND_ENV_D_TS, encoding="utf-8")
+                    (src_root / "test-setup.ts").write_text(
+                        _FRONTEND_VITEST_SETUP, encoding="utf-8"
+                    )
                     (src_root / "styles.css").write_text(_FRONTEND_STYLES_CSS, encoding="utf-8")
                     public_root = frontend_root / "public"
                     public_root.mkdir(parents=True, exist_ok=True)
@@ -2707,6 +2795,24 @@ class DeploymentPipelineService:
                         runtime_environment=runtime_environment,
                     )
                     pipeline_run.test_summary = test_result.summary
+                    # Real, observed gap (Genie platform-change Phase A): the
+                    # Test Generation Agent's own ```tsx (Vitest/RTL) and
+                    # ```playwright (end-to-end primary-journey) blocks were
+                    # generated for every mission but never actually executed
+                    # - every real bug found during the ACI PoC mission this
+                    # session (premature validation errors, a dead catalog
+                    # button, broken checkbox wiring) was a frontend-
+                    # interaction bug only a real browser driving the real
+                    # deployed UI could catch; the backend black-box tests
+                    # above never touch the DOM at all. Runs against the SAME
+                    # real MISSION_FRONTEND_URL the backend acceptance tests
+                    # already use - never a mock, never a local dev server.
+                    ui_test_result = await self._ui_test_execution_service.run_ui_tests(
+                        frontend_root=frontend_root,
+                        test_output_text=test_output_text,
+                        runtime_environment=runtime_environment,
+                    )
+                    pipeline_run.ui_test_summary = ui_test_result.summary
                     # ``success`` fails closed even when pytest itself exits 0
                     # (e.g. zero test functions were actually collected) - see
                     # TestExecutionResult.success's docstring.
@@ -2728,7 +2834,20 @@ class DeploymentPipelineService:
                         minimum_coverage_percent=self._fidelity_min_coverage_percent,
                     )
                     if pipeline_run.fidelity_report.status == "passed":
-                        detail = test_result.summary
+                        detail = f"{test_result.summary}; UI tests: {ui_test_result.summary}"
+                        # The backend REQ-coverage gate above has its own
+                        # dedicated repair loop; a generated UI test suite's
+                        # own real failure is surfaced here as a non-blocking
+                        # warning (this entire step is in
+                        # _NON_BLOCKING_PROTOTYPE_VALIDATION_STEPS) rather than
+                        # triggering a full prototype rebuild - the goal of
+                        # Phase A is that this evidence is real and visible,
+                        # never silently skipped, not that a flaky generated
+                        # browser test blocks an otherwise-working prototype.
+                        if (ui_test_result.unit_ran or ui_test_result.e2e_ran) and not ui_test_result.success:
+                            raise DeploymentPipelineStepFailedError(
+                                f"Generated UI test suite did not pass: {ui_test_result.summary}"
+                            )
                     else:
                         if final_failure:
                             raise DeploymentPipelineStepFailedError(
@@ -2945,6 +3064,11 @@ def create_deployment_pipeline_service(
         prototype_max_active_per_owner=settings.prototype_max_active_per_owner,
         test_execution_service=TestExecutionService(
             timeout_seconds=settings.deployment_test_execution_timeout_seconds
+        ),
+        ui_test_execution_service=UiTestExecutionService(
+            npm_install_timeout_seconds=settings.deployment_ui_test_npm_install_timeout_seconds,
+            vitest_timeout_seconds=settings.deployment_ui_test_execution_timeout_seconds,
+            playwright_test_timeout_seconds=settings.deployment_ui_test_execution_timeout_seconds,
         ),
         security_scan_service=SecurityScanService(),
         build_workspace_root=settings.deployment_build_workspace_root,

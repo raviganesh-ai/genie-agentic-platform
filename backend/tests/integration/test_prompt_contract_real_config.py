@@ -305,6 +305,26 @@ def test_acceptance_test_prompt_uses_trusted_auth_proxy_without_disclosing_token
     assert "MISSION_UNAUTHENTICATED_BACKEND_URL" in template
 
 
+def test_test_generation_prompt_requires_a_real_playwright_primary_journey_smoke_test():
+    """Genie platform-change Phase A regression guard: the Test Generation
+    Agent must produce exactly one fenced ```playwright block driving the
+    mission's primary user journey with a real browser against the real
+    deployed MISSION_FRONTEND_URL - the gap that let every frontend-
+    interaction bug found during the ACI PoC mission ship unnoticed (no
+    generated test ever actually clicked through the real deployed UI).
+    See app.deploy_launch.ui_test_execution_service, which actually
+    executes this block with Playwright, never a mock."""
+
+    registry = PromptRegistry.load(_REPO_CONFIG_ROOT / "prompts")
+    template = " ".join(registry.get("test-generation-v1").template.split())
+
+    assert "```playwright" in template
+    assert "primary" in template.lower() and "journey" in template.lower()
+    assert "never intercept, mock, or stub network requests" in template
+    assert "@playwright/test" in template
+    assert "MISSION_FRONTEND_URL" in template
+
+
 def test_generation_prompts_fail_closed_on_ui_orchestrator_schema_drift():
     registry = PromptRegistry.load(_REPO_CONFIG_ROOT / "prompts")
 

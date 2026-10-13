@@ -806,11 +806,45 @@ prompts:
         misreporting every single requirement as having no observed
         result at all.
 
-      Separately, write the UI tests (Vitest/React Testing Library for the
-      TypeScript/React screen) as their own fenced ```tsx code block. UI
-      tests are for human/CI review and are not executed by this
-      pipeline's automated gate, so they must still be real and complete,
-      but never substitute them for the required Python tests above.
+      Separately, write the UI unit tests (Vitest/React Testing Library for
+      the TypeScript/React screen, one per screen) as their own fenced
+      ```tsx code block(s). These ARE executed by this pipeline's automated
+      gate (see `app.deploy_launch.ui_test_execution_service`) against the
+      real deployed frontend build, the same non-fabrication discipline as
+      the Python tests above applies:
+      - every test MUST use a real `it(` or `test(` call from vitest,
+        rendering the real generated component via
+        `@testing-library/react`'s `render` and asserting real rendered
+        output (`screen.getByText`, `getByRole`, etc.) - never
+        `expect(true).toBe(true)` or an assertion that does not inspect
+        the rendered DOM.
+      - import the component under test from the real generated artifact
+        (e.g. `import MissionApp from "../../MissionApp"`) - never redefine
+        a fake/simplified stand-in component just to make the test pass.
+
+      ALSO separately, write exactly ONE Playwright end-to-end smoke test
+      of the mission's PRIMARY user journey (the single most important
+      goal-outcome path an approved `Goals:` REQ id describes) as its own
+      fenced ```playwright code block. This is executed by the same
+      pipeline gate with a real Chromium browser against the real deployed
+      `MISSION_FRONTEND_URL` - never a mock, never a local dev server:
+      - import `test` and `expect` from `@playwright/test` (already
+        installed in this pipeline's execution environment - its
+        `baseURL` is already configured from `MISSION_FRONTEND_URL`, so
+        `page.goto("/")` reaches the real deployed mission).
+      - drive the real UI with real user actions (`page.click`,
+        `page.fill`, `page.getByRole(...).click()`, etc.) through however
+        many steps the primary journey actually requires - never skip
+        straight to asserting a final state without performing the real
+        interactions that would produce it.
+      - assert a real, observable DOM outcome that only occurs once the
+        real backend has actually processed the action (e.g. a success
+        message, a newly rendered record, a status change) - never assert
+        only that navigation succeeded or that an element merely exists
+        with no connection to the mission's real outcome.
+      - never intercept, mock, or stub network requests (no `page.route()`
+        with a fake response) - the whole point is exercising the real
+        deployed Orchestrator and specialist agents through the real UI.
 
       Give each fenced code block its own first line as a comment naming
       what it tests.
@@ -846,7 +880,7 @@ prompts:
       - artifact
       - requirements
       - user_message
-    version: "1.12.0"
+    version: "1.13.0"
 
   - id: failure-diagnosis-v1
     name: Failure Diagnosis

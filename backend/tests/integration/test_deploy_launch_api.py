@@ -48,6 +48,7 @@ from app.deploy_launch.pipeline_service import DeploymentPipelineService
 from app.deploy_launch.repository_checkin_service import NullRepositoryCheckinService
 from app.deploy_launch.security_scan_service import SecurityScanService
 from app.deploy_launch.test_execution_service import TestExecutionService
+from app.deploy_launch.ui_test_execution_service import UiTestExecutionService
 from app.main import create_app
 from app.models.workflow_models import WorkflowRunResult, WorkflowStepResult
 
@@ -267,6 +268,7 @@ async def test_full_pipeline_runs_through_the_real_http_api(
             data_layer_provisioning_service=NullDataLayerProvisioningService(),
             repository_checkin_service=NullRepositoryCheckinService(),
             test_execution_service=TestExecutionService(timeout_seconds=60),
+            ui_test_execution_service=UiTestExecutionService(),
             security_scan_service=SecurityScanService(timeout_seconds=60),
             build_workspace_root=tmp_path,
         )

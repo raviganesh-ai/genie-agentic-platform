@@ -268,6 +268,15 @@ class DeploymentPipelineRun(BaseModel):
     repository_commit_sha: str | None = None
     launch_url: str | None = None
     test_summary: str | None = None
+    # Real, observed gap (Genie platform-change Phase A): the Test
+    # Generation Agent already produced real Vitest/RTL UI tests and a
+    # Playwright end-to-end smoke test for every mission, but nothing
+    # executed them - see app.deploy_launch.ui_test_execution_service.
+    # Mirrors test_summary's own shape (a human-readable one-line result),
+    # kept as a SEPARATE field rather than folded into test_summary so a
+    # mission predating this field (ui_test_summary is None) is visibly
+    # distinguishable from one whose UI tests genuinely found nothing to run.
+    ui_test_summary: str | None = None
     fidelity_report: RequirementFidelityReport | None = None
     security_findings_count: int | None = None
     security_scan_report: dict[str, JsonValue] | None = None

@@ -335,6 +335,13 @@ class Settings(BaseSettings):
     # single requirement as if its test didn't exist, rather than surfacing
     # the real "the suite didn't finish in time" cause.
     deployment_test_execution_timeout_seconds: int = 300
+    # Mirrors deployment_test_execution_timeout_seconds for the generated
+    # Vitest/RTL and Playwright UI test suites (Genie platform-change Phase
+    # A) - see app.deploy_launch.ui_test_execution_service. npm install is
+    # timed separately since it is a one-time network-bound cost, not
+    # proportional to the number of generated UI tests.
+    deployment_ui_test_npm_install_timeout_seconds: int = 300
+    deployment_ui_test_execution_timeout_seconds: int = 180
     prototype_default_ttl_days: int = Field(default=7, ge=1, le=90)
     prototype_max_active_per_owner: int = Field(default=0, ge=0, le=20)
     prototype_cleanup_interval_seconds: int = Field(default=3600, ge=60, le=86400)
