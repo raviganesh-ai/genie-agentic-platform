@@ -24,6 +24,7 @@ from app.governance.decision_graph_service import DecisionGraphService
 from app.governance.governance_service import GovernanceService, create_governance_service
 from app.governance.recommendation_lineage_service import RecommendationLineageService
 from app.memory.memory_service import MemoryService, create_memory_service
+from app.models.lessons_learned import LessonLearned
 from app.models.reanalysis_models import (
     ReanalysisRequest,
     ReanalysisRequestType,
@@ -51,6 +52,10 @@ from app.repositories.governance_event_repository import GovernanceEventReposito
 from app.repositories.recommendation_lineage_repository import (
     InMemoryRecommendationLineageRepository,
     RecommendationLineageRepository,
+)
+from app.repositories.lessons_learned_repository import (
+    InMemoryLessonsLearnedRepository,
+    LessonsLearnedRepository,
 )
 from app.repositories.shared_memory_repository import SharedMemoryRepository
 from app.repositories.workflow_run_repository import (
@@ -323,6 +328,9 @@ class AgentOrchestrator:
             session_id=session_id, source_agent_id=source_agent_id, error=error, trace_id=trace_id
         )
 
+    async def list_open_lessons_learned(self) -> list[LessonLearned]:
+        return await self._debugging_workflow_service.list_open_lessons_learned()
+
     def generate_deliverable_package(
         self,
         *,
@@ -360,6 +368,7 @@ def create_agent_orchestrator(
     approval_service: ApprovalService | None = None,
     workflow_event_bus: WorkflowEventBus | None = None,
     workflow_run_repository: WorkflowRunRepository | None = None,
+    lessons_learned_repository: LessonsLearnedRepository | None = None,
     shared_memory_repository: SharedMemoryRepository | None = None,
     governance_event_repository: GovernanceEventRepository | None = None,
     approval_repository: ApprovalRepository | None = None,
@@ -470,7 +479,10 @@ def create_agent_orchestrator(
     )
     reanalysis_service = ReanalysisService(agent_registry=agent_registry)
     debugging_workflow_service = DebuggingWorkflowService(
-        settings=settings, execution_service=execution_service
+        settings=settings,
+        execution_service=execution_service,
+        lessons_learned_repository=lessons_learned_repository
+        or InMemoryLessonsLearnedRepository(),
     )
 
     return AgentOrchestrator(

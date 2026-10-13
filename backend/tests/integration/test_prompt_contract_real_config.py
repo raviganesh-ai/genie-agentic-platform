@@ -345,6 +345,25 @@ def test_requirements_extraction_prompt_requires_open_decisions_for_ambiguous_de
     assert "folded into the Must-Have list with no trace" in template
 
 
+def test_failure_diagnosis_prompt_requires_a_lessons_learned_prompt_change_verdict():
+    """Genie platform-change Phase F regression guard: every failure
+    diagnosis must explicitly state whether its root cause traces to a gap
+    in an existing prompt's own instructions - closing the loop from a
+    diagnosed failure back to a concrete, reviewable prompt/config change
+    candidate instead of relying on someone remembering to make that
+    connection by hand (as happened once, ad hoc, in this platform's own
+    development history). See
+    app.orchestration.debugging_workflow_service._parse_lessons_learned,
+    which actually parses this heading out of the agent's real output,
+    never a guess."""
+
+    registry = PromptRegistry.load(_REPO_CONFIG_ROOT / "prompts")
+    template = " ".join(registry.get("failure-diagnosis-v1").template.split())
+
+    assert "Lessons Learned (Prompt/Config Changes):" in template
+    assert "No prompt or config change indicated." in template
+
+
 def test_generation_prompts_fail_closed_on_ui_orchestrator_schema_drift():
     registry = PromptRegistry.load(_REPO_CONFIG_ROOT / "prompts")
 

@@ -894,8 +894,12 @@ prompts:
   - id: failure-diagnosis-v1
     name: Failure Diagnosis
     description: >-
-      Diagnoses a detected workflow or agent execution failure and
-      recommends remediation.
+      Diagnoses a detected workflow or agent execution failure, recommends
+      remediation, and states whether the root cause traces to a gap in an
+      existing prompt's own instructions - closing the loop from a
+      diagnosed failure back to a concrete, reviewable prompt/config
+      change candidate instead of relying on someone remembering to make
+      that connection by hand.
     template: >-
       You are the Debugging Agent for the Genie Agentic Experience Center.
       Given the following failure details, diagnose the root cause and
@@ -905,10 +909,30 @@ prompts:
       {failure_details}
 
       Customer message (if any): {user_message}
+
+      LESSONS LEARNED (PROMPT/CONFIG CHANGES):
+      After diagnosing the root cause, decide whether it traces to a gap,
+      ambiguity, or missing instruction in an EXISTING prompt template
+      (config/prompts/registry.yaml) that generated the failing code,
+      decision, or output - as opposed to a transient infrastructure
+      issue, a one-off data problem, or anything else no prompt change
+      could have prevented. Conclude your response with a
+      "Lessons Learned (Prompt/Config Changes):" heading followed by
+      either:
+      - One line per concrete suggested change, each in exactly this
+      format: "- [<prompt_id>] <specific instruction to add or change,
+      and why>" - using the real prompt_id you believe is responsible,
+      never a guess disguised as a fact if you are not reasonably
+      confident which prompt is responsible.
+      - Or, if the root cause does not trace to any prompt/config gap, the
+      single line "No prompt or config change indicated." - never silence
+      or omit this heading entirely; a human reading your diagnosis must
+      always be able to see whether you considered this question, not
+      just your conclusion.
     variables:
       - failure_details
       - user_message
-    version: "1.0.0"
+    version: "1.1.0"
 
   - id: build-generation-v1
     name: Build Generation

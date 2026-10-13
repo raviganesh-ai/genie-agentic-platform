@@ -37,3 +37,21 @@ async def test_handle_failure_records_governance_execution_event(orchestrator) -
     # event via WorkflowStepExecutor, verified indirectly by successful
     # completion (governance failures propagate as exceptions, never silently).
     assert result.status == "completed"
+
+
+# Genie platform-change Phase F: proves the real end-to-end wiring (real
+# AgentOrchestrator -> DebuggingWorkflowService -> real
+# InMemoryLessonsLearnedRepository) works, without fabricating a "has
+# lessons" scenario - LocalAgentGateway's deterministic stub output never
+# contains the "Lessons Learned (Prompt/Config Changes):" heading, so
+# nothing should be persisted. The "has lessons" case is covered by
+# tests/unit/orchestration/test_debugging_workflow_service.py's direct,
+# crafted-output tests instead.
+async def test_list_open_lessons_learned_is_empty_for_a_deterministic_stub_diagnosis(
+    orchestrator,
+) -> None:
+    await orchestrator.handle_failure(
+        session_id="session-failure-3", source_agent_id="agent-c", error="A third failure."
+    )
+
+    assert await orchestrator.list_open_lessons_learned() == []

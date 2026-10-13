@@ -37,6 +37,7 @@ from app.api import (
     memory,
     model_catalog,
     modernization,
+    lessons_learned,
     outputs,
     phase_tracking,
     peer_review,
@@ -127,6 +128,7 @@ from app.repositories.recommendation_lineage_repository import (
 from app.repositories.session_repository import CosmosSessionRepository
 from app.repositories.shared_memory_repository import CosmosSharedMemoryRepository
 from app.repositories.upload_repository import CosmosUploadRepository
+from app.repositories.lessons_learned_repository import CosmosLessonsLearnedRepository
 from app.repositories.workflow_run_repository import CosmosWorkflowRunRepository
 from app.repository_connections.github_mcp_client import (
     EnvironmentGitHubTokenProvider,
@@ -247,6 +249,7 @@ def create_app(
         discovery_case_repository = None
         upload_repository = None
         workflow_run_repository = None
+        lessons_learned_repository = None
         shared_memory_repository = None
         repository_binding_repository = None
         repository_assessment_repository = None
@@ -272,6 +275,7 @@ def create_app(
             discovery_case_repository = CosmosDiscoveryCaseRepository(store=document_store)
             upload_repository = CosmosUploadRepository(store=document_store)
             workflow_run_repository = CosmosWorkflowRunRepository(store=document_store)
+            lessons_learned_repository = CosmosLessonsLearnedRepository(store=document_store)
             shared_memory_repository = CosmosSharedMemoryRepository(store=document_store)
             repository_binding_repository = CosmosRepositoryBindingRepository(store=document_store)
             repository_assessment_repository = CosmosRepositoryAssessmentRepository(
@@ -315,6 +319,7 @@ def create_app(
         orchestrator = create_agent_orchestrator(
             settings=resolved_settings,
             workflow_run_repository=workflow_run_repository,
+            lessons_learned_repository=lessons_learned_repository,
             shared_memory_repository=shared_memory_repository,
             governance_event_repository=governance_event_repository,
             approval_repository=approval_repository,
@@ -818,6 +823,7 @@ def create_app(
     app.include_router(memory.router)
     app.include_router(peer_review.router)
     app.include_router(prototype_admin.router)
+    app.include_router(lessons_learned.router)
     app.include_router(approvals.router)
     app.include_router(architecture.router)
     app.include_router(workshop.router)
