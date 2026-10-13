@@ -325,6 +325,26 @@ def test_test_generation_prompt_requires_a_real_playwright_primary_journey_smoke
     assert "MISSION_FRONTEND_URL" in template
 
 
+def test_requirements_extraction_prompt_requires_open_decisions_for_ambiguous_defaults():
+    """Genie platform-change Phase D regression guard: whenever the
+    Requirements Analyst defaults an ambiguous requirement to MUST-HAVE
+    (its existing rule), it must also list that exact requirement under a
+    dedicated "Open Decisions Requiring Customer Confirmation:" heading -
+    the gap that let a real ambiguous assumption ship silently folded into
+    the Must-Have list with no trace, for a human to notice only by
+    reading every requirement's prose instead of seeing it called out.
+    See app.services.requirements_service._parse_open_decisions, which
+    actually parses this heading out of the agent's real output, never a
+    guess."""
+
+    registry = PromptRegistry.load(_REPO_CONFIG_ROOT / "prompts")
+    template = " ".join(registry.get("requirements-extraction-v1").template.split())
+
+    assert "Open Decisions Requiring Customer Confirmation:" in template
+    assert "you must also list that exact requirement" in template
+    assert "folded into the Must-Have list with no trace" in template
+
+
 def test_generation_prompts_fail_closed_on_ui_orchestrator_schema_drift():
     registry = PromptRegistry.load(_REPO_CONFIG_ROOT / "prompts")
 

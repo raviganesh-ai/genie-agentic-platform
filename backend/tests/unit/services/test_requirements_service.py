@@ -8,7 +8,7 @@ workflow) is covered in
 """
 from __future__ import annotations
 
-from app.services.requirements_service import _parse_verdict
+from app.services.requirements_service import _parse_open_decisions, _parse_verdict
 
 
 def test_parse_verdict_extracts_qualified_and_reason():
@@ -61,3 +61,61 @@ def test_parse_verdict_returns_none_reason_when_reason_line_missing():
     text = "AGENTIC_WORKFLOW_QUALIFICATION: QUALIFIED"
 
     assert _parse_verdict(text) == (True, None)
+
+
+# Genie platform-change Phase D: requirements-extraction-v1 now requires an
+# "Open Decisions Requiring Customer Confirmation:" heading for any
+# requirement defaulted to MUST-HAVE because it was ambiguous - these tests
+# prove the parser actually recognizes the real contract, not a guess.
+def test_parse_open_decisions_returns_empty_list_when_heading_is_absent():
+    # The same "omit a heading with no items" convention every other
+    # heading in this prompt already uses - absence means "none found",
+    # not "could not verify".
+    text = (
+        "Goals:\n"
+        "- [REQ-001] Users can submit a claim.\n\n"
+        "Must-Have Functional Requirements:\n"
+        "- [REQ-002] The system validates claim amounts.\n"
+    )
+
+    assert _parse_open_decisions(text) == []
+
+
+def test_parse_open_decisions_extracts_items_under_the_heading():
+    text = (
+        "Must-Have Functional Requirements:\n"
+        "- [REQ-003] The system supports multi-currency claims.\n\n"
+        "Open Decisions Requiring Customer Confirmation:\n"
+        "- [REQ-003] The transcript did not state which currencies are in "
+        "scope; assumed USD and EUR only.\n"
+        "- [REQ-007] \"Reasonably fast\" response time was not quantified; "
+        "assumed under 2 seconds.\n\n"
+        "Critical path (must build first):\n"
+        "1. [REQ-003] The system supports multi-currency claims.\n"
+    )
+
+    result = _parse_open_decisions(text)
+
+    assert result == [
+        "[REQ-003] The transcript did not state which currencies are in "
+        "scope; assumed USD and EUR only.",
+        "[REQ-007] \"Reasonably fast\" response time was not quantified; "
+        "assumed under 2 seconds.",
+    ]
+
+
+def test_parse_open_decisions_is_case_insensitive_on_the_heading():
+    text = "open decisions requiring customer confirmation:\n- [REQ-009] Ambiguous scope.\n"
+
+    assert _parse_open_decisions(text) == ["[REQ-009] Ambiguous scope."]
+
+
+def test_parse_open_decisions_stops_at_the_next_heading_with_no_blank_line():
+    text = (
+        "Open Decisions Requiring Customer Confirmation:\n"
+        "- [REQ-010] Ambiguous scope.\n"
+        "Acceptance Criteria:\n"
+        "- [AC-001] Something testable.\n"
+    )
+
+    assert _parse_open_decisions(text) == ["[REQ-010] Ambiguous scope."]

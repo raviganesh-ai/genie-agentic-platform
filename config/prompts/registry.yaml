@@ -273,7 +273,15 @@ prompts:
 
       If a requirement is ambiguous or seems borderline, err on the side
       of "MUST-HAVE" rather than filtering it out - the goal is to
-      capture the full scope, not shrink the scope.
+      capture the full scope, not shrink the scope. Whenever you apply
+      this default, you must also list that exact requirement (by its
+      `[REQ-###]` id) under the "Open Decisions Requiring Customer
+      Confirmation:" section below, with a one-line note on what made it
+      ambiguous and what you assumed. A default applied silently - folded
+      into the Must-Have list with no trace of the judgment call you
+      made - is a broken extraction: the customer must be able to see
+      every place you made an assumption on their behalf, not just the
+      conclusion you reached.
 
       OUTPUT FORMAT (DETERMINISTIC ORDER):
       Output that reviewed, comprehensive list grouped under these exact
@@ -283,7 +291,8 @@ prompts:
 
       "Goals:", "Must-Have Functional Requirements:", "Nice-to-Have
       Functional Requirements:", "Non-Functional Requirements:",
-      "Risks:", "Assumptions:", "Constraints:"
+      "Risks:", "Assumptions:", "Constraints:", "Open Decisions Requiring
+      Customer Confirmation:"
 
       Within "Must-Have Functional Requirements:", order items by logical
       dependency (prerequisites first, dependent items after).
@@ -361,7 +370,7 @@ prompts:
     variables:
       - transcript_excerpt
       - user_message
-    version: "2.4.0"
+    version: "2.5.0"
 
 
   - id: architecture-recommendation-v1
