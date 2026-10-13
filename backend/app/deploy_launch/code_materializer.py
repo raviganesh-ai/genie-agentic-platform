@@ -281,6 +281,159 @@ def _has_nested_object_value(object_literal: str) -> bool:
     return False
 
 
+def _object_literal_keys(object_literal: str) -> set[str]:
+    """Extracts just the key names from a ``{...}`` object literal's
+    top-level entries (``_top_level_object_entries``), accepting both bare
+    identifier keys (``requestedProductDomains: domains``) and quoted
+    string keys (``"requested-domains": domains``). Computed keys
+    (``[expr]: value``) and spreads (``...rest``) are deliberately skipped
+    rather than guessed at, to avoid false positives below."""
+
+    keys: set[str] = set()
+    for entry in _top_level_object_entries(object_literal):
+        name_part, separator, _ = entry.partition(":")
+        if not separator:
+            continue
+        name = name_part.strip()
+        if len(name) >= 2 and name[0] in "'\"" and name[-1] == name[0]:
+            name = name[1:-1]
+        if re.fullmatch(r"[A-Za-z_$][\w$]*", name):
+            keys.add(name)
+    return keys
+
+
+def _orchestrator_request_variable_names(tree: ast.AST) -> set[str]:
+    """Finds every variable assigned the result of ``json.loads(...)`` - the
+    fixed contract the ``build-generation-component-v1`` prompt requires of
+    every generated Orchestrator ("parse ``ui_message`` via
+    ``json.loads(ui_message)`` first")."""
+
+    names: set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Assign):
+            continue
+        value = node.value
+        if not (
+            isinstance(value, ast.Call)
+            and isinstance(value.func, ast.Attribute)
+            and value.func.attr == "loads"
+            and isinstance(value.func.value, ast.Name)
+            and value.func.value.id == "json"
+        ):
+            continue
+        for target in node.targets:
+            if isinstance(target, ast.Name):
+                names.add(target.id)
+    return names
+
+
+def _string_key_read_from(node: ast.AST, request_var_names: set[str]) -> str | None:
+    """Returns the literal string key read by ``node`` from one of
+    ``request_var_names`` via ``.get("key")`` or ``["key"]``, or ``None``
+    when ``node`` isn't that shape (a dynamic/non-literal key is skipped,
+    never guessed at)."""
+
+    if (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "get"
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id in request_var_names
+        and node.args
+        and isinstance(node.args[0], ast.Constant)
+        and isinstance(node.args[0].value, str)
+    ):
+        return node.args[0].value
+    if (
+        isinstance(node, ast.Subscript)
+        and isinstance(node.value, ast.Name)
+        and node.value.id in request_var_names
+        and isinstance(node.slice, ast.Constant)
+        and isinstance(node.slice.value, str)
+    ):
+        return node.slice.value
+    return None
+
+
+def _orchestrator_request_field_reads(python_source: str) -> set[str] | None:
+    """Returns every string key read from the Orchestrator's parsed request
+    dict (see ``_orchestrator_request_variable_names``).
+
+    Returns ``None`` when no ``json.loads(...)``-parsed request variable can
+    be identified at all (a syntax error, or a shape this check does not
+    recognize) - callers must treat ``None`` as "could not verify", never as
+    "every field was read"."""
+
+    try:
+        tree = ast.parse(python_source)
+    except SyntaxError:
+        return None
+
+    request_var_names = _orchestrator_request_variable_names(tree)
+    if not request_var_names:
+        return None
+
+    read_keys: set[str] = set()
+    for node in ast.walk(tree):
+        key = _string_key_read_from(node, request_var_names)
+        if key is not None:
+            read_keys.add(key)
+    return read_keys
+
+
+def _orchestrator_dropped_request_fields(python_source: str) -> list[str] | None:
+    """Returns request fields the Orchestrator reads into a local variable
+    but then never references again anywhere else in the module - parsed
+    from the incoming request and silently discarded before being forwarded
+    to any specialist agent's ``FunctionTool`` call or included in the
+    response. This is the same shape as a real, previously observed
+    incident: a field accepted by the UI/request contract that the
+    Orchestrator read once into a variable and then never used again.
+
+    A variable name that appears anywhere else in the module at all (even
+    for an unrelated purpose) is treated as "possibly still used" and is
+    never flagged - this check is deliberately biased toward missing real
+    drops rather than blocking a good build on a false positive.
+
+    Returns ``None`` when the request-parsing shape could not be
+    recognized - callers must treat ``None`` as "could not verify", never
+    as "nothing was dropped"."""
+
+    try:
+        tree = ast.parse(python_source)
+    except SyntaxError:
+        return None
+
+    request_var_names = _orchestrator_request_variable_names(tree)
+    if not request_var_names:
+        return None
+
+    key_to_variable: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Assign) or len(node.targets) != 1:
+            continue
+        target = node.targets[0]
+        if not isinstance(target, ast.Name):
+            continue
+        extracted_key = _string_key_read_from(node.value, request_var_names)
+        if extracted_key is not None:
+            key_to_variable[extracted_key] = target.id
+
+    if not key_to_variable:
+        return []
+
+    reference_counts: dict[str, int] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name):
+            reference_counts[node.id] = reference_counts.get(node.id, 0) + 1
+
+    return sorted(
+        key
+        for key, variable_name in key_to_variable.items()
+        if reference_counts.get(variable_name, 0) <= 1
+    )
+
+
 def _has_strict_sample_cardinality_gate(source: str, *, python_source: bool) -> bool:
     matches = list(_SAMPLE_CARDINALITY_COMPARISON_PATTERN.finditer(source))
     if not matches:
@@ -642,6 +795,48 @@ def materialize_build(output_text: str) -> MaterializedBuild:
             "one key per rendered field - a nested payload silently breaks every "
             "'config.get(...)' read in the orchestrator's json.loads(ui_message)."
         )
+
+    # Genie platform-change Phase C: a field the UI submits must actually be
+    # read, and used, by the Orchestrator - a real, previously observed
+    # incident had a field accepted by a mission's request contract that was
+    # silently dropped by both the Orchestrator and a downstream tool
+    # wrapper before it ever reached the service that needed it. Only runs
+    # when the request-parsing shape is confidently recognized
+    # (_orchestrator_request_field_reads/_orchestrator_dropped_request_fields
+    # return None, not an empty result, when they cannot verify) - an
+    # unrecognized shape is skipped rather than guessed at.
+    if orchestrator_module is not None:
+        submitted_keys = {
+            key for literal in submit_payloads for key in _object_literal_keys(literal)
+        }
+        orchestrator_read_keys = _orchestrator_request_field_reads(orchestrator_module)
+        if submitted_keys and orchestrator_read_keys is not None:
+            never_read = sorted(submitted_keys - orchestrator_read_keys)
+            if never_read:
+                field_word = "field" if len(never_read) == 1 else "fields"
+                raise MaterializedCodeError(
+                    "The generated mission UI submits "
+                    f"{', '.join(repr(key) for key in never_read)}, but the "
+                    f"Orchestrator never reads that {field_word} from its parsed "
+                    "request (no matching config.get(...)/config[...] call was "
+                    "found). Every field the UI collects must be read by the "
+                    "Orchestrator - a field the UI submits but the Orchestrator "
+                    "ignores is silently dropped at the very first boundary."
+                )
+
+        dropped_after_parsing = _orchestrator_dropped_request_fields(orchestrator_module)
+        if dropped_after_parsing:
+            field_word = "field" if len(dropped_after_parsing) == 1 else "fields"
+            raise MaterializedCodeError(
+                "The generated Orchestrator reads "
+                f"{', '.join(repr(key) for key in dropped_after_parsing)} from its "
+                f"parsed request into a local variable, but never references that "
+                f"{field_word} again anywhere else in the module. The value is read "
+                "once and then silently discarded instead of being forwarded to a "
+                "specialist agent's FunctionTool call or included in the response - "
+                "forward every field you read, or remove the read if it is "
+                "genuinely unused."
+            )
 
     return MaterializedBuild(
         agent_modules=agent_modules,

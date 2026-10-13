@@ -307,6 +307,140 @@ def test_materialize_build_allows_unrelated_nested_serialization():
     assert "counts" in build.ui_component
 
 
+_ORCHESTRATOR_WITH_REQUEST_PARSING = '''
+```python
+# agent: orchestrator
+import json
+
+
+class OrchestratorAgent:
+    async def run(self, ui_message: str, on_progress=None) -> None:
+        config = json.loads(ui_message)
+        primary_model_id = config.get("primary_model_id")
+        await self._requirements_specialist(primary_model_id=primary_model_id)
+```
+'''
+
+
+# Genie platform-change Phase C: a real, previously observed incident had a
+# field accepted by a mission's request contract silently dropped by both
+# the Orchestrator and a downstream tool wrapper before it ever reached the
+# service that needed it. These tests prove the new, automated checks in
+# materialize_build() actually catch that bug class rather than merely
+# describing it in prompt text.
+def test_materialize_build_rejects_a_ui_field_the_orchestrator_never_reads():
+    output = _ORCHESTRATOR_WITH_REQUEST_PARSING + '''
+```tsx
+// agent: ui
+export function MissionApp() {
+    const handleSubmit = () => {
+        const payload = {primary_model_id: primaryModel, requested_product_domains: domains};
+        const message = JSON.stringify(payload);
+        onSubmit(message);
+    };
+    return null;
+}
+```
+'''
+
+    with pytest.raises(MaterializedCodeError, match="requested_product_domains"):
+        materialize_build(output)
+
+
+def test_materialize_build_allows_a_ui_field_the_orchestrator_does_read():
+    output = _ORCHESTRATOR_WITH_REQUEST_PARSING + '''
+```tsx
+// agent: ui
+export function MissionApp() {
+    const handleSubmit = () => {
+        const payload = {primary_model_id: primaryModel};
+        const message = JSON.stringify(payload);
+        onSubmit(message);
+    };
+    return null;
+}
+```
+'''
+
+    build = materialize_build(output)
+
+    assert build.orchestrator_module is not None
+
+
+def test_materialize_build_rejects_a_request_field_read_but_never_forwarded():
+    output = '''
+```python
+# agent: orchestrator
+import json
+
+
+class OrchestratorAgent:
+    async def run(self, ui_message: str, on_progress=None) -> None:
+        config = json.loads(ui_message)
+        requested_product_domains = config.get("requested_product_domains")
+        await self._requirements_specialist()
+```
+''' + '''
+```tsx
+// agent: ui
+export function MissionApp() {
+    const handleSubmit = () => {
+        const payload = {requested_product_domains: domains};
+        const message = JSON.stringify(payload);
+        onSubmit(message);
+    };
+    return null;
+}
+```
+'''
+
+    with pytest.raises(MaterializedCodeError, match="requested_product_domains"):
+        materialize_build(output)
+
+
+def test_materialize_build_allows_a_request_field_read_and_forwarded():
+    output = _ORCHESTRATOR_WITH_REQUEST_PARSING + '''
+```tsx
+// agent: ui
+export function MissionApp() {
+    const handleSubmit = () => {
+        const payload = {primary_model_id: primaryModel};
+        const message = JSON.stringify(payload);
+        onSubmit(message);
+    };
+    return null;
+}
+```
+'''
+
+    build = materialize_build(output)
+
+    assert build.orchestrator_module is not None
+    assert "primary_model_id" in build.orchestrator_module
+
+
+def test_materialize_build_skips_request_field_checks_when_shape_is_unrecognized():
+    # _SAMPLE_OUTPUT's orchestrator never does `json.loads(ui_message)` at
+    # all (an unrecognized shape) - the new checks must be skipped rather
+    # than guessed at, never raising on an orchestrator shape they cannot
+    # actually verify.
+    output = _SAMPLE_OUTPUT.replace(
+        "export function MissionApp() {\n    return null;\n}",
+        """export function MissionApp() {
+    const handleSubmit = () => {
+        const payload = {anything_at_all: value};
+        const message = JSON.stringify(payload);
+        onSubmit(message);
+    };
+    return null;
+}""",
+    )
+
+    build = materialize_build(output)
+
+    assert build.ui_component is not None
+
+
 def test_write_to_directory_creates_expected_files(tmp_path: Path):
     build = materialize_build(_SAMPLE_OUTPUT)
 
