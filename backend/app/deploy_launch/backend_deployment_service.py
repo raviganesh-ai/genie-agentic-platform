@@ -46,6 +46,7 @@ from urllib.parse import urlparse
 from uuid import NAMESPACE_URL, uuid5
 
 from app.config.settings import Settings
+from app.deploy_launch.dependency_preflight_service import DependencyPreflightService
 from app.deploy_launch.prototype_api_gateway_service import PrototypeApiGatewayService
 from app.deploy_launch.resource_naming import (
     prototype_container_app_name,
@@ -133,6 +134,7 @@ class BackendDeploymentService:
         foundry_project_name: str,
         foundry_resource_group: str | None = None,
         prototype_api_gateway_service: PrototypeApiGatewayService | None = None,
+        dependency_preflight_service: DependencyPreflightService | None = None,
     ) -> None:
         self._subscription_id = subscription_id
         self._resource_group = resource_group
@@ -153,6 +155,11 @@ class BackendDeploymentService:
         # environment where the Foundry account actually lives elsewhere.
         self._foundry_resource_group = foundry_resource_group or resource_group
         self._prototype_api_gateway_service = prototype_api_gateway_service
+        # Optional (defaults to None/skipped) so existing call sites and tests
+        # that construct this service directly keep working unchanged; the
+        # real factory (create_backend_deployment_service) always wires a
+        # real DependencyPreflightService in production.
+        self._dependency_preflight_service = dependency_preflight_service
 
     def _acr_client(self) -> Any:
         """Client pinned to the ``2019-06-01-preview`` API version - the version
@@ -339,6 +346,32 @@ class BackendDeploymentService:
             raise BackendDeploymentError(
                 f"No Dockerfile found in materialized build directory '{build_root}'."
             )
+
+        if self._dependency_preflight_service is not None:
+            requirements_path = build_root / "requirements.txt"
+            if requirements_path.exists():
+                await _report(
+                    "Checking backend Python dependencies resolve cleanly before building..."
+                )
+                preflight = await self._dependency_preflight_service.check_python_requirements(
+                    requirements_path
+                )
+                # Only a real, observed ResolutionImpossible (checked, ran,
+                # and genuinely failed - not merely timed out, which is
+                # inconclusive rather than a proven conflict) blocks the
+                # deploy here; a timeout or missing pip is reported via
+                # on_progress and the real remote ACR build is still the
+                # authoritative check in that case.
+                if preflight.checked and not preflight.ok and not preflight.timed_out:
+                    raise BackendDeploymentError(
+                        f"Backend dependency pre-flight check failed: {preflight.summary}"
+                    )
+                if not preflight.success:
+                    await _report(
+                        f"Dependency pre-flight check was inconclusive ({preflight.summary}); "
+                        "proceeding to the remote build."
+                    )
+
         private_gateway_enabled = self._prototype_api_gateway_service is not None
         if private_gateway_enabled and not mission_identity_resource_id:
             raise BackendDeploymentError(
@@ -704,5 +737,8 @@ def create_backend_deployment_service(
             )
             if settings.prototype_api_gateway_enabled
             else None
+        ),
+        dependency_preflight_service=DependencyPreflightService(
+            timeout_seconds=settings.deployment_dependency_preflight_timeout_seconds
         ),
     )

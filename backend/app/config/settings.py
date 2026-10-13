@@ -342,6 +342,14 @@ class Settings(BaseSettings):
     # proportional to the number of generated UI tests.
     deployment_ui_test_npm_install_timeout_seconds: int = 300
     deployment_ui_test_execution_timeout_seconds: int = 180
+    # Genie platform-change Phase B: `pip install --dry-run`/`npm install
+    # --dry-run` pre-flight dependency resolution checks, run before the
+    # slow remote ACR build begins (see
+    # app.deploy_launch.dependency_preflight_service). A real conflict
+    # (e.g. a mission's own pinned package vs. agent-framework-core's own
+    # transitive pin) is caught locally in seconds instead of failing deep
+    # inside a remote build several minutes later.
+    deployment_dependency_preflight_timeout_seconds: int = 120
     prototype_default_ttl_days: int = Field(default=7, ge=1, le=90)
     prototype_max_active_per_owner: int = Field(default=0, ge=0, le=20)
     prototype_cleanup_interval_seconds: int = Field(default=3600, ge=60, le=86400)

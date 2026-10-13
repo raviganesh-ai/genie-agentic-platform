@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from app.config.settings import Settings
+from app.deploy_launch.dependency_preflight_service import DependencyPreflightService
 from app.deploy_launch.resource_naming import (
     prototype_container_app_name,
     prototype_frontend_environment_name,
@@ -72,12 +73,17 @@ class ContainerAppFrontendDeploymentService:
         acr_name: str,
         acr_agent_pool_name: str | None = None,
         location: str,
+        dependency_preflight_service: DependencyPreflightService | None = None,
     ) -> None:
         self._subscription_id = subscription_id
         self._resource_group = resource_group
         self._acr_name = acr_name
         self._acr_agent_pool_name = acr_agent_pool_name
         self._location = location
+        # Optional so existing call sites/tests keep working unchanged; the
+        # real factory (create_container_app_frontend_deployment_service)
+        # always wires a real DependencyPreflightService in production.
+        self._dependency_preflight_service = dependency_preflight_service
 
     def _acr_client(self) -> Any:
         try:
@@ -132,6 +138,27 @@ class ContainerAppFrontendDeploymentService:
             raise ContainerAppFrontendDeploymentError(
                 "Frontend deployment requires the mission user-assigned identity."
             )
+
+        if self._dependency_preflight_service is not None:
+            package_json_path = ui_root / "package.json"
+            if package_json_path.exists():
+                await report(
+                    "Checking frontend npm dependencies resolve cleanly before building..."
+                )
+                preflight = await self._dependency_preflight_service.check_npm_requirements(
+                    package_json_path
+                )
+                # Same fail-fast-only-on-a-proven-conflict policy as the
+                # backend check in backend_deployment_service.deploy().
+                if preflight.checked and not preflight.ok and not preflight.timed_out:
+                    raise ContainerAppFrontendDeploymentError(
+                        f"Frontend dependency pre-flight check failed: {preflight.summary}"
+                    )
+                if not preflight.success:
+                    await report(
+                        f"Dependency pre-flight check was inconclusive ({preflight.summary}); "
+                        "proceeding to the remote build."
+                    )
 
         dockerfile = ui_root / "Dockerfile"
         dockerfile.write_text(_FRONTEND_DOCKERFILE, encoding="utf-8")
@@ -339,4 +366,7 @@ def create_container_app_frontend_deployment_service(
         acr_name=settings.deployment_acr_name,  # type: ignore[arg-type]
         acr_agent_pool_name=settings.deployment_acr_agent_pool_name,
         location=settings.deployment_location,  # type: ignore[arg-type]
+        dependency_preflight_service=DependencyPreflightService(
+            timeout_seconds=settings.deployment_dependency_preflight_timeout_seconds
+        ),
     )

@@ -15,6 +15,7 @@ from app.deploy_launch.backend_deployment_service import (
     NullBackendDeploymentService,
     create_backend_deployment_service,
 )
+from app.deploy_launch.dependency_preflight_service import DependencyPreflightService
 from app.deploy_launch.container_app_frontend_deployment_service import (
     ContainerAppFrontendDeploymentError,
     ContainerAppFrontendDeploymentService,
@@ -566,3 +567,148 @@ async def test_gateway_origin_finalization_updates_apim_policy():
             "frontend_origin": "https://prototype.example.com/",
         }
     ]
+
+
+# Genie platform-change Phase B: the pre-flight dependency-resolution check
+# must block `deploy()` before any slow/costly remote ACR work begins when a
+# real conflict is found, and must not fabricate success when none is given
+# a DependencyPreflightService at all (existing, pre-Phase-B call sites).
+async def test_backend_deploy_is_blocked_by_a_real_dependency_conflict_before_any_acr_call(
+    tmp_path,
+):
+    (tmp_path / "Dockerfile").write_text("FROM scratch\n", encoding="utf-8")
+    # Real, published packages with a genuine, observable version conflict -
+    # same shape as the real incident (mcp vs agent-framework-core) this
+    # check exists to catch, without depending on agent-framework-core being
+    # installed in this test environment.
+    (tmp_path / "requirements.txt").write_text("idna<3.0\nrequests>=2.32\n", encoding="utf-8")
+    service = BackendDeploymentService(
+        subscription_id="sub-123",
+        resource_group="genie-dev-rg",
+        acr_name="acr123",
+        container_apps_environment_id="env-123",
+        location="eastus2",
+        foundry_endpoint="https://foundry.example.com/api/projects/demo",
+        foundry_project_name="demo",
+        dependency_preflight_service=DependencyPreflightService(timeout_seconds=60),
+    )
+
+    def _fail_if_called():
+        pytest.fail("deploy() must not reach ACR when the pre-flight check finds a real conflict")
+
+    service._acr_client = _fail_if_called  # type: ignore[method-assign]
+
+    with pytest.raises(BackendDeploymentError, match="dependency pre-flight check failed"):
+        await service.deploy(mission_slug="claims-1234", build_root=tmp_path)
+
+
+async def test_backend_deploy_proceeds_past_a_clean_dependency_preflight_check(
+    monkeypatch, tmp_path
+):
+    from azure.storage.blob import BlobClient
+
+    (tmp_path / "Dockerfile").write_text("FROM scratch\n", encoding="utf-8")
+    (tmp_path / "requirements.txt").write_text("idna>=3.0,<4.0\n", encoding="utf-8")
+    service = BackendDeploymentService(
+        subscription_id="sub-123",
+        resource_group="genie-dev-rg",
+        acr_name="acr123",
+        container_apps_environment_id="env-123",
+        location="eastus2",
+        foundry_endpoint="https://foundry.example.com/api/projects/demo",
+        foundry_project_name="demo",
+        dependency_preflight_service=DependencyPreflightService(timeout_seconds=60),
+    )
+    acr_client = SimpleNamespace(
+        registries=SimpleNamespace(
+            get_build_source_upload_url=lambda *_: SimpleNamespace(
+                upload_url="https://upload.example.com/source", relative_path="source.tgz"
+            ),
+            begin_schedule_run=lambda *_: SimpleNamespace(
+                result=lambda: SimpleNamespace(run_id="run-1")
+            ),
+        ),
+        runs=SimpleNamespace(get=lambda *_: SimpleNamespace(status="Succeeded")),
+    )
+    monkeypatch.setattr(service, "_acr_client", lambda: acr_client)
+    monkeypatch.setattr(
+        service,
+        "_acr_credentials_client",
+        lambda: SimpleNamespace(
+            registries=SimpleNamespace(
+                list_credentials=lambda *_: SimpleNamespace(
+                    username="acr-user",
+                    passwords=[SimpleNamespace(value="acr-pass")],
+                )
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        service,
+        "_container_apps_client",
+        lambda: SimpleNamespace(
+            container_apps=SimpleNamespace(
+                begin_create_or_update=lambda *_: SimpleNamespace(
+                    result=lambda: SimpleNamespace(
+                        configuration=SimpleNamespace(
+                            ingress=SimpleNamespace(fqdn="claims-1234.example.com")
+                        )
+                    )
+                )
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        BlobClient,
+        "from_blob_url",
+        lambda *_: SimpleNamespace(upload_blob=lambda *_args, **_kwargs: None),
+    )
+    monkeypatch.setattr(service, "_configure_mission_identity", lambda *_: "mission-client")
+
+    async def _skip_readiness_check(_backend_url: str) -> None:
+        return None
+
+    monkeypatch.setattr(service, "_wait_for_readiness", _skip_readiness_check)
+
+    result = await service.deploy(
+        mission_slug="claims-1234",
+        build_root=tmp_path,
+        mission_identity_resource_id=(
+            "/subscriptions/sub-123/resourceGroups/genie-dev-rg/providers/"
+            "Microsoft.ManagedIdentity/userAssignedIdentities/claims-1234"
+        ),
+    )
+
+    assert result.backend_url == "https://claims-1234.example.com"
+
+
+async def test_frontend_deploy_is_blocked_by_a_real_npm_conflict_before_any_acr_call(tmp_path):
+    (tmp_path / "package.json").write_text(
+        '{"name": "fixture", "private": true, '
+        '"dependencies": {"react": "17.0.2", "react-dom": "18.3.1"}}',
+        encoding="utf-8",
+    )
+    service = ContainerAppFrontendDeploymentService(
+        subscription_id="sub-123",
+        resource_group="genie-dev-rg",
+        acr_name="acr123",
+        location="eastus2",
+        dependency_preflight_service=DependencyPreflightService(timeout_seconds=120),
+    )
+
+    def _fail_if_called():
+        pytest.fail("deploy() must not reach ACR when the pre-flight check finds a real conflict")
+
+    service._acr_client = _fail_if_called  # type: ignore[method-assign]
+
+    with pytest.raises(
+        ContainerAppFrontendDeploymentError, match="dependency pre-flight check failed"
+    ):
+        await service.deploy(
+            mission_slug="claims-1234",
+            ui_root=tmp_path,
+            mission_identity_resource_id=(
+                "/subscriptions/sub-123/resourceGroups/genie-dev-rg/providers/"
+                "Microsoft.ManagedIdentity/userAssignedIdentities/claims-1234"
+            ),
+        )
