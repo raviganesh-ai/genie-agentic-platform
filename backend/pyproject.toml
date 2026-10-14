@@ -49,6 +49,13 @@ dev = [
     "pytest-asyncio>=0.23,<1.0",
     "httpx>=0.27,<1.0",
     "ruff>=0.5,<1.0",
+    # Only used by tests that construct a real FastMCP server instance to
+    # verify generated-mission mcp_server.py modules actually work (see
+    # app.deploy_launch.code_materializer's "# agent: mcp_server" marker
+    # and the real version range - mcp>=1.24,<2.0 - already pinned in
+    # generated missions' own requirements.txt). Genie's own backend
+    # process never imports this package itself.
+    "mcp>=1.24,<2.0",
 ]
 
 [build-system]

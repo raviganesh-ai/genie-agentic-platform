@@ -364,6 +364,32 @@ def test_failure_diagnosis_prompt_requires_a_lessons_learned_prompt_change_verdi
     assert "No prompt or config change indicated." in template
 
 
+def test_architecture_and_build_prompts_support_an_mcp_tool_server_component():
+    """Genie platform-change Phase G (gap-analysis follow-up) regression
+    guard: Genie must be able to generate a real MCP tool server as part
+    of a mission's build, closing the biggest reason a real prior mission
+    needed extensive manual, out-of-band work (a hand-written standalone
+    MCP server Genie itself could not produce). See
+    app.deploy_launch.code_materializer's "# agent: mcp_server" marker and
+    app.agents.tools.architecture_parsing's "## MCP Tool Server" ->
+    "mcp_tool_server" mapping, which actually parse/materialize this
+    component, never just prompt text alone."""
+
+    registry = PromptRegistry.load(_REPO_CONFIG_ROOT / "prompts")
+
+    architecture_template = " ".join(
+        registry.get("architecture-recommendation-v1").template.split()
+    )
+    assert "## MCP Tool Server" in architecture_template
+    assert "Model Context Protocol" in architecture_template
+
+    build_template = " ".join(registry.get("build-generation-component-v1").template.split())
+    assert 'component_kind is "mcp_tool_server"' in build_template
+    assert "mcp.server.fastmcp" in build_template
+    assert "mcp_server = FastMCP" in build_template
+    assert "# agent: mcp_server" in build_template
+
+
 def test_generation_prompts_fail_closed_on_ui_orchestrator_schema_drift():
     registry = PromptRegistry.load(_REPO_CONFIG_ROOT / "prompts")
 

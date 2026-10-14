@@ -158,6 +158,10 @@ def test_parses_optional_component_type_sections_in_declared_order():
 ## Identity Configuration
 
 - **Entra ID Adapter**: the identity-provider adapter configuration.
+
+## MCP Tool Server
+
+- **Lookup Claim Status**: exposes claim status lookup as an MCP tool.
 """
 
     plan = parse_architecture_build_plan(document)
@@ -170,6 +174,7 @@ def test_parses_optional_component_type_sections_in_declared_order():
         ("api_contract", "Payments API"),
         ("gateway_policy", "APIM JWT Policy"),
         ("identity_config", "Entra ID Adapter"),
+        ("mcp_tool_server", "Lookup Claim Status"),
     )
 
 

@@ -61,6 +61,25 @@ _SERVICE_MARKER_PATTERN: Final = re.compile(r"^#\s*agent:\s*service:(.+)$", re.I
 # One shared data model/entity definition (see "## Data Models"). First
 # line ``# agent: model:<Model Name>``.
 _MODEL_MARKER_PATTERN: Final = re.compile(r"^#\s*agent:\s*model:(.+)$", re.IGNORECASE)
+# The mission's MCP tool server (see "## MCP Tool Server") - a Python
+# module exposing real mission capabilities as tools over the Model
+# Context Protocol, using the real ``mcp`` SDK's ``FastMCP`` server class
+# (verified against the actually-installed SDK before this marker was
+# added - never an invented API). At most one per mission. First line
+# ``# agent: mcp_server``.
+_MCP_SERVER_MARKER_PATTERN: Final = re.compile(r"^#\s*agent:\s*mcp_server\s*$", re.IGNORECASE)
+# ``generate_backend_service_scaffold``'s deterministic ``main.py`` always
+# does ``from mcp_server import mcp_server`` when an MCP server module was
+# materialized (see _MAIN_PY_TEMPLATE's try/except import below) - this
+# exact literal variable name is the contract between the LLM-generated
+# module and that scaffold, mirroring _ORCHESTRATOR_CLASS_PATTERN's own
+# build-time contract check for the same reason: a differently named
+# variable would silently fail closed inside main.py's own try/except,
+# deploying a mission with its MCP server entirely unreachable instead of
+# failing this earlier, at build time, with an actionable error.
+_MCP_SERVER_INSTANCE_PATTERN: Final = re.compile(
+    r"^mcp_server\s*=\s*FastMCP\(", re.MULTILINE
+)
 # One API's OpenAPI contract document (see "## API Contracts") - a YAML
 # fence, not code. First line ``# agent: api_contract:<API Name>``.
 _API_CONTRACT_MARKER_PATTERN: Final = re.compile(
@@ -509,6 +528,11 @@ class MaterializedBuild:
     # TypeScript identity-provider adapter module (see
     # "IDENTITY_PROVIDER_INTERFACE" in build-generation-component-v1).
     identity_config_modules: dict[str, str] = field(default_factory=dict)
+    # The mission's MCP tool server (see "## MCP Tool Server") - a Python
+    # module using the real ``mcp`` SDK's ``FastMCP`` class, written as
+    # ``mcp_server.py``. At most one per mission; ``None`` when the
+    # architecture did not call for one (most missions).
+    mcp_server_module: str | None = None
 
     def write_to_directory(
         self, root: Path, *, backend_service_scaffold: dict[str, str] | None = None
@@ -535,6 +559,13 @@ class MaterializedBuild:
             path = root / "orchestrator.py"
             path.write_text(
                 _use_mission_foundry_runtime(self.orchestrator_module), encoding="utf-8"
+            )
+            written.append(path)
+
+        if self.mcp_server_module is not None:
+            path = root / "mcp_server.py"
+            path.write_text(
+                _use_mission_foundry_runtime(self.mcp_server_module), encoding="utf-8"
             )
             written.append(path)
 
@@ -629,6 +660,7 @@ def materialize_build(output_text: str) -> MaterializedBuild:
 
     agent_modules: dict[str, str] = {}
     orchestrator_module: str | None = None
+    mcp_server_module: str | None = None
     ui_component: str | None = None
     page_components: dict[str, str] = {}
     service_modules: dict[str, str] = {}
@@ -644,11 +676,15 @@ def materialize_build(output_text: str) -> MaterializedBuild:
         if language.lower() == "python":
             service_match = _SERVICE_MARKER_PATTERN.match(first_line)
             model_match = _MODEL_MARKER_PATTERN.match(first_line)
+            mcp_server_match = _MCP_SERVER_MARKER_PATTERN.match(first_line)
             if service_match is not None:
                 service_modules[service_match.group(1).strip()] = body.strip("\n")
                 continue
             if model_match is not None:
                 data_model_modules[model_match.group(1).strip()] = body.strip("\n")
+                continue
+            if mcp_server_match is not None:
+                mcp_server_module = body.strip("\n")
                 continue
             marker_match = _AGENT_MARKER_PATTERN.match(first_line)
             if marker_match is None:
@@ -686,11 +722,12 @@ def materialize_build(output_text: str) -> MaterializedBuild:
         and not api_contract_documents
         and not gateway_policy_documents
         and not identity_config_modules
+        and mcp_server_module is None
     ):
         raise MaterializedCodeError(
             "No materializable agent, orchestrator, UI, page, service, model, API "
-            "contract, gateway policy, or identity config code block was found in "
-            "the build-solution step's output."
+            "contract, gateway policy, identity config, or MCP tool server code "
+            "block was found in the build-solution step's output."
         )
 
     if orchestrator_module is None and (agent_modules or ui_component or page_components):
@@ -731,6 +768,19 @@ def materialize_build(output_text: str) -> MaterializedBuild:
             "does 'from orchestrator import OrchestratorAgent', so any other "
             "class name would silently fall back to a generic conversational "
             "reply instead of running this mission's real pipeline."
+        )
+
+    if mcp_server_module is not None and not _MCP_SERVER_INSTANCE_PATTERN.search(
+        mcp_server_module
+    ):
+        raise MaterializedCodeError(
+            "The generated MCP tool server module does not define a top-level "
+            "'mcp_server = FastMCP(...)' instance - this mission's backend proxy "
+            "always does 'from mcp_server import mcp_server' when an MCP server "
+            "was materialized, so any other variable name would silently fail "
+            "closed inside main.py's own try/except, deploying a mission whose "
+            "MCP tools are entirely unreachable instead of failing this earlier, "
+            "at build time, with an actionable error."
         )
 
     if (
@@ -848,6 +898,7 @@ def materialize_build(output_text: str) -> MaterializedBuild:
         api_contract_documents=api_contract_documents,
         gateway_policy_documents=gateway_policy_documents,
         identity_config_modules=identity_config_modules,
+        mcp_server_module=mcp_server_module,
     )
 
 
@@ -912,6 +963,53 @@ class InvokeRequest(BaseModel):
 
 class InvokeResponse(BaseModel):
     output_text: str
+
+
+# MCP Tool Server mounting (Genie platform-change Phase G): only present
+# when this mission's architecture called for one (see "## MCP Tool
+# Server" / "# agent: mcp_server" in code_materializer.py) - every other
+# mission has no mcp_server.py file at all, so this import fails closed
+# into a no-op rather than crashing main.py's own import. Real MCP clients
+# (other agents, Claude Desktop, etc.) reach the mission's tools over the
+# real Model Context Protocol at /mcp; the two plain REST routes below
+# exist only so a generated "Tool Browser" UI page can list/invoke the
+# same tools with an ordinary fetch() call, without needing an MCP client
+# library in the browser. The two REST routes are registered BEFORE
+# app.mount("/mcp", ...) below - Starlette's router matches routes in
+# registration order, and a Mount("/mcp") matches ANY sub-path under it
+# (including "/mcp/tools"), so registering the mount first would silently
+# swallow both REST routes into 404s from the mounted MCP sub-app instead
+# of ever reaching these handlers (a real failure mode, caught by this
+# scaffold's own exec()-and-TestClient test, not assumed).
+try:
+    from mcp_server import mcp_server as _mcp_server
+
+    @app.get("/mcp/tools")
+    async def list_mcp_tools() -> list[dict[str, Any]]:
+        tools = await _mcp_server.list_tools()
+        return [tool.model_dump(mode="json") for tool in tools]
+
+    class McpToolInvokeRequest(BaseModel):
+        arguments: dict[str, Any] = {{}}
+
+    @app.post("/mcp/tools/{{tool_name}}/invoke")
+    async def invoke_mcp_tool(tool_name: str, request: McpToolInvokeRequest) -> dict[str, Any]:
+        try:
+            result = await _mcp_server.call_tool(tool_name, request.arguments)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if isinstance(result, dict):
+            return result
+        return {{
+            "content": [
+                block.model_dump(mode="json") if hasattr(block, "model_dump") else str(block)
+                for block in result
+            ]
+        }}
+
+    app.mount("/mcp", _mcp_server.streamable_http_app())
+except ModuleNotFoundError:
+    pass
 
 
 def _check_attachment_size(attachments: list[Attachment]) -> None:
@@ -1499,6 +1597,7 @@ def generate_backend_service_scaffold(
     mission_title: str,
     orchestrator_agent_name: str,
     agent_foundry_names: dict[str, str],
+    include_mcp_server: bool = False,
 ) -> dict[str, str]:
     """Returns the real, deterministic mission backend service scaffold.
 
@@ -1506,7 +1605,19 @@ def generate_backend_service_scaffold(
     LLM-generated orchestration logic and version-sensitive SDK behavior. The
     scaffold is
     never LLM-authored, so every deployed mission's backend proxy is
-    consistent and auditable."""
+    consistent and auditable.
+
+    ``include_mcp_server`` adds the real ``mcp`` SDK (pinned to the exact
+    range verified compatible with ``agent-framework``'s own transitive
+    pin - a real, previously observed incident had a mission's own
+    ``mcp>=2.0`` conflict with ``agent-framework-core``'s ``mcp<2``) to
+    ``requirements.txt`` only when this mission actually materialized an
+    MCP tool server module - every other mission's requirements.txt is
+    unchanged."""
+
+    requirements_txt = _REQUIREMENTS_TXT
+    if include_mcp_server:
+        requirements_txt += "mcp>=1.24,<2.0\n"
 
     return {
         "main.py": _MAIN_PY_TEMPLATE.format(
@@ -1514,7 +1625,7 @@ def generate_backend_service_scaffold(
             orchestrator_agent_name=orchestrator_agent_name,
             authentication_middleware="",
         ),
-        "requirements.txt": _REQUIREMENTS_TXT,
+        "requirements.txt": requirements_txt,
         "Dockerfile": _DOCKERFILE,
         "agent_config.py": generate_agent_config_module(agent_foundry_names),
         "mission_foundry_runtime.py": _MISSION_FOUNDRY_RUNTIME_PY,

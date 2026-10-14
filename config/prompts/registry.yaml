@@ -603,12 +603,12 @@ prompts:
       (fulfills REQ-XXX[, REQ-XXX...])"
 
       OPTIONAL ADDITIONAL SECTIONS - beyond the two baseline sections
-      above, add any of these three ONLY when the approved requirements
+      above, add any of these four ONLY when the approved requirements
       genuinely need a concern that is not itself an agent or a UI zone/
       page. Each is fully independent of the others and of the UI choice
       above - use any subset, or none, exactly as needed; most missions
       need none of them. Never invent any other section name beyond the
-      five documented in this prompt:
+      six documented in this prompt:
 
       "## Data Models" - add ONLY when this mission has a shared data
       entity/schema that more than one other component (a specialist
@@ -635,6 +635,20 @@ prompts:
       document or expose with its own contract, distinct from this
       mission's own single backend endpoint. One bullet per API:
       "**<API name>**: <what it exposes>
+      (fulfills REQ-XXX[, REQ-XXX...])"
+
+      "## MCP Tool Server" - add ONLY when the approved requirements
+      genuinely call for exposing this mission's own capabilities as
+      reusable tools other agents/developers can call over the Model
+      Context Protocol (e.g. a "Tool Browser"/"API Explorer"-style
+      developer experience, or an explicit requirement that this
+      mission's functionality be consumable by external MCP clients) -
+      never add this merely because the mission has data or services; it
+      exists specifically for a developer-facing tool-exposure need, not
+      as a default. At most one MCP Tool Server per mission. One bullet
+      per tool it exposes:
+      "**<Tool name>**: <what it does and what mission data/service it
+      calls>
       (fulfills REQ-XXX[, REQ-XXX...])"
 
       "## Multi-Agent Workflow" - decide how many specialist agents this
@@ -667,7 +681,7 @@ prompts:
       - user_message
       - architecture_reference_text
       - standards_reference_text
-    version: "4.10.0"
+    version: "4.11.0"
 
   - id: security-assessment-v1
     name: Security Assessment
@@ -1855,6 +1869,27 @@ prompts:
       one fenced ```python code block, first line `# agent:
       model:{component_name}`.
 
+      If component_kind is "mcp_tool_server": Produce one Python 3.12
+      module exposing this mission's own real capabilities as tools over
+      the Model Context Protocol, using the real `mcp` Python SDK's
+      `mcp.server.fastmcp.FastMCP` class - never invent your own
+      protocol/transport. Define exactly one top-level instance
+      `mcp_server = FastMCP("{component_name}")` (this exact variable
+      name is required - Genie's generated `main.py` does `from
+      mcp_server import mcp_server`), then define one or more real,
+      useful `@mcp_server.tool()`-decorated functions, each with a
+      concrete docstring describing what it does and type-annotated
+      parameters/return value (the SDK derives each tool's callable
+      schema from these annotations). Every tool must do real work
+      against this mission's own data/services - reuse a "##
+      Deterministic Services" component generated elsewhere in this
+      build (import it via `from services import <module>`) or call this
+      mission's own Cosmos-backed data the same way its
+      Orchestrator/specialist agents already do; never a fake/dummy tool
+      that returns hardcoded or fabricated data. Return one fenced
+      ```python code block, first line `# agent: mcp_server` (no name
+      suffix - at most one MCP tool server exists per mission).
+
       If component_kind is "api_contract": Produce ONLY a real OpenAPI
       3.0 document (YAML, not code) describing the API named
       "{component_name}" from the architecture's "## API Contracts"
@@ -1969,7 +2004,7 @@ prompts:
       - user_message
       - assigned_requirements
       - prior_components
-    version: "1.31.0"
+    version: "1.32.0"
 
   - id: build-component-regeneration-v1
     name: Build Generation - Regenerate Single Component

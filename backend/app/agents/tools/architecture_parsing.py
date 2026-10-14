@@ -22,6 +22,14 @@ backend component that is not an agent or a UI zone:
 - "## API Contracts" -> ``component_type == "api_contract"``
 - "## Gateway Policies" -> ``component_type == "gateway_policy"``
 - "## Identity Configuration" -> ``component_type == "identity_config"``
+- "## MCP Tool Server" -> ``component_type == "mcp_tool_server"`` - at most
+  one per mission, a Python module exposing mission capabilities as tools
+  over the Model Context Protocol (see ``build-generation-component-v1``'s
+  own "mcp_tool_server" component_kind handler, and
+  ``app.deploy_launch.code_materializer``'s "# agent: mcp_server" marker -
+  unlike the other optional sections in this docstring, this one IS
+  documented in ``architecture-recommendation-v1``'s own prompt text and
+  IS generated/materialized end to end, not parsing-only).
 - "## UI Pages" -> ``component_type == "page_view"`` - an ordered list of
   additional, independently navigable pages (a catalog, a dashboard, an
   audit/trace view, ...), each described with the same bullet convention
@@ -76,6 +84,7 @@ _OTHER_COMPONENT_SECTIONS: tuple[tuple[str, str], ...] = (
     ("api_contract", "API Contracts"),
     ("gateway_policy", "Gateway Policies"),
     ("identity_config", "Identity Configuration"),
+    ("mcp_tool_server", "MCP Tool Server"),
     ("page_view", "UI Pages"),
 )
 _OTHER_COMPONENT_SECTION_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
@@ -95,9 +104,10 @@ class ArchitectureBuildPlan:
     orchestrator_agent_name: str
     # (component_type, component_name) pairs parsed from the optional
     # "## Deterministic Services" / "## Data Models" / "## API Contracts" /
-    # "## Gateway Policies" / "## Identity Configuration" sections - see
-    # this module's docstring. Empty for every architecture document that
-    # only uses the two baseline sections, which remains the common case.
+    # "## Gateway Policies" / "## Identity Configuration" /
+    # "## MCP Tool Server" sections - see this module's docstring. Empty
+    # for every architecture document that only uses the two baseline
+    # sections, which remains the common case.
     other_components: tuple[tuple[str, str], ...] = ()
 
 

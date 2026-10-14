@@ -441,6 +441,179 @@ def test_materialize_build_skips_request_field_checks_when_shape_is_unrecognized
     assert build.ui_component is not None
 
 
+# Genie platform-change Phase G (gap-analysis follow-up): generation support
+# for exposing a mission's capabilities as MCP tools - the biggest reason a
+# real prior mission needed extensive manual, out-of-band work (a
+# hand-written standalone MCP server, never something Genie itself could
+# generate). These tests prove materialize_build actually recognizes and
+# validates the new "# agent: mcp_server" marker, not just that the prompt
+# describes it in words.
+_MCP_SERVER_OUTPUT = _SAMPLE_OUTPUT.replace(
+    "```tsx",
+    '''```python
+# agent: mcp_server
+from mcp.server.fastmcp import FastMCP
+
+mcp_server = FastMCP("acme-mission-tools")
+
+
+@mcp_server.tool()
+def lookup_claim_status(claim_id: str) -> dict:
+    """Looks up a claim's status by id."""
+    return {"claim_id": claim_id, "status": "approved"}
+```
+
+```tsx''',
+    1,
+)
+
+
+def test_materialize_build_parses_the_mcp_server_marker():
+    build = materialize_build(_MCP_SERVER_OUTPUT)
+
+    assert build.mcp_server_module is not None
+    assert "FastMCP" in build.mcp_server_module
+    assert "lookup_claim_status" in build.mcp_server_module
+
+
+def test_materialize_build_rejects_an_mcp_server_module_without_the_required_instance_name():
+    output = _SAMPLE_OUTPUT.replace(
+        "```tsx",
+        '''```python
+# agent: mcp_server
+from mcp.server.fastmcp import FastMCP
+
+tools_server = FastMCP("acme-mission-tools")
+```
+
+```tsx''',
+        1,
+    )
+
+    with pytest.raises(MaterializedCodeError, match="mcp_server = FastMCP"):
+        materialize_build(output)
+
+
+def test_write_to_directory_writes_mcp_server_module(tmp_path: Path):
+    build = materialize_build(_MCP_SERVER_OUTPUT)
+
+    build.write_to_directory(tmp_path)
+
+    assert (tmp_path / "mcp_server.py").exists()
+    assert "FastMCP" in (tmp_path / "mcp_server.py").read_text(encoding="utf-8")
+
+
+def test_generate_backend_service_scaffold_adds_mcp_dependency_only_when_requested():
+    with_mcp = generate_backend_service_scaffold(
+        mission_title="Acme Mission",
+        orchestrator_agent_name="acme-orchestrator",
+        agent_foundry_names={"Requirements Specialist": "acme-requirements-specialist"},
+        include_mcp_server=True,
+    )
+    without_mcp = generate_backend_service_scaffold(
+        mission_title="Acme Mission",
+        orchestrator_agent_name="acme-orchestrator",
+        agent_foundry_names={"Requirements Specialist": "acme-requirements-specialist"},
+    )
+
+    assert "mcp>=1.24,<2.0" in with_mcp["requirements.txt"]
+    assert "mcp" not in without_mcp["requirements.txt"]
+
+
+def test_generated_main_py_serves_real_mcp_tool_routes_end_to_end(monkeypatch):
+    """The ultimate, non-fake proof: a generated-style mcp_server.py module,
+    using the real installed `mcp` SDK (never faked), is imported by the
+    real rendered main.py source and actually served over real HTTP
+    requests (FastAPI TestClient) - not just text/compile checks."""
+
+    from fastapi.testclient import TestClient
+    from mcp.server.fastmcp import FastMCP
+
+    scaffold = generate_backend_service_scaffold(
+        mission_title="Acme Mission",
+        orchestrator_agent_name="acme-orchestrator",
+        agent_foundry_names={"Requirements Specialist": "acme-requirements-specialist"},
+        include_mcp_server=True,
+    )
+    main_source = scaffold["main.py"]
+
+    fake_orchestrator_module = types.ModuleType("orchestrator")
+
+    class _FakeOrchestratorAgent:
+        async def run(self, ui_message, on_progress=None):
+            return {"summary": "done"}
+
+    fake_orchestrator_module.OrchestratorAgent = _FakeOrchestratorAgent
+    monkeypatch.setitem(sys.modules, "orchestrator", fake_orchestrator_module)
+
+    # A real FastMCP server with a real registered tool - the same shape
+    # build-generation-component-v1 instructs the LLM to produce.
+    real_mcp_server = FastMCP("acme-mission-tools")
+
+    @real_mcp_server.tool()
+    def lookup_claim_status(claim_id: str) -> dict:
+        """Looks up a claim's status by id."""
+        return {"claim_id": claim_id, "status": "approved"}
+
+    fake_mcp_server_module = types.ModuleType("mcp_server")
+    fake_mcp_server_module.mcp_server = real_mcp_server
+    monkeypatch.setitem(sys.modules, "mcp_server", fake_mcp_server_module)
+
+    generated_module = types.ModuleType("acme_main_with_mcp")
+    monkeypatch.setitem(sys.modules, "acme_main_with_mcp", generated_module)
+    # Deliberate: this is our own deterministically generated template
+    # source (never user/agent input), executed in an isolated throwaway
+    # module purely to exercise the real, rendered FastAPI app.
+    exec(compile(main_source, "main.py", "exec"), generated_module.__dict__)  # noqa: S102
+
+    client = TestClient(generated_module.app)
+
+    list_response = client.get("/mcp/tools")
+    assert list_response.status_code == 200
+    tool_names = [tool["name"] for tool in list_response.json()]
+    assert tool_names == ["lookup_claim_status"]
+
+    invoke_response = client.post(
+        "/mcp/tools/lookup_claim_status/invoke", json={"arguments": {"claim_id": "C-100"}}
+    )
+    assert invoke_response.status_code == 200
+    content = invoke_response.json()["content"]
+    assert json.loads(content[0]["text"]) == {"claim_id": "C-100", "status": "approved"}
+
+    # The real MCP-protocol endpoint (for external MCP clients, not the
+    # browser) is also genuinely mounted, not merely a REST facade.
+    assert any(getattr(route, "path", "") == "/mcp" for route in generated_module.app.routes)
+
+
+def test_generated_main_py_has_no_mcp_routes_when_no_mcp_server_was_materialized(monkeypatch):
+    scaffold = generate_backend_service_scaffold(
+        mission_title="Acme Mission",
+        orchestrator_agent_name="acme-orchestrator",
+        agent_foundry_names={"Requirements Specialist": "acme-requirements-specialist"},
+    )
+    main_source = scaffold["main.py"]
+
+    fake_orchestrator_module = types.ModuleType("orchestrator")
+
+    class _FakeOrchestratorAgent:
+        async def run(self, ui_message, on_progress=None):
+            return {"summary": "done"}
+
+    fake_orchestrator_module.OrchestratorAgent = _FakeOrchestratorAgent
+    monkeypatch.setitem(sys.modules, "orchestrator", fake_orchestrator_module)
+    monkeypatch.delitem(sys.modules, "mcp_server", raising=False)
+
+    generated_module = types.ModuleType("acme_main_without_mcp")
+    monkeypatch.setitem(sys.modules, "acme_main_without_mcp", generated_module)
+    exec(compile(main_source, "main.py", "exec"), generated_module.__dict__)  # noqa: S102
+
+    from fastapi.testclient import TestClient
+
+    client = TestClient(generated_module.app)
+
+    assert client.get("/mcp/tools").status_code == 404
+
+
 def test_write_to_directory_creates_expected_files(tmp_path: Path):
     build = materialize_build(_SAMPLE_OUTPUT)
 

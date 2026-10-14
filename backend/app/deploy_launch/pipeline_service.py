@@ -2389,6 +2389,7 @@ class DeploymentPipelineService:
                         mission_title=mission_title,
                         orchestrator_agent_name=orchestrator_foundry_name,
                         agent_foundry_names=self._agent_foundry_names[pipeline_run.id],
+                        include_mcp_server=materialized.mcp_server_module is not None,
                     )
                     # write_to_directory is synchronous (plain file I/O over
                     # potentially dozens of generated agent/page/service/model
