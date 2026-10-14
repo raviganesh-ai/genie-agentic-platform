@@ -48,6 +48,7 @@ from app.orchestration.workflow_step_executor import WorkflowStepExecutor
 from app.platform_config.repository import PlatformReferenceRepositoryStore
 from app.prompts.registry import PromptRegistry
 from app.repositories.approval_repository import ApprovalRepository
+from app.repositories.enterprise_memory_repository import EnterpriseMemoryRepository
 from app.repositories.governance_event_repository import GovernanceEventRepository
 from app.repositories.recommendation_lineage_repository import (
     InMemoryRecommendationLineageRepository,
@@ -57,6 +58,7 @@ from app.repositories.lessons_learned_repository import (
     InMemoryLessonsLearnedRepository,
     LessonsLearnedRepository,
 )
+from app.repositories.personal_memory_repository import PersonalMemoryRepository
 from app.repositories.shared_memory_repository import SharedMemoryRepository
 from app.repositories.workflow_run_repository import (
     InMemoryWorkflowRunRepository,
@@ -370,6 +372,8 @@ def create_agent_orchestrator(
     workflow_run_repository: WorkflowRunRepository | None = None,
     lessons_learned_repository: LessonsLearnedRepository | None = None,
     shared_memory_repository: SharedMemoryRepository | None = None,
+    personal_memory_repository: PersonalMemoryRepository | None = None,
+    enterprise_memory_repository: EnterpriseMemoryRepository | None = None,
     governance_event_repository: GovernanceEventRepository | None = None,
     approval_repository: ApprovalRepository | None = None,
     recommendation_lineage_repository: RecommendationLineageRepository | None = None,
@@ -400,6 +404,8 @@ def create_agent_orchestrator(
     resolved_memory_service = memory_service or create_memory_service(
         settings=settings,
         shared_repository=shared_memory_repository,
+        personal_repository=personal_memory_repository,
+        enterprise_repository=enterprise_memory_repository,
     )
     resolved_approval_service = approval_service or create_approval_service(
         settings=settings,

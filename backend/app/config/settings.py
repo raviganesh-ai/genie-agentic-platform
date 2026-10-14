@@ -123,6 +123,19 @@ class Settings(BaseSettings):
     memory_store_database_name: str = "genie"
     memory_store_container_name: str = "memory"
 
+    # --- Enterprise Knowledge Memory search backend (Genie platform-change
+    # Phase G) ---------------------------------------------------------------
+    # Enterprise Knowledge Memory's own backend is a real Azure AI Search
+    # index (per the Memory Architecture's "Use Azure AI Search"), not
+    # Cosmos DB like Personal Agent Memory / Shared Collaboration Memory -
+    # a genuinely different Azure service, so it is gated by its own
+    # setting rather than reusing memory_store_backend. None (the default)
+    # means local-development/test only (InMemoryEnterpriseKnowledgeRepository);
+    # production must configure a real index endpoint. Never a hardcoded
+    # real endpoint (Configuration Rules).
+    enterprise_knowledge_search_endpoint: str | None = None
+    enterprise_knowledge_search_index_name: str = "genie-enterprise-knowledge"
+
     # --- Governance / lineage storage backend ------------------------------------
     # "in_memory" is the only backend implemented in Phase 5 and is safe only
     # for local development and tests; production must configure a durable,

@@ -290,6 +290,7 @@ def foundry_configured_settings(valid_config_root: Path) -> Settings:
         key_vault_uri="https://genie-kv.vault.azure.net/",
         memory_store_backend="cosmos_db",
         memory_store_endpoint="https://genie-memory.example-project.documents.azure.com/",
+        enterprise_knowledge_search_endpoint="https://genie-search.search.windows.net",
         lineage_store_backend="cosmos_db",
         lineage_store_endpoint="https://genie-lineage.example-project.documents.azure.com/",
         azure_subscription_id="00000000-0000-0000-0000-000000000000",

@@ -31,6 +31,20 @@ def test_fails_closed_when_memory_store_backend_is_not_cosmos_db(foundry_configu
     assert not result.passed
 
 
+def test_fails_closed_when_enterprise_knowledge_search_endpoint_missing(
+    foundry_configured_settings,
+):
+    broken = foundry_configured_settings.model_copy(
+        update={"enterprise_knowledge_search_endpoint": None}
+    )
+    result = ProductionSafetyValidator().validate(broken)
+    assert not result.passed
+    assert any(
+        "enterprise_knowledge_search_endpoint is required" in issue.message
+        for issue in result.issues
+    )
+
+
 def test_fails_closed_when_key_vault_uri_missing(foundry_configured_settings):
     broken = foundry_configured_settings.model_copy(update={"key_vault_uri": None})
     result = ProductionSafetyValidator().validate(broken)

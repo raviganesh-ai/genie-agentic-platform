@@ -19,6 +19,12 @@ class ProductionSafetyValidator:
             errors.append("governance_provider must be 'agent365' in production.")
         if settings.memory_store_backend != "cosmos_db":
             errors.append("memory_store_backend must be 'cosmos_db' in production.")
+        if not settings.enterprise_knowledge_search_endpoint:
+            errors.append(
+                "enterprise_knowledge_search_endpoint is required in production "
+                "(Enterprise Knowledge Memory must be backed by a real Azure AI "
+                "Search index, not the in-memory reference implementation)."
+            )
         if settings.lineage_store_backend != "cosmos_db":
             errors.append("lineage_store_backend must be 'cosmos_db' in production.")
         if not settings.key_vault_uri:

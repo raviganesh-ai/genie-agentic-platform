@@ -126,6 +126,8 @@ from app.repositories.recommendation_lineage_repository import (
     CosmosRecommendationLineageRepository,
 )
 from app.repositories.session_repository import CosmosSessionRepository
+from app.repositories.enterprise_memory_repository import AzureSearchEnterpriseKnowledgeRepository
+from app.repositories.personal_memory_repository import CosmosPersonalMemoryRepository
 from app.repositories.shared_memory_repository import CosmosSharedMemoryRepository
 from app.repositories.upload_repository import CosmosUploadRepository
 from app.repositories.lessons_learned_repository import CosmosLessonsLearnedRepository
@@ -251,6 +253,8 @@ def create_app(
         workflow_run_repository = None
         lessons_learned_repository = None
         shared_memory_repository = None
+        personal_memory_repository = None
+        enterprise_memory_repository = None
         repository_binding_repository = None
         repository_assessment_repository = None
         standards_repository = None
@@ -277,6 +281,7 @@ def create_app(
             workflow_run_repository = CosmosWorkflowRunRepository(store=document_store)
             lessons_learned_repository = CosmosLessonsLearnedRepository(store=document_store)
             shared_memory_repository = CosmosSharedMemoryRepository(store=document_store)
+            personal_memory_repository = CosmosPersonalMemoryRepository(store=document_store)
             repository_binding_repository = CosmosRepositoryBindingRepository(store=document_store)
             repository_assessment_repository = CosmosRepositoryAssessmentRepository(
                 store=document_store
@@ -302,6 +307,28 @@ def create_app(
             recommendation_lineage_repository = CosmosRecommendationLineageRepository(
                 store=document_store
             )
+        if resolved_settings.enterprise_knowledge_search_endpoint:
+            # A genuinely different Azure service from the Cosmos-backed
+            # repositories above (Memory Architecture's own "Use Azure AI
+            # Search" requirement for Enterprise Knowledge Memory
+            # specifically) - gated by its own setting, not
+            # memory_store_backend, and constructed even when
+            # memory_store_backend == "in_memory" (the two tiers' real
+            # backends are independent). Uses the async DefaultAzureCredential
+            # (azure.identity.aio), matching the async SearchClient -
+            # CosmosDocumentStore uses the identical async-credential
+            # convention for its own async SDK client.
+            from azure.identity.aio import DefaultAzureCredential as AsyncDefaultAzureCredential
+            from azure.search.documents.aio import SearchClient
+
+            search_client = SearchClient(
+                endpoint=resolved_settings.enterprise_knowledge_search_endpoint,
+                index_name=resolved_settings.enterprise_knowledge_search_index_name,
+                credential=AsyncDefaultAzureCredential(),
+            )
+            enterprise_memory_repository = AzureSearchEnterpriseKnowledgeRepository(
+                search_client=search_client
+            )
         app.state.document_store = document_store
         effective_standards_repository = standards_repository or InMemoryStandardsRepository()
         effective_architecture_reference_repository = (
@@ -321,6 +348,8 @@ def create_app(
             workflow_run_repository=workflow_run_repository,
             lessons_learned_repository=lessons_learned_repository,
             shared_memory_repository=shared_memory_repository,
+            personal_memory_repository=personal_memory_repository,
+            enterprise_memory_repository=enterprise_memory_repository,
             governance_event_repository=governance_event_repository,
             approval_repository=approval_repository,
             recommendation_lineage_repository=recommendation_lineage_repository,
